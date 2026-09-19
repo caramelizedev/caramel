@@ -4,15 +4,18 @@ Date: 2026-09-19
 
 Status: proposed experience for review. The product direction is agreed; the commands, APIs, and defaults below are design proposals, not implemented features. This is an experience specification, not an implementation plan.
 
+Correction: Crystal is an explicit user requirement. The earlier Ruby foundation was an assistant misinterpretation and is superseded by this revision.
+
 ## 1. Product direction
 
-Caramel is an independently designed Ruby web framework and development environment that brings Laravel's attention to the entire developer journey to idiomatic Ruby. Its initial customer is its creator, building real browser-based applications. Community adoption is an ambition; commercial validation is not the first release gate.
+Caramel is an independently designed Crystal web framework and development environment that brings Laravel's attention to the entire developer journey to a compiled, Ruby-like language. Its initial customer is its creator, building real browser-based applications. Community adoption is an ambition; commercial validation is not the first release gate.
 
 The central promise: install Caramel, create an application, and spend your time on the application. Setup, dependencies, conventions, diagnostics, and documentation are part of the product.
 
 Agreed requirements:
 
-- Actual Ruby is the recommended direction, following the user's fondness for Ruby and desire to bring Laravel's lessons to it. Crystal and native-binary performance are no longer requirements.
+- Crystal is the foundation: Ruby-like syntax, static type inference, compile-time checks and macros, fiber-based concurrency, and native compilation are core motivations from the original proposal.
+- Efficient execution, low memory use, simple binary distribution, and fast local iteration are design goals. Workload-specific performance and toolchain compatibility must be demonstrated; the original numerical claims are not established results.
 - Complete browser applications are the primary experience.
 - Frappé is the everyday application CLI, comparable in purpose to Artisan.
 - Authentication is optional and added with one command.
@@ -24,8 +27,8 @@ Proposed first-release defaults:
 - macOS on Apple Silicon for the managed local installation.
 - SQLite locally, with separate development and test databases.
 - Server-rendered HTML, ordinary CSS, and browser JavaScript modules.
-- Plain Ruby application classes and readable generated files.
-- A conventional container deployment recipe targeting Linux; no promise of a static executable or zero-downtime provisioning service.
+- Plain Crystal application classes, typed inputs, compiled templates, and readable generated files.
+- A native production application binary, with a Linux/musl build path targeting fully static linkage of supported dependencies. A container is a build/distribution option; production must not need a language interpreter. Static linkage and runtime resource requirements are verified on the actual artifact.
 
 These platform and storage defaults limit the first delivery, not the long-term framework.
 
@@ -41,7 +44,7 @@ frappe dev
 
 `new` installs the project's compatible, locked dependency set, prepares its development database, creates local development secrets, and generates a usable styled homepage. It prints the directory it created and the next command. It never overwrites a nonempty destination.
 
-`dev` boots the application, opens the browser once, watches application files, and reloads the browser after a successful change. It binds to loopback. If the preferred port is occupied, it selects a free port and prints the actual URL. An explicit port request instead produces an actionable conflict error.
+`dev` compiles and boots a development build, opens the browser once, watches application files, and rebuilds/restarts after Crystal source or compiled-template changes. The browser reloads only after a successful build and readiness check. Static CSS and JavaScript edits refresh without recompiling Crystal. It binds to loopback. If the preferred port is occupied, it selects a free port and prints the actual URL. An explicit port request instead produces an actionable conflict error.
 
 Illustrative output:
 
@@ -89,41 +92,45 @@ bookshelf/
   app/
     commands/
     controllers/
-      application_controller.rb
-      books_controller.rb
+      application_controller.cr
+      books_controller.cr
     models/
-      application_record.rb
-      book.rb
+      application_record.cr
+      book.cr
+    inputs/
+      book_input.cr
     views/
-      layouts/application.html.erb
-      home/index.html.erb
+      layouts/application.html.ecr
+      home/index.html.ecr
       books/
-        index.html.erb
-        show.html.erb
-        new.html.erb
-        edit.html.erb
-        _form.html.erb
+        index.html.ecr
+        show.html.ecr
+        new.html.ecr
+        edit.html.ecr
+        _form.html.ecr
     assets/
       stylesheets/app.css
       javascript/app.js
   config/
-    application.rb
+    application.cr
     database.yml
-    routes.rb
+    routes.cr
   db/
     migrations/
-    schema.rb
-    seeds.rb
-  test/
+    schema.cr
+    seeds.cr
+  src/
+    bookshelf.cr
+  spec/
     models/
     requests/
     system/
-    test_helper.rb
+    spec_helper.cr
   storage/
   public/
-  Gemfile
-  Gemfile.lock
-  .ruby-version
+  shard.yml
+  shard.lock
+  .caramel-version
   .env.example
   .env
   .gitignore
@@ -134,76 +141,98 @@ The fresh project has the same conventions but omits the Book-specific files. Da
 
 The README explains how to start, test, migrate, add authentication, and obtain command help. It describes the generated application rather than the framework's internal architecture.
 
-## 5. Ruby that should feel natural
+## 5. Crystal that should feel natural
 
-The examples below propose Caramel's application-facing API. They are illustrative excerpts; the generated resource must include complete actions, routes, and tests.
+The examples below propose Caramel's application-facing API. They are illustrative excerpts, not existing shard APIs or compile-verified code; the generated resource must include complete actions, routes, and specs. Macros must resolve routes, fields, inputs, and template locals to typed code at compile time.
 
 Routes:
 
-```ruby
-# config/routes.rb
+```crystal
+# config/routes.cr
 Caramel.routes do
-  root "home#index"
-  resources :books
+  get "/", HomeController, :index
+  resources :books, BooksController
 end
 ```
 
 A model with an application-specific rule:
 
-```ruby
-# app/models/book.rb
+```crystal
+# app/models/book.cr
 class Book < ApplicationRecord
+  table :books
+
+  field id : Int64?, primary: true
+  field title : String
+  field author : String
+  timestamps
+
   validates :title, presence: true
+end
+```
+
+Models use reference semantics: `ApplicationRecord` inherits from Caramel's model base class, not a struct. An unsaved record has a nil ID; persisted-record operations must narrow or check that state. The `timestamps` macro supplies the columns used by the example ordering. The model generator emits matching migrations; source typing does not establish that a deployed database matches those declarations.
+
+A typed form input defines writable fields:
+
+```crystal
+# app/inputs/book_input.cr
+struct BookInput
+  include Caramel::FormInput
+
+  field title : String
+  field author : String
 end
 ```
 
 A controller excerpt:
 
-```ruby
-# app/controllers/books_controller.rb
+```crystal
+# app/controllers/books_controller.cr
 class BooksController < ApplicationController
-  def index
-    @books = Book.order(created_at: :desc)
+  def index : Caramel::Response
+    books = Book.order(created_at: :desc).to_a
+    render "books/index", books: books
   end
 
-  def create
-    @book = Book.new(book_params)
+  def create : Caramel::Response
+    input = parse_form(BookInput)
+    book = Book.new(title: input.title, author: input.author)
 
-    if @book.save
+    if book.save
       redirect_to books_path, notice: "Book added."
     else
-      render :new, status: :unprocessable_entity
+      render "books/new", book: book, status: 422
     end
-  end
-
-  private
-
-  def book_params
-    params.require(:book).permit(:title, :author)
   end
 end
 ```
 
+The parser reads the `book` form envelope for `BookInput`, rejects undeclared fields, and reports missing/invalid values through the same 422 form-error path while preserving submitted values. Authentication and record authorization remain separate from input typing.
+
 A reusable form excerpt:
 
-```erb
-<%= form_with model: @book do |form| %>
-  <%= form.error_summary %>
+```ecr
+<form action="<%= action %>" method="post">
+  <%= csrf_field %>
+  <%= method_field(method) %>
+  <%= error_summary(book) %>
 
-  <%= form.label :title %>
-  <%= form.text_field :title %>
-  <%= form.error_for :title %>
+  <label for="book_title">Title</label>
+  <input id="book_title" name="book[title]" value="<%= book.title %>"
+         aria-describedby="book_title_errors">
+  <%= field_errors(book, :title, id: "book_title_errors") %>
 
-  <%= form.label :author %>
-  <%= form.text_field :author %>
+  <label for="book_author">Author</label>
+  <input id="book_author" name="book[author]" value="<%= book.author %>">
 
-  <%= form.submit "Save book" %>
-<% end %>
+  <button type="submit">Save book</button>
+</form>
 ```
 
-Conventions are documented: an action with no explicit response renders its matching template; `resources` generates standard CRUD routes and helpers; model tables are pluralized; resource migrations include timestamps. Parameter allowlists control writable fields. Application authors add business validations explicitly.
+Conventions are documented: actions return explicit responses; template names and locals are checked through generated typed render methods; `resources` generates standard CRUD routes and helpers; model tables are pluralized; resource migrations include timestamps. The shared form receives `book`, `action`, and `method` locals; its parent page supplies the appropriate create or update route. Generated input types control writable fields. Application authors add business validations explicitly.
 
-The form helper produces labels, CSRF protection, accessible error associations, and styled controls. User-provided output is escaped by default. Standard form submission and navigation work without JavaScript. Caramel owns the presentation and helper integration, while established Ruby components should supply underlying rendering and persistence behavior.
+Generated forms provide labels, CSRF protection, accessible error associations, and styled controls. Caramel's template layer must escape ordinary interpolated values, including quoted attribute values, and allow raw markup only through an explicit trusted-HTML type used by framework helpers. ECR-style syntax alone does not supply this security contract. Escaping is an implementation gate. Standard form submission and navigation work without JavaScript. Crystal libraries should supply underlying database and HTTP facilities where they fit; Caramel owns their consistent integration.
 
 This familiar API is intentional. New syntax must solve a demonstrated problem rather than establish visual novelty. The full application workflow is where Caramel must earn its identity.
 
@@ -223,7 +252,7 @@ Authentication includes password hashing through a maintained implementation, se
 
 Existing application routes remain public. Installing authentication does not invent authorization rules or automatically assign ownership to existing records. Controllers opt into login protection:
 
-```ruby
+```crystal
 class BooksController < ApplicationController
   require_authentication
 end
@@ -244,41 +273,46 @@ This establishes identity only. The generated documentation shows separate recor
 | `frappe seed` | Run the project's explicit seed file; never reset data automatically |
 | `frappe test` | Run the application's tests against its separate test database |
 | `frappe routes` | List methods, paths, names, and controller actions |
-| `frappe console` | Open a Ruby console with application context |
+| `frappe run FILE` | Compile and run a Crystal script with application context; an interactive console is deferred until its toolchain behavior is proven |
+| `frappe build --release` | Produce the native application artifact for the selected supported target |
 | `frappe doctor` | Diagnose runtime, dependency, database, and configuration problems without changing them |
-| `frappe deps add GEM` | Add a dependency using the existing Ruby resolver and show the resulting dependency changes |
-| `frappe deps update [GEM]` | Explicitly resolve updates and update the lockfile |
+| `frappe deps add SOURCE` | Add a shard from an explicit supported source, such as `github:owner/repository`, using Shards and show the resulting dependency changes |
+| `frappe deps update [SHARD]` | Explicitly resolve updates and update the lockfile |
 
-Every command supports consistent help, useful exit codes, and plain output when redirected. Project commands are registered explicitly from `app/commands/`; unknown command names show close matches. Secrets are redacted from diagnostics. Machine-readable output can follow when it has a concrete consumer.
+Every command supports consistent help, useful exit codes, and plain output when redirected. Project commands are registered at compile time from `app/commands/` into a project-specific executable; Frappé rebuilds that executable when its sources change. Unknown command names show close matches. Secrets are redacted from diagnostics. Machine-readable output can follow when it has a concrete consumer.
 
 Environment defaults to development. Test commands cannot point at the development or production database. Production mutation requires an explicit environment selection and never happens as a side effect of `dev` or `setup`.
 
 ## 8. Managed dependencies without a new package manager
 
-Caramel manages one tested Ruby/tooling combination for each framework release. The launcher uses the project's declared Ruby version rather than the user's shell runtime. It does not replace the operating system Ruby or edit unrelated shell configuration.
+Caramel manages one tested Crystal/compiler-library/Shards combination for each framework release. `.caramel-version` selects a versioned Caramel toolchain manifest that pins the exact tool versions and supported platform artifacts. The launcher uses that manifest rather than whatever compiler happens to be on the shell path. It does not replace unrelated global tools or shell configuration.
 
-Bundler and standard gems remain underneath, with a normal Gemfile and lockfile. Frappé owns the common workflow and translates failures into useful guidance while retaining the underlying diagnostic. Users can inspect their dependencies and use ordinary Ruby tooling through the managed runtime.
+Shards remains the dependency manager, with standard `shard.yml` and `shard.lock` files. Frappé owns the common workflow and translates failures into useful guidance while retaining the underlying diagnostic. Users can inspect their dependencies and use ordinary Crystal tooling through the managed toolchain. The supported native libraries and linker requirements are included or provisioned by the managed installation; a lockfile alone is not a complete environment.
 
 New projects start from a tested lockfile. Setup restores its exact versions and reports incompatible metadata rather than silently upgrading it. Explicit dependency updates can change the graph and must show that change. A clean-install smoke test must prove the default project requires no manual native-library setup on the supported platform before we advertise this experience.
 
-The installer owns the runtime download, integrity verification, and dependency cache. Offline use is supported only when all required artifacts are already cached; an unavailable download produces a resumable failure. Runtime updates do not overwrite versions still used by existing projects.
+The installer owns toolchain downloads, integrity verification, and dependency caches. Offline use is supported only when all required artifacts are already cached; an unavailable download produces a resumable failure. Toolchain updates do not overwrite versions still used by existing projects. Cache keys include compiler version, dependency lock, build flags, and target; caches are an optimization, not a guarantee of incremental semantic analysis.
 
 ## 9. Architecture boundaries and request flow
 
-Proposed implementation foundations: Rack for the HTTP boundary, an existing Rack server, Active Record for relational persistence, Action View for escaped templates and form primitives, and Bundler for dependency resolution. These are library recommendations, not a tested compatibility claim. The implementation plan must first demonstrate them working together without a generated Rails application and lock compatible versions.
+Proposed implementation foundations: Crystal's HTTP facilities and fibers; `crystal-db` with a compatible SQLite driver for the first vertical slice; Shards for dependencies; and compiled ECR-style templates behind Caramel's escaping contract. SugarORM remains the intended typed persistence API from the original proposal. Begin with the fields, validations, parameterized queries, migrations, and record lifecycle needed by Bookshelf, evaluating existing Crystal ORM components before choosing reuse or a narrow implementation. Ruby libraries such as Rack, Active Record, Action View, and Bundler are not dependencies.
+
+The implementation plan must prove the selected compiler, libraries, template escaping, and database behavior together before locking exact versions. It must document fiber/parallelism settings and identify blocking calls. Compiler safety applies to instantiated/generated source paths; runtime schema drift, authorization, and external-system failures still need explicit checks.
 
 | Boundary | Responsibility |
 | --- | --- |
-| Managed installation | Runtime selection, artifact integrity, environment isolation, local caches |
+| Managed installation | Compiler/toolchain selection, native dependencies, artifact integrity, environment isolation, local caches |
 | Frappé | Command grammar, generators, feature installation, process supervision, diagnostics |
 | Caramel application runtime | Boot, configuration, routes, controller lifecycle, middleware, exception handling |
-| Persistence integration | ORM configuration, connection lifecycle, migrations, test database isolation |
+| SugarORM / persistence integration | Typed model/query API, driver configuration, connection lifecycle, migrations, spec database isolation |
 | Browser integration | Escaped rendering, forms, asset delivery, development refresh, shared styles |
 | Optional auth feature | Identity, sessions, recovery, integration migrations, views, behavioral tests |
 
-An incoming request passes through host validation, session/CSRF middleware as appropriate, route matching, and the controller action. The action reads permitted inputs and uses the model layer. A successful mutation redirects; a failed validation re-renders the form with its submitted values and field errors. The renderer returns escaped HTML through the Rack boundary.
+An incoming request passes through host validation, session/CSRF middleware as appropriate, route matching, and the typed controller action. The action reads a declared form input and uses the model layer. A successful mutation redirects; a failed validation re-renders the form with its submitted values and field errors. The compiled renderer returns escaped HTML through Crystal's HTTP response boundary.
 
-Application class reloads occur between requests. A failed reload presents the error rather than silently serving stale application code. Dependency or boot-configuration changes trigger an explicit supervised restart. The development supervisor cleans up its child processes when stopped and does not terminate unrelated services.
+Crystal source and compiled-template changes trigger a debounced development rebuild and supervised process replacement, rather than runtime class reloading. A supervisor-owned development endpoint displays a build-error page while a build is broken, so requests do not silently reach stale code. Only a successfully built, ready replacement receives application traffic. The supervisor cleans up its child processes when stopped and does not terminate unrelated services.
+
+The initial development mode uses ordinary compilation with development settings. Interpreter mode (`crystal i`), semantic-only checks, structured diagnostic formats, and compiler-cache improvements require verification on the exact bundled version before becoming supported accelerators. The original document's sub-second interpreter/repair-loop claims do not become guarantees merely by restoring Crystal. No automatic code-repair daemon is included.
 
 ## 10. Errors and browser experience
 
@@ -290,7 +324,9 @@ The local mailbox and development diagnostics bind to loopback and are absent fr
 
 ## 11. Deployment belongs in the journey
 
-The first release provides one documented container recipe and an example deployment, with the Ruby runtime, locked gems, and prepared assets included. Configuration and secrets are supplied externally. Database migrations run as an explicit release step.
+The first release provides one documented Linux/musl build recipe and an example deployment of the native binary. Compiled templates and the supported application assets are embedded in the release artifact. Configuration, secrets, persistent data, and any required certificate trust data are supplied explicitly. Database migrations run as an explicit release step using compiled application tooling; production does not need the Crystal compiler or source shards.
+
+Fully static linkage is a target for the supported release dependency set, verified using artifact inspection and execution in a minimal environment. It must not be inferred from a compiler flag. A statically linked application still needs its operating-system services and any documented external resources. Each supported CPU target gets its own built and tested artifact; no universal-binary claim is made.
 
 The initial SQLite deployment is a single application instance with persistent storage and a documented backup/restore procedure. It does not claim horizontal scaling, ephemeral-disk durability, or automatic rollback of schema changes. A later PostgreSQL path must be tested separately.
 
@@ -302,34 +338,36 @@ Roast provisioning, managed cloud hosting, zero-downtime orchestration, and the 
 
 The Bookshelf application is the reference integration fixture. Its generated files, browser behavior, and documented commands must be exercised together.
 
-- On a clean supported machine without Ruby, Node, or database services preinstalled, the supported installer and three startup commands open a working website. Download failures are reported distinctly from framework failures.
+- On a clean supported machine without Crystal, Shards, Node, or database services preinstalled, the supported installer and three startup commands open a working website. Download failures are reported distinctly from framework failures.
 - Creating the Book resource and migrating yields working browser CRUD. Tests cover valid writes, invalid forms, escaped output, missing records, CSRF rejection, and persisted data after restart.
 - `frappe add auth` yields usable registration/login/logout/recovery. Negative tests cover invalid credentials, expired/reused reset tokens, session invalidation, and rate limiting. The documented ownership example prevents cross-user reads and writes.
 - A second checkout works through `frappe setup` and `frappe dev`, without manual resolver repair. Development secrets are regenerated locally, never copied from version control.
 - Interrupted setup is resumable. Generator and auth-install conflicts preserve user edits. Stopping and restarting development leaves no orphaned processes.
 - `frappe test` cannot modify development data. Generated documentation matches command help and actual behavior.
 - The deployment smoke test exercises the generated application with persistent storage.
+- Compile fixtures reject invalid declared model fields, route/controller bindings, and template-local types on exercised code paths. A broken source edit shows a useful error; correcting it recovers without restarting Frappé manually.
+- Release artifact inspection establishes the actual dynamic-library dependencies. The deployed application handles HTTP/database/auth flows without a Crystal compiler, Shards, or application source installed.
 
-Proposed performance targets, measured after dependencies are cached on a declared reference machine: new project ready within 30 seconds, application boot within 5 seconds, and successful template/CSS edit visible within 1 second at p95 over 20 edits. These are targets, not observed results. Record hardware, artifact sizes, versions, and timings; measure cold installation separately with network conditions noted.
+Proposed performance targets on a declared reference machine: a new project including its first development compile ready within 30 seconds once dependencies are cached; an already built application booting within 5 seconds; and static CSS/JavaScript edits visible within 1 second at p95 over 20 edits. For Crystal source and compiled-template edits, use an initial p95 target of 3 seconds over representative edits and report actual results before accepting it as a supported promise. Measure cold/warm builds, semantic checks, specs, and release compilation separately on both Bookshelf and a larger fixture. Record hardware, versions, flags, artifact sizes, CPU, and memory; note network conditions for cold installation. The original 20–40 MB RSS and concurrency claims remain workload-specific hypotheses to benchmark.
 
 Qualitative acceptance: the creator uses Caramel for a real application, can explain where each generated file belongs, and can recover from deliberate setup/form errors using the product's own guidance. The Bookshelf demo alone does not establish broader usability.
 
 ## 13. Deliberate scope boundaries
 
-The initial experience includes managed setup, a Ruby web application, CRUD generation, migrations, basic assets/styles, optional authentication, tests, diagnostics, and one deployment recipe. Implementation should deliver this in sequential slices; it is not one parallel task per branded product.
+The initial experience includes managed setup, a Crystal web application, typed CRUD generation, migrations, compiled templates, basic assets/styles, optional authentication, specs, diagnostics, and a native-binary deployment recipe. Implementation should deliver this in sequential slices; it is not one parallel task per branded product.
 
-We defer a custom ORM, package resolver, template language, distributed queue engine, frontend framework, desktop interface, hosted control plane, and AI repair/MCP subsystem. We also defer supporting every OS and database before the supported combination works well.
+We defer the full SugarORM association/eager-loading feature set, a custom package resolver, a new template syntax, a distributed queue engine, a frontend framework, the desktop interface, the hosted control plane, and AI repair/MCP. Typed persistence and safe compiled rendering remain necessary work for the first slice. We also defer supporting every OS and database before the supported combination works well.
 
-The main design risk is building a familiar Rails-like API without improving its surrounding experience. The clean-machine setup and complete feature journey are therefore primary acceptance criteria, not finishing touches.
+The main design risk is making compilation or native dependencies interrupt the otherwise smooth application workflow. Clean-machine setup, measured edit feedback, and the complete browser feature journey are primary acceptance criteria. Crystal is a fixed foundation; if a measured target fails, revise the implementation, supported scope, or explicit performance promise rather than silently switching languages.
 
 ## References consulted
 
 - [Laravel installation and framework scope](https://laravel.com/framework/docs/13.x)
 - [Artisan](https://laravel.com/framework/docs/13.x/artisan)
 - [Laravel starter kits](https://laravel.com/framework/docs/13.x/starter-kits)
-- [Rails getting started](https://guides.rubyonrails.org/getting_started.html)
-- [Rack protocol](https://rack.github.io/rack/3.2/SPEC_rdoc.html)
-- [Active Record basics](https://guides.rubyonrails.org/active_record_basics.html)
-- [Action View overview](https://guides.rubyonrails.org/action_view_overview.html)
+- [Crystal dependency management with Shards](https://crystal-lang.org/reference/1.21/man/shards/index.html)
+- [Crystal concurrency](https://crystal-lang.org/reference/1.21/guides/concurrency.html)
+- [Crystal static linking](https://crystal-lang.org/reference/1.21/guides/static_linking.html)
+- [Crystal ECR templates](https://crystal-lang.org/api/1.21.0/ECR.html)
 
 Sources establish available building blocks and inspiration. Caramel-specific behavior, CLI syntax, integration choices, and performance targets above are proposals.
