@@ -21,6 +21,7 @@ The application workflow branch adds a narrow typed model API and typed browser 
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
 - [Reproduce the toolchain installation](experiments/toolchain/README.md)
+- [Resumable toolchain installer component](docs/research/toolchain-installer.md)
 
 ## Contributor checks
 

@@ -18,10 +18,12 @@ Evidence and API details: [typed application APIs](../../research/typed-applicat
 
 ## 2. Managed launcher and project configuration
 
-- [ ] Turn the pinned provider experiment into a resumable supported installer, retaining isolated mise state, exact artifact verification and native dependency closure. State the SDK/platform prerequisites and verify a fresh prefix. Do not claim a clean machine from the existing host.
+- [x] Turn the pinned provider experiment into a resumable toolchain installer component, retaining isolated mise state, exact artifact verification and native dependency closure. State the SDK/platform prerequisites and verify a fresh prefix. Do not claim a clean machine from the existing host.
 - [ ] Persist framework/toolchain versions outside temporary directories. Rebuild executables against the installed prefix and validate their actual linked libraries.
 - [ ] Define and validate `.caramel-version`, `config/environment.yml` and local ignored secrets. PostgreSQL major and domain suffix are versioned metadata; credentials remain local. Cloned projects regenerate secrets.
 - [ ] Install the launchers and Latte menu app, register the user daemon and complete the reviewed system integration. A failed DNS/trust setup produces an actionable failure before opening a browser.
+
+Toolchain component evidence: [installer checks and limits](../../research/toolchain-installer.md). Fresh-prefix installation, deliberate interruption/resumption, native linking, offline reuse and managed PostgreSQL checks pass; full consumer installation, clean-machine proof and independent review remain pending.
 
 ## 3. Frappé command skeleton and application creation
 
