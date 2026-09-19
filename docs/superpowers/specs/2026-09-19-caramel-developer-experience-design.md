@@ -30,7 +30,7 @@ Proposed first-release defaults:
 - macOS on Apple Silicon for the managed local installation.
 - Managed PostgreSQL, with separate project databases and credentials for development and specs; the selected major version is recorded in the project environment manifest.
 - Server-rendered HTML, bundled htmx 4, ordinary CSS, and browser JavaScript modules.
-- Named HTTPS origins such as `https://bookshelf.caramel.test`. The reserved `.test` suffix is the proposed default; exact `.caramel` is supported as an explicit local override if preferred.
+- Named HTTPS origins such as `https://bookshelf.caramel`, using Latte's scoped local resolver and trusted certificates.
 - Latte's shared service manager and a compact macOS menu-bar interface for projects, HTTPS, PostgreSQL, toolchains, logs, and service health.
 - Plain Crystal application classes, typed inputs, compiled templates, and readable generated files.
 - A native production application binary, with a Linux/musl build path targeting fully static linkage of supported dependencies. A container is a build/distribution option; production must not need a language interpreter. Static linkage and runtime resource requirements are verified on the actual artifact.
@@ -56,7 +56,7 @@ Illustrative output:
 ```text
 Bookshelf is ready
 
-Website    https://bookshelf.caramel.test
+Website    https://bookshelf.caramel
 HTTPS      Trusted locally
 Database   PostgreSQL · bookshelf_development
 
@@ -322,7 +322,7 @@ Latte is a shared local environment service with a compact menu-bar interface. T
 
 A scoped local resolver maps the chosen development suffix to loopback. Caddy routes each exact registered hostname to a private application upstream and terminates HTTPS. The installer handles the macOS resolver configuration and the OS authorization needed for local trust and privileged listeners. Ordinary project commands run without elevation. Existing software on ports 80/443 is diagnosed rather than displaced or silently bypassed with a different browser URL.
 
-The proposed naming default is `<project>.caramel.test`, because `.test` is reserved for testing. Exact `<project>.caramel` can be configured as a local namespace, but `.caramel` is not reserved for this purpose and may conflict with future public DNS. The selection is recorded explicitly; renaming a site updates its route, certificate, and development application origin together. Duplicate names are reported before registration and can be resolved with an explicit alternate name. No suffix or origin changes silently during normal startup.
+The naming default is `<project>.caramel`, following the intended product experience. `.caramel` is a locally managed namespace, not a reserved public-DNS suffix. Local-only exposure comes from scoped resolution and loopback listeners. Latte checks resolver health and offers `.test` as an explicit alternate suffix if a user needs one; it does not silently change project URLs. Renaming a site updates its route, certificate, and development application origin together. Duplicate names are reported before registration and can be resolved with an explicit alternate name.
 
 Each installation has its own local CA. The CA key stays outside repositories with restricted access; leaf certificates renew automatically. The installer establishes trust for the supported browsers and bundled tooling and verifies it with a real HTTPS request. If trust is declined or fails, setup explains the remaining step instead of claiming completion or disabling verification. Local HTTPS uses private certificates, not public ACME certificates. HTTPS is also used for the mailbox and browser-facing development diagnostics; HTTP only redirects to HTTPS.
 
@@ -331,6 +331,16 @@ Caddy is the recommended web TLS issuer/terminator; use one coordinated local tr
 The UI and app processes remain unprivileged. A narrow helper owns only the necessary resolver/trust/listener changes. The proxy admin interface and Latte control API use restricted local IPC, with registered-project ownership and validated upstreams. Repeated registration reconciles a route instead of appending duplicates. Uninstall removes Caramel-owned resolver/trust entries while preserving data unless deletion is separately requested.
 
 The application trusts forwarded scheme/host headers only from its registered local proxy. Sessions use Secure, HttpOnly, host-only cookies, preferably the `__Host-` prefix; sibling project domains must not share sessions. Origin and CSRF checks use the exact project origin. Private proxy-to-application traffic may use a Unix socket; if it uses TCP, require TLS and verify the upstream certificate. The public development experience remains HTTPS throughout, including refresh connections.
+
+### 8.3. Mise as a toolchain provider candidate
+
+Mise is the preferred candidate to evaluate for tool installation, exact-version selection, caching, and command execution. Its registry includes Crystal, Caddy, and PostgreSQL through multiple backends. Registry presence does not establish that a backend ships usable macOS ARM64 binaries or all required native libraries. Some PostgreSQL backends compile from source and may initialize a cluster automatically; neither behavior should leak into Caramel's ordinary setup without an explicit product decision.
+
+The first evaluation uses mise for contributor tooling in an isolated directory. If it meets the clean-machine installation contract, Frappé can invoke a pinned mise executable internally and use `mise exec` without requiring shell activation or teaching users another CLI. Mise installs tools; Shards continues to resolve application libraries; Latte owns project registration, PostgreSQL data/roles/upgrades, local DNS/CA/proxy, and their visible lifecycle. Mise's service/bootstrap facilities may be reusable underneath Latte, but must not create a competing authority over the same services.
+
+Pin explicit backends and exact versions, retain lock/provenance metadata where the backend supports it, and verify native dependency closure independently. Keep Caramel-managed mise configuration/data separate from a user's existing mise installation. Only Caramel-generated/reviewed tool configuration is used for internal setup; do not broadly trust arbitrary project tasks or hooks. The project's Caramel environment manifest remains authoritative while this is an evaluation; any move to project-facing `mise.toml` must define one source of truth rather than duplicate version declarations.
+
+Successful use in the development repository does not by itself prove suitability for the consumer installer. Source-only installation or missing native dependencies may require Caramel-published binary bundles while still using mise for version selection/execution. This is an adapter decision and cannot change the Crystal/PostgreSQL/HTTPS requirements.
 
 ## 9. Architecture boundaries and request flow
 
@@ -433,5 +443,11 @@ The main design risk is making compilation or native dependencies interrupt the 
 - [Crystal PostgreSQL driver](https://github.com/will/crystal-pg)
 - [PostgreSQL TLS verification semantics](https://www.postgresql.org/docs/current/libpq-ssl.html)
 - [PostgreSQL cluster upgrades](https://www.postgresql.org/docs/current/upgrading.html)
+- [Mise tool registry](https://mise.jdx.dev/registry.html)
+- [Mise command execution](https://mise.jdx.dev/cli/exec.html)
+- [Mise lockfiles](https://mise.jdx.dev/dev-tools/mise-lock.html)
+- [Mise bootstrap and services](https://mise.jdx.dev/bootstrap.html)
+- [Mise configuration trust](https://mise.jdx.dev/cli/trust.html)
+- [Mise PostgreSQL source-build plugin](https://github.com/mise-plugins/vfox-postgres)
 
 Sources establish available building blocks and inspiration. Caramel-specific behavior, CLI syntax, integration choices, and performance targets above are proposals.
