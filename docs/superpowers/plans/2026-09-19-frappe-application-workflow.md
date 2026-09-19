@@ -1,0 +1,54 @@
+# Frappé application workflow implementation plan
+
+> Use superpowers:subagent-driven-development. Implement bounded tasks in isolated worktrees, review specification compliance and quality, then integrate verified results.
+
+**Goal:** The creator can install the supported environment, create a Crystal application, generate Book CRUD, migrate, edit, test and build it through Frappé. This follows the Latte local environment gate and precedes the optional-authentication completion gate; it does not replace either.
+
+**Existing foundations:** HTTP/router/controller/escaped compiled view/form/CSRF primitives, verified PostgreSQL driver/pooling/migrations, managed toolchain experiment, and Latte's private registry/service API. Bookshelf is currently hand-authored and must become an integration fixture for the actual generator.
+
+## 1. Typed application APIs
+
+- [x] Evaluate current maintained Crystal model/form libraries against the exact required syntax and dependency constraints; document the reuse versus narrow implementation choice.
+- [x] Implement the declared model class API needed by generated Book CRUD: typed fields and primary key, timestamps, presence validation, parameterized insert/update/find/delete, typed ordering and conditions. Unsaved IDs remain nullable. Unknown declared query fields fail compilation. Do not expand into the deferred association/eager-loading framework.
+- [x] Add typed form inputs over the existing bounded parser. Writable fields are an explicit declaration; unknown/duplicate/missing/invalid inputs produce usable 422 errors while retaining submitted text. Input typing never implies authorization.
+- [ ] Add resource routes/helpers and template/controller conveniences needed by the generated app, preserving compile-time errors and the explicit trusted-HTML boundary.
+- [x] Verify real PostgreSQL behavior, source-level invalid-field fixtures, missing-record behavior, and SQL parameterization. Use restricted runtime and separate migration roles.
+
+Evidence and API details: [typed application APIs](../../research/typed-application-apis.md). Luna workers hit their account usage limit; root continued these tasks locally. Independent review is still pending and the workflow will not be described as reviewed until it happens.
+
+## 2. Managed launcher and project configuration
+
+- [ ] Turn the pinned provider experiment into a resumable supported installer, retaining isolated mise state, exact artifact verification and native dependency closure. State the SDK/platform prerequisites and verify a fresh prefix. Do not claim a clean machine from the existing host.
+- [ ] Persist framework/toolchain versions outside temporary directories. Rebuild executables against the installed prefix and validate their actual linked libraries.
+- [ ] Define and validate `.caramel-version`, `config/environment.yml` and local ignored secrets. PostgreSQL major and domain suffix are versioned metadata; credentials remain local. Cloned projects regenerate secrets.
+- [ ] Install the launchers and Latte menu app, register the user daemon and complete the reviewed system integration. A failed DNS/trust setup produces an actionable failure before opening a browser.
+
+## 3. Frappé command skeleton and application creation
+
+- [ ] Implement consistent help/exit codes and command suggestions. Native project commands are compiled with application context; user arguments are argv values, never shell interpolation.
+- [ ] `new NAME` preflights the complete target, refuses a nonempty directory, creates the documented structure and styled homepage, installs the exact dependency lock, registers/provisions through Latte, and writes local secrets privately.
+- [ ] `setup` restores a clone without silently updating dependency versions or mutating application schema. Interrupted operations resume safely and preserve user edits.
+- [ ] Implement services/sites/open/doctor through the same Latte state. Doctor reads and explains compiler, lockfile, PostgreSQL, DNS, proxy and trust problems without repairing them silently.
+
+## 4. Generators and database commands
+
+- [ ] Resource generation creates the actual typed model, input, controller, full CRUD views/shared form, routes, migration and meaningful behavior specs. Generate all files before writing; any conflict leaves the project unchanged.
+- [ ] Model/controller/migration/command generators share the documented grammar and clear scope. Do not overwrite edited files on a repeated invocation.
+- [ ] Implement migrate/seed/routes/run and isolated test execution. Migrations are explicit; seed never resets. The spec runner verifies environment/database identity and cannot target development or production, including parallel worker isolation.
+- [ ] Add explicit dependency add/update workflows via Shards, show lockfile changes and reject incompatible framework/toolchain metadata.
+
+## 5. Development loop
+
+- [ ] `dev` starts or repairs only the managed services it needs, compiles the application, starts it on a private site socket and registers the ready upstream before opening its stable HTTPS URL.
+- [ ] Watch Crystal/ECR changes with debounce and replace the application only after successful compilation/readiness. Show a same-origin build-error page while source is broken, then recover automatically after the edit is corrected.
+- [ ] Serve static CSS/JS updates without Crystal compilation. Add same-origin authenticated refresh, no external CDN or frontend package manager.
+- [ ] Terminal shutdown removes only this dev session's process/route state; shared services and other projects remain usable. Stale process/socket recovery checks ownership.
+- [ ] Measure representative warm/cold builds and static/source refresh, recording actual distributions rather than asserting the proposed timing targets.
+
+## 6. Generated-app acceptance and next gates
+
+- [ ] Create Bookshelf using `frappe new`, generate Book with `title:string author:string`, run migrate, and exercise browser CRUD through `.caramel` HTTPS.
+- [ ] Verify invalid submissions, escaping, CSRF, htmx 4 navigation/422/history/focus and JavaScript-disabled forms in the browser; fix generated output, not only the reference fixture.
+- [ ] Clone/setup a second project and prove separate origins, roles, databases, spec isolation and simultaneous dev sessions.
+- [ ] Independently review and commit this workflow, with executable documentation matching help.
+- [ ] Continue with complete `frappe add auth` and Linux/musl production artifact plans. The overall goal remains active until auth, deployment and installation acceptance are verified.

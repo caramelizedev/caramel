@@ -66,17 +66,20 @@ try:
     sql = "\n".join([
         "CREATE ROLE caramel_spec LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';",
         "CREATE ROLE caramel_dev LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';",
+        "CREATE ROLE caramel_model_spec LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';",
         "CREATE DATABASE caramel_spec OWNER caramel_spec;",
         "CREATE DATABASE bookshelf_spec OWNER caramel_spec;",
         "CREATE DATABASE caramel_development OWNER caramel_dev;",
         "REVOKE CONNECT ON DATABASE caramel_spec FROM PUBLIC;",
         "REVOKE CONNECT ON DATABASE bookshelf_spec FROM PUBLIC;",
         "REVOKE CONNECT ON DATABASE caramel_development FROM PUBLIC;",
+        "GRANT CONNECT ON DATABASE caramel_spec TO caramel_model_spec;",
     ])
     run([pg / "psql", "-X", "-v", "ON_ERROR_STOP=1", "-h", sock, "-p", port, "-U", "caramel_admin", "-d", "postgres"], input=sql, text=True, stdout=subprocess.DEVNULL)
     env.update({
         "CARAMEL_OWNED_BOOKSHELF_URL": db_url("bookshelf_spec", "caramel_spec", password, sock),
         "CARAMEL_OWNED_SPEC_URL": db_url("caramel_spec", "caramel_spec", password, sock),
+        "CARAMEL_OWNED_MODEL_RUNTIME_URL": db_url("caramel_spec", "caramel_model_spec", password, sock),
         "CARAMEL_OWNED_DEV_URL": db_url("caramel_development", "caramel_dev", password, sock),
         "CARAMEL_OWNED_TLS_URL": db_url("caramel_spec", "caramel_spec", password, "localhost", owned / "ca.crt"),
         "CARAMEL_OWNED_WRONG_HOST_URL": db_url("caramel_spec", "caramel_spec", password, "127.0.0.1", owned / "ca.crt"),

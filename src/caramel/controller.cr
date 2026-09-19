@@ -1,4 +1,5 @@
 require "./application"
+require "./form_input"
 
 module Caramel
   # A controller instance belongs to one request and holds no shared request state.
@@ -15,6 +16,11 @@ module Caramel
       form = Form.read(@request, envelope, fields, required_fields)
       raise Forbidden.new unless @csrf.valid?(@request, form.csrf_token)
       form
+    end
+
+    def parse_form(input_type : T.class) : FormInput::Result(T) forall T
+      form = parse_form(T.envelope, T.fields, T.required_fields)
+      T.from_form(form)
     end
 
     def html(full : String, partial : String, status = 200) : Response

@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Check typed form input declarations without a running application."""
+from pathlib import Path
+import subprocess
+
+REPO = Path(__file__).resolve().parents[1]
+cases = {
+    'compile_valid': None,
+    'compile_unknown_constructor': 'unknown Caramel::FormInput constructor field',
+    'compile_wrong_type': "must be Int32",
+    'compile_missing_field': "missing key",
+    'compile_unsupported_type': 'unsupported Caramel::FormInput field type',
+    'compile_unknown_access': "undefined method 'admin'",
+}
+for name, error in cases.items():
+    result = subprocess.run([str(REPO / 'scripts/crystal'), 'build',
+                             'spec/fixtures/inputs/' + name + '.cr', '--no-codegen'],
+                            cwd=REPO, capture_output=True, text=True, timeout=90)
+    if error is None:
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        assert result.returncode != 0 and error in result.stderr, name + '\n' + result.stdout + result.stderr
+    print('PASS: ' + name)

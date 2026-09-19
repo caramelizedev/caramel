@@ -15,6 +15,7 @@ module Caramel
     MAX_BYTES = 65_536
     getter values = {} of String => String
     getter errors = [] of String
+    getter field_errors = {} of String => Array(String)
     getter csrf_token : String? = nil
     @override : String? = nil
 
@@ -38,7 +39,8 @@ module Caramel
       URI::Params.parse(body).each do |key, value|
         raise InvalidEncoding.new("Malformed form encoding") unless key.valid_encoding? && value.valid_encoding? && !key.includes?('\0') && !value.includes?('\0')
         if seen.includes?(key)
-          @errors << "Duplicate form field"
+          field = fields.find { |name| key == "#{envelope}[#{name}]" }
+          add_error(field || "_base", "Duplicate form field")
           next
         end
         seen << key
@@ -47,16 +49,21 @@ module Caramel
           @csrf_token = value
         when "_method"
           @override = value.upcase
-          @errors << "Unsupported method override" unless {"PATCH", "PUT", "DELETE"}.includes?(@override)
+          add_error("_base", "Unsupported method override") unless {"PATCH", "PUT", "DELETE"}.includes?(@override)
         else
           if field = fields.find { |name| key == "#{envelope}[#{name}]" }
             @values[field] = value
           else
-            @errors << "Unknown form field"
+            add_error("_base", "Unknown form field")
           end
         end
       end
-      required_fields.each { |field| @errors << "Missing #{field}" unless @values.has_key?(field) }
+      required_fields.each { |field| add_error(field, "Missing #{field}") unless @values.has_key?(field) }
+    end
+
+    private def add_error(field : String, message : String) : Nil
+      @errors << message
+      (@field_errors[field] ||= [] of String) << message
     end
 
     def [](field : String) : String
