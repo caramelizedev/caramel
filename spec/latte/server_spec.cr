@@ -33,6 +33,10 @@ private class TestServices < Caramel::Latte::ServiceControl
     @registry.set_upstream(id, socket)
   end
 
+  def clear_upstream(id : String, socket : String) : Bool
+    !@registry.clear_upstream(id, socket).nil?
+  end
+
   def environment_json(id : String, directory : String) : String
     site = @registry.find(id)
     raise Caramel::Latte::PublicError.new("not_found", "Project is not registered", 404) unless site
@@ -74,6 +78,9 @@ describe Caramel::Latte::Server do
       site = JSON.parse(response.body)["site"]
       site["origin"].as_s.should eq("https://bookshelf.caramel")
       site["domain"].as_s.should eq("bookshelf.caramel")
+      clear = server.handle(HTTP::Request.new("DELETE", "/v1/sites/#{site["id"].as_s}/upstream", headers, {socket: "/private/nonmatching.sock"}.to_json))
+      clear.status.should eq(200)
+      JSON.parse(clear.body)["cleared"].as_bool.should be_false
       endpoint = "/v1/sites/#{site["id"].as_s}/environment"
       secrets = server.handle(HTTP::Request.new("POST", endpoint, headers, {directory: root}.to_json))
       secrets.status.should eq(200)

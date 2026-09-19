@@ -164,6 +164,9 @@ with (ROOT / "environment.log").open("w") as daemon_log, (ROOT / "app.log").open
         resume_readme.write_text(resume_readme.read_text() + "\nPreserve this edit during setup.\n")
         run([FRAPPE, "setup"], cwd=resumed)
         assert resume_readme.read_text().endswith("Preserve this edit during setup.\n")
+        if "--dev" in sys.argv:
+            from frappe_dev_checks import check
+            check(run, REPO, ROOT, project, clone, rpc, ports, ENV)
         site = next(site for site in rpc("GET", "/v1/sites")["sites"] if site["name"] == "bookshelf")
         app_dir = RUNTIME / "sites" / site["id"]
         app_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

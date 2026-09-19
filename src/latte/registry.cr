@@ -95,11 +95,12 @@ module Caramel
         end
       end
 
-      def clear_upstream(id_or_name : String) : Site?
+      def clear_upstream(id_or_name : String, expected_socket : String? = nil) : Site?
         with_exclusive_lock do
           sites = read_unlocked
           index = sites.index { |site| site.id == id_or_name || site.name == id_or_name }
           next nil unless index
+          next nil if expected_socket && sites[index].upstream != expected_socket
           updated = sites[index].without_upstream
           sites[index] = updated
           write_unlocked(sites)

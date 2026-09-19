@@ -3,6 +3,7 @@ require "../latte/toolchain"
 
 module Caramel::Frappe
   class Tools
+    getter framework_root : String
     getter toolchain : Latte::Toolchain
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)

@@ -2,12 +2,13 @@ require "./new_project"
 require "./latte_client"
 require "./tools"
 require "./resource_generator"
+require "./dev_session"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    COMMANDS = %w(new setup make migrate seed routes test services sites doctor open)
+    COMMANDS = %w(new setup dev make migrate seed routes test services sites doctor open)
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
     end
@@ -33,12 +34,24 @@ module Caramel::Frappe
         @output.puts(usage(command))
         return 0
       end
-      if (command == "new" && args.size != 1) || (!{"new", "make", "test", "services"}.includes?(command) && !args.empty?)
+      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "services"}.includes?(command) && !args.empty?)
         @error.puts(usage(command))
         return 2
       end
 
       case command
+      when "dev"
+        project = Project.load
+        NewProject.new(@framework_root).verify_snapshot(project)
+        values = development_environment(project)
+        tools = Tools.new(@framework_root, @output, @error)
+        begin
+          tools.check_dependencies(project)
+        rescue Error
+          tools.dependencies(project)
+        end
+        verify_origin(project)
+        DevSession.new(project, tools, LatteClient.new, values, @output, @error).run(open_browser: !args.includes?("--no-open"))
       when "make"
         unless args.size >= 3 && args.shift == "resource"
           @error.puts(usage("make"))
@@ -74,7 +87,7 @@ module Caramel::Frappe
         rescue ex : Error
           raise Error.new("#{ex.message}\nProject files were preserved. Run cd #{name} && frappe setup to resume.")
         end
-        @output.puts("\n#{project.name} is configured at #{project.origin}\n\nNext:\n  cd #{name}\n  frappe make resource Book title:string author:string\n  frappe migrate\n  frappe test")
+        @output.puts("\n#{project.name} is configured at #{project.origin}\n\nNext:\n  cd #{name}\n  frappe dev")
       when "setup"
         project = Project.load
         NewProject.new(@framework_root).verify_snapshot(project)
@@ -83,7 +96,7 @@ module Caramel::Frappe
         client.ready!
         tools.dependencies(project)
         configure(project, client)
-        @output.puts("#{project.name} is configured. Use frappe routes or frappe test to check the application.")
+        @output.puts("#{project.name} is configured. Run frappe dev.")
       when "migrate", "seed", "routes"
         project = Project.load
         values = command == "routes" ? {} of String => String : development_environment(project)
@@ -237,6 +250,7 @@ module Caramel::Frappe
 
     private def usage(command : String) : String
       case command
+      when "dev"      then "frappe dev [--no-open]"
       when "make"     then "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"
       when "new"      then "frappe new NAME"
       when "test"     then "frappe test [SPEC_OPTIONS]"

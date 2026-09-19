@@ -4,6 +4,7 @@ A Crystal browser application built with Caramel @@VERSION@@, PostgreSQL and loc
 
 ```sh
 frappe setup  # after cloning; creates fresh private local credentials
+frappe dev    # compiles, watches, and opens your named HTTPS project
 ```
 
 Create your first feature:
@@ -16,7 +17,9 @@ frappe test
 
 Routes live in `config/routes.cr`, application code in `app/`, and database changes in `db/migrations/`. Generated files are yours to edit. Source assets live in `app/assets/`; Frappé publishes them into `public/assets/`. Only `public/` is served directly.
 
-Run `frappe --help` for implemented commands. `frappe seed` executes `db/seeds.cr` without resetting data. This preview implements setup, resource generation, migration and testing; the watched `frappe dev` loop and optional `frappe add auth` are still being built.
+Run `frappe --help` for implemented commands. `frappe seed` executes `db/seeds.cr` without resetting data. The optional `frappe add auth` feature is still being built.
+
+`frappe dev` watches Crystal, compiled templates and configuration. Broken builds show a diagnostic page at the same HTTPS address and recover when you save a fix. CSS/JavaScript changes refresh without compilation. Pending migrations require an explicit `frappe migrate`; dev resumes after they are applied. Ctrl-C stops this project's app and watcher while leaving shared services and other projects running. `--no-open` suppresses browser launch and still requires working named, trusted HTTPS. Use `frappe doctor` if local DNS or trust needs repair.
 
 Resource fields support `string`, `int32`, `int64`, `bool`, `float64`, and RFC 3339 `time`. Append `?` for nullable values (quote these declarations in shells that expand `?`). For irregular plurals, use `--plural=people`. Generation refuses existing files and preserves edits around the route and path markers. Review the generated files before running migrations.
 

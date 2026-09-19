@@ -63,6 +63,18 @@ module Caramel::Frappe
       request("POST", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
     end
 
+    def clear_upstream(id : String, socket : String) : Bool
+      validate_id(id)
+      request("DELETE", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["cleared"].as_bool
+    end
+
+    def site_directory(id : String) : String
+      validate_id(id)
+      Latte::StateSecurity.validate_owned_directory(@runtime)
+      sites = Latte::StateSecurity.ensure_owned_directory(File.join(@runtime, "sites"))
+      Latte::StateSecurity.ensure_owned_directory(File.join(sites, id))
+    end
+
     private def validate_id(id : String) : Nil
       raise Error.new("Invalid Latte site identifier") unless Latte::StateSecurity.valid_site_id?(id)
     end

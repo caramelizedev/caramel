@@ -10,7 +10,7 @@ The toolchain feasibility milestone is complete. The first runtime slice now has
 
 Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configuration, a shared service daemon and a native macOS menu client. Disposable integration checks cover service startup, crash recovery, two-site HTTPS and database retention. Its fixed macOS resolver/port installer passed review; applying that system installation awaits explicit authorization. System-resolved, browser-trusted HTTPS remains an acceptance gate.
 
-The application workflow branch adds a narrow typed model API, typed browser inputs, and the native Frappé CLI. It creates and restores projects, generates typed resources, applies explicit migrations, and runs specs against separately provisioned PostgreSQL databases. Resource generation produces editable models, inputs, controllers, views, route helpers, migrations and request specs. The watched development loop, smaller individual generators, custom commands, dependency editing, optional authentication, and production deployment remain unfinished. Consumer installation and the complete browser experience still need acceptance testing. Mise provides the pinned private toolchain.
+The application workflow branch adds a narrow typed model API, typed browser inputs, and the native Frappé CLI. It creates and restores projects, generates typed resources, applies explicit migrations, and runs specs against separately provisioned PostgreSQL databases. Resource generation produces editable models, inputs, controllers, views, route helpers, migrations and request specs. The watched development loop now rebuilds safely, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes. Smaller individual generators, custom commands, dependency editing, optional authentication, and production deployment remain unfinished. Consumer installation and the complete browser experience still need acceptance testing. Mise provides the pinned private toolchain.
 
 - [Developer experience design](docs/superpowers/specs/2026-09-19-caramel-developer-experience-design.md)
 - [Runtime plan and remaining delivery map](docs/superpowers/plans/2026-09-19-runtime-foundation.md)
@@ -18,6 +18,7 @@ The application workflow branch adds a narrow typed model API, typed browser inp
 - [Runtime verification and limits](docs/research/runtime-verification.md)
 - [Typed model and input APIs, verification and limits](docs/research/typed-application-apis.md)
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
+- [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
 - [Latte plan](docs/superpowers/plans/2026-09-19-latte-local-environment.md)
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
@@ -52,6 +53,8 @@ scripts/check-latte-network
 scripts/check-latte-daemon
 scripts/build-frappe
 scripts/check-frappe-project
+scripts/check-frappe-project --dev
+scripts/check-dev-child
 ```
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.

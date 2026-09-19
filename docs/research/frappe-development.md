@@ -1,0 +1,38 @@
+# Frappé development loop
+
+The native `frappe dev [--no-open]` implementation combines the shared Latte services with a terminal-owned project session. It verifies the pinned framework, locked dependencies, authoritative local database configuration and system-resolved trusted HTTPS before starting. A failed DNS/trust preflight never substitutes an HTTP or high-port browser address. `--no-open` suppresses browser launch, not that preflight.
+
+## Lifecycle
+
+Each site has an owner-private runtime directory and an exclusive development-session lock. The session binds a private Unix socket and registers it through Latte. This socket is a development HTTP gateway: it serves build diagnostics and authenticated refresh, and forwards normal traffic only to a successfully compiled, ready application. Caddy keeps the named HTTPS origin stable.
+
+Source/configuration/template changes are detected by content hashes with a 100 ms polling interval and 200 ms debounce. A changed source cancels an obsolete compile. During compilation or failure the gateway does not forward requests to the old app. The next application must return `200 ok` from `/health` before traffic switches; the previous app is then stopped. Pending migrations remain explicit: the startup failure names `frappe migrate`, and dev retries booting the compiled app after that command applies the schema.
+
+The build cache records source fingerprint, binary checksum, framework version and toolchain prefix. Reuse is validated before launch. Source assets are published separately and refresh without a Crystal build. Asset output conflicts preserve public edits and show an actionable diagnostic. Correcting the conflict restores service. The poller currently hashes watched contents each pass; performance on larger projects remains to be measured.
+
+App processes receive the development runtime database URL; migration/spec credentials are withheld. Changing local environment metadata or secrets while dev is active requires a restart. The normal CLI validates these credentials against Latte before entering the session; the disposable fixture invokes the session directly against its own prepared state.
+
+## Ownership and shutdown
+
+Compiler and app commands run through a small native helper in a newly created POSIX session. The terminal owner holds a pipe lease. Normal cancellation or parent death closes that pipe; the helper signals only its own process group and escalates to terminate resistant descendants. It never restores or kills a PID from an old record. Tests cover preserved child output/exit status and a TERM-resistant descendant.
+
+Ctrl-C closes owned commands, conditionally clears the exact registered gateway socket, removes its socket files and releases the session lock. Shared database/DNS/proxy services remain available. Route cleanup compares the expected socket, so it cannot clear a different upstream. A later session removes only owned, private, recognized socket names after a refused connection proves they are stale; live sockets are preserved.
+
+## Diagnostics and refresh
+
+Compiler/startup diagnostics are escaped, bounded and redacted using known local secret values plus database-URL patterns. They are served at the project HTTPS origin with no-store and restrictive browser policies. Repeated identical failures do not repeatedly advance the refresh generation.
+
+Full HTML responses receive a local external refresh script. Fragments do not. Application cookies and response status are preserved. A random per-session host-only Secure/HttpOnly/SameSite=Strict cookie authenticates refresh polling, together with a required custom request header and exact Origin validation when supplied. Unknown hosts and cross-origin refresh are refused. No development client or endpoint is added to the production application binary; the gateway owns these features.
+
+## Evidence
+
+- The combined runtime, Latte and Frappé unit suite passes 106 examples, including real Unix-socket proxying, full versus partial HTML, preserved application cookies, refresh authentication, escaped/redacted diagnostics including truncation boundaries, and asset conflict handling.
+- `scripts/check-dev-child` passes real process-group lifecycle checks.
+- `scripts/check-frappe-project --dev` runs two generated native apps behind the disposable Caddy/PostgreSQL fixture. It verifies rebuild/error/fix recovery, explicit migration recovery without a source edit, refresh authentication, CSS updates without compilation, duplicate-session refusal, independent project shutdown, cached restart, abrupt owner death, stale-socket recovery and asset-conflict recovery.
+- The refresh JavaScript passes `node --check`. This is syntax evidence, not browser acceptance.
+
+These HTTPS checks use private fixture ports and an explicitly supplied fixture CA. They do not establish normal system DNS, port 443, browser trust or browser rendering. Full `frappe dev` startup through the ordinary installation remains gated on the pending macOS integration and certificate trust work.
+
+## Remaining development acceptance
+
+Real browser refresh, htmx history/focus/422 behavior, native HTML forms and visual review remain open. Runtime exception pages still use the existing generic application error response; expanded developer traces need implementation and production-exclusion tests. Running/build-error/stopped project status needs propagation into both the CLI listing and native menu. Performance distributions (including 20 edits and a larger fixture), startup resource measurements, and cancellation during compilation remain unverified. No sub-second or p95 timing promise is accepted from these functional checks. Independent review remains pending while the requested Luna workers are unavailable.

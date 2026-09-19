@@ -1,6 +1,6 @@
 # Frappé generated-project workflow
 
-This is an implementation preview on `codex/frappe-application-workflow`, not a consumer release. The framework and toolchain are pinned; consumer launchers, the watched development loop and browser acceptance remain open. Independent review is pending while the requested Luna workers are unavailable.
+This is an implementation preview on `codex/frappe-application-workflow`, not a consumer release. The framework and toolchain are pinned; consumer launchers and browser acceptance remain open. Independent review is pending while the requested Luna workers are unavailable.
 
 ## Implemented interface
 
@@ -15,7 +15,7 @@ frappe routes
 frappe test
 ```
 
-The binary also implements `setup`, `seed`, `services`, `sites`, `doctor` and `open`. Help is authoritative for currently available commands. `open` checks system DNS and certificate trust before opening the URL. `doctor` checks project metadata, framework snapshot, managed compiler, installed dependencies, PostgreSQL tool, private configuration, service state and named HTTPS; it does not repair state.
+The binary also implements `setup`, `dev`, `seed`, `services`, `sites`, `doctor` and `open`. See [development workflow](frappe-development.md) for watcher ownership, build diagnostics, refresh and verification limits. Help is authoritative for currently available commands. `open` checks system DNS and certificate trust before opening the URL. `doctor` checks project metadata, framework snapshot, managed compiler, installed dependencies, PostgreSQL tool, private configuration, service state and named HTTPS; it does not repair state.
 
 `new` writes the complete starter before invoking locked Shards installation. An interrupted dependency step retains the project and directs the user to `setup`. Setup preserves application edits and existing valid secrets; it refuses mismatched credentials. Compilation uses the main target in `shard.yml`, independently of the local site name. A simultaneous clone needs a distinct name in `config/environment.yml` because two directories cannot own the same local origin.
 
@@ -56,7 +56,7 @@ Unit specs cover configuration, literal environment parsing, secret preservation
 
 ## Remaining gates
 
-- The watched `dev` loop: safe process ownership, source rebuild/error recovery, asset refresh, stable HTTPS and concurrent project behavior.
+- Complete development acceptance: real browsers, runtime exception diagnostics, CLI/menu project state and measured performance. The watcher, build-error recovery, isolated child ownership and asset publishing are implemented.
 - Individual model/controller/migration/command generators, custom commands, explicit dependency add/update and spec worker isolation.
 - Schema snapshot output; `db/schema.cr` is currently a placeholder and migrations remain authoritative.
 - Complete optional authentication, native Linux/musl production artifact and its assets/configuration.

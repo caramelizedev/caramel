@@ -189,6 +189,16 @@ module Caramel::Latte
       @configuration = File.read(@proxy.config_file)
     end
 
+    def clear_upstream(id : String, socket : String) : Bool
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        cleared = @registry.clear_upstream(id, socket)
+        reconcile if cleared
+        !cleared.nil?
+      end
+    end
+
     def monitor : Nil
       return if @monitoring
       @monitoring = true

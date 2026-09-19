@@ -8,6 +8,7 @@ describe Caramel::Frappe::CLI do
     cli.run(["--help"]).should eq(0)
     output.to_s.should contain("frappe new NAME")
     output.to_s.should contain("frappe make resource NAME")
+    output.to_s.should contain("frappe dev [--no-open]")
     errors.to_s.should eq("")
     output.clear
     cli.run(["--version"]).should eq(0)
