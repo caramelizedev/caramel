@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Exercise real daemon restart/adoption and its native menu client."""
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import struct
+import subprocess
+import tempfile
+import time
+
+REPO = Path(__file__).resolve().parents[1]
+ROOT = Path(tempfile.mkdtemp(prefix="latte-daemon-", dir="/private/tmp"))
+RUNTIME = Path(f"/private/tmp/caramel-{os.getuid()}-{hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]}")
+ENV = {**os.environ, "CARAMEL_HOME": str(ROOT)}
+
+class Connection(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(20)
+        self.sock.connect(str(RUNTIME / "latte.sock"))
+
+def request(method, path, body=None):
+    connection = Connection("localhost", timeout=20)
+    try:
+        connection.request(method, path, json.dumps(body) if body is not None else None,
+                           {"Content-Type": "application/json"})
+        response = connection.getresponse()
+        value = json.loads(response.read())
+        if response.status >= 400:
+            raise RuntimeError(f"Latte request failed: {response.status} {value}")
+        return value
+    finally:
+        connection.close()
+
+def wait_state(state):
+    end = time.monotonic() + 60
+    while time.monotonic() < end:
+        try:
+            result = request("GET", "/v1/status")
+            values = [entry["state"] for entry in result["services"].values()]
+            if values == [state] * 3:
+                return
+            if "failed" in values:
+                raise RuntimeError(str(result))
+        except (FileNotFoundError, ConnectionRefusedError):
+            pass
+        time.sleep(.1)
+    raise RuntimeError(f"Services did not become {state}")
+
+process = None
+log = open(ROOT / "daemon.log", "wb")
+try:
+    process = subprocess.Popen([str(REPO / "bin/latte"), "daemon"], env=ENV, stdout=log, stderr=log)
+    wait_state("running")
+    duplicate = subprocess.run([str(REPO / "bin/latte"), "daemon"], env=ENV, capture_output=True, timeout=5)
+    assert duplicate.returncode != 0, "Two daemons acquired the same instance"
+    site = request("POST", "/v1/sites", {"name": "bookshelf", "directory": str(ROOT)})["site"]
+    # Registration must wait for CoreDNS's asynchronous hosts reload. Opening
+    # the returned URL immediately should not hit a cached NXDOMAIN.
+    labels = b''.join(bytes([len(label)]) + label.encode() for label in site['domain'].split('.')) + b'\0'
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as dns:
+        dns.settimeout(1)
+        dns.sendto(struct.pack('!6H', 0x4341, 0x100, 1, 0, 0, 0) + labels + struct.pack('!2H', 1, 1), ('127.0.0.1', 15353))
+        answer, _ = dns.recvfrom(512)
+        assert answer[3] & 15 == 0 and answer[-4:] == b'\x7f\0\0\x01', 'Registration returned before DNS was ready'
+    before = json.loads((ROOT / "services/caddy/process.json").read_text())["pid"]
+    process.kill()
+    process.wait(timeout=5)
+    process = subprocess.Popen([str(REPO / "bin/latte"), "daemon"], env=ENV, stdout=log, stderr=log)
+    wait_state("running")
+    after = json.loads((ROOT / "services/caddy/process.json").read_text())["pid"]
+    assert before == after, "Daemon restart should adopt its verified service"
+    assert request("GET", "/v1/sites")["sites"][0]["id"] == site["id"]
+    # A proxy crash must be visible, then recoverable through the same UI API.
+    certificate = (ROOT / "services/caddy/storage/pki/authorities/caramel/root.crt").read_bytes()
+    os.kill(after, 9)
+    deadline = time.monotonic() + 15
+    while True:
+        record = json.loads((ROOT / "services/caddy/process.json").read_text())
+        if record['pid'] != after:
+            break
+        assert time.monotonic() < deadline, "Proxy crash was not recovered automatically"
+        time.sleep(.1)
+    wait_state("running")
+    assert (ROOT / "services/caddy/storage/pki/authorities/caramel/root.crt").read_bytes() == certificate
+    menu = subprocess.run([str(REPO / "bin/Latte.app/Contents/MacOS/Latte"), "--check"], env=ENV, capture_output=True, text=True, timeout=10)
+    assert menu.returncode == 0, menu.stdout + menu.stderr
+    # A second crash exhausts the automatic budget and must give an actionable
+    # diagnostic. Manual Start explicitly resets the budget and recovers it.
+    os.kill(record['pid'], 9)
+    deadline = time.monotonic() + 10
+    while True:
+        status = request('GET', '/v1/status')
+        if status['services']['proxy']['state'] == 'failed':
+            assert 'Start Services' in status.get('error', ''), status
+            break
+        assert time.monotonic() < deadline, 'Second crash was not diagnosed'
+        time.sleep(.1)
+    request('POST', '/v1/services/start', {})
+    wait_state('running')
+    request("POST", "/v1/services/stop", {})
+    wait_state("stopped")
+    assert (ROOT / "services/postgres/18/data/PG_VERSION").exists()
+    print("PASS: daemon singleton, crash recovery, service adoption, proxy recovery, CA/registry persistence, native menu and explicit stop")
+finally:
+    if process and process.poll() is None:
+        try:
+            request("POST", "/v1/services/stop", {})
+            wait_state("stopped")
+        except Exception as error:
+            print(f"Cleanup needs inspection: {ROOT}: {error}")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    log.close()
+    if (ROOT / "services/postgres/18/data/postmaster.pid").exists():
+        print(f"Preserved running cluster state: {ROOT}")
+    else:
+        shutil.rmtree(RUNTIME, ignore_errors=True)
+        shutil.rmtree(ROOT)

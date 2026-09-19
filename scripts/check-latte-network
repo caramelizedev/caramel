@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Verify real local DNS and internal-CA HTTPS without changing OS integration."""
+import json
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import socket
+import socketserver
+import subprocess
+import tempfile
+import threading
+import time
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+class Application(socketserver.StreamRequestHandler):
+    def handle(self):
+        if not self.rfile.readline():
+            return
+        while self.rfile.readline().strip():
+            pass
+        body = ("<h1>" + self.server.site_name + "</h1>").encode()
+        self.wfile.write(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: "
+                         + str(len(body)).encode() + b"\r\n\r\n" + body)
+
+
+def port():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def run(*args, **kwargs):
+    return subprocess.run([str(arg) for arg in args], check=True, capture_output=True, timeout=30, **kwargs)
+
+
+def eventually(check, label, duration=12):
+    deadline = time.monotonic() + duration
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            return check()
+        except (AssertionError, subprocess.CalledProcessError, OSError) as error:
+            last = error
+            time.sleep(0.1)
+    raise RuntimeError(label + " did not become ready") from last
+
+
+def main():
+    tool_root = Path(os.environ["CARAMEL_TOOLCHAIN_ROOT"]).resolve()
+    installs = tool_root / "data/installs"
+    coredns = installs / "github-coredns-coredns/1.14.7/coredns"
+    caddy = installs / "aqua-caddyserver-caddy/2.11.4/caddy"
+    # The real Application Support root contains spaces too.
+    root = Path(tempfile.mkdtemp(prefix="latte network-", dir="/private/tmp"))
+    root.chmod(0o700)
+    runtime = Path('/private/tmp') / ('caramel-' + str(os.getuid()) + '-' + hashlib.sha256(str(root).encode()).hexdigest()[:12])
+    processes, servers, threads, logs = [], [], [], []
+    try:
+        fixture = root / "network-fixture"
+        run(REPO / "scripts/crystal", "build", REPO / "spec/fixtures/latte_network.cr", "-o", fixture, cwd=REPO)
+        dns_port, https_port, http_port = port(), port(), port()
+
+        def configure(mode):
+            return json.loads(run(fixture, root, mode, dns_port, https_port, http_port).stdout)
+
+        config = configure("prepare")
+        runtime = Path(config["runtime"])
+        for site in config["sites"]:
+            server = socketserver.ThreadingUnixStreamServer(site["socket"], Application)
+            server.daemon_threads = True
+            server.site_name = site["name"]
+            os.chmod(site["socket"], 0o600)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            servers.append(server)
+            threads.append(thread)
+        config = configure("route")
+        env = {key: value for key, value in os.environ.items() if not key.startswith("CADDY_")}
+        env.update(config["environment"])
+        for name, command in [("dns", [coredns, "-conf", config["corefile"]]),
+                              ("proxy", [caddy, "run", "--config", config["caddy_config"]])]:
+            log = (root / (name + ".log")).open("wb")
+            logs.append(log)
+            processes.append(subprocess.Popen([str(x) for x in command], env=env, cwd=root, stdout=log, stderr=log))
+
+        def query(host, kind="A", tcp=False, status="NOERROR", answer=None):
+            result = run("/usr/bin/dig", "@127.0.0.1", "-p", dns_port, host, kind,
+                         "+time=1", "+tries=1", "+tcp" if tcp else "+notcp").stdout.decode()
+            assert "status: " + status in result, result
+            if answer:
+                assert answer in result, result
+            if kind == "AAAA":
+                assert "ANSWER: 0" in result, result
+            return result
+
+        eventually(lambda: query("bookshelf.caramel", answer="127.0.0.1"), "DNS")
+        for tcp in (False, True):
+            query("bookshelf.caramel", tcp=tcp, answer="127.0.0.1")
+            query("notes.caramel", tcp=tcp, answer="127.0.0.1")
+            query("bookshelf.caramel", "AAAA", tcp=tcp)
+            query("missing.caramel", tcp=tcp, status="NXDOMAIN")
+            query("example.com", tcp=tcp, status="REFUSED")
+
+        def request(name, expected=200, host=None):
+            args = ["/usr/bin/curl", "--silent", "--show-error", "--max-time", "3", "--noproxy", "*",
+                    "--cacert", config["ca"], "--resolve", f"{name}.caramel:{https_port}:127.0.0.1",
+                    "--write-out", "\n%{http_code}"]
+            if host:
+                args += ["-H", "Host: " + host]
+            args += [f"https://{name}.caramel:{https_port}/"]
+            result = run(*args).stdout.decode()
+            assert result.endswith("\n" + str(expected)), result
+            return result
+
+        for name in ("bookshelf", "notes"):
+            result = eventually(lambda: request(name), "HTTPS " + name)
+            assert "<h1>" + name + "</h1>" in result
+        redirect = run("/usr/bin/curl", "--silent", "--show-error", "--max-time", "3", "--noproxy", "*",
+                       "--dump-header", "-", "-H", "Host: bookshelf.caramel",
+                       f"http://127.0.0.1:{http_port}/books?q=novel").stdout.decode()
+        assert "308" in redirect.splitlines()[0], redirect
+        assert f"https://bookshelf.caramel:{https_port}/books?q=novel" in redirect, redirect
+        assert Path(config["admin"]).stat().st_mode & 0o777 == 0o600
+        request("bookshelf", 421, "notes.caramel")
+        request("bookshelf", 421, "missing.caramel")
+        ca_before = Path(config["ca"]).read_bytes()
+        config = configure("unregister")
+        run("/usr/bin/curl", "--silent", "--show-error", "--fail", "--max-time", "5",
+            "--unix-socket", config["admin"], "-H", "Content-Type: application/json",
+            "--data-binary", "@" + config["caddy_config"], "http://localhost/load")
+        eventually(lambda: query("notes.caramel", status="NXDOMAIN"), "DNS removal")
+        assert "<h1>bookshelf</h1>" in request("bookshelf")
+        request("bookshelf", 421, "notes.caramel")
+        try:
+            request("notes")
+        except subprocess.CalledProcessError as error:
+            assert error.returncode == 35, error.stderr.decode()
+        else:
+            raise AssertionError("removed hostname still accepts TLS")
+        assert Path(config["ca"]).read_bytes() == ca_before
+        assert (root / "notes").is_dir()
+        processes[-1].terminate()
+        processes[-1].wait(timeout=5)
+        processes.append(subprocess.Popen([str(caddy), "run", "--config", config["caddy_config"]],
+                                          env=env, cwd=root, stdout=logs[-1], stderr=logs[-1]))
+        eventually(lambda: request("bookshelf"), "HTTPS restart")
+        assert Path(config["ca"]).read_bytes() == ca_before
+        print("Latte DNS UDP/TCP + two-site verified HTTPS + private administration + removal/restart: passed")
+    except Exception as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            print(error.stderr.decode(errors="replace")[-6000:])
+        for name in ("dns", "proxy"):
+            log = root / (name + ".log")
+            if log.exists():
+                print(log.read_text(errors="replace")[-6000:])
+        raise
+    finally:
+        for process in reversed(processes):
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
+        for log in logs:
+            log.close()
+        if runtime.exists():
+            shutil.rmtree(runtime)
+        shutil.rmtree(root)
+
+
+if __name__ == "__main__":
+    main()

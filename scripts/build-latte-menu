@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+APP="$ROOT/bin/Latte.app"
+CONTENTS="$APP/Contents"
+MACOS="$CONTENTS/MacOS"
+RESOURCES="$CONTENTS/Resources"
+CACHE_ROOT=${CARAMEL_LATTE_SWIFT_CACHE:-/private/tmp/caramel-latte-swift-module-cache}
+
+mkdir -p "$MACOS" "$RESOURCES" "$CACHE_ROOT"
+
+/usr/bin/swiftc \
+  -parse-as-library \
+  -O \
+  -module-cache-path "$CACHE_ROOT" \
+  "$ROOT/latte/macos/Latte.swift" \
+  -o "$MACOS/Latte" \
+  -framework AppKit \
+  -framework Foundation \
+  -framework CryptoKit
+
+cp "$ROOT/latte/macos/Info.plist" "$CONTENTS/Info.plist"
+
+# Keep a real ICNS resource in the bundle for Finder and LaunchServices. The
+# in-menu icon remains the native cup-and-saucer glyph from AppKit.
+ICON_SOURCE=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns
+if [ -f "$ICON_SOURCE" ]; then
+  cp "$ICON_SOURCE" "$RESOURCES/Latte.icns"
+fi
+
+# The status item uses the native cup-and-saucer glyph. Keep the bundle's icon
+# metadata in place even on build hosts without an icon-generation utility.
+/usr/bin/plutil -lint "$CONTENTS/Info.plist" >/dev/null
+chmod 755 "$MACOS/Latte"
+printf 'Built %s\n' "$APP"

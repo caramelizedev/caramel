@@ -1,0 +1,238 @@
+require "spec"
+require "file_utils"
+require "../../src/latte/postgres"
+
+private def postgres_unit_root : String
+  root = File.join(Dir.tempdir, "caramel-latte-postgres-unit-#{Random::Secure.hex(8)}")
+  Dir.mkdir(root, 0o700)
+  root
+end
+
+private def remove_postgres_unit_root(root : String)
+  FileUtils.rm_rf(root)
+end
+
+describe Caramel::Latte::Toolchain do
+  it "resolves every managed executable from the explicit root" do
+    root = postgres_unit_root
+    begin
+      %w(conda-postgresql/18.6/bin/postgres conda-postgresql/18.6/bin/initdb conda-postgresql/18.6/bin/pg_ctl conda-postgresql/18.6/bin/psql conda-postgresql/18.6/bin/pg_dump conda-postgresql/18.6/bin/pg_restore conda-openssl/3.6.4/bin/openssl).each do |relative|
+        path = File.join(root, "data", "installs", relative)
+        Dir.mkdir_p(File.dirname(path), mode: 0o700)
+        File.write(path, "#!/bin/sh\n")
+        File.chmod(path, 0o700)
+      end
+      Dir.mkdir_p(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4"), mode: 0o700)
+      File.write(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4", "caddy"), "")
+      File.chmod(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4", "caddy"), 0o700)
+      Dir.mkdir_p(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7"), mode: 0o700)
+      File.write(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7", "coredns"), "")
+      File.chmod(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7", "coredns"), 0o700)
+
+      tools = Caramel::Latte::Toolchain.new(root)
+      tools.root.should eq(File.realpath(root))
+      tools.postgres.should eq(File.join(File.realpath(root), "data/installs/conda-postgresql/18.6/bin/postgres"))
+      tools.pg_ctl.should end_with("/conda-postgresql/18.6/bin/pg_ctl")
+      tools.pg_dump.should end_with("/conda-postgresql/18.6/bin/pg_dump")
+      tools.pg_restore.should end_with("/conda-postgresql/18.6/bin/pg_restore")
+      tools.openssl.should end_with("/conda-openssl/3.6.4/bin/openssl")
+      tools.caddy.should end_with("/aqua-caddyserver-caddy/2.11.4/caddy")
+      tools.coredns.should end_with("/github-coredns-coredns/1.14.7/coredns")
+    ensure
+      remove_postgres_unit_root(root)
+    end
+  end
+
+  it "does not fall back to a globally installed executable" do
+    root = postgres_unit_root
+    begin
+      tools = Caramel::Latte::Toolchain.new(root)
+      expect_raises(Caramel::Latte::Toolchain::Unavailable) { tools.postgres }
+    ensure
+      remove_postgres_unit_root(root)
+    end
+  end
+
+  it "rejects a PostgreSQL patch version outside the pinned 18.6 toolchain" do
+    root = postgres_unit_root
+    begin
+      path = File.join(root, "data", "installs", "conda-postgresql", "18.6", "bin", "postgres")
+      Dir.mkdir_p(File.dirname(path), mode: 0o700)
+      File.write(path, "#!/bin/sh\necho 'postgres (PostgreSQL) 18.5'\n")
+      File.chmod(path, 0o700)
+      tools = Caramel::Latte::Toolchain.new(root)
+      expect_raises(Caramel::Latte::Toolchain::VersionMismatch) { tools.verify_postgres_version! }
+    ensure
+      remove_postgres_unit_root(root)
+    end
+  end
+end
+
+describe Caramel::Latte::ProcessRunner do
+  it "kills a command that exceeds its deadline and bounds diagnostics" do
+    result = Caramel::Latte::ProcessRunner.run(["/bin/sh", "-c", "sleep 2"], timeout: 50.milliseconds)
+    result.timed_out.should be_true
+    result.status.success?.should be_false
+  end
+
+  it "reaps a direct child after an ordinary timeout" do
+    root = postgres_unit_root
+    pid_path = File.join(root, "timed-out.pid")
+    result = Caramel::Latte::ProcessRunner.run(
+      ["/bin/sh", "-c", "echo $$ > #{pid_path}; exec /bin/sleep 2"],
+      timeout: 50.milliseconds,
+    )
+    result.timed_out.should be_true
+    pid = File.read(pid_path).strip.to_i64
+    deadline = Time.instant + 2.seconds
+    while Process.exists?(pid) && Time.instant < deadline
+      sleep 20.milliseconds
+    end
+    Process.exists?(pid).should be_false
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "applies one operation budget across successive commands" do
+    expect_raises(Caramel::Latte::DeadlineExceeded) do
+      Caramel::Latte::OperationDeadline.run(100.milliseconds) do
+        first = Caramel::Latte::ProcessRunner.run(["/bin/sleep", "2"], timeout: 5.seconds)
+        first.timed_out.should be_true
+        Caramel::Latte::ProcessRunner.run(["/bin/echo", "must-not-launch"], timeout: 5.seconds)
+      end
+    end
+  end
+
+  it "does not include environment passwords in the returned command diagnostic" do
+    result = Caramel::Latte::ProcessRunner.run(
+      ["/bin/sh", "-c", "echo secret >&2; exit 7"],
+      env: {"PGPASSWORD" => "must-not-be-reported"},
+      timeout: 2.seconds,
+    )
+    result.status.exit_code.should eq(7)
+    result.stderr.should eq("secret\n")
+    result.diagnostic.should_not contain("must-not-be-reported")
+  end
+
+  it "drains noisy output without retaining more than the configured bound" do
+    result = Caramel::Latte::ProcessRunner.run(
+      ["/bin/sh", "-c", "yes x | head -c 100000"],
+      timeout: 2.seconds,
+      output_limit: 64,
+    )
+    result.success?.should be_true
+    result.stdout.bytesize.should be <= 64
+  end
+end
+
+describe Caramel::Latte::ManagedChild do
+  it "records an exact live identity and returns without waiting for lifecycle readiness" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    started = Time.instant
+    identity = child.start
+    (Time.instant - started).should be < 2.seconds
+    identity.pid.should be > 1
+    child.running?.should be_true
+    child.stop.should be_true
+    child.running?.should be_false
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "rejects a symlinked log before launching a child" do
+    root = postgres_unit_root
+    target = File.join(root, "real.log")
+    log = File.join(root, "child.log")
+    File.write(target, "private\n")
+    File.symlink(target, log)
+    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], File.join(root, "child.json"), log)
+    expect_raises(Caramel::Latte::OwnershipError) { child.start }
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "adopts one exact unrecorded child after a record write window" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    stray = Process.new(["/bin/sleep", "5"])
+    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    identity = child.start
+    identity.pid.should eq(stray.pid)
+    child.stop.should be_true
+    stray.wait
+  ensure
+    begin
+      stray.terminate(graceful: false) if stray && !stray.terminated?
+      stray.wait if stray
+    rescue
+    end
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses ambiguous unrecorded children without signaling either one" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    first : Process? = nil
+    second : Process? = nil
+    first = Process.new(["/bin/sleep", "5"])
+    second = Process.new(["/bin/sleep", "5"])
+    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    expect_raises(Caramel::Latte::OwnershipError) { child.start }
+    Process.exists?(first.pid).should be_true
+    Process.exists?(second.pid).should be_true
+  ensure
+    [first, second].each do |stray|
+      begin
+        process = stray.not_nil!
+        process.terminate(graceful: false) unless process.terminated?
+        process.wait
+      rescue
+      end
+    end
+    FileUtils.rm_rf(root) if root
+  end
+end
+
+describe Caramel::Latte::Postgres do
+  it "derives safe identifiers and private Unix socket URLs from a site id" do
+    id = "0123456789abcdef"
+    names = Caramel::Latte::Postgres.database_names(id)
+    names.development.should eq("caramel_dev_0123456789abcdef")
+    names.spec.should eq("caramel_spec_0123456789abcdef")
+    names.development.bytesize.should be <= 63
+
+    url = Caramel::Latte::Postgres.connection_url("caramel_runtime_#{id}", "secret", names.development, "/private/tmp/caramel-test/postgres")
+    url.should start_with("postgresql://caramel_runtime_#{id}:secret@/")
+    url.should contain("host=%2Fprivate%2Ftmp%2Fcaramel-test%2Fpostgres")
+    url.should_not contain("127.0.0.1")
+  end
+
+  it "quotes generated SQL identifiers and literals" do
+    Caramel::Latte::Postgres.quote_identifier("safe_name").should eq("\"safe_name\"")
+    Caramel::Latte::Postgres.quote_identifier("name\"with\"quotes").should eq("\"name\"\"with\"\"quotes\"")
+    Caramel::Latte::Postgres.quote_literal("don't").should eq("'don''t'")
+  end
+
+  it "redacts credential URLs and passwords from inspection" do
+    id = "0123456789abcdef"
+    names = Caramel::Latte::Postgres.database_names(id)
+    roles = Caramel::Latte::Postgres.role_names(id)
+    credentials = Caramel::Latte::Postgres::Credentials.new(
+      "postgresql://runtime:secret@/dev",
+      "postgresql://migration:secret@/dev",
+      "postgresql://runtime:secret@/spec",
+      "postgresql://migration:secret@/spec",
+      names.development,
+      names.spec,
+      roles,
+      names,
+    )
+    credentials.inspect.should_not contain("secret")
+    credentials.to_s.should_not contain("postgresql://")
+  end
+end

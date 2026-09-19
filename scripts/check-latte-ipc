@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Exercise native Swift client against the real Crystal owner-only HTTP API."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import socket as socket_module
+import subprocess
+import tempfile
+import time
+
+REPO = Path(__file__).resolve().parent.parent
+root = Path(tempfile.mkdtemp(prefix="latte-ipc-", dir="/private/tmp"))
+runtime = Path('/private/tmp') / ('caramel-' + str(os.getuid()) + '-' + hashlib.sha256(str(root).encode()).hexdigest()[:12])
+child = None
+try:
+    subprocess.run([str(REPO / 'scripts/crystal'), 'build', 'spec/fixtures/latte_ipc.cr', '-o', str(root / 'ipc')],
+                   cwd=REPO, check=True, timeout=60)
+    subprocess.run([str(REPO / 'scripts/build-latte-menu')], cwd=REPO, check=True, timeout=60)
+    with (root / 'server.log').open('wb') as log:
+        child = subprocess.Popen([str(root / 'ipc'), str(root)], cwd=REPO, stdout=log, stderr=log)
+    socket = runtime / 'latte.sock'
+    deadline = time.monotonic() + 5
+    while not socket.exists() and time.monotonic() < deadline:
+        if child.poll() is not None:
+            raise RuntimeError((root / 'server.log').read_text())
+        time.sleep(0.05)
+    assert socket.stat().st_mode & 0o777 == 0o600
+    env = os.environ.copy()
+    env['CARAMEL_HOME'] = str(root)
+    result = subprocess.run([str(REPO / 'bin/Latte.app/Contents/MacOS/Latte'), '--check'],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'https://bookshelf.caramel' in result.stdout, result.stdout
+    response = subprocess.run(['/usr/bin/curl', '--silent', '--show-error', '--fail', '--max-time', '3',
+                               '--unix-socket', str(socket), '-H', 'Content-Type: application/json',
+                               '--data', '{}', 'http://localhost/v1/services/start'], check=True, capture_output=True)
+    assert json.loads(response.stdout)['version'] == 1
+    # Keep every read within the inactivity timeout while exhausting the one
+    # dispatch-to-operation budget in HTTP headers. No site may be registered.
+    body = json.dumps({'name': 'expired', 'directory': str(root)}).encode()
+    with socket_module.socket(socket_module.AF_UNIX) as slow:
+        slow.settimeout(5)
+        slow.connect(str(socket))
+        slow.sendall(b'POST /v1/sites HTTP/1.1\r\n')
+        for index in range(4):
+            time.sleep(3.1)
+            slow.sendall(f'X-Trickle-{index}: 1\r\n'.encode())
+        slow.sendall(b'Content-Type: application/json\r\nContent-Length: ' + str(len(body)).encode() + b'\r\nConnection: close\r\n\r\n' + body)
+        expired = slow.recv(65536)
+        assert b'503' in expired.split(b'\r\n', 1)[0], expired
+    sites = subprocess.run(['/usr/bin/curl', '--silent', '--show-error', '--fail', '--max-time', '3',
+                            '--unix-socket', str(socket), 'http://localhost/v1/sites'], check=True, capture_output=True)
+    assert [site['name'] for site in json.loads(sites.stdout)['sites']] == ['bookshelf']
+    print('Native Swift client + real owner-only Crystal IPC + service command + expired trickled request: passed')
+finally:
+    if child and child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
+    if runtime.exists():
+        shutil.rmtree(runtime)
+    shutil.rmtree(root)

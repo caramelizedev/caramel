@@ -1,0 +1,24 @@
+# Latte supervisor evidence
+
+The contributor build uses the previously verified isolated toolchain at `CARAMEL_TOOLCHAIN_ROOT`. It does not yet constitute the consumer installer.
+
+The shared Crystal supervisor now starts PostgreSQL, CoreDNS and Caddy asynchronously behind the owner-only IPC API. Caddy listens on high loopback ports 18080/18443; the planned launchd relay owns the standard ports. Redirects retain the public `https://name.caramel` origin. Service health is checked periodically, and changed upstream liveness reconciles stopped-app pages.
+
+`spec/latte_integration/supervisor_spec.cr` exercises a new disposable cluster, actual DNS/proxy startup, project registration/provisioning, local CA creation, exact CA fingerprint generation, refusal to overwrite a different recorded authority, and explicit service shutdown retaining PG_VERSION. It does not install trust.
+
+`scripts/check-latte-daemon` exercises the compiled daemon and native Swift client. It verifies single-instance exclusion, kills the daemon, starts a replacement, verifies adoption of the same Caddy PID and retained registry, then explicitly stops shared services. All fixtures use fresh private temporary state and remove it after confirming PostgreSQL stopped.
+
+The combined runtime/Latte suite passes 67 examples, including deadline, retention and failed-start cleanup. The rebuilt daemon crash/adoption check passed. Native menu protocol tests include a continuous 50 ms trickle to verify its aggregate response deadline, and pass seven cases, including failed-service diagnostics and protocol-version validation. The complete Python installer/menu/relay/provider suite passes 26 tests.
+
+The root-only system installer has only been prepared and unit-tested. No `/etc/resolver/caramel`, LaunchDaemon or user keychain change has been applied by this milestone. System-resolved/browser-trusted HTTPS and actual launchd socket activation remain acceptance gates.
+
+
+Additional failure checks now pass for preserving an occupied listener while cleaning up newly started services, automatic recovery of a killed proxy, and retained CA identity. Automatic recovery is limited to one attempt until an explicit Start Services action resets it. Native service states use `failed`, matching the protocol client.
+
+Operation deadlines are shared across each startup/stop/request fiber and clipped at managed-command launches. Cleanup uses its own bounded command deadlines. Live service-log retention runs once per second, preserves the active inode and keeps at most one MiB in each previous-log file; bytes arriving between sweeps can exceed that threshold. This is periodic retention, not an instantaneous write quota.
+
+The IPC deadline begins at HTTP dispatch, before header/body parsing. The real native-client/API check also trickles headers for more than twelve seconds, then attempts registration: the request gets 503 and no project is created. The independent fifteen-second socket closure still bounds stalled clients. Registration waits for DNS answers for all registered sites, avoiding CoreDNS's asynchronous hosts-file reload window. Ongoing TLS health samples the first registered site; the independent network harness verifies two-site routing, certificates, removal and restart.
+
+Quality review reproduced a transient DNS reload miss consuming the single automatic recovery attempt. Reconciliation now waits for DNS readiness, and health probes for still-running processes require three consecutive misses before failure; a dead process is detected immediately. The daemon regression checks immediate DNS after registration, automatic recovery of one proxy crash, an actionable diagnostic after a second crash, and successful manual Start. The updated check and both supervisor integration cases pass.
+
+The fixed system installer and relay passed independent review after fairness, listener-conflict, job-ownership and rollback fixes. Eleven installer checks and four real relay tests pass. On 2026-09-19 the actual apply command was rejected by automatic approval review before execution: it requires explicit user approval for protected system paths, persistent launchd integration, scoped DNS and loopback port ownership. That exact approval is pending. No system installation, DNS or keychain change has occurred. The prepared bundle is `/private/tmp/caramel-install-rh6nhye_/bundle`; rebuilding the relay requires preparing a new bundle and checking its digest again.

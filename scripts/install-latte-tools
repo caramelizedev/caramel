@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Add the pinned DNS binary to the isolated contributor toolchain.
+
+Crystal, PostgreSQL, OpenSSL, and Caddy retain the toolchain experiment's mise
+lock. This supplements that installation; it is not the consumer installer.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def directory(path):
+    if path.is_symlink():
+        raise RuntimeError("tool directory must not be a symlink")
+    path.mkdir(mode=0o700, exist_ok=True)
+    info = path.stat()
+    if not path.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o022:
+        raise RuntimeError("tool directory must be owned and not writable by other users")
+
+
+def install_archive(archive, target, entry):
+    if target.is_symlink():
+        raise RuntimeError("tool destination must not be a symlink")
+    if target.exists():
+        binary = target / "coredns"
+        if (not target.is_dir() or target.stat().st_uid != os.getuid()
+                or target.stat().st_mode & 0o022 or binary.is_symlink()
+                or not binary.is_file() or binary.stat().st_uid != os.getuid()
+                or binary.stat().st_mode & 0o022
+                or digest(binary) != entry["binary_sha256"]):
+            raise RuntimeError("existing CoreDNS installation failed verification; preserved for inspection")
+        return binary
+    if archive.is_symlink() or digest(archive) != entry["archive_sha256"]:
+        raise RuntimeError("CoreDNS archive checksum failed; installation was not changed")
+    directory(target.parent)
+    with tempfile.TemporaryDirectory(prefix=".coredns-install-", dir=target.parent) as tmp:
+        stage = Path(tmp) / "payload"
+        stage.mkdir(mode=0o700)
+        with tarfile.open(archive, "r:gz") as stream:
+            members = stream.getmembers()
+            if (len(members) != 1 or members[0].name != "coredns"
+                    or not members[0].isfile() or members[0].size > 128 * 1024 * 1024):
+                raise RuntimeError("unexpected CoreDNS archive contents")
+            with stream.extractfile(members[0]) as source, (stage / "coredns").open("xb") as dest:
+                shutil.copyfileobj(source, dest)
+        binary = stage / "coredns"
+        if digest(binary) != entry["binary_sha256"]:
+            raise RuntimeError("CoreDNS binary checksum failed; installation was not changed")
+        binary.chmod(0o755)
+        (stage / "receipt.json").write_text(json.dumps(entry, indent=2) + "\n")
+        (stage / "receipt.json").chmod(0o600)
+        # Same-volume rename publishes only a complete verified installation.
+        # An existing nonempty destination from another installer is preserved.
+        stage.rename(target)
+    return target / "coredns"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archive", type=Path, help="use a previously downloaded pinned archive")
+    args = parser.parse_args()
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        parser.error("this provider supports Apple Silicon macOS")
+    root_value = os.environ.get("CARAMEL_TOOLCHAIN_ROOT")
+    if not root_value:
+        parser.error("set CARAMEL_TOOLCHAIN_ROOT to the isolated contributor installation")
+    root = Path(root_value).resolve(strict=True)
+    directory(root)
+    entry = json.loads((REPO / "tools/latte-darwin-arm64.json").read_text())["coredns"]
+    parent = root
+    for component in ("data", "installs", "github-coredns-coredns"):
+        parent = parent / component
+        directory(parent)
+    target = parent / entry["version"]
+    if args.archive or target.exists():
+        binary = install_archive(args.archive or Path("unused"), target, entry)
+    else:
+        with tempfile.TemporaryDirectory(prefix=".coredns-download-", dir=parent) as tmp:
+            archive = Path(tmp) / "coredns.tgz"
+            subprocess.run(["/usr/bin/curl", "--fail", "--location", "--silent", "--show-error",
+                            "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15",
+                            "--max-time", "180", "--retry", "2", "--output", str(archive), entry["url"]],
+                           check=True, timeout=600)
+            binary = install_archive(archive, target, entry)
+    print("Verified CoreDNS " + entry["version"] + ": " + str(binary))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, tarfile.TarError, subprocess.SubprocessError) as error:
+        sys.exit("install-latte-tools: " + str(error))

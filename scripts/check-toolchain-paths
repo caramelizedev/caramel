@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Verify Crystal linking with spaces and shell characters in the managed prefix.
+
+This reuses installed tools through temporary links; it is not evidence of a
+fresh installation or of relocating conda packages.
+"""
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+REPO = Path(__file__).resolve().parent.parent
+selected = os.environ.get("CARAMEL_TOOLCHAIN_ROOT")
+if not selected:
+    raise SystemExit("Set CARAMEL_TOOLCHAIN_ROOT to the verified tool installation")
+installed = Path(selected).resolve(strict=True)
+with tempfile.TemporaryDirectory(prefix="Caramel's Toolchain $literal ", dir="/private/tmp") as tmp:
+    root = Path(tmp)
+    (root / "data").mkdir()
+    (root / "data/installs").symlink_to(installed / "data/installs", target_is_directory=True)
+    (root / "bin").symlink_to(installed / "bin", target_is_directory=True)
+    source = root / "path-check.cr"
+    source.write_text('require "http/client"\nputs "native path check"\n')
+    binary = root / "check"
+    env = {**os.environ, "CARAMEL_TOOLCHAIN_ROOT": str(root)}
+    subprocess.run([str(REPO / "scripts/crystal"), "build", str(source), "-o", str(binary)],
+                   env=env, cwd=REPO, check=True, timeout=90)
+    output = subprocess.check_output([str(binary)], text=True, timeout=5)
+    assert output.strip() == "native path check", output
+    loads = subprocess.check_output(["/usr/bin/otool", "-l", str(binary)], text=True, timeout=5)
+    assert str(root / "data/installs/conda-openssl/3.6.4/lib") in loads
+print("PASS: native build and execution with spaces, quote and dollar sign in toolchain prefix")

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "coredns": {
+    "version": "1.14.7",
+    "url": "https://github.com/coredns/coredns/releases/download/v1.14.7/coredns_1.14.7_darwin_arm64.tgz",
+    "archive_sha256": "0005d154d49c73a88b2c56f429f35106e46c4ca37ee6de4e4d482d7de5c4b8ba",
+    "binary_sha256": "922e76b2e2ad480fd1c7ddb0f991e174a99157593decf71db38c3f91901a7059",
+    "license": "Apache-2.0",
+    "license_url": "https://raw.githubusercontent.com/coredns/coredns/v1.14.7/LICENSE"
+  }
+}

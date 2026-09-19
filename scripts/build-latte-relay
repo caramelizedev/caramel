@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+CACHE_ROOT=${CARAMEL_LATTE_SWIFT_CACHE:-/private/tmp/caramel-latte-swift-module-cache}
+OUTPUT="$ROOT/bin/latte-port-relay"
+
+mkdir -p "$ROOT/bin" "$CACHE_ROOT"
+
+/usr/bin/swiftc \
+  -parse-as-library \
+  -O \
+  -target arm64-apple-macosx11.0 \
+  -module-cache-path "$CACHE_ROOT" \
+  "$ROOT/latte/macos/PortRelay.swift" \
+  -o "$OUTPUT"
+
+chmod 755 "$OUTPUT"
+printf 'Built %s (arm64)\n' "$OUTPUT"
