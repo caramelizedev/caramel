@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Use Shards shipped with the selected contributor Crystal toolchain."""
+import os
+from pathlib import Path
+import shutil
+import sys
+
+env = os.environ.copy()
+root = env.get("CARAMEL_TOOLCHAIN_ROOT")
+if root:
+    base = Path(root).resolve()
+    compiler = base / "data/installs/github-crystal-lang-crystal/1.21.0"
+    binary = compiler / "embedded/bin/shards"
+    env["PATH"] = str(compiler / "bin") + ":" + env.get("PATH", "")
+    env["SHARDS_CACHE_PATH"] = str(base / "shards-cache")
+else:
+    binary = shutil.which("shards")
+if not binary or not Path(binary).is_file() or Path(binary).resolve() == Path(__file__).resolve():
+    sys.exit("Shards is unavailable. Set CARAMEL_TOOLCHAIN_ROOT to the verified installation.")
+os.execve(str(binary), [str(binary), *sys.argv[1:]], env)

@@ -1,0 +1,14 @@
+
+# Crystal dependencies and build output
+/lib/
+/bin/
+/.crystal/
+/.crystal-cache/
+*.dwarf
+.DS_Store
+
+# Local application secrets and Python caches
+.env
+.env.local
+__pycache__/
+*.pyc
