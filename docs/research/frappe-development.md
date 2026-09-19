@@ -44,4 +44,4 @@ These HTTPS checks use private fixture ports and an explicitly supplied fixture 
 
 ## Remaining development acceptance
 
-Real browser refresh, htmx history/focus/422 behavior, native HTML forms and visual review remain open. Performance distributions (including 20 edits and a larger fixture), startup resource measurements, and cancellation during compilation remain unverified. No sub-second or p95 timing promise is accepted from these functional checks. Independent review remains pending while the requested Luna workers are unavailable.
+Real browser refresh, htmx history/focus/422 behavior, native HTML forms and visual review remain open. The [initial warm-cache performance baseline](development-performance.md) includes 20 edits per category on small/larger fixtures and exposes a missed compiled-edit target. Cold installation/compiler-cache and service-startup measurements, full compiler resource accounting, browser timing, and cancellation during compilation remain unverified. Functional checks alone do not establish a timing promise. Independent review remains pending while the requested Luna workers are unavailable.

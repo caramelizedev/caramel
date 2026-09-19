@@ -19,6 +19,7 @@ The application workflow branch adds a narrow typed model API, typed browser inp
 - [Typed model and input APIs, verification and limits](docs/research/typed-application-apis.md)
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
 - [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
+- [Development performance measurements and limits](docs/research/development-performance.md)
 - [Latte plan](docs/superpowers/plans/2026-09-19-latte-local-environment.md)
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
