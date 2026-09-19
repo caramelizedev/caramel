@@ -21,5 +21,16 @@ module Caramel
       end
       new(status, "", HTTP::Headers{"Location" => path})
     end
+
+    def self.navigate(request : HTTP::Request, path : String) : self
+      response = redirect(path)
+      response.headers["Vary"] = "HX-Request"
+      response.headers["Cache-Control"] = "no-store"
+      if request.headers["HX-Request"]? == "true"
+        new(200, "", HTTP::Headers{"HX-Location" => path, "Vary" => "HX-Request", "Cache-Control" => "no-store"})
+      else
+        response
+      end
+    end
   end
 end

@@ -1,0 +1,5 @@
+version: 1
+name: @@NAME@@
+postgresql_major: 18
+extensions: []
+domain_suffix: @@SUFFIX@@

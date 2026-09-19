@@ -137,6 +137,27 @@ module Caramel::Latte
       end
     end
 
+    # Credentials are returned only on an explicit owner-IPC request bound to
+    # the registered directory. Status/site summaries never contain them.
+    def environment_json(id : String, directory : String) : String
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        site = @registry.find(id)
+        raise PublicError.new("not_found", "Project is not registered", 404) unless site
+        unless site.directory == Site.canonical_directory(directory)
+          raise ArgumentError.new("Project directory differs from registration")
+        end
+        credentials = @postgres.credentials(site)
+        {version: 1, environment: {
+          DATABASE_URL:                credentials.development_runtime,
+          MIGRATION_DATABASE_URL:      credentials.development_migration,
+          SPEC_DATABASE_URL:           credentials.spec_runtime,
+          SPEC_MIGRATION_DATABASE_URL: credentials.spec_migration,
+        }}.to_json
+      end
+    end
+
     def set_upstream(id : String, socket : String) : Site
       require_ready!
       @lock.synchronize do

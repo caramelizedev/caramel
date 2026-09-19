@@ -1,0 +1,10 @@
+name: @@SHARD@@
+version: 0.1.0
+crystal: ">= 1.21.0"
+license: MIT
+targets:
+  @@SHARD@@:
+    main: src/@@SHARD@@.cr
+dependencies:
+  caramel:
+    path: vendor/caramel

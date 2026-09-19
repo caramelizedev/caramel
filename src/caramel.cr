@@ -10,6 +10,4 @@ require "./caramel/database"
 require "./caramel/migration"
 require "./caramel/model"
 
-module Caramel
-  VERSION = "0.1.0"
-end
+require "./caramel/version"

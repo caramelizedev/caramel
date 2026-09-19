@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Exercise the real Frappé CLI against disposable Latte services and projects.
+
+Uses private test ports and an explicitly verified test CA. Does not install
+system DNS, privileged listeners, certificate trust or launchd services.
+"""
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.parse import parse_qs, unquote, urlparse
+
+REPO = Path(__file__).resolve().parents[1]
+TOOLCHAIN = os.environ.get("CARAMEL_TOOLCHAIN_ROOT")
+if not TOOLCHAIN:
+    sys.exit("Set CARAMEL_TOOLCHAIN_ROOT to the managed toolchain")
+ROOT = Path(tempfile.mkdtemp(prefix="caramel-frappe-", dir="/private/tmp"))
+STATE = ROOT / "state"
+STATE.mkdir(mode=0o700)
+PROJECTS = ROOT / "projects"
+PROJECTS.mkdir(mode=0o700)
+RUNTIME = Path(f"/private/tmp/caramel-{os.getuid()}-" + hashlib.sha256(str(STATE).encode()).hexdigest()[:12])
+ENV = {key: value for key, value in os.environ.items() if not key.startswith("PG") and not key.endswith("DATABASE_URL")}
+ENV.update({"CARAMEL_HOME": str(STATE), "CARAMEL_FRAMEWORK_ROOT": str(REPO)})
+FRAPPE = REPO / "bin/frappe"
+daemon = None
+app = None
+cleanup_ok = False
+
+
+class Connection(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(15)
+        self.sock.connect(str(RUNTIME / "latte.sock"))
+
+
+def rpc(method, path, body=None):
+    connection = Connection("latte", timeout=15)
+    try:
+        connection.request(method, path, json.dumps(body) if body is not None else None, {"Content-Type": "application/json"})
+        response = connection.getresponse()
+        document = json.loads(response.read(1024 * 1024))
+        if response.status >= 400:
+            raise RuntimeError("Latte request failed: " + str(response.status))
+        return document
+    finally:
+        connection.close()
+
+
+def wait_state(state, timeout=100):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if daemon.poll() is not None:
+            raise RuntimeError("Fixture daemon exited")
+        try:
+            document = rpc("GET", "/v1/status")
+            states = [document["services"][name]["state"] for name in ("postgres", "dns", "proxy")]
+            if states == [state] * 3:
+                return
+            if "failed" in states and state != "stopped":
+                raise RuntimeError("Fixture services failed")
+        except (FileNotFoundError, ConnectionRefusedError):
+            pass
+        time.sleep(.1)
+    raise RuntimeError("Fixture services did not reach " + state)
+
+
+def run(args, cwd=REPO, **kwargs):
+    return subprocess.run([str(arg) for arg in args], cwd=cwd, env=ENV, check=True, timeout=180, **kwargs)
+
+
+def local_values(project):
+    return {line.split("=", 1)[0]: json.loads(line.split("=", 1)[1]) for line in (project / ".env").read_text().splitlines() if line and not line.startswith("#")}
+
+
+def sql(url, statement):
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    env = {**ENV, "PGPASSWORD": unquote(parsed.password or "")}
+    command = [str(Path(TOOLCHAIN) / "data/installs/conda-postgresql/18.6/bin/psql"), "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", query["host"][0], "-p", query.get("port", ["5432"])[0], "-U", unquote(parsed.username), "-d", parsed.path[1:]]
+    return subprocess.run(command, input=statement, text=True, capture_output=True, env=env, check=True, timeout=15).stdout.strip()
+
+
+print("Frappé fixture: " + str(ROOT), flush=True)
+with (ROOT / "environment.log").open("w") as daemon_log, (ROOT / "app.log").open("w") as app_log:
+    try:
+        run([REPO / "scripts/build-frappe"])
+        run([REPO / "scripts/crystal", "build", "spec/fixtures/frappe_environment.cr", "-o", ROOT / "environment"])
+        ports = []
+        for kind in (socket.SOCK_DGRAM, socket.SOCK_STREAM, socket.SOCK_STREAM):
+            with socket.socket(socket.AF_INET, kind) as reservation:
+                reservation.bind(("127.0.0.1", 0))
+                ports.append(reservation.getsockname()[1])
+        daemon = subprocess.Popen([str(ROOT / "environment"), str(STATE), *map(str, ports)], env=ENV, stdout=daemon_log, stderr=daemon_log)
+        wait_state("running")
+        run([FRAPPE, "new", "bookshelf"], cwd=PROJECTS)
+        project = PROJECTS / "bookshelf"
+        values = local_values(project)
+        assert (project / ".env").stat().st_mode & 0o777 == 0o600
+        assert len(set(values[key] for key in ("DATABASE_URL", "MIGRATION_DATABASE_URL", "SPEC_DATABASE_URL", "SPEC_MIGRATION_DATABASE_URL"))) == 4
+        run([FRAPPE, "make", "resource", "Book", "title:string", "author:string"], cwd=project)
+        run([FRAPPE, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], cwd=project)
+        run([FRAPPE, "routes"], cwd=project)
+        run([FRAPPE, "migrate"], cwd=project)
+        sql(values["MIGRATION_DATABASE_URL"], "CREATE TABLE dev_sentinel (value text NOT NULL); INSERT INTO dev_sentinel VALUES ('keep');")
+        run([FRAPPE, "test"], cwd=project)
+        assert sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep"
+        original_env = (project / ".env").read_text()
+        changed = original_env.replace("SPEC_DATABASE_URL=" + json.dumps(values["SPEC_DATABASE_URL"], separators=(",", ":")), "SPEC_DATABASE_URL=" + json.dumps(values["DATABASE_URL"], separators=(",", ":")))
+        assert changed != original_env
+        (project / ".env").write_text(changed)
+        refused = subprocess.run([str(FRAPPE), "test"], cwd=project, env=ENV, capture_output=True, text=True, timeout=30)
+        assert refused.returncode != 0 and "test refused" in refused.stderr, refused.stderr
+        assert sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep"
+        (project / ".env").write_text(original_env)
+        run([FRAPPE, "setup"], cwd=project)
+        assert local_values(project)["APP_SECRET"] == values["APP_SECRET"]
+        doctor = subprocess.run([str(FRAPPE), "doctor"], cwd=project, env=ENV, capture_output=True, text=True, timeout=35)
+        assert "OK    Managed Crystal compiler" in doctor.stdout, doctor.stdout
+        assert "OK    Locked dependencies" in doctor.stdout, doctor.stdout
+        assert (project / ".env").read_text() == original_env
+
+        # A clone retains source edits and receives fresh local credentials.
+        clone = PROJECTS / "bookshelf-clone"
+        shutil.copytree(project, clone, ignore=shutil.ignore_patterns("lib", ".caramel", ".env"))
+        manifest = clone / "config/environment.yml"
+        manifest.write_text(manifest.read_text().replace("name: bookshelf", "name: bookshelf-clone"))
+        readme = clone / "README.md"
+        readme.write_text(readme.read_text() + "\nAn application-specific note.\n")
+        run([FRAPPE, "setup"], cwd=clone)
+        clone_values = local_values(clone)
+        assert clone_values["APP_SECRET"] != values["APP_SECRET"]
+        assert clone_values["DATABASE_URL"] != values["DATABASE_URL"]
+        assert readme.read_text().endswith("An application-specific note.\n")
+        run([FRAPPE, "test"], cwd=clone)
+        assert sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep"
+
+        # Fail the dependency subprocess after real project files are created.
+        # Retrying through the real provider must preserve those files.
+        injected = ROOT / "package-with-failed-installer"
+        injected.mkdir()
+        for folder in ("src", "templates", "vendor"):
+            shutil.copytree(REPO / folder, injected / folder)
+        for name in ("shard.yml", "shard.lock", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+            shutil.copyfile(REPO / name, injected / name)
+        (injected / "scripts").mkdir()
+        failed_shards = injected / "scripts/shards"
+        failed_shards.write_text("#!/usr/bin/python3\nraise SystemExit(67)\n")
+        failed_shards.chmod(0o700)
+        interrupted = subprocess.run([str(FRAPPE), "new", "resumed"], cwd=PROJECTS,
+                                     env={**ENV, "CARAMEL_FRAMEWORK_ROOT": str(injected)},
+                                     capture_output=True, text=True, timeout=40)
+        assert interrupted.returncode != 0 and "frappe setup to resume" in interrupted.stderr
+        resumed = PROJECTS / "resumed"
+        resume_readme = resumed / "README.md"
+        resume_readme.write_text(resume_readme.read_text() + "\nPreserve this edit during setup.\n")
+        run([FRAPPE, "setup"], cwd=resumed)
+        assert resume_readme.read_text().endswith("Preserve this edit during setup.\n")
+        site = next(site for site in rpc("GET", "/v1/sites")["sites"] if site["name"] == "bookshelf")
+        app_dir = RUNTIME / "sites" / site["id"]
+        app_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        app_socket = app_dir / "app.sock"
+        app_env = {**ENV, **values, "CARAMEL_ENV": "development", "CARAMEL_SOCKET": str(app_socket)}
+        app = subprocess.Popen([str(project / ".caramel/application"), "serve"], cwd=project, env=app_env, stdout=app_log, stderr=app_log)
+        deadline = time.monotonic() + 10
+        while not app_socket.exists():
+            if app.poll() is not None or time.monotonic() >= deadline:
+                raise RuntimeError("Generated application failed to start")
+            time.sleep(.05)
+        rpc("POST", f"/v1/sites/{site['id']}/upstream", {"socket": str(app_socket)})
+        certificate = STATE / "services/caddy/storage/pki/authorities/caramel/root.crt"
+        page = run(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--max-time", "5", "--noproxy", "*", "--cacert", certificate, "--resolve", f"bookshelf.caramel:{ports[2]}:127.0.0.1", "-H", "Host: bookshelf.caramel", f"https://bookshelf.caramel:{ports[2]}/"], capture_output=True, text=True)
+        assert "A little less setup." in page.stdout and "/assets/htmx-4.0.0.min.js" in page.stdout
+        print("PASS: real frappe new/setup/migrate/routes/test, clone secrets, failed-dependency recovery, source preservation, test refusal for development URL, retained development data, and generated native app over CA-verified named HTTPS", flush=True)
+    finally:
+        if app and app.poll() is None:
+            app.terminate()
+            app.wait(timeout=15)
+        if daemon and daemon.poll() is None:
+            try:
+                rpc("POST", "/v1/services/stop", {})
+                wait_state("stopped", timeout=70)
+                cleanup_ok = True
+            finally:
+                daemon.terminate()
+                daemon.wait(timeout=90)
+        elif daemon is None:
+            cleanup_ok = True
+        if cleanup_ok:
+            shutil.rmtree(RUNTIME, ignore_errors=True)
+            shutil.rmtree(ROOT)
+        else:
+            print("Cleanup needs inspection; preserved " + str(ROOT), file=sys.stderr)

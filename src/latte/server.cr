@@ -21,6 +21,10 @@ module Caramel::Latte
     abstract def register(name : String, directory : String, suffix : String) : Site
     abstract def unregister(id : String) : Bool
     abstract def set_upstream(id : String, socket : String) : Site
+
+    def environment_json(id : String, directory : String) : String
+      raise PublicError.new("unavailable", "Project environment is unavailable")
+    end
   end
 
   class PublicError < Exception
@@ -138,7 +142,7 @@ module Caramel::Latte
         @services.stop_services
         return json(@services.status_json)
       end
-      if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})(\/upstream)?\z/)
+      if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})(\/(?:upstream|environment))?\z/)
         id = match[1]
         if request.method == "DELETE" && match[2]?.nil?
           removed = OperationDeadline.run(12.seconds) { @services.unregister(id) }
@@ -149,6 +153,10 @@ module Caramel::Latte
           OperationDeadline.check!
           site = OperationDeadline.run(12.seconds) { @services.set_upstream(id, string(fields, "socket")) }
           return json({version: 1, site: summary(site)}.to_json)
+        elsif request.method == "POST" && match[2]? == "/environment"
+          fields = body(request, %w(directory))
+          OperationDeadline.check!
+          return json(@services.environment_json(id, string(fields, "directory")))
         end
       end
       failure("not_found", "Unknown Latte endpoint", 404)

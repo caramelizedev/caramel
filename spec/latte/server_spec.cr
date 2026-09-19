@@ -32,6 +32,13 @@ private class TestServices < Caramel::Latte::ServiceControl
   def set_upstream(id : String, socket : String) : Caramel::Latte::Site
     @registry.set_upstream(id, socket)
   end
+
+  def environment_json(id : String, directory : String) : String
+    site = @registry.find(id)
+    raise Caramel::Latte::PublicError.new("not_found", "Project is not registered", 404) unless site
+    raise ArgumentError.new("Project directory differs from registration") unless site.directory == File.realpath(directory)
+    {version: 1, environment: {DATABASE_URL: "private-test-connection", SPEC_DATABASE_URL: "private-test-spec"}}.to_json
+  end
 end
 
 describe Caramel::Latte::Server do
@@ -67,6 +74,14 @@ describe Caramel::Latte::Server do
       site = JSON.parse(response.body)["site"]
       site["origin"].as_s.should eq("https://bookshelf.caramel")
       site["domain"].as_s.should eq("bookshelf.caramel")
+      endpoint = "/v1/sites/#{site["id"].as_s}/environment"
+      secrets = server.handle(HTTP::Request.new("POST", endpoint, headers, {directory: root}.to_json))
+      secrets.status.should eq(200)
+      JSON.parse(secrets.body)["environment"]["DATABASE_URL"].as_s.should eq("private-test-connection")
+      secrets.headers["Cache-Control"].should eq("no-store")
+      server.handle(HTTP::Request.new("GET", endpoint)).status.should eq(404)
+      server.handle(HTTP::Request.new("POST", endpoint, headers, %({"directory":"/private/tmp"}))).status.should eq(400)
+      server.handle(HTTP::Request.new("GET", "/v1/sites")).body.should_not contain("private-test-connection")
       JSON.parse(server.handle(HTTP::Request.new("GET", "/v1/sites")).body)["sites"].as_a.size.should eq(1)
       server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, "{}")).status.should eq(200)
       services.starts.should eq(1)

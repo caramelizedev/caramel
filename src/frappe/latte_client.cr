@@ -1,0 +1,117 @@
+require "http/client"
+require "socket/unix_socket"
+require "./project"
+
+module Caramel::Frappe
+  # Frappé and the menu application speak to the same private service owner.
+  # Constructing or inspecting this client never creates Latte state.
+  class LatteClient
+    MAX_RESPONSE = 1024 * 1024
+    getter socket_path : String
+
+    def initialize(root : String? = nil)
+      selected = root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT
+      @root = Latte::StateSecurity.canonical_creation_path(selected)
+      @runtime = Latte::StateSecurity.runtime_root(@root)
+      @socket_path = File.join(@runtime, "latte.sock")
+    end
+
+    def status : JSON::Any
+      request("GET", "/v1/status")
+    end
+
+    def sites : Array(JSON::Any)
+      request("GET", "/v1/sites")["sites"].as_a
+    end
+
+    def start_services : JSON::Any
+      request("POST", "/v1/services/start", "{}")
+    end
+
+    def stop_services : JSON::Any
+      request("POST", "/v1/services/stop", "{}")
+    end
+
+    def ready!(timeout : Time::Span = 95.seconds) : Nil
+      deadline = Time.instant + timeout
+      current = status
+      states = service_states(current)
+      start_services unless states.all? { |state| state == "running" } || states.any? { |state| state == "starting" }
+      loop do
+        current = status
+        states = service_states(current)
+        return if states.all? { |state| state == "running" }
+        if current["error"]?.try(&.as_s?) || states.any? { |state| state == "failed" }
+          raise Error.new(current["error"]?.try(&.as_s?) || "Latte services failed; inspect frappe services")
+        end
+        raise Error.new("Latte services did not become ready; inspect frappe services") if Time.instant >= deadline
+        sleep 200.milliseconds
+      end
+    end
+
+    def register(project : Project) : JSON::Any
+      request("POST", "/v1/sites", {name: project.name, directory: project.root, suffix: project.metadata.domain_suffix}.to_json)["site"]
+    end
+
+    def environment(id : String, directory : String) : Hash(String, String)
+      validate_id(id)
+      request("POST", "/v1/sites/#{id}/environment", {directory: directory}.to_json)["environment"].as_h.transform_values(&.as_s)
+    end
+
+    def set_upstream(id : String, socket : String) : JSON::Any
+      validate_id(id)
+      request("POST", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
+    end
+
+    private def validate_id(id : String) : Nil
+      raise Error.new("Invalid Latte site identifier") unless Latte::StateSecurity.valid_site_id?(id)
+    end
+
+    private def service_states(document : JSON::Any) : Array(String)
+      %w(postgres dns proxy).map { |name| document["services"][name]["state"].as_s }
+    rescue KeyError | TypeCastError
+      raise Error.new("Latte returned an invalid service status")
+    end
+
+    def request(method : String, path : String, body : String? = nil) : JSON::Any
+      begin
+        Latte::StateSecurity.validate_owned_directory(@root)
+        Latte::StateSecurity.validate_owned_directory(@runtime)
+        Latte::StateSecurity.validate_socket_entry(@socket_path, require_socket: true)
+      rescue ex : ArgumentError
+        raise Error.new("Latte is unavailable: #{ex.message}. Start Latte and try again.")
+      end
+      socket = Socket.unix
+      socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: 1.second)
+      socket.read_timeout = 13.seconds
+      socket.write_timeout = 2.seconds
+      finished = false
+      spawn do
+        sleep 15.seconds
+        socket.close unless finished || socket.closed?
+      rescue IO::Error
+      end
+      client = HTTP::Client.new(socket, "latte")
+      headers = HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}
+      client.exec(method, path, headers, body) do |response|
+        bytes = Bytes.new(MAX_RESPONSE + 1)
+        size = response.body_io.read_greedy(bytes)
+        raise Error.new("Latte response exceeded 1 MiB") if size > MAX_RESPONSE
+        document = JSON.parse(String.new(bytes[0, size]))
+        raise Error.new("Unsupported Latte API version") unless document["version"].as_i == 1
+        if response.status_code >= 400
+          raise Error.new(document["error"]["message"].as_s)
+        end
+        document
+      end
+    rescue JSON::ParseException | KeyError | TypeCastError
+      raise Error.new("Latte returned an invalid response; check its installation")
+    rescue IO::Error
+      raise Error.new("Latte connection failed or timed out; check frappe services")
+    ensure
+      finished = true
+      client.try(&.close)
+      socket.try(&.close)
+    end
+  end
+end

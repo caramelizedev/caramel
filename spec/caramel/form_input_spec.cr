@@ -28,6 +28,16 @@ private def scalar_form(body : String) : Caramel::Form
 end
 
 describe Caramel::FormInput do
+  it "accepts the inherited CSRF header when no hidden token was sent" do
+    csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+    token = csrf.issue
+    headers = HTTP::Headers{"Content-Type" => "application/x-www-form-urlencoded", "Origin" => "https://bookshelf.caramel", "Cookie" => "__Host-caramel_csrf=#{token}", "X-CSRF-Token" => token}
+    request = HTTP::Request.new("POST", "/books", headers, "book[title]=Hello&book[author]=Someone")
+    Caramel::Controller.new(request, csrf).parse_form(BookInput).valid?.should be_true
+    forged = HTTP::Request.new("POST", "/books", headers, "_csrf=forged&book[title]=Hello&book[author]=Someone")
+    expect_raises(Caramel::Forbidden) { Caramel::Controller.new(forged, csrf).parse_form(BookInput) }
+  end
+
   it "infers an envelope and produces a typed value for exactly the declared fields" do
     BookInput.envelope.should eq("book")
     BookInput.fields.should eq(["title", "author"])

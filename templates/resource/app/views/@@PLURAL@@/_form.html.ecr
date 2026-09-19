@@ -1,0 +1,7 @@
+<form class="book-form" action="<%= action %>" method="post">
+  <input type="hidden" name="_csrf" value="<%= csrf_token %>">
+  <% unless method == "POST" %><input type="hidden" name="_method" value="<%= method %>"><% end %>
+  <% unless errors.empty? %><div class="errors" role="alert" tabindex="-1" id="form-errors"><p>Please check the fields below.</p><ul><% errors.each do |field, messages| %><% messages.each do |message| %><li><%= field == "_base" ? message : "#{field}: #{message}" %></li><% end %><% end %></ul></div><% end %>
+@@FORM_FIELDS@@
+  <div class="actions"><button class="button" type="submit">Save @@LABEL@@</button><a class="cancel" href="<%= action %>">Cancel</a></div>
+</form>
