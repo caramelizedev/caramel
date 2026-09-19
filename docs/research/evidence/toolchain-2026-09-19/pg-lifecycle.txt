@@ -1,0 +1,59 @@
+COMMAND ["initdb", "-D", "<EVAL>/cluster", "-U", "caramel_spike", "--locale=C", "--encoding=UTF8", "-A", "trust"]
+The files belonging to this database system will be owned by user "<LOCAL_USER>".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "C".
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+creating directory <EVAL>/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... America/New_York
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    <EVAL>/data/installs/conda-postgresql/18.6/bin/pg_ctl -D <EVAL>/cluster -l logfile start
+
+ {"args": ["exec", "--", "initdb", "-D", "<EVAL>/cluster", "-U", "caramel_spike", "--locale=C", "--encoding=UTF8", "-A", "trust"], "seconds": 1.164, "exit": 0}
+
+COMMAND ["pg_ctl", "-D", "<EVAL>/cluster", "-l", "<EVAL>/logs/postgres-server.txt", "-o", "-k <EVAL>/socket -c listen_addresses='' -p 55439 -c unix_socket_permissions=0700", "-w", "start"]
+waiting for server to start.... done
+server started
+ {"args": ["exec", "--", "pg_ctl", "-D", "<EVAL>/cluster", "-l", "<EVAL>/logs/postgres-server.txt", "-o", "-k <EVAL>/socket -c listen_addresses='' -p 55439 -c unix_socket_permissions=0700", "-w", "start"], "seconds": 0.154, "exit": 0}
+
+COMMAND ["psql", "-h", "<EVAL>/socket", "-p", "55439", "-U", "caramel_spike", "-d", "postgres", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", "SHOW data_directory; SHOW server_version; SHOW listen_addresses; CREATE TABLE caramel_probe(id integer primary key, title text not null); INSERT INTO caramel_probe VALUES(1, 'Bookshelf'); SELECT title FROM caramel_probe;"]
+<EVAL>/cluster
+18.6
+
+CREATE TABLE
+INSERT 0 1
+Bookshelf
+ {"args": ["exec", "--", "psql", "-h", "<EVAL>/socket", "-p", "55439", "-U", "caramel_spike", "-d", "postgres", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", "SHOW data_directory; SHOW server_version; SHOW listen_addresses; CREATE TABLE caramel_probe(id integer primary key, title text not null); INSERT INTO caramel_probe VALUES(1, 'Bookshelf'); SELECT title FROM caramel_probe;"], "seconds": 0.057, "exit": 0}
+
+COMMAND ["pg_ctl", "-D", "<EVAL>/cluster", "-m", "fast", "-w", "stop"]
+waiting for server to shut down.... done
+server stopped
+ {"args": ["exec", "--", "pg_ctl", "-D", "<EVAL>/cluster", "-m", "fast", "-w", "stop"], "seconds": 0.139, "exit": 0}
+
+COMMAND ["pg_ctl", "-D", "<EVAL>/cluster", "-l", "<EVAL>/logs/postgres-server.txt", "-o", "-k <EVAL>/socket -c listen_addresses='' -p 55439 -c unix_socket_permissions=0700", "-w", "start"]
+waiting for server to start.... done
+server started
+ {"args": ["exec", "--", "pg_ctl", "-D", "<EVAL>/cluster", "-l", "<EVAL>/logs/postgres-server.txt", "-o", "-k <EVAL>/socket -c listen_addresses='' -p 55439 -c unix_socket_permissions=0700", "-w", "start"], "seconds": 0.153, "exit": 0}
+
+COMMAND ["psql", "-h", "<EVAL>/socket", "-p", "55439", "-U", "caramel_spike", "-d", "postgres", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", "SELECT title FROM caramel_probe WHERE id=1;"]
+Bookshelf
+ {"args": ["exec", "--", "psql", "-h", "<EVAL>/socket", "-p", "55439", "-U", "caramel_spike", "-d", "postgres", "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", "SELECT title FROM caramel_probe WHERE id=1;"], "seconds": 0.045, "exit": 0}
+
+PASS: row survives restart, no TCP listeners configured
+COMMAND ["pg_ctl", "-D", "<EVAL>/cluster", "-m", "fast", "-w", "stop"]
+waiting for server to shut down.... done
+server stopped
+ {"args": ["exec", "--", "pg_ctl", "-D", "<EVAL>/cluster", "-m", "fast", "-w", "stop"], "seconds": 0.134, "exit": 0}

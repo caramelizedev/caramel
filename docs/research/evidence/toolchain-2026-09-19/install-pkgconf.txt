@@ -1,0 +1,7 @@
+mise by @jdx – installing 1 tool
+mise ✓ conda:pkgconf@3.0.7  481ms
+mise ████████████████ 1/1 · installed 1 tool in 482ms
+mise WARN  conda:pkgconf installed but not activated — it is not in any config file.
+To install and activate, run:
+  mise use conda:pkgconf
+{"args": ["install", "conda:pkgconf@3.0.7"], "seconds": 0.542, "exit": 0}

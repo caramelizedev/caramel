@@ -1,0 +1,7 @@
+{
+  "recorded_shell_and_mise_config_hashes_unchanged": true,
+  "external_psql_resolution_unchanged": true,
+  "external_psql_version": "psql (PostgreSQL) 17.0 (Laravel Herd)",
+  "all_three_owned_probe_clusters_stopped_and_removed": true,
+  "system_dns_or_trust_changes_performed": false
+}

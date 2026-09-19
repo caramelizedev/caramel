@@ -1,0 +1,5 @@
+mise WARN  missing: github:crystal-lang/crystal@1.20.3
+mise ERROR "crystal" couldn't exec process: No such file or directory
+mise ERROR Version: 2026.9.11 macos-arm64 (2026-09-18)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+{"args": ["exec", "github:crystal-lang/crystal@1.20.3", "--", "crystal", "--version"], "seconds": 0.027, "exit": 1}

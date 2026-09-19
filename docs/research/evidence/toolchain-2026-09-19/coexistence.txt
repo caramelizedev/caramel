@@ -1,0 +1,10 @@
+Crystal 1.20.3 [2f93147c0] (2026-07-02)
+
+LLVM: 15.0.7
+Default target: aarch64-apple-macosx11.0
+{"args": ["exec", "github:crystal-lang/crystal@1.20.3", "--", "crystal", "--version"], "seconds": 2.465, "exit": 0}
+Crystal 1.21.0 [57cf7da50] (2026-07-16)
+
+LLVM: 15.0.7
+Default target: aarch64-apple-macosx11.0
+{"args": ["exec", "github:crystal-lang/crystal@1.21.0", "--", "crystal", "--version"], "seconds": 0.081, "exit": 0}
