@@ -56,13 +56,13 @@ class ProcessSampler:
             self.rows.append(row)
 
 
-def check(run, repo, root, project, rpc, ports, env, daemon_pid):
+def check(run, repo, root, project, rpc, ports, env, daemon_pid, *, edit_only=False):
     destination = Path(os.environ.get("CARAMEL_BENCHMARK_OUTPUT", f"/private/tmp/caramel-dev-benchmark-{time.time_ns()}.json"))
     # Refuse to replace an earlier result. Keep partial measurements on failure.
     output = destination.open("x")
     os.chmod(destination, 0o600)
     sampler = ProcessSampler(daemon_pid)
-    report = {"complete": False, "scenarios": {}, "hardware": {}, "resource_samples": sampler.rows,
+    report = {"complete": False, "mode": "edit-only" if edit_only else "full", "scenarios": {}, "hardware": {}, "resource_samples": sampler.rows,
               "limitations": ["HTTP-visible changes, not browser paint or browser refresh execution",
                               "50 ms polling plus a new curl process per observation",
                               "Managed compiler cache and dependencies warmed by fixture setup",
@@ -170,6 +170,9 @@ def check(run, repo, root, project, rpc, ports, env, daemon_pid):
             stop()
             build_files = list((project / ".caramel/dev").glob("application-*"))
             metrics["development_artifacts_bytes"] = {item.suffix or "binary": item.stat().st_size for item in build_files}
+            if edit_only:
+                persist()
+                continue
             sampler.phase = scenario + "/semantic-check"
             metrics["semantic_check_ms"] = elapsed(lambda: run([repo / "scripts/crystal", "build", "src/bookshelf.cr", "--no-codegen"], cwd=project))
             sampler.phase = scenario + "/specs"

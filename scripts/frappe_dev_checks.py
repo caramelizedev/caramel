@@ -59,6 +59,32 @@ def check(run, repo, root, project, clone, rpc, ports, env):
 
         controller = project / "app/controllers/home_controller.cr"
         original = controller.read_text()
+        # Hold a real compiler macro open, then supersede the edit. The macro
+        # deliberately ignores TERM so cancellation must finish its owned group.
+        probe = project / "app/compile_probe.cr"
+        marker = project / ".caramel/cancel-probe.pid"
+        probe.write_text('Signal::TERM.ignore\nFile.write(ARGV[0], Process.pid.to_s)\nsleep 30.seconds\nputs "nil"\n')
+        controller.write_text('{{ run(' + json.dumps(str(probe)) + ', ' + json.dumps(str(marker)) + ') }}\n' + original)
+        deadline = time.monotonic() + 30
+        while not marker.exists():
+            assert time.monotonic() < deadline and first.poll() is None, "compiler cancellation probe did not start"
+            time.sleep(.05)
+        macro_pid = int(marker.read_text())
+        assert request("bookshelf")[0] == 503, "stale app served while compiling"
+        assert request("bookshelf-clone")[0] == 200
+        controller.write_text(original)
+        probe.unlink()
+        wait_for("bookshelf", lambda status, body: status == 200 and "A little less setup." in body)
+        deadline = time.monotonic() + 5
+        while True:
+            state = subprocess.run(["/bin/ps", "-p", str(macro_pid), "-o", "stat="], capture_output=True, text=True).stdout.strip()
+            if not state or state.startswith("Z"):
+                break
+            assert time.monotonic() < deadline, "superseded compiler left its macro process alive"
+            time.sleep(.05)
+        assert not list((project / ".caramel/dev").glob("building-*"))
+        print("PASS: superseded real compilation cancels a TERM-resistant macro and never serves stale code", flush=True)
+
         controller.write_text(original + "\ndef deliberately_broken(\n")
         wait_for("bookshelf", lambda status, body: status == 503 and "home_controller.cr" in body)
         site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")

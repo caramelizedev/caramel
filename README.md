@@ -56,6 +56,7 @@ scripts/build-frappe
 scripts/check-frappe-project
 scripts/check-frappe-project --dev
 scripts/check-dev-child
+scripts/check-dev-retirement
 scripts/check-runtime-diagnostics
 ```
 

@@ -1,0 +1,25 @@
+Parse:                            Parse:                             00:00:00.000162625 (   1.17MB)
+Semantic (top level):             Semantic (top level):              00:00:00.445405791 ( 162.97MB)
+Semantic (new):                   Semantic (new):                    00:00:00.002151000 ( 162.97MB)
+Semantic (type declarations):     Semantic (type declarations):      00:00:00.027431500 ( 162.97MB)
+Semantic (abstract def check):    Semantic (abstract def check):     00:00:00.010377166 ( 178.97MB)
+Semantic (restrictions augmenter):Semantic (restrictions augmenter): 00:00:00.008501166 ( 178.97MB)
+Semantic (ivars initializers):    Semantic (ivars initializers):     00:00:00.072125958 ( 179.02MB)
+Semantic (cvars initializers):    Semantic (cvars initializers):     00:00:00.068071833 ( 211.02MB)
+Semantic (main):                  Semantic (main):                   00:00:03.052453708 ( 419.39MB)
+Semantic (cleanup):               Semantic (cleanup):                00:00:00.000451791 ( 419.39MB)
+Semantic (recursive struct check):Semantic (recursive struct check): 00:00:00.000945916 ( 419.39MB)
+Codegen (crystal):                Codegen (crystal):                 00:00:00.890190375 ( 483.89MB)
+Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                  00:00:00.576517625 ( 483.89MB)
+Codegen (linking):                Codegen (linking):                 00:00:00.234930958 ( 483.89MB)
+dsymutil:                         dsymutil:                          00:00:00.222716458 ( 483.89MB)
+
+Macro runs:
+ - /private/tmp/caramel-compiler-profile-hj6a42pb/22/bookshelf/lib/caramel/src/caramel/view/compiler.cr: reused previous compilation (00:00:00.006350042)
+ - /private/tmp/caramel-compiler-profile-hj6a42pb/22/toolchain/data/installs/github-crystal-lang-crystal/1.21.0/src/ecr/process.cr: reused previous compilation (00:00:00.007397083)
+
+Codegen (bc+obj):
+ - 1210/1211 .o files were reused
+
+These modules were not reused:
+ - App::HomeController (A-pp5858H-omeC-ontroller.o0.bc)

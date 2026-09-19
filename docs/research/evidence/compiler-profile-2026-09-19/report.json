@@ -1,0 +1,52 @@
+{
+  "complete": true,
+  "scenarios": {
+    "2": {
+      "cold": {
+        "elapsed_ms": 21936.238333999998,
+        "exit_code": 0,
+        "log": "2/cold.log"
+      },
+      "unchanged_warm": {
+        "elapsed_ms": 2670.414959000002,
+        "exit_code": 0,
+        "log": "2/unchanged_warm.log"
+      },
+      "template_edit": {
+        "elapsed_ms": 2512.4662079999994,
+        "exit_code": 0,
+        "log": "2/template_edit.log"
+      },
+      "controller_edit": {
+        "elapsed_ms": 2429.7133749999985,
+        "exit_code": 0,
+        "log": "2/controller_edit.log"
+      }
+    },
+    "22": {
+      "cold": {
+        "elapsed_ms": 27718.248959,
+        "exit_code": 0,
+        "log": "22/cold.log"
+      },
+      "unchanged_warm": {
+        "elapsed_ms": 6152.753999999994,
+        "exit_code": 0,
+        "log": "22/unchanged_warm.log"
+      },
+      "template_edit": {
+        "elapsed_ms": 5690.217917000013,
+        "exit_code": 0,
+        "log": "22/template_edit.log"
+      },
+      "controller_edit": {
+        "elapsed_ms": 5721.02695800001,
+        "exit_code": 0,
+        "log": "22/controller_edit.log"
+      }
+    }
+  },
+  "root": "/private/tmp/caramel-compiler-profile-hj6a42pb",
+  "framework_revision": "60e0a51",
+  "profile_script_sha256": "10cae67a83fc4ed5e5ff8eade45a33a145006b15b702058a0533cb67762d6209"
+}

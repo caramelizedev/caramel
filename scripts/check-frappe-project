@@ -167,9 +167,9 @@ with (ROOT / "environment.log").open("w") as daemon_log, (ROOT / "app.log").open
         if "--dev" in sys.argv:
             from frappe_dev_checks import check
             check(run, REPO, ROOT, project, clone, rpc, ports, ENV)
-        if "--benchmark" in sys.argv:
+        if "--benchmark" in sys.argv or "--edit-benchmark" in sys.argv:
             from frappe_dev_benchmarks import check
-            check(run, REPO, ROOT, project, rpc, ports, ENV, daemon.pid)
+            check(run, REPO, ROOT, project, rpc, ports, ENV, daemon.pid, edit_only="--edit-benchmark" in sys.argv)
         site = next(site for site in rpc("GET", "/v1/sites")["sites"] if site["name"] == "bookshelf")
         app_dir = RUNTIME / "sites" / site["id"]
         app_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

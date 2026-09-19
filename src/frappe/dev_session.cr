@@ -1,4 +1,5 @@
 require "./dev_command"
+require "./dev_retirement"
 require "./dev_gateway"
 require "./dev_files"
 require "./tools"
@@ -10,6 +11,9 @@ module Caramel::Frappe
     @compiler : DevCommand? = nil
     @application : DevCommand? = nil
     @application_socket : String? = nil
+    @application_binary : String? = nil
+    @retirement = DevRetirement.new
+    @cleanup_pending = false
     @server : HTTP::Server? = nil
     @gateway : DevGateway
     @busy = false
@@ -81,6 +85,8 @@ module Caramel::Frappe
       @output.puts("Watching #{@project.name} at #{@project.origin}. Ctrl-C stops this project.")
       @output.flush
       until @stopping
+        @retirement.check!
+        cleanup_binaries if @cleanup_pending && @retirement.empty?
         begin
           current = files.snapshot
           if current.source != observed.source
@@ -194,9 +200,7 @@ module Caramel::Frappe
         elapsed = (Time.instant - started).total_milliseconds.round.to_i64
         @output.puts("Build ready#{cached ? " (cached)" : ""} in #{elapsed} ms · #{@project.origin}")
         @output.flush
-        Dir.glob(File.join(directory, "application-*")).each do |old|
-          File.delete(old) if old != binary && old != binary + ".dwarf" && File.basename(old).matches?(/\Aapplication-[0-9a-f]{16}(?:\.dwarf)?\z/) && File.file?(old) && !File.symlink?(old)
-        end
+        cleanup_binaries
       end
     end
 
@@ -214,10 +218,17 @@ module Caramel::Frappe
           if ready?(socket)
             previous, previous_socket = @application, @application_socket
             @application, @application_socket = candidate, socket
+            @application_binary = binary
             @gateway.ready(socket)
             accepted = true
-            previous.try(&.stop)
-            File.delete?(previous_socket) if previous_socket
+            if previous
+              @retirement.retire(previous) do
+                if previous_path = previous_socket
+                  File.delete?(previous_path)
+                end
+                cleanup_binaries
+              end
+            end
             if @open_browser && !@opened
               @opened = Process.run("/usr/bin/open", [@project.origin]).success?
               @error.puts("Could not open the browser. Visit #{@project.origin}.") unless @opened
@@ -238,6 +249,20 @@ module Caramel::Frappe
           candidate.stop
           File.delete?(socket)
         end
+      end
+    end
+
+    private def cleanup_binaries : Nil
+      # A retiring app may still need its debug file for an in-flight request.
+      unless @retirement.empty?
+        @cleanup_pending = true
+        return
+      end
+      @cleanup_pending = false
+      keep = [@binary, @application_binary].compact
+      Dir.glob(File.join(@project.root, ".caramel/dev/application-*")).each do |old|
+        next if keep.any? { |binary| old == binary || old == binary + ".dwarf" }
+        File.delete(old) if File.basename(old).matches?(/\Aapplication-[0-9a-f]{16}(?:\.dwarf)?\z/) && File.file?(old) && !File.symlink?(old)
       end
     end
 
@@ -330,6 +355,8 @@ module Caramel::Frappe
         sleep 50.milliseconds
       end
       @application.try(&.stop)
+      @retirement.drain
+      cleanup_binaries
       if @registered
         begin
           @client.clear_upstream(@id, @socket)

@@ -50,7 +50,8 @@ Generated-project evidence and limitations: [Frappé workflow](../../research/fr
 - [x] Terminal shutdown removes only this dev session's process/route state; shared services and other projects remain usable. Stale process/socket recovery checks ownership.
 - [x] Propagate running/build-error/stopped project state to CLI and menu, and add development runtime exception pages with production exclusion.
 - [x] Record an initial warm-cache development baseline on small/larger generated applications: 20 edits per CSS/JavaScript/template/Crystal category, cached startup, semantic checks, specs, release compilation and sampled development/service resources. Preserve actual distributions, including missed targets.
-- [ ] Complete cold compiler-cache, installation, service/database initialization, browser refresh and full compiler resource measurements; profile and improve the missed source/template latency target.
+- [x] Profile compiler phases with a fresh isolated compiler cache and subsequent warm edits on both resource counts; retain raw phase logs. Main semantic analysis dominates the larger warm build.
+- [ ] Complete installation, service/database initialization, browser refresh and full compiler resource measurements; verify improvements to the missed source/template latency target and document remaining limits.
 
 Development implementation evidence: [watcher and process ownership](../../research/frappe-development.md). Private-fixture HTTPS tests pass for two concurrent generated apps, source/asset recovery, pending migrations, cached restart, terminal death cleanup, live CLI/menu state and development runtime diagnostics. Separate compile checks verify production exclusion. Native debug-companion loss forces a rebuild and restores application locations. Browser execution, normal system trust, visual menu acceptance and timing acceptance remain open.
 

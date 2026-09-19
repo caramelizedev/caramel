@@ -45,9 +45,13 @@ module Caramel::Frappe
       @status.nil?
     end
 
-    def stop : Nil
+    def request_stop : Nil
       return unless running?
       @process.input.close unless @process.input.closed?
+    end
+
+    def stop : Nil
+      request_stop
       deadline = Time.instant + 5.seconds
       while running?
         raise Error.new("Development child did not close its owned process group") if Time.instant >= deadline
