@@ -5,6 +5,9 @@ require "log"
 require "./router"
 require "./form"
 require "./csrf"
+{% if flag?(:caramel_development) %}
+  require "./development_error"
+{% end %}
 
 module Caramel
   class Forbidden < Exception; end
@@ -46,6 +49,11 @@ module Caramel
       # Do not log arbitrary exception messages: dependency errors may include
       # connection URLs, form values, or other secrets.
       Log.error { "request_id=#{request_id} error_type=#{error.class}" }
+      {% if flag?(:caramel_development) %}
+        if ENV["CARAMEL_ENV"]? == "development"
+          return secure(DevelopmentError.response(error, request_id, request))
+        end
+      {% end %}
       headers = HTTP::Headers{"X-Request-ID" => request_id, "Cache-Control" => "no-store", "Content-Type" => "text/plain; charset=utf-8"}
       secure(Response.new(500, "Something went wrong. Reference: #{request_id}", headers))
     end

@@ -65,6 +65,23 @@ private struct Site: Decodable {
     let domain: String
     let origin: String
     let upstream: String?
+    let state: String?
+    let owner: String?
+
+    var stateLabel: String {
+        switch state {
+        case "running": return "Running"
+        case "building": return "Building"
+        case "build-error": return "Build error"
+        case "stopped": return "Stopped"
+        case "unavailable": return "Unavailable"
+        default: return "Unknown"
+        }
+    }
+
+    var ownerLabel: String? {
+        owner == "terminal" ? "Terminal session" : nil
+    }
 
     func validatedURL() throws -> URL {
         let domainParts = domain.split(separator: ".", omittingEmptySubsequences: false)
@@ -605,7 +622,7 @@ private enum LatteDiagnostics {
             }
             print("sites: \(snapshot.sites.count)")
             for site in snapshot.sites.sorted(by: { $0.name < $1.name }) {
-                print("- \(site.name) \(site.origin)")
+                print("- \(site.name) \(site.origin) [\(site.stateLabel)]\(site.ownerLabel.map { " · " + $0 } ?? "")")
             }
             return 0
         } catch {
@@ -770,9 +787,11 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
                 addDisabledItem("No registered sites", to: menu)
             } else {
                 for site in snapshot.sites.sorted(by: { $0.name < $1.name }) {
-                    let siteItem = NSMenuItem(title: site.name + "  ·  " + site.origin, action: nil, keyEquivalent: "")
+                    let siteItem = NSMenuItem(title: site.name + "  ·  " + site.stateLabel, action: nil, keyEquivalent: "")
                     let siteMenu = NSMenu()
                     siteMenu.autoenablesItems = false
+                    addDisabledItem(site.origin, to: siteMenu)
+                    if let owner = site.ownerLabel { addDisabledItem(owner, to: siteMenu) }
                     siteMenu.addItem(actionItem("Open site", action: #selector(openSite(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open folder", action: #selector(openFolder(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open logs", action: #selector(openLogs(_:)), id: site.id))

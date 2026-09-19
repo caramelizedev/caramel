@@ -14,6 +14,7 @@ module Caramel::Frappe
     COOKIE = "__Host-caramel_dev"
     CLIENT = {{ read_file("#{__DIR__}/dev_client.js") }}
     getter generation : Int64 = 0_i64
+    getter owner_token : String = Random::Secure.hex(32)
     getter state : String = "building"
     @message = "Compiling your application…"
     @upstream : String? = nil
@@ -76,6 +77,11 @@ module Caramel::Frappe
         css = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;background:#faf8f3;color:#332d27}h1{font:44px Georgia}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:24px;background:#fff;border:1px solid #e5dfd4;border-radius:8px}p{color:#786f65}"
         secure(Caramel::Response.new(200, css, HTTP::Headers{"Content-Type" => "text/css; charset=utf-8"}))
       when "/__caramel/dev/status"
+        if token = request.headers["X-Caramel-Owner-Token"]?
+          if token.bytesize == @owner_token.bytesize && Crypto::Subtle.constant_time_compare(token, @owner_token)
+            return secure(Caramel::Response.new(200, {generation: @generation, state: @state}.to_json, HTTP::Headers{"Content-Type" => "application/json"}))
+          end
+        end
         cookie = request.cookies[COOKIE]?.try(&.value)
         origin = request.headers["Origin"]?
         unless cookie && cookie.bytesize == @token.bytesize && Crypto::Subtle.constant_time_compare(cookie, @token) && request.headers["X-Caramel-Dev"]? == "1" && (origin.nil? || origin == @origin)

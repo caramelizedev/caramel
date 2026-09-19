@@ -22,10 +22,10 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         body, _, status = response.stdout.rpartition("\n")
         return int(status or 0), body
 
-    def wait_for(name, predicate, timeout=100):
+    def wait_for(name, predicate, timeout=100, headers=()):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            status, body = request(name)
+            status, body = request(name, headers=headers)
             if predicate(status, body):
                 return body
             assert all(item.poll() is None for item in processes), "dev session exited; inspect fixture logs"
@@ -45,6 +45,8 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         assert "/__caramel/dev/client.js" in body
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])
         assert status == 200 and json.loads(state)["state"] == "ready"
+        site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")
+        assert site["state"] == "running" and site["owner"] == "terminal"
         initial_generation = json.loads(state)["generation"]
         duplicate = subprocess.run([str(executable), str(project)], cwd=project, env=env, capture_output=True, text=True, timeout=20)
         assert duplicate.returncode != 0 and "already running" in duplicate.stderr
@@ -59,8 +61,27 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         original = controller.read_text()
         controller.write_text(original + "\ndef deliberately_broken(\n")
         wait_for("bookshelf", lambda status, body: status == 503 and "home_controller.cr" in body)
+        site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")
+        assert site["state"] == "build-error" and site["owner"] == "terminal"
+        listed = run([repo / "bin/frappe", "sites"], capture_output=True, text=True).stdout
+        assert any("bookshelf " in line and "build-error (terminal)" in line for line in listed.splitlines()), listed
+        run([repo / "scripts/build-latte-menu"])
+        menu = run([repo / "bin/Latte.app/Contents/MacOS/Latte", "--check"], capture_output=True, text=True).stdout
+        assert "[Build error] · Terminal session" in menu, menu
         assert request("bookshelf-clone")[0] == 200
         controller.write_text(original)
+        wait_for("bookshelf", lambda status, body: status == 200 and "A little less setup." in body)
+        # Runtime diagnostics are distinct from compiler failures: the app is
+        # still healthy overall and details remain confined to its dev build.
+        diagnostic_headers = ("X-Diagnostic-Proof: 1",)
+        controller.write_text(original.replace("def index : Caramel::Response", "def index : Caramel::Response\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\""))
+        assert controller.read_text() != original
+        body = wait_for("bookshelf", lambda status, body: status == 500 and "CARAMEL DEVELOPMENT EXCEPTION" in body, headers=diagnostic_headers)
+        assert "runtime-diagnostic-proof &lt;escaped&gt;" in body and "home_controller.cr:" in body, body[:16000]
+        assert "home_controller.cr:" in body.split("<details>")[0], body[:16000]
+        assert "Internal stack frames" in body
+        site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")
+        assert site["state"] == "running"
         wait_for("bookshelf", lambda status, body: status == 200 and "A little less setup." in body)
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])
         assert status == 200 and json.loads(state)["generation"] > initial_generation
@@ -88,6 +109,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         sites = rpc("GET", "/v1/sites")["sites"]
         site = next(item for item in sites if item["name"] == "bookshelf")
         assert site["upstream"] is None
+        assert site["state"] == "stopped" and site["owner"] is None
         assert request("bookshelf")[0] == 503
         assert request("bookshelf-clone")[0] == 200
         assert all(item["state"] == "running" for item in rpc("GET", "/v1/status")["services"].values())
@@ -99,6 +121,8 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         while "Build ready (cached)" not in (root / "bookshelf-dev.log").read_text():
             assert time.monotonic() < deadline
             time.sleep(.05)
+        status, body = request("bookshelf", headers=diagnostic_headers)
+        assert status == 500 and "home_controller.cr:" in body.split("<details>")[0], body[:16000]
         listing = subprocess.run(["/bin/ps", "-ax", "-o", "pid=,args="], capture_output=True, text=True, check=True).stdout
         native_pids = [int(line.strip().split(None, 1)[0]) for line in listing.splitlines() if len(line.strip().split(None, 1)) == 2 and line.strip().split(None, 1)[1].startswith(str(project / ".caramel/dev/application-"))]
         assert len(native_pids) == 1, "expected one owned native app"
@@ -116,6 +140,22 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         restarted = start(project, "bookshelf")
         wait_for("bookshelf", lambda status, body: status == 200 and "A little less setup." in body)
         assert request("bookshelf-clone")[0] == 200
+        restarted.terminate()
+        assert restarted.wait(timeout=20) == 0
+        processes.remove(restarted)
+        # On macOS, cached native traces depend on a separately published DWARF
+        # file. A missing companion must invalidate the cache and rebuild it.
+        build_directory = project / ".caramel/dev"
+        debug_files = list(build_directory.glob("application-*.dwarf"))
+        assert len(debug_files) == 1, debug_files
+        assert not list(build_directory.glob("building-*"))
+        debug_files[0].unlink()
+        start(project, "bookshelf")
+        body = wait_for("bookshelf", lambda status, body: status == 500 and "CARAMEL DEVELOPMENT EXCEPTION" in body, headers=diagnostic_headers)
+        assert "home_controller.cr:" in body.split("<details>")[0], body[:16000]
+        assert debug_files[0].is_file()
+        assert "Build ready (cached)" not in (root / "bookshelf-dev.log").read_text()
+        print("PASS: runtime application locations, cached traces, missing debug-file recovery, and live CLI/native menu state", flush=True)
         print("PASS: cached restart, abrupt terminal death cleanup, stale socket recovery, and asset-conflict recovery", flush=True)
         print("PASS: watched native builds, same-origin diagnostics/recovery, pending-migration recovery, authenticated refresh, CSS without compilation, duplicate session refusal, and independent project shutdown", flush=True)
     finally:

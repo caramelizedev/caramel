@@ -3,6 +3,7 @@ require "./dev_gateway"
 require "./dev_files"
 require "./tools"
 require "./latte_client"
+require "../latte/project_status"
 
 module Caramel::Frappe
   class DevSession
@@ -67,6 +68,7 @@ module Caramel::Frappe
       end
       Signal::INT.trap { @stopping = true }
       Signal::TERM.trap { @stopping = true }
+      Latte::ProjectStatus.write_session(@directory, @socket, @gateway.owner_token)
       # A response can fail after Latte persisted the route. Cleanup uses the
       # exact socket comparison even when registration's outcome is uncertain.
       @registered = true
@@ -160,7 +162,7 @@ module Caramel::Frappe
         begin
           @output.puts("Building #{@project.name}…")
           @output.flush
-          command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "--error-trace", "-o", temporary], @tools.environment, @project.root, @error)
+          command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", temporary], @tools.environment, @project.root, @error)
           @compiler = command
           deadline = Time.instant + 180.seconds
           while command.running? && !@stopping && Time.instant < deadline
@@ -174,10 +176,16 @@ module Caramel::Frappe
             return
           end
           reject_symlink(binary)
+          {% if flag?(:darwin) %}
+            reject_symlink(binary + ".dwarf")
+            raise Error.new("Compiler did not produce development debug information") unless File.file?(temporary + ".dwarf")
+            File.rename(temporary + ".dwarf", binary + ".dwarf")
+          {% end %}
           File.rename(temporary, binary)
-          write_metadata(metadata, {source: fingerprint, binary: Digest::SHA256.hexdigest(File.read(binary)), toolchain: @tools.toolchain.root, framework: Caramel::VERSION}.to_json)
+          write_metadata(metadata, {source: fingerprint, binary: Digest::SHA256.hexdigest(File.read(binary)), debug: debug_checksum(binary), toolchain: @tools.toolchain.root, framework: Caramel::VERSION, mode: "caramel_development"}.to_json)
         ensure
           File.delete?(temporary)
+          File.delete?(temporary + ".dwarf")
         end
       end
       @binary = binary
@@ -187,7 +195,7 @@ module Caramel::Frappe
         @output.puts("Build ready#{cached ? " (cached)" : ""} in #{elapsed} ms · #{@project.origin}")
         @output.flush
         Dir.glob(File.join(directory, "application-*")).each do |old|
-          File.delete(old) if old != binary && File.basename(old).matches?(/\Aapplication-[0-9a-f]{16}\z/) && File.file?(old) && !File.symlink?(old)
+          File.delete(old) if old != binary && old != binary + ".dwarf" && File.basename(old).matches?(/\Aapplication-[0-9a-f]{16}(?:\.dwarf)?\z/) && File.file?(old) && !File.symlink?(old)
         end
       end
     end
@@ -197,7 +205,7 @@ module Caramel::Frappe
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
       # Request serving receives only the runtime role, never migration/spec credentials.
       values = @values.reject { |key, _| key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL" }
-      values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_SOCKET" => socket, "CARAMEL_EXPECTED_DATABASE_URL" => @values["DATABASE_URL"]})
+      values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "CARAMEL_EXPECTED_DATABASE_URL" => @values["DATABASE_URL"]})
       candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, @output)
       accepted = false
       begin
@@ -252,10 +260,24 @@ module Caramel::Frappe
       reject_symlink(metadata)
       reject_symlink(binary)
       return false unless File.file?(metadata) && File.file?(binary)
+      debug = debug_checksum(binary)
+      {% if flag?(:darwin) %}
+        return false unless debug
+      {% end %}
       saved = JSON.parse(File.read(metadata))
-      saved["source"].as_s == fingerprint && saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) && saved["toolchain"].as_s == @tools.toolchain.root && saved["framework"].as_s == Caramel::VERSION
+      saved["source"].as_s == fingerprint && saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) && saved["debug"].as_s? == debug && saved["toolchain"].as_s == @tools.toolchain.root && saved["framework"].as_s == Caramel::VERSION && saved["mode"].as_s == "caramel_development"
     rescue JSON::ParseException | KeyError | TypeCastError
       false
+    end
+
+    private def debug_checksum(binary : String) : String?
+      {% if flag?(:darwin) %}
+        path = binary + ".dwarf"
+        reject_symlink(path)
+        Digest::SHA256.hexdigest(File.read(path)) if File.file?(path)
+      {% else %}
+        nil
+      {% end %}
     end
 
     private def write_metadata(path : String, contents : String) : Nil
@@ -316,6 +338,7 @@ module Caramel::Frappe
         end
       end
       @server.try { |server| server.close unless server.closed? }
+      Latte::ProjectStatus.remove_session(@directory, @socket) unless @socket.empty?
       File.delete?(@socket) unless @socket.empty?
       File.delete?(@application_socket.not_nil!) if @application_socket
       Signal::INT.reset

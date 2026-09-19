@@ -48,10 +48,10 @@ Generated-project evidence and limitations: [Frappé workflow](../../research/fr
 - [x] Watch Crystal/ECR changes with debounce and replace the application only after successful compilation/readiness. Show a same-origin build-error page while source is broken, then recover automatically after the edit is corrected.
 - [x] Serve static CSS/JS updates without Crystal compilation. Add same-origin authenticated refresh, no external CDN or frontend package manager.
 - [x] Terminal shutdown removes only this dev session's process/route state; shared services and other projects remain usable. Stale process/socket recovery checks ownership.
-- [ ] Propagate running/build-error/stopped project state to CLI and menu, and add development runtime exception pages with production exclusion.
+- [x] Propagate running/build-error/stopped project state to CLI and menu, and add development runtime exception pages with production exclusion.
 - [ ] Measure representative warm/cold builds and static/source refresh, recording actual distributions rather than asserting the proposed timing targets.
 
-Development implementation evidence: [watcher and process ownership](../../research/frappe-development.md). Private-fixture HTTPS tests pass for two concurrent generated apps, source/asset recovery, pending migrations, cached restart and terminal death cleanup. Browser execution, normal system trust, runtime diagnostics, UI state and timing acceptance remain open.
+Development implementation evidence: [watcher and process ownership](../../research/frappe-development.md). Private-fixture HTTPS tests pass for two concurrent generated apps, source/asset recovery, pending migrations, cached restart, terminal death cleanup, live CLI/menu state and development runtime diagnostics. Separate compile checks verify production exclusion. Native debug-companion loss forces a rebuild and restores application locations. Browser execution, normal system trust, visual menu acceptance and timing acceptance remain open.
 
 ## 6. Generated-app acceptance and next gates
 

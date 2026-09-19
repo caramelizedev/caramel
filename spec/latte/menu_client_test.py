@@ -173,6 +173,8 @@ class MenuClientTest(unittest.TestCase):
                     "domain": "bookshelf.caramel",
                     "origin": "https://bookshelf.caramel",
                     "upstream": None,
+                    "state": "build-error",
+                    "owner": "terminal",
                 }
             ]
         )
@@ -181,6 +183,8 @@ class MenuClientTest(unittest.TestCase):
         self.assertIn("status: postgres=running dns=running proxy=stopped", result.stdout)
         self.assertIn("sites: 1", result.stdout)
         self.assertIn("https://bookshelf.caramel", result.stdout)
+        self.assertIn("Build error", result.stdout)
+        self.assertIn("Terminal session", result.stdout)
 
     def test_check_rejects_origin_that_does_not_match_validated_domain(self) -> None:
         self.serve(

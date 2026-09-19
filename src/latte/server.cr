@@ -4,6 +4,7 @@ require "json"
 require "uuid"
 require "./registry"
 require "./deadline"
+require "./project_status"
 require "../caramel/response"
 
 {% if flag?(:darwin) %}
@@ -202,8 +203,9 @@ module Caramel::Latte
     end
 
     private def summary(site : Site)
+      status = ProjectStatus.read(@registry.paths, site)
       {id: site.id, name: site.name, directory: site.directory, suffix: site.suffix,
-       domain: site.domain, origin: site.origin, upstream: site.upstream}
+       domain: site.domain, origin: site.origin, upstream: site.upstream, state: status[:state], owner: status[:owner]}
     end
 
     private def json(content : String, status : Int32 = 200) : Caramel::Response

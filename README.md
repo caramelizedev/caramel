@@ -55,6 +55,7 @@ scripts/build-frappe
 scripts/check-frappe-project
 scripts/check-frappe-project --dev
 scripts/check-dev-child
+scripts/check-runtime-diagnostics
 ```
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.

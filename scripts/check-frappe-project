@@ -198,7 +198,10 @@ with (ROOT / "environment.log").open("w") as daemon_log, (ROOT / "app.log").open
         elif daemon is None:
             cleanup_ok = True
         if cleanup_ok:
-            shutil.rmtree(RUNTIME, ignore_errors=True)
-            shutil.rmtree(ROOT)
+            if sys.exc_info()[0] is None:
+                shutil.rmtree(RUNTIME, ignore_errors=True)
+                shutil.rmtree(ROOT)
+            else:
+                print("Services stopped; preserved failed fixture for inspection: " + str(ROOT), file=sys.stderr)
         else:
             print("Cleanup needs inspection; preserved " + str(ROOT), file=sys.stderr)

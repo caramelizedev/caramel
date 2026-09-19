@@ -110,7 +110,12 @@ module Caramel::Frappe
       when "services"
         return services(args)
       when "sites"
-        LatteClient.new.sites.each { |site| @output.puts("#{site["name"].as_s.ljust(24)} #{site["origin"].as_s}  #{site["directory"].as_s}") }
+        LatteClient.new.sites.each do |site|
+          state = site["state"]?.try(&.as_s?) || "unknown"
+          state = "unknown" unless %w(running building build-error stopped unavailable unknown).includes?(state)
+          owner = site["owner"]?.try(&.as_s?) == "terminal" ? " (terminal)" : ""
+          @output.puts("#{site["name"].as_s.ljust(24)} #{(state + owner).ljust(24)} #{site["origin"].as_s}  #{site["directory"].as_s}")
+        end
       when "doctor"
         return doctor
       when "open"
