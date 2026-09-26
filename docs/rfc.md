@@ -237,6 +237,13 @@ Every Action automatically performs content negotiation based on inbound headers
 1. `HX-Request: true` $\to$ Returns the compiled HTML fragment / `<hx-partial>`.
 2. `Accept: application/json` $\to$ Bypasses HTML generation entirely, serializing the Action's assigned internal response struct directly to JSON for native mobile clients or external consumers.
 
+### 3. Failure Modes & Mitigations
+
+* **Route Collision Overhead:** Deep nesting of dynamic routes can lead to ambiguous path matching.  
+  *Mitigation:* The radix compiler verifies path uniqueness at compile time and rejects overlapping route patterns (e.g., `/teams/:id` vs `/teams/new`) unless precedence is explicitly defined.
+* **Large Request Body Memory Pressure:** Parsing massive multipart payloads on the stack can exceed memory limits.  
+  *Mitigation:* `RequestContracts` enforce a default 2MB cap on standard form bodies. Larger uploads stream directly to disk tempfiles via `HTTP::FormData.parse`.
+
 ---
 
 # RFC-0002: SugarORM (Data Layer, Pure Schemas, & Evolution)
@@ -339,6 +346,13 @@ The migration compiler enforces three non-negotiable rules:
 * **Rule 1 (Concurrent Indexing):** All `ADD INDEX` operations must be emitted as `CREATE INDEX CONCURRENTLY`. Standard blocking index DDL fails the lint check.
 * **Rule 2 (Non-Null Additions):** Adding a column with `null: false` without a default value is rejected by the linter, preventing table rewrites on populated tables.
 * **Rule 3 (Rename Safety):** Renaming a field requires an explicit `renamed_from: :old_col` AST directive. If missing, the diff engine refuses to emit a destructive `DROP COLUMN` and halts with a diagnostic.
+
+### 3. Failure Modes & Mitigations
+
+* **Complex SQL Beyond Basic ORM Scope:** Analytical queries requiring window functions, CTEs, or complex aggregations can tempt developers to drop into raw, untyped strings.  
+  *Mitigation:* SugarORM exposes a type-checked `SugarORM.sql` block supporting CTEs, Window Functions, and `RETURNING` clauses with statically typed `NamedTuple` results.
+* **Prototyping Friction from Strict Linters:** Zero-lock migration linters (e.g., forcing `CONCURRENTLY`) can slow down early exploratory prototyping on empty local databases.  
+  *Mitigation:* Linters provide an explicit `--dev-override` flag during local development, while strictly enforcing safety checks on staging and production branches.
 
 ---
 
@@ -456,6 +470,11 @@ end
 
 The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table that bypasses WAL writes entirely. Reads and writes execute in microseconds over UNIX domain sockets, supporting TTL expirations through an automatic background vacuum fiber.
 
+### 3. Failure Modes & Mitigations
+
+* **PostgreSQL WAL Bloat Under High Job Volume:** Rapidly inserting, updating, and deleting hundreds of thousands of jobs can saturate write-ahead logs and lead to table bloat.  
+  *Mitigation:* Cold Brew uses time-partitioned tables (`caramel_jobs_pYYYY_MM_DD`) allowing completed jobs to be dropped via partition truncation rather than individual row `DELETE` queries, preventing VACUUM saturation.
+
 ---
 
 # RFC-0004: Caramel Latte (Bare-Metal Local DX & Database Branching)
@@ -513,6 +532,11 @@ ALTER DATABASE caramel_dev WITH ALLOW_CONNECTIONS true;
 
 
 
+### 3. Failure Modes & Mitigations
+
+* **Postgres Access Lockups During Hard Crashes:** If the development supervisor crashes while connections to the template database are disabled, developers can get locked out.  
+  *Mitigation:* Latte registers host process signal traps (`SIGINT`, `SIGTERM`) to restore `ALLOW_CONNECTIONS true` on primary catalogs, and verifies connectivity on every supervisor reboot.
+
 ---
 
 # RFC-0005: Caramel Frappé (Stateless Agent CLI & Dual-Mode Diagnostics)
@@ -562,6 +586,11 @@ MISSING: tenant_id:String
 PATCH: INSERT "field tenant_id : String" AT 14:5
 
 ```
+
+### 3. Failure Modes & Mitigations
+
+* **Agent Hallucinating Obsolete CLI Flags:** LLM coding agents often hallucinate flags learned from other frameworks.  
+  *Mitigation:* Frappé strictly validates CLI inputs. Any unrecognized argument terminates immediately with exit code `1` and outputs the exact single-line syntax for the intended command.
 
 ---
 
@@ -644,6 +673,13 @@ Corretto.stub_wire("https://api.stripe.com/v1/customers")
 
 ```
 
+### 3. Failure Modes & Mitigations
+
+* **Test Suite Execution Creep:** As integration suites grow to thousands of tests, savepoint rollbacks and database queries accumulate run time.  
+  *Mitigation:* Corretto supports multi-core parallel worker splits (`caramel corretto --concurrency=8`), pairing each worker thread with an independent, pre-seeded Latte database branch.
+* **Flaky Asynchronous Assertions:** Background jobs executing on polling loops cause timing races and force flaky `sleep()` calls.  
+  *Mitigation:* Queues run in **Synchronous Drain Mode** during tests. Background polling is disabled, and jobs are executed deterministically on demand via `Caramel::ColdBrew.drain_queue!`.
+
 ---
 
 # RFC-0007: Caramel Roast & Ecosystem Operations (Deployment, SDKs, & Sustainability)
@@ -723,6 +759,11 @@ Caramel’s ongoing development is sustainably funded via a two-tier product mod
 └─────────────────────────────────────────────────────────────┘
 
 ```
+
+### 3. Failure Modes & Mitigations
+
+* **Failed Migration Halting Cutover:** If an applied migration introduces a breaking schema change before traffic cuts over, the application can enter a split-brain state.  
+  *Mitigation:* Roast creates an atomic pre-deployment PostgreSQL restore point and executes DDL in an isolated transaction. If the new binary fails its post-boot health check within 10 seconds, Roast triggers an automated rollback to the previous binary and rolls back the migration.
 
 ---
 
@@ -864,6 +905,13 @@ Human developer feedback is rendered with visual clarity and actionable remediat
      team = Team.query.preload(:users).find(team_id)
 
 ```
+
+### 3. Failure Modes & Mitigations
+
+* **Over-Clever DSLs Obscuring Execution Flow:** Highly expressive macros can become opaque, making it difficult for developers or agents to trace code paths.  
+  *Mitigation:* Caramel Core enforces an invariant: all macros must compile down to explicit, standard Crystal code. Running `caramel expand <file>` outputs the generated Crystal code to demystify any abstraction.
+* **Performance Tax on Semantic Extensions:** Semantic numbers and time spans (`3.days`, `50.gigabytes`) could introduce heap allocation overhead if implemented naively.  
+  *Mitigation:* All temporal and numeric extensions are implemented as zero-allocation inline struct methods on primitive types, compiling directly down to LLVM integer constants.
 
 ---
 
