@@ -18,7 +18,7 @@ installs = Path(root).resolve() / "data/installs"
 pg = installs / "conda-postgresql/18.6/bin"
 openssl = installs / "conda-openssl/3.6.4/bin/openssl"
 if not (pg / "initdb").is_file() or not openssl.is_file():
-    sys.exit("Managed PostgreSQL or OpenSSL is missing; see experiments/toolchain/README.md.")
+    sys.exit("Managed PostgreSQL or OpenSSL is missing; rerun scripts/install-toolchain for CARAMEL_TOOLCHAIN_ROOT.")
 owned = Path(tempfile.mkdtemp(prefix="caramel-integration-", dir="/private/tmp"))
 owned.chmod(0o700)
 data = owned / "data"

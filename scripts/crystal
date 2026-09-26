@@ -87,5 +87,5 @@ if root:
 else:
     compiler = shutil.which("crystal")
 if not compiler or not Path(compiler).is_file() or Path(compiler).resolve() == Path(__file__).resolve():
-    sys.exit("Crystal is unavailable. Set CARAMEL_TOOLCHAIN_ROOT to the verified installation (see experiments/toolchain/README.md).")
+    sys.exit("Crystal is unavailable. Run scripts/install-toolchain --root <dir> and set CARAMEL_TOOLCHAIN_ROOT to that directory.")
 os.execve(str(compiler), [str(compiler), *args], env)

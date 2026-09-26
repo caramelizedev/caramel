@@ -2,11 +2,9 @@
 
 This is the installation result for the exact pins tested on Apple Silicon macOS on 2026-09-19. It is a feasibility record for that run, not a claim about releases after the dates shown. The selected artifact URLs, SHA-256 values, licenses, and mise backend comparison are kept in [toolchain-artifacts.md](toolchain-artifacts.md); no publisher signature was independently verified.
 
-## Reproduce the isolated run
+## How the run was performed
 
-Follow the [experiment README](../../experiments/toolchain/README.md) to copy the harness into a short, fresh temporary path outside Git, bootstrap and verify mise, trust the reviewed copied configuration, install the locked tools, and create the two local command aliases. Do not run the experiment in the repository. All generated state belongs to that disposable copy.
-
-The wrapper's default environment is already no-auto-install. It scopes mise, XDG, conda, and Crystal state below `<EVAL>`, accepts only the copied `project/caramel-eval.toml`, uses `project/mise.lock` for `macos-arm64`, and sets `MISE_CEILING_PATHS`, `MISE_ENV=''`, `MISE_NO_ENV=1`, `MISE_NO_HOOKS=1`, and `MISE_NETRC=0`. The source and lockfile are under `experiments/toolchain/project`; the smoke source is `project/smoke.cr`.
+The run used a disposable copy of a research harness (since removed) that bootstrapped and verified mise, trusted the reviewed configuration, installed the locked tools and created the two local command aliases. Its environment disabled automatic installation, scoped mise, XDG, conda and Crystal state below `<EVAL>`, accepted only the copied project configuration with its `macos-arm64` lockfile, and set `MISE_CEILING_PATHS`, `MISE_ENV=''`, `MISE_NO_ENV=1`, `MISE_NO_HOOKS=1` and `MISE_NETRC=0`. `scripts/install-toolchain` now performs this installation with the same isolation; the pinned selection, lockfile, smoke source and mise environment live in [`tools/toolchain`](../../tools/toolchain).
 
 The complete README sequence was also replayed from a second fresh temporary directory, with fresh downloads and no reused tool cache. It passed checksum verification, locked installation, native smoke compilation, and database restart persistence. After review added explicit no-TCP assertions at both starts, the final database helper was [rerun successfully](evidence/toolchain-2026-09-19/final-pg-verification.txt) against the installed tools. The tested helper scripts match the checked-in copies byte-for-byte; all five regression checks pass. See [README replay evidence](evidence/toolchain-2026-09-19/readme-reproduction.txt). This is a fresh-directory test on the same host, not a clean-machine test.
 
@@ -28,7 +26,7 @@ The Crystal archive contains `embedded/bin/shards`, but mise's Crystal wrapper d
 
 ## Crystal compile and native linking
 
-After changing into the prepared experiment copy, the successful cold-cache smoke command is reproduced as:
+The successful cold-cache smoke command, run in the prepared harness copy, was:
 
 ```sh
 CARAMEL_EVAL="$PWD"

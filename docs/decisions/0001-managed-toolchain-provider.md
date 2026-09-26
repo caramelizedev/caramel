@@ -42,19 +42,14 @@ These are single-run observations on the development machine, not product speed 
 
 ## Source of truth
 
-For this experiment, `experiments/toolchain/project/caramel-eval.toml` is the authored tool selection and `mise.lock` records resolved artifacts. They describe the contributor experiment only.
+`tools/toolchain/caramel-toolchain.toml` is the authored tool selection and `tools/toolchain/mise.lock` records resolved artifacts. `scripts/install-toolchain` installs exactly that selection into a private prefix, verifies the native tools, and records a receipt; `scripts/crystal` and `scripts/shards` run from that prefix.
 
-The application-facing Caramel environment manifest remains authoritative in the product design. If the consumer adapter uses mise, it generates internal configuration from that manifest; users do not maintain duplicate version declarations. The precise manifest-to-toolchain mapping will be implemented with Frappé after the application slice establishes its required native libraries.
+The application-facing Caramel environment manifest remains authoritative. If the consumer adapter uses mise, it generates internal configuration from that manifest; users do not maintain duplicate version declarations. The precise manifest-to-toolchain mapping will be implemented with Frappé after the application slice establishes its required native libraries.
 
 ## Consumer release gates still open
 
 - A clean Apple Silicon macOS installation without Homebrew or Herd. This machine already has Apple Command Line Tools; the experiment cannot establish the absence of an Xcode/SDK prerequisite. No clean-machine host was available for this run.
 - A complete native dependency and license inventory for redistribution, supported minimum macOS versions, and signed/provenance verification policy. Published SHA-256 integrity was checked; this run does not establish independent publisher signature verification for every artifact.
-- Real Crystal PostgreSQL driver connections with certificate-chain and hostname verification, including negative certificate tests.
 - Caddy service operation, named local DNS, trusted browser HTTPS, scoped privileged setup, and existing-port/service conflict behavior.
 - Recovery across interrupted extraction, upgrades, corrupted installations, and loss of cached artifacts. A download interruption test alone does not cover these cases.
 - A relocatable release artifact and Linux deployment recipe. The smoke binary's absolute temporary OpenSSL search path is suitable only for this experiment.
-
-## Next milestone
-
-Build a small Bookshelf application using the verified compiler and PostgreSQL distribution. Prove escaped server rendering, bundled htmx 4, safe form submissions, explicit migration, and driver TLS behavior. Keep the existing Crystal/PostgreSQL/HTTPS requirements. Plan and implement Latte's named-domain experience around the running slice; no choice in this ADR makes localhost ports the final product experience.

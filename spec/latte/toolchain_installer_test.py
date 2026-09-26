@@ -20,7 +20,7 @@ class InstallationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="caramel-installer-unit-")
         self.root = Path(self.tmp.name) / "Toolchain With Spaces"
-        self.payloads = {"project/caramel-eval.toml": b"[tools]\n", "project/mise.lock": b"version = 1\n"}
+        self.payloads = {"project/caramel-toolchain.toml": b"[tools]\n", "project/mise.lock": b"version = 1\n"}
         self.critical = ["bin/mise", "data/installs/test/bin/compiler"]
         self.patch = patch.multiple(installer, authored_payloads=lambda: self.payloads, CRITICAL=self.critical, ALIASES={})
         self.patch.start()
@@ -54,7 +54,7 @@ class InstallationTests(unittest.TestCase):
             install.prepare()
         with installer.Installation(self.root) as install:
             install.prepare()
-        config = self.root / "project/caramel-eval.toml"
+        config = self.root / "project/caramel-toolchain.toml"
         config.write_text("[tasks.unreviewed]\nrun = 'echo unsafe'\n")
         with self.assertRaisesRegex(RuntimeError, "differs"):
             with installer.Installation(self.root) as install:
@@ -119,7 +119,7 @@ class InstallationTests(unittest.TestCase):
                 installer.install(self.root, preflight=False)
         state = json.loads((self.root / installer.RECEIPT).read_text())
         self.assertEqual(state["status"], "installing")
-        config_before = (self.root / "project/caramel-eval.toml").read_bytes()
+        config_before = (self.root / "project/caramel-toolchain.toml").read_bytes()
 
         def complete_payloads(installation, **kwargs):
             for name in self.critical:
@@ -129,7 +129,7 @@ class InstallationTests(unittest.TestCase):
 
         with patch.object(installer, "install_payloads", side_effect=complete_payloads):
             installer.install(self.root, preflight=False)
-        self.assertEqual((self.root / "project/caramel-eval.toml").read_bytes(), config_before)
+        self.assertEqual((self.root / "project/caramel-toolchain.toml").read_bytes(), config_before)
         self.assertEqual(json.loads((self.root / installer.RECEIPT).read_text())["status"], "complete")
 
     def test_moving_an_installation_requires_a_fresh_install(self):

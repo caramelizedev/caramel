@@ -19,12 +19,11 @@ The application workflow branch adds a narrow typed model API, Caramel Core (com
 - [Development performance measurements and limits](docs/research/development-performance.md)
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
-- [Reproduce the toolchain installation](experiments/toolchain/README.md)
 - [Resumable toolchain installer component](docs/research/toolchain-installer.md)
 
 ## Contributor checks
 
-After installing the toolchain experiment, set `CARAMEL_TOOLCHAIN_ROOT` to its installation directory. The launchers preserve the caller's working directory and use the pinned Crystal/Shards/OpenSSL tools without shell activation.
+Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) with `scripts/install-toolchain --root <dir>`, then set `CARAMEL_TOOLCHAIN_ROOT` to that directory. The selection and lockfile live in `tools/toolchain/`. The launchers preserve the caller's working directory and use the pinned Crystal/Shards/OpenSSL tools without shell activation.
 
 ```sh
 scripts/shards install --frozen

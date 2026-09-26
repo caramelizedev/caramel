@@ -20,6 +20,7 @@ import sys
 import tempfile
 
 REPO = Path(__file__).resolve().parents[1]
+TOOLCHAIN = REPO / "tools/toolchain"
 RECEIPT = ".caramel-toolchain.json"
 MISE_URL = "https://github.com/jdx/mise/releases/download/v2026.9.11/mise-v2026.9.11-macos-arm64"
 MISE_SHA = "bbfd47ef65c2278c4e9ba09b523beb1019365a3c0b9c9fc60f686dc16f358e0f"
@@ -63,10 +64,10 @@ os.environ["CARAMEL_TOOLCHAIN_ROOT"] = str(root)
 runpy.run_path(str(root / "launchers/crystal"), run_name="__main__")
 '''
     return {
-        "project/caramel-eval.toml": (REPO / "experiments/toolchain/project/caramel-eval.toml").read_bytes(),
-        "project/mise.lock": (REPO / "experiments/toolchain/project/mise.lock").read_bytes(),
-        "project/smoke.cr": (REPO / "experiments/toolchain/project/smoke.cr").read_bytes(),
-        "toolchain-provider.py": (REPO / "experiments/toolchain/run-mise.py").read_bytes(),
+        "project/caramel-toolchain.toml": (TOOLCHAIN / "caramel-toolchain.toml").read_bytes(),
+        "project/mise.lock": (TOOLCHAIN / "mise.lock").read_bytes(),
+        "project/smoke.cr": (TOOLCHAIN / "smoke.cr").read_bytes(),
+        "toolchain-provider.py": (TOOLCHAIN / "provider.py").read_bytes(),
         "launchers/crystal": (REPO / "scripts/crystal").read_bytes(),
         "launchers/shards": (REPO / "scripts/shards").read_bytes(),
         "bin/crystal": compiler_entry,
@@ -298,7 +299,7 @@ def install_payloads(installation, mise_binary=None):
         raise RuntimeError("existing mise checksum verification failed; preserved")
     provider = runpy.run_path(str(root / "toolchain-provider.py"))
     env = provider["build_environment"](root)
-    for args in (["trust", str(root / "project/caramel-eval.toml")], ["install", "--locked"]):
+    for args in (["trust", str(root / "project/caramel-toolchain.toml")], ["install", "--locked"]):
         subprocess.run([str(mise), *args], cwd=root / "project", env=env, check=True, timeout=900)
     for name, target in ALIASES.items():
         path = root / name

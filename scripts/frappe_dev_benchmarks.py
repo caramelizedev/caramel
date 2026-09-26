@@ -69,7 +69,7 @@ def check(run, repo, root, project, rpc, ports, env, daemon_pid, *, edit_only=Fa
                               "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average",
                               "Resource sampling every 500 ms can miss short-lived processes",
                               "Private HTTPS ports and explicitly supplied fixture CA; no system DNS/trust acceptance"],
-              "versions_manifest": (repo / "experiments/toolchain/project/caramel-eval.toml").read_text(),
+              "versions_manifest": (repo / "tools/toolchain/caramel-toolchain.toml").read_text(),
               "platform": platform.platform(), "sample_count_per_edit_kind": 20}
     process = None
     log = None

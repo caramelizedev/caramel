@@ -1,6 +1,6 @@
 # Toolchain installer component
 
-`scripts/install-toolchain` turns the pinned provider experiment into a repeatable installation component. It installs Crystal 1.21.0, Shards 0.20.0, PostgreSQL 18.6, OpenSSL 3.6.4, pkgconf 3.0.7, Caddy 2.11.4 and CoreDNS 1.14.7. Mise 2026.9.11 remains an internal provider with isolated configuration and state.
+`scripts/install-toolchain` installs the pinned selection in `tools/toolchain` as a repeatable installation component. It installs Crystal 1.21.0, Shards 0.20.0, PostgreSQL 18.6, OpenSSL 3.6.4, pkgconf 3.0.7, Caddy 2.11.4 and CoreDNS 1.14.7. Mise 2026.9.11 remains an internal provider with isolated configuration and state.
 
 This is one component of the consumer installer, not the finished Caramel installation. It does not install Frappé or the menu app, start services, create databases, edit DNS, or add certificate trust. The complete installer and clean-machine acceptance are still pending.
 
