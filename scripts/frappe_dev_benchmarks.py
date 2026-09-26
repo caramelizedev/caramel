@@ -132,7 +132,7 @@ def check(run, repo, root, project, rpc, ports, env, daemon_pid, *, edit_only=Fa
         report["revision"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
         run([repo / "scripts/crystal", "build", "spec/fixtures/frappe_dev.cr", "-o", executable])
         sampler.thread.start()
-        controller = project / "app/controllers/home_controller.cr"
+        controller = project / "app/actions/home/show.cr"
         original_controller = controller.read_text()
         template = project / "app/views/home/index.html.ecr"
         original_template = template.read_text()
@@ -154,7 +154,7 @@ def check(run, repo, root, project, rpc, ports, env, daemon_pid, *, edit_only=Fa
                 for index in range(20):
                     marker = f"benchmark-{scenario}-{kind}-{index}"
                     if kind == "crystal":
-                        updated = original_controller.replace('page(content, "Welcome")', f'page(content + "<!-- {marker} -->", "Welcome")')
+                        updated = original_controller.replace('Caramel::Page.new("Welcome", content)', f'Caramel::Page.new("Welcome", content + "<!-- {marker} -->")')
                         assert updated != original_controller
                     elif kind == "template":
                         updated = original_template + f"\n<!-- {marker} -->\n"

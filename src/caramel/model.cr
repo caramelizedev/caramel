@@ -1,4 +1,5 @@
 require "db"
+require "json"
 
 module Caramel
   # A deliberately small typed persistence layer over an already configured
@@ -458,6 +459,19 @@ module Caramel
 
         def save : Bool
           __caramel_save_body
+        end
+
+        # Serializes declared fields only, in declaration order.
+        def to_json(json : ::JSON::Builder) : Nil
+          json.object do
+            {% verbatim do %}
+              {% for ivar in @type.instance_vars %}
+                {% if @type.constant("FIELD_#{ivar.name.id.upcase}".id) %}
+                  json.field {{ivar.name.stringify}}, @{{ivar.name}}
+                {% end %}
+              {% end %}
+            {% end %}
+          end
         end
 
         def delete : Bool

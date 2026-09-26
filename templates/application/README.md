@@ -15,7 +15,7 @@ frappe migrate
 frappe test
 ```
 
-Routes live in `config/routes.cr`, application code in `app/`, and database changes in `db/migrations/`. Generated files are yours to edit. Source assets live in `app/assets/`; Frappé publishes them into `public/assets/`. Only `public/` is served directly.
+Routes live in `config/routes.cr`, actions in `app/actions/`, other application code in `app/`, and database changes in `db/migrations/`. Each action declares a `contract do ... end` of typed fields; route parameters must match contract fields, and the build fails otherwise. `frappe routes` lists every route with its contract. Actions answer browsers with HTML and clients sending `Accept: application/json` with JSON. Register client components with `CaramelIslands.define("Name", (element, props) => ...)` in `app/assets/javascript/app.js` and render them with `island("Name", props)`. Generated files are yours to edit. Source assets live in `app/assets/`; Frappé publishes them into `public/assets/`. Only `public/` is served directly.
 
 Run `frappe --help` for implemented commands. `frappe seed` executes `db/seeds.cr` without resetting data. The optional `frappe add auth` feature is still being built.
 

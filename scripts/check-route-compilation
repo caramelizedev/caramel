@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Verify route declarations are checked against action contracts at compile time."""
+from pathlib import Path
+import subprocess
+
+REPO = Path(__file__).resolve().parents[1]
+cases = {
+    "compile_valid": None,
+    "compile_missing_contract_field": "ROUTE CONTRACT MISMATCH",
+    "compile_wrong_param_type": "ROUTE CONTRACT TYPE MISMATCH",
+    "compile_nilable_param": "ROUTE CONTRACT TYPE MISMATCH",
+    "compile_undefined_action": "Action 'Missing::Show' is undefined",
+    "compile_not_action": "must inherit from Caramel::Action",
+    "compile_missing_contract": "must define an explicit `contract do ... end` block",
+    "compile_duplicate_route": "DUPLICATE ROUTE",
+    "compile_ambiguous_order": "AMBIGUOUS ROUTE ORDER",
+    "compile_unknown_verb": "accepts only get, post, put, patch and delete",
+    "compile_wrong_path_id": "expected argument #1",
+}
+for name, error in cases.items():
+    result = subprocess.run([str(REPO / "scripts/crystal"), "build",
+                             "spec/fixtures/routes/" + name + ".cr", "--no-codegen"],
+                            cwd=REPO, capture_output=True, text=True, timeout=90)
+    if error is None:
+        assert result.returncode == 0, name + "\n" + result.stdout + result.stderr
+    else:
+        assert result.returncode != 0 and error in result.stderr, name + "\n" + result.stdout + result.stderr
+    print("PASS: " + name)

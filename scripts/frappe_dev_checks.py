@@ -57,7 +57,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         run([repo / "bin/frappe", "migrate"], cwd=clone)
         wait_for("bookshelf-clone", lambda status, body: status == 200 and "A little less setup." in body)
 
-        controller = project / "app/controllers/home_controller.cr"
+        controller = project / "app/actions/home/show.cr"
         original = controller.read_text()
         # Hold a real compiler macro open, then supersede the edit. The macro
         # deliberately ignores TERM so cancellation must finish its owned group.
@@ -86,7 +86,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         print("PASS: superseded real compilation cancels a TERM-resistant macro and never serves stale code", flush=True)
 
         controller.write_text(original + "\ndef deliberately_broken(\n")
-        wait_for("bookshelf", lambda status, body: status == 503 and "home_controller.cr" in body)
+        wait_for("bookshelf", lambda status, body: status == 503 and "app/actions/home/show.cr" in body)
         site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")
         assert site["state"] == "build-error" and site["owner"] == "terminal"
         listed = run([repo / "bin/frappe", "sites"], capture_output=True, text=True).stdout
@@ -100,11 +100,11 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         # Runtime diagnostics are distinct from compiler failures: the app is
         # still healthy overall and details remain confined to its dev build.
         diagnostic_headers = ("X-Diagnostic-Proof: 1",)
-        controller.write_text(original.replace("def index : Caramel::Response", "def index : Caramel::Response\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\""))
+        controller.write_text(original.replace("def handle(contract : Contract) : Caramel::Response", "def handle(contract : Contract) : Caramel::Response\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\""))
         assert controller.read_text() != original
         body = wait_for("bookshelf", lambda status, body: status == 500 and "CARAMEL DEVELOPMENT EXCEPTION" in body, headers=diagnostic_headers)
-        assert "runtime-diagnostic-proof &lt;escaped&gt;" in body and "home_controller.cr:" in body, body[:16000]
-        assert "home_controller.cr:" in body.split("<details>")[0], body[:16000]
+        assert "runtime-diagnostic-proof &lt;escaped&gt;" in body and "app/actions/home/show.cr:" in body, body[:16000]
+        assert "app/actions/home/show.cr:" in body.split("<details>")[0], body[:16000]
         assert "Internal stack frames" in body
         site = next(item for item in rpc("GET", "/v1/sites")["sites"] if item["name"] == "bookshelf")
         assert site["state"] == "running"
@@ -148,7 +148,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
             assert time.monotonic() < deadline
             time.sleep(.05)
         status, body = request("bookshelf", headers=diagnostic_headers)
-        assert status == 500 and "home_controller.cr:" in body.split("<details>")[0], body[:16000]
+        assert status == 500 and "app/actions/home/show.cr:" in body.split("<details>")[0], body[:16000]
         listing = subprocess.run(["/bin/ps", "-ax", "-o", "pid=,args="], capture_output=True, text=True, check=True).stdout
         native_pids = [int(line.strip().split(None, 1)[0]) for line in listing.splitlines() if len(line.strip().split(None, 1)) == 2 and line.strip().split(None, 1)[1].startswith(str(project / ".caramel/dev/application-"))]
         assert len(native_pids) == 1, "expected one owned native app"
@@ -178,7 +178,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         debug_files[0].unlink()
         start(project, "bookshelf")
         body = wait_for("bookshelf", lambda status, body: status == 500 and "CARAMEL DEVELOPMENT EXCEPTION" in body, headers=diagnostic_headers)
-        assert "home_controller.cr:" in body.split("<details>")[0], body[:16000]
+        assert "app/actions/home/show.cr:" in body.split("<details>")[0], body[:16000]
         assert debug_files[0].is_file()
         assert "Build ready (cached)" not in (root / "bookshelf-dev.log").read_text()
         print("PASS: runtime application locations, cached traces, missing debug-file recovery, and live CLI/native menu state", flush=True)

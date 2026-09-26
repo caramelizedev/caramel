@@ -1,0 +1,351 @@
+require "uri"
+require "../response"
+require "../action"
+require "./request_input"
+require "./request_context"
+
+module Caramel
+  # Routes are declared once with `Caramel::Router.draw`, which checks every
+  # route against its action's contract at compile time and defines
+  # `AppRouter` in the calling module.
+  module Router
+    MAX_SEGMENTS = 32
+
+    record Entry, method : String, path : String, action : String, contract : String
+
+    METHOD_BITS = {"GET" => 1_u8, "POST" => 2_u8, "PUT" => 4_u8, "PATCH" => 8_u8, "DELETE" => 16_u8}
+
+    def self.method_bit(method : String) : UInt8
+      METHOD_BITS[method == "HEAD" ? "GET" : method]? || 0_u8
+    end
+
+    def self.allow_header(mask : UInt8) : String
+      String.build do |io|
+        first = true
+        {"GET" => 1_u8, "HEAD" => 1_u8, "POST" => 2_u8, "PUT" => 4_u8, "PATCH" => 8_u8, "DELETE" => 16_u8}.each do |method, bit|
+          next if mask & bit == 0
+          io << ", " unless first
+          io << method
+          first = false
+        end
+      end
+    end
+
+    def self.head(response : Response) : Response
+      headers = response.headers.dup
+      headers["Content-Length"] = response.body.bytesize.to_s
+      Response.new(response.status, "", headers)
+    end
+
+    module Dispatcher
+      abstract def dispatch(context : RequestContext) : Response
+    end
+
+    # Byte offsets of each path segment. Parsing validates escapes and
+    # control characters without allocating.
+    struct Segments
+      @bounds = StaticArray(Int32, 64).new(0)
+      getter size = 0
+
+      def self.parse(path : String) : Segments?
+        bytes = path.to_slice
+        return nil if bytes.empty? || bytes[0] != '/'.ord
+        index = 0
+        while index < bytes.size
+          byte = bytes[index]
+          if byte == '%'.ord
+            return nil unless index + 2 < bytes.size
+            high = hex(bytes[index + 1])
+            low = hex(bytes[index + 2])
+            return nil unless high && low
+            decoded = high * 16 + low
+            return nil if decoded < 0x20 || decoded == 0x7F || decoded == '/'.ord || decoded == '\\'.ord
+            index += 3
+          else
+            return nil if byte < 0x20 || byte == 0x7F || byte == '\\'.ord
+            index += 1
+          end
+        end
+        segments = new
+        return segments if bytes.size == 1
+        start = 1
+        while true
+          stop = start
+          while stop < bytes.size && bytes[stop] != '/'.ord
+            stop += 1
+          end
+          break unless segments.push(start, stop)
+          break if stop == bytes.size
+          start = stop + 1
+        end
+        segments
+      end
+
+      private def self.hex(byte : UInt8) : Int32?
+        case byte
+        when '0'.ord..'9'.ord then byte.to_i32 - '0'.ord
+        when 'a'.ord..'f'.ord then byte.to_i32 - 'a'.ord + 10
+        when 'A'.ord..'F'.ord then byte.to_i32 - 'A'.ord + 10
+        end
+      end
+
+      # Returns false once the path exceeds MAX_SEGMENTS; `size` then reports
+      # one more than the limit so the caller can answer 404.
+      protected def push(start : Int32, stop : Int32) : Bool
+        if @size == MAX_SEGMENTS
+          @size += 1
+          return false
+        end
+        @bounds[@size * 2] = start
+        @bounds[@size * 2 + 1] = stop
+        @size += 1
+        true
+      end
+
+      def bytesize(index : Int32) : Int32
+        @bounds[index * 2 + 1] - @bounds[index * 2]
+      end
+
+      def equals?(path : String, index : Int32, literal : String) : Bool
+        path.to_slice[@bounds[index * 2], bytesize(index)] == literal.to_slice
+      end
+
+      def decode(path : String, index : Int32) : String
+        value = URI.decode(path.byte_slice(@bounds[index * 2], bytesize(index)))
+        raise RequestInput::InvalidEncoding.new("Malformed path") unless value.valid_encoding?
+        value
+      end
+    end
+
+    # A segment trie built once from the compile-time route table. Static
+    # children win over the parameter child; matching backtracks, so
+    # `/teams/new/members` can still reach `/teams/:team_id/members`.
+    class Tree
+      class Node
+        getter statics = [] of {String, Node}
+        property param : Node? = nil
+        getter terminals = [] of {UInt8, Int32}
+      end
+
+      getter entries : Array(Entry)
+
+      def initialize(@entries : Array(Entry))
+        @root = Node.new
+        @entries.each_with_index do |entry, index|
+          node = @root
+          entry.path.lchop('/').split('/', remove_empty: true).each do |segment|
+            node = if segment.starts_with?(':')
+                     node.param ||= Node.new
+                   elsif found = node.statics.find { |(literal, _)| literal == segment }
+                     found[1]
+                   else
+                     Node.new.tap { |child| node.statics << {segment, child} }
+                   end
+          end
+          node.terminals << {Router.method_bit(entry.method), index}
+        end
+      end
+
+      # Returns the route index (-1 for none) and every method allowed at the
+      # matching paths, for 405 responses.
+      def match(path : String, segments : Segments, method : String) : {Int32, UInt8}
+        walk(@root, path, segments, 0, Router.method_bit(method))
+      end
+
+      private def walk(node : Node, path : String, segments : Segments, depth : Int32, bit : UInt8) : {Int32, UInt8}
+        mask = 0_u8
+        if depth == segments.size
+          node.terminals.each do |(route_bit, index)|
+            mask |= route_bit
+            return {index, mask} if route_bit == bit
+          end
+          return {-1, mask}
+        end
+        node.statics.each do |(literal, child)|
+          next unless segments.equals?(path, depth, literal)
+          index, allowed = walk(child, path, segments, depth + 1, bit)
+          return {index, allowed} if index >= 0
+          mask |= allowed
+          break
+        end
+        if (child = node.param) && segments.bytesize(depth) > 0
+          index, allowed = walk(child, path, segments, depth + 1, bit)
+          return {index, allowed} if index >= 0
+          mask |= allowed
+        end
+        {-1, mask}
+      end
+    end
+
+    # Expands in the calling module: route actions resolve like any other
+    # constant there, and the generated `AppRouter` is defined there.
+    macro draw(&block)
+      __caramel_router_draw do
+        {{block.body}}
+      end
+    end
+  end
+end
+
+# Implementation of `Caramel::Router.draw`. A receiverless top-level macro
+# expands in the caller's scope, so relative action paths resolve there.
+macro __caramel_router_draw(&block)
+  {% if block.body.is_a?(Expressions) %}
+    {% statements = block.body.expressions %}
+  {% elsif block.body.is_a?(Nop) %}
+    {% statements = [] of Nil %}
+  {% else %}
+    {% statements = [block.body] %}
+  {% end %}
+  {% routes = [] of Nil %}
+  {% for stmt in statements %}
+    {% ok = false %}
+    {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.block.is_a?(Nop) %}
+      {% if ["get", "post", "put", "patch", "delete"].includes?(stmt.name.stringify) && stmt.args.size == 2 %}
+        {% ok = stmt.args[0].is_a?(StringLiteral) && stmt.args[1].is_a?(Path) %}
+      {% end %}
+    {% end %}
+    {% unless ok %}
+      {% raise "Caramel::Router.draw accepts only get, post, put, patch and delete declarations with a string path and an Action constant: #{stmt}" %}
+    {% end %}
+    {% method = stmt.name.stringify.upcase %}
+    {% path = stmt.args[0] %}
+    {% action = stmt.args[1] %}
+    {% unless path.starts_with?("/") %}
+      {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+    {% end %}
+    {% segments = path == "/" ? [] of Nil : path[1..-1].split("/") %}
+    {% params = [] of Nil %}
+    {% names = [] of Nil %}
+    {% for segment, position in segments %}
+      {% if segment.starts_with?(":") %}
+        {% unless segment =~ /\A:[a-z_][a-z0-9_]*\z/ %}
+          {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+        {% end %}
+        {% name = segment[1..-1] %}
+        {% if names.includes?(name) %}
+          {% raise "Route '#{path.id}' repeats parameter ':#{name.id}'" %}
+        {% end %}
+        {% names << name %}
+        {% params << {name, position} %}
+      {% else %}
+        {% unless segment =~ /\A[A-Za-z0-9._~-]+\z/ %}
+          {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% if segments.size > 32 %}
+      {% raise "Route '#{path.id}' exceeds 32 path segments" %}
+    {% end %}
+    {% type = action.resolve? %}
+    {% unless type %}
+      {% raise "Compile Error: Action '#{action}' is undefined." %}
+    {% end %}
+    {% unless type < ::Caramel::Action %}
+      {% raise "Compile Error: '#{action}' must inherit from Caramel::Action." %}
+    {% end %}
+    {% contract = type.constant("Contract") %}
+    {% unless contract %}
+      {% raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block." %}
+    {% end %}
+    {% for param in params %}
+      {% t = param[0] %}
+      {% field = contract.constant("CARAMEL_FIELD_#{t.upcase.id}") %}
+      {% unless field %}
+        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n" %}
+      {% end %}
+      {% scalar = field[1] %}
+      {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
+        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n" %}
+      {% end %}
+    {% end %}
+    {% summaries = [] of Nil %}
+    {% for constant in contract.constants %}
+      {% if constant.stringify.starts_with?("CARAMEL_FIELD_") %}
+        {% summaries << contract.constant(constant)[4].id %}
+      {% end %}
+    {% end %}
+    {% for earlier in routes %}
+      {% if earlier[0] == method && earlier[3].size == segments.size %}
+        {% overlap = true %}
+        {% identical = true %}
+        {% mixed = nil %}
+        {% for segment, position in segments %}
+          {% other = earlier[3][position] %}
+          {% if segment.starts_with?(":") && other.starts_with?(":") %}
+          {% elsif !segment.starts_with?(":") && !other.starts_with?(":") %}
+            {% if segment != other %}
+              {% overlap = false %}
+            {% end %}
+          {% else %}
+            {% identical = false %}
+            {% if mixed == nil %}
+              {% mixed = segment.starts_with?(":") ? "earlier" : "later" %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% if overlap && identical %}
+          {% raise "\n\n❌ DUPLICATE ROUTE\n'#{method.id} #{earlier[1].id}' and '#{method.id} #{path.id}' match the same requests\n" %}
+        {% end %}
+        {% if overlap && mixed == "later" %}
+          {% raise "\n\n❌ AMBIGUOUS ROUTE ORDER\n'#{method.id} #{path.id}' must be declared before '#{method.id} #{earlier[1].id}'\n" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% routes << {method, path, type, segments, params, summaries.join(" "), action.stringify} %}
+  {% end %}
+
+  class AppRouter
+    include ::Caramel::Router::Dispatcher
+
+    TREE = ::Caramel::Router::Tree.new([
+      {% for route in routes %}
+        ::Caramel::Router::Entry.new({{route[0]}}, {{route[1]}}, {{route[6]}}, {{route[5]}}),
+      {% end %}
+    ] of ::Caramel::Router::Entry)
+
+    def self.routes : Array(::Caramel::Router::Entry)
+      TREE.entries
+    end
+
+    def dispatch(context : ::Caramel::RequestContext) : ::Caramel::Response
+      path = context.request.path
+      segments = ::Caramel::Router::Segments.parse(path)
+      return ::Caramel::Response.new(400, "Malformed path") unless segments
+      return ::Caramel::Response.new(404, "Not found") if segments.size > ::Caramel::Router::MAX_SEGMENTS
+      index, mask = TREE.match(path, segments, context.method)
+      if index < 0
+        return ::Caramel::Response.new(404, "Not found") if mask == 0
+        return ::Caramel::Response.new(405, "Method not allowed", HTTP::Headers{"Allow" => ::Caramel::Router.allow_header(mask)})
+      end
+      {% if routes.empty? %}
+        response = ::Caramel::Response.new(404, "Not found")
+      {% else %}
+        response = case index
+        {% for route, index in routes %}
+          when {{index}} then __caramel_route_{{index}}(context, path, segments)
+        {% end %}
+        else
+          ::Caramel::Response.new(404, "Not found")
+        end
+      {% end %}
+      context.request.method == "HEAD" ? ::Caramel::Router.head(response) : response
+    end
+
+    {% for route, index in routes %}
+      private def __caramel_route_{{index}}(context : ::Caramel::RequestContext, path : String, segments : ::Caramel::Router::Segments) : ::Caramel::Response
+        {% if route[4].empty? %}
+          context.input.route_params = {} of String => String
+        {% else %}
+          context.input.route_params = { {% for param in route[4] %}{{param[0]}} => segments.decode(path, {{param[1]}}), {% end %} }
+        {% end %}
+        contract = ::{{route[2]}}::Contract.parse(context.input)
+        {% unless route[4].empty? %}
+          return ::Caramel::Response.new(404, "Not found") if contract.route_error?([{% for param in route[4] %}{{param[0]}}, {% end %}])
+        {% end %}
+        action = ::{{route[2]}}.new(context)
+        contract.valid? ? action.respond(action.handle(contract)) : action.render_contract_failure(contract)
+      end
+    {% end %}
+  end
+end

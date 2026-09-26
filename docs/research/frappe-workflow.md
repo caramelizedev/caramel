@@ -31,18 +31,19 @@ The unpublished preview includes the framework under `vendor/caramel`, with a ve
 
 `make resource` takes a singular class name and `field:type` declarations. Supported types are `string`, `int32`, `int64`, `bool`, `float64` and RFC 3339 `time`, optionally nullable with `?`. Quote nullable declarations in globbing shells. Ordinary plurals follow a small predictable inflector; irregular names use `--plural=people`.
 
-Generated source contains an explicit typed model, writable input, controller, five views including the shared form, SQL migration, route/path declarations and a request spec. Required strings get presence validation. Index pages show the newest 100 rows; pagination and associations are outside this generator's current scope. Models and inputs use a fixed `App` namespace. All generated files are application-owned and editable.
+Generated source contains an explicit typed model, seven actions (index, show, new, create, edit, update, destroy) with their request contracts, a shared form module, five views including the shared form, SQL migration, route/path declarations and a request spec. Required strings get presence validation. Index pages show the newest 100 rows; pagination and associations are outside this generator's current scope. Models and actions use a fixed `App` namespace. All generated files are application-owned and editable.
 
-The actual route API is explicit:
+Routes are explicit verb declarations inside the single `Caramel::Router.draw` block in `config/routes.cr`:
 
 ```crystal
-router.resources(:books, App::BooksController, csrf)
+get "/books/:id", App::Books::Show
+patch "/books/:id", App::Books::Update
 
-# Inside App::Paths, included by ApplicationController:
+# Inside App::Paths, included by ApplicationAction:
 Caramel.resource_paths :books, :book
 ```
 
-Controller bindings and Int64 path arguments are checked by Crystal. Invalid, negative or overflowing member IDs return 404. Native HTML forms submit POST with a CSRF-checked `_method`; direct PATCH/PUT/DELETE routes are also generated. Normal success navigates with a 303 redirect, and enhanced requests receive `HX-Location`. Invalid input renders 422 with submitted values and field errors. All ECR expressions escape by default; only compiled partial composition uses the explicit trusted HTML type.
+Each route is checked at compile time: the action must exist, inherit from `Caramel::Action` and declare a `contract do ... end` block, every `:param` must be a non-nilable `String`, `Int32` or `Int64` contract field, and duplicate or ambiguously ordered routes are rejected. `frappe routes` prints each route with its contract summary. Invalid, negative or overflowing member IDs return 404. Native HTML forms submit POST with a CSRF-checked `_method`; direct PATCH/DELETE routes are generated, PUT is not. Normal success navigates with a 303 redirect, and enhanced requests receive `HX-Location`. Invalid input renders 422 with submitted values and field errors for browsers, `{"errors": ...}` for JSON clients and a plain-text diagnostic for other clients. Clients sending `Accept: application/json` receive each action's result as JSON. All ECR expressions escape by default; only compiled partial composition uses the explicit trusted HTML type.
 
 Generation preflights every destination and requires a unique insertion marker in routes and paths. Existing files and source conflicts are refused. Writes are staged, serialized by a project lock, and ordinary write failures roll back published source if it has not changed again. This is not a crash-atomic multi-file filesystem transaction; a process or machine crash can require manual inspection before retrying. Concurrent external editors are not coordinated by that lock.
 
@@ -52,12 +53,12 @@ Generation preflights every destination and requires a unique insertion marker i
 
 The final HTTP check serves the generated application through Caddy on a private test port with a named Host and explicitly supplied fixture CA. It establishes native app/proxy/TLS behavior; it does not establish system DNS, browser certificate trust, public port 443, or real htmx interaction.
 
-Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check-resource-compilation` verifies that missing controller actions and wrong ID/path types fail compilation.
+Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check-route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation.
 
 ## Remaining gates
 
 - Complete development acceptance: real browsers, runtime exception diagnostics, CLI/menu project state and measured performance. The watcher, build-error recovery, isolated child ownership and asset publishing are implemented.
-- Individual model/controller/migration/command generators, custom commands, explicit dependency add/update and spec worker isolation.
+- Individual model/action/migration/command generators, custom commands, explicit dependency add/update and spec worker isolation.
 - Schema snapshot output; `db/schema.cr` is currently a placeholder and migrations remain authoritative.
 - Complete optional authentication, native Linux/musl production artifact and its assets/configuration.
 - Full macOS installation, native menu acceptance, system DNS/ports, CA trust and real browser CRUD, including htmx history/focus/422 handling and JavaScript-disabled forms.

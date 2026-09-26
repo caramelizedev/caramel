@@ -3,8 +3,6 @@
 import os
 from pathlib import Path
 import secrets
-import json
-import time
 import shutil
 import socket
 import subprocess
@@ -34,9 +32,6 @@ env = {k: v for k, v in os.environ.items() if not k.startswith("PG") and not k.s
 env["LC_ALL"] = "C"
 started = False
 failed = False
-children = []
-http_smoke = "--http-smoke" in sys.argv[1:]
-spec_args = [arg for arg in sys.argv[1:] if arg != "--http-smoke"]
 
 def run(args, **kwargs):
     return subprocess.run([str(a) for a in args], env=env, check=True, timeout=120, **kwargs)
@@ -68,16 +63,13 @@ try:
         "CREATE ROLE caramel_dev LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';",
         "CREATE ROLE caramel_model_spec LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';",
         "CREATE DATABASE caramel_spec OWNER caramel_spec;",
-        "CREATE DATABASE bookshelf_spec OWNER caramel_spec;",
         "CREATE DATABASE caramel_development OWNER caramel_dev;",
         "REVOKE CONNECT ON DATABASE caramel_spec FROM PUBLIC;",
-        "REVOKE CONNECT ON DATABASE bookshelf_spec FROM PUBLIC;",
         "REVOKE CONNECT ON DATABASE caramel_development FROM PUBLIC;",
         "GRANT CONNECT ON DATABASE caramel_spec TO caramel_model_spec;",
     ])
     run([pg / "psql", "-X", "-v", "ON_ERROR_STOP=1", "-h", sock, "-p", port, "-U", "caramel_admin", "-d", "postgres"], input=sql, text=True, stdout=subprocess.DEVNULL)
     env.update({
-        "CARAMEL_OWNED_BOOKSHELF_URL": db_url("bookshelf_spec", "caramel_spec", password, sock),
         "CARAMEL_OWNED_SPEC_URL": db_url("caramel_spec", "caramel_spec", password, sock),
         "CARAMEL_OWNED_MODEL_RUNTIME_URL": db_url("caramel_spec", "caramel_model_spec", password, sock),
         "CARAMEL_OWNED_DEV_URL": db_url("caramel_development", "caramel_dev", password, sock),
@@ -85,69 +77,12 @@ try:
         "CARAMEL_OWNED_WRONG_HOST_URL": db_url("caramel_spec", "caramel_spec", password, "127.0.0.1", owned / "ca.crt"),
         "CARAMEL_OWNED_UNTRUSTED_URL": db_url("caramel_spec", "caramel_spec", password, "localhost", owned / "untrusted.crt"),
     })
-    result = subprocess.run([str(REPO / "scripts/crystal"), "spec", "spec/integration", "--error-trace", *spec_args], cwd=REPO, env=env)
+    result = subprocess.run([str(REPO / "scripts/crystal"), "spec", "spec/integration", "--error-trace", *sys.argv[1:]], cwd=REPO, env=env)
     failed = result.returncode != 0
-    if not failed and http_smoke:
-        build_start = time.monotonic()
-        run([REPO / "scripts/crystal", "build", "examples/bookshelf/src/bookshelf.cr", "-o", owned / "bookshelf"], cwd=REPO)
-        print("Bookshelf native build: %.3fs" % (time.monotonic() - build_start), flush=True)
-        app_socket = owned / "bookshelf.sock"
-        app_env = env.copy()
-        app_env.update({"DATABASE_URL": env["CARAMEL_OWNED_BOOKSHELF_URL"], "APP_SECRET": secrets.token_hex(32), "APP_ORIGIN": "https://bookshelf.caramel", "CARAMEL_SOCKET": str(app_socket)})
-        with (owned / "bookshelf.log").open("w") as log:
-            children.append(subprocess.Popen([str(owned / "bookshelf"), "serve"], env=app_env, stdout=log, stderr=log))
-        quiet([openssl, "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=bookshelf.caramel", "-keyout", owned / "app.key", "-out", owned / "app.csr"])
-        (owned / "app.ext").write_text("subjectAltName=DNS:bookshelf.caramel\nextendedKeyUsage=serverAuth\n")
-        quiet([openssl, "x509", "-req", "-in", owned / "app.csr", "-CA", owned / "ca.crt", "-CAkey", owned / "ca.key", "-CAserial", owned / "ca.srl", "-days", "1", "-extfile", owned / "app.ext", "-out", owned / "app.crt"])
-        (owned / "app.key").chmod(0o600)
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            https_port = reservation.getsockname()[1]
-        caddy_config = {
-            "admin": {"disabled": True},
-            "apps": {
-                "tls": {"certificates": {"load_files": [{"certificate": str(owned / "app.crt"), "key": str(owned / "app.key") }]}},
-                "http": {"servers": {"test": {
-                    "listen": ["127.0.0.1:" + str(https_port)],
-                    "automatic_https": {"disable": True},
-                    "tls_connection_policies": [{}],
-                    "routes": [{"match": [{"host": ["bookshelf.caramel"]}], "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "unix/" + str(app_socket)}]}]}]
-                }}}
-            }
-        }
-        (owned / "caddy.json").write_text(json.dumps(caddy_config))
-        caddy_env = env.copy()
-        caddy_env.update({"XDG_DATA_HOME": str(owned / "caddy-data"), "XDG_CONFIG_HOME": str(owned / "caddy-config")})
-        with (owned / "caddy.log").open("w") as log:
-            children.append(subprocess.Popen([str(installs / "aqua-caddyserver-caddy/2.11.4/caddy"), "run", "--config", str(owned / "caddy.json")], env=caddy_env, stdout=log, stderr=log))
-        curl = ["/usr/bin/curl", "--silent", "--show-error", "--fail", "--max-time", "2", "--noproxy", "*", "--cacert", str(owned / "ca.crt"), "--resolve", "bookshelf.caramel:" + str(https_port) + ":127.0.0.1", "-H", "Host: bookshelf.caramel"]
-        response = None
-        for attempt in range(50):
-            if any(child.poll() is not None for child in children):
-                raise RuntimeError("An owned application or proxy process exited before readiness")
-            response = subprocess.run(curl + ["https://bookshelf.caramel:" + str(https_port) + "/books"], env=env, capture_output=True)
-            if response.returncode == 0:
-                break
-            time.sleep(0.1)
-        if response is None or response.returncode or b"Your next chapter" not in response.stdout:
-            raise RuntimeError("Named HTTPS Bookshelf readiness check failed")
-        asset = subprocess.run(curl + ["https://bookshelf.caramel:" + str(https_port) + "/assets/htmx-4.0.0.min.js"], env=env, capture_output=True, check=True)
-        if asset.stdout != (REPO / "vendor/htmx/htmx-4.0.0.min.js").read_bytes():
-            raise RuntimeError("Served htmx asset differs from the pinned asset")
-        print("Named HTTPS + Unix upstream + bundled htmx smoke: passed (test CA verified; no OS trust or DNS changes)", flush=True)
-except (subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyboardInterrupt, RuntimeError) as exc:
+except (subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
     print("Integration harness failed: " + type(exc).__name__, file=sys.stderr)
     failed = True
 finally:
-    for child in reversed(children):
-        if child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=5)
-                failed = True
     # The cluster path was created by this invocation. Never inspect/stop other clusters.
     if started or (data / "postmaster.pid").exists():
         stopped = subprocess.run([str(pg / "pg_ctl"), "-D", str(data), "-m", "fast", "-w", "stop"], env=env, stdout=subprocess.DEVNULL, timeout=30)

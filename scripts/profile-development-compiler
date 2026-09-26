@@ -40,14 +40,14 @@ try:
         (prefix / "data/installs").symlink_to(installed / "data/installs", target_is_directory=True)
         (prefix / "bin").symlink_to(installed / "bin", target_is_directory=True)
         environment = {**os.environ, "CARAMEL_TOOLCHAIN_ROOT": str(prefix)}
-        controller = project / "app/controllers/home_controller.cr"
+        controller = project / "app/actions/home/show.cr"
         template = project / "app/views/home/index.html.ecr"
         stages = report["scenarios"][str(count)] = {}
         for stage in ("cold", "unchanged_warm", "template_edit", "controller_edit"):
             if stage == "template_edit":
                 template.write_text(template.read_text() + "\n<!-- compiler-profile-template -->\n")
             elif stage == "controller_edit":
-                controller.write_text(controller.read_text().replace('page(content, "Welcome")', 'page(content + "<!-- compiler-profile-controller -->", "Welcome")'))
+                controller.write_text(controller.read_text().replace('Caramel::Page.new("Welcome", content)', 'Caramel::Page.new("Welcome", content + "<!-- compiler-profile-controller -->")'))
             log = directory / (stage + ".log")
             command = [str(repo / "scripts/crystal"), "build", "src/bookshelf.cr", "-D", "caramel_development", "--stats", "--error-trace", "-o", str(directory / "application")]
             started = time.monotonic()

@@ -1,4 +1,4 @@
-# Typed models and browser inputs
+# Typed models and request contracts
 
 The Frappé workflow branch implements these application APIs over the existing database pool and bounded form parser. They are exported by `require "caramel"`. The CLI and generated-project workflow are still in progress.
 
@@ -34,25 +34,29 @@ Conditions accept declared scalar field types or nil; nil produces `IS NULL`. Va
 
 Supported fields are `String`, `Int32`, `Int64`, `Bool`, `Float64`, `Time`, and their nullable equivalents. Unsupported field types and field/validation options fail compilation. This intentionally small surface is documented in the [persistence decision](../decisions/0002-typed-persistence.md).
 
-## Browser inputs
+## Request contracts and actions
 
 ```crystal
-struct BookInput
-  include Caramel::FormInput
-  field title : String
-  field author : String
+module App::Books
+  class Update < App::ApplicationAction
+    contract do
+      field id : Int64, min: 1
+      field title : String, max: 200
+      field note : String?
+    end
+
+    def handle(contract : Contract) : Result | Caramel::Response
+      # contract.id : Int64, contract.title : String, contract.note : String?
+    end
+  end
 end
 ```
 
-`BookInput` accepts `book[title]` and `book[author]`. The default envelope strips the `Input` suffix and uses snake case for the unqualified type name; `Admin::OrderLineInput` uses `order_line`. Override it explicitly with `form_envelope "book"`.
+Fields bind by name from route parameters, then the form body, then the query; a name supplied by more than one source is a `Duplicate field` error. Body keys, and query keys on writes, that are not declared fields produce `Unknown field` errors under `_base`; unrelated GET query keys are ignored. `handle` is only called with a valid contract. Failures render 422 as the action's form (`contract_failure_page`), JSON `{"errors": ...}`, or a plain-text diagnostic depending on `Accept`. Route parameters that fail conversion or bounds answer 404 instead.
 
-Controllers call `result = parse_form(BookInput)`. A successful result has a typed `result.value : BookInput?`. A failure has no value, per-field `result.errors`, and original declared text in `result.values` for a 422 form response. Branch on `if input = result.value` before constructing or updating a model. Unlike the early design excerpt, the parser does not return a typed input unconditionally; malformed input is an ordinary result rather than a runtime type exception.
+Bodies must be URL-encoded (2 MiB cap) or multipart; multipart files are streamed to request-scoped tempfiles (64 MiB total) and bind to `Caramel::UploadedFile` fields. Other media types answer 415. The application checks the signed CSRF token (`_csrf` field or `X-CSRF-Token` header) and exact origin before dispatching any POST, PUT, PATCH or DELETE.
 
-The controller checks the signed token and exact origin **before returning either result**. Invalid CSRF raises `Caramel::Forbidden` and receives the application's 403 response. The existing body limit, media-type checks and malformed-encoding responses remain in force. Direct `Input.from_form(form)` is a conversion primitive and does not perform CSRF or authorization; browser controllers should use `parse_form`.
-
-Missing required fields, duplicate keys, and unknown/envelope-mismatched keys invalidate the result. The first value of a duplicate declared field is retained for redisplay; no typed value is produced. Unknown fields are not copied into `values`. General form errors use `_base`. Views must still escape displayed values through `Caramel::View`/`Caramel::HTML`.
-
-Inputs support the same six scalar types as models. Integers accept signed decimal text within range; floats accept finite decimal/exponent notation. Booleans accept exactly `true` or `false`. Timestamps accept RFC3339 with a timezone and become UTC. Numeric underscores, hexadecimal integers, truthy synonyms, nonfinite floats and date-only timestamps are rejected. Missing or whitespace-only nullable fields become nil; a required blank `String` remains a string for model-level presence validation. Nullable strings preserve their original whitespace when nonblank. No automatic model assignment is provided.
+Contracts support `String`, `Int32`, `Int64`, `Bool`, `Float64`, `Time` and `Caramel::UploadedFile`, optionally nilable, with `min:`/`max:` bounds for numbers and string lengths and `default:` values. Integers accept signed decimal text within range; floats accept finite decimal/exponent notation. Booleans accept exactly `true` or `false`. Timestamps accept RFC3339 with a timezone and become UTC. Numeric underscores, hexadecimal integers, truthy synonyms, nonfinite floats and date-only timestamps are rejected. Missing or whitespace-only fields become the default, nil when nilable, or an `is required` error. `contract.values` keeps the submitted text for redisplay. No automatic model assignment is provided.
 
 ## Verification and remaining gates
 
@@ -63,4 +67,4 @@ Verified on the pinned Crystal 1.21.0 / PostgreSQL 18.6 toolchain:
 - Ten model and six input compile fixtures cover valid API use and expected type/field/option failures.
 - The existing native Bookshelf named-HTTPS/Unix-upstream smoke still passes with the exported APIs. That reference app is hand-authored; this is not generated-app or browser acceptance.
 
-Run `scripts/check-model-compilation`, `scripts/check-input-compilation`, `scripts/crystal spec spec/caramel spec/latte`, and `scripts/integration --http-smoke` with the pinned toolchain. Fresh independent review remains pending: the Luna workers stopped at the account usage limit. Frappé generation, browser interaction and consumer installation remain separate acceptance gates.
+Run `scripts/check-model-compilation`, `scripts/check-contract-compilation`, `scripts/check-route-compilation`, `scripts/crystal spec spec/caramel spec/latte`, `scripts/integration` and `scripts/check-frappe-project` with the pinned toolchain. Fresh independent review remains pending: the Luna workers stopped at the account usage limit. Frappé generation, browser interaction and consumer installation remain separate acceptance gates.

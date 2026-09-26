@@ -21,6 +21,11 @@ describe "@@COLLECTION_LABEL@@" do
       App::@@MODEL@@.find(id).should_not be_nil
       shown = app.handle(HTTP::Request.new("GET", path, headers))
       shown.status.should eq(200)
+      json_headers = headers.dup
+      json_headers["Accept"] = "application/json"
+      json = app.handle(HTTP::Request.new("GET", path, json_headers))
+      json.status.should eq(200)
+      JSON.parse(json.body)["record"]["id"].as_i64.should eq(id)
 @@ASSERT_ESCAPING@@
       app.handle(HTTP::Request.new("GET", "/@@PLURAL@@", headers)).status.should eq(200)
       app.handle(HTTP::Request.new("GET", path + "/edit", headers)).status.should eq(200)
@@ -41,7 +46,7 @@ describe "@@COLLECTION_LABEL@@" do
       rejected = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(invalid)))
       rejected.status.should eq(422)
       rejected.body.should_not contain("<!DOCTYPE")
-      rejected.body.should contain("Unknown form field")
+      rejected.body.should contain("Unknown field: unexpected_field")
       headers.delete("HX-Request-Type")
       deleted = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode({"_csrf" => token, "_method" => "DELETE"})))
       deleted.status.should eq(303)

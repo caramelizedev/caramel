@@ -60,6 +60,8 @@ module Caramel::Frappe
       result["vendor/caramel/snapshot.json"] = manifest + "\n"
       result["public/assets/htmx-4.0.0.min.js"] = File.read(File.join(@framework_root, "vendor/htmx/htmx-4.0.0.min.js"))
       result["app/assets/vendor/htmx-4.0.0.min.js"] = result["public/assets/htmx-4.0.0.min.js"]
+      result["public/assets/caramel-islands.js"] = File.read(File.join(@framework_root, "src/caramel/islands.js"))
+      result["app/assets/vendor/caramel-islands.js"] = result["public/assets/caramel-islands.js"]
       result["public/assets/app.css"] = result["app/assets/stylesheets/app.css"]
       result["public/assets/app.js"] = result["app/assets/javascript/app.js"]
       result

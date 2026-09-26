@@ -11,7 +11,7 @@ describe Caramel::Frappe::NewProject do
       generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
       project = generator.create("reading-list", target)
       project.origin.should eq("https://reading-list.caramel")
-      %w(app/controllers/application_controller.cr app/controllers/home_controller.cr app/models/application_record.cr app/views/layouts/application.html.ecr app/views/home/index.html.ecr config/application.cr config/database.yml config/environment.yml config/routes.cr db/schema.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .caramel-version .env.example .gitignore README.md vendor/caramel/src/caramel.cr vendor/caramel/snapshot.json public/assets/htmx-4.0.0.min.js).each do |name|
+      %w(app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/application_record.cr app/views/layouts/application.html.ecr app/views/home/index.html.ecr config/application.cr config/database.yml config/environment.yml config/routes.cr db/schema.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .caramel-version .env.example .gitignore README.md vendor/caramel/src/caramel.cr vendor/caramel/snapshot.json public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js).each do |name|
         File.file?(File.join(target, name)).should be_true
       end
       File.exists?(File.join(target, ".env")).should be_false

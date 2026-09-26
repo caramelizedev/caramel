@@ -21,12 +21,12 @@ describe Caramel::Frappe::ResourceGenerator do
       generator = Caramel::Frappe::ResourceGenerator.new(package)
       paths = generator.generate(project, "Book", ["title:string", "author:string"], version: 20260919000001_i64)
       paths.should contain("app/models/book.cr")
-      paths.should contain("app/inputs/book_input.cr")
-      paths.should contain("app/controllers/books_controller.cr")
+      paths.should contain("app/actions/books.cr")
+      paths.should contain("app/actions/books/index.cr")
       paths.should contain("spec/requests/books_spec.cr")
       paths.should contain("db/migrations/20260919000001_create_books.cr")
       File.read(route).should contain("# My existing route notes")
-      File.read(route).should contain("router.resources(:books, App::BooksController, csrf)")
+      File.read(route).should contain(%(get "/books/:id", App::Books::Show))
       File.read(File.join(project.root, "config/paths.cr")).should contain("Caramel.resource_paths :books, :book")
       %w(index show new edit _form).each do |view|
         File.file?(File.join(project.root, "app/views/books/#{view}.html.ecr")).should be_true
@@ -60,7 +60,7 @@ describe Caramel::Frappe::ResourceGenerator do
       model = File.read(File.join(project.root, "app/models/person.cr"))
       model.should contain("field rating : Float64?")
       model.should contain("field joined_at : Time?")
-      File.read(File.join(project.root, "config/routes.cr")).should contain("App::PeopleController")
+      File.read(File.join(project.root, "config/routes.cr")).should contain("App::People::Index")
     end
   end
 end

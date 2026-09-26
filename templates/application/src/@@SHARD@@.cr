@@ -2,8 +2,10 @@ require "../config/application"
 
 command = ARGV.shift? || "help"
 if command == "routes"
-  csrf = Caramel::CSRF.new("route-inspection-only-not-a-server-secret", "https://@@NAME@@.@@SUFFIX@@")
-  App::Routes.build(csrf).routes.each { |method, path| puts "#{method.ljust(7)} #{path}" }
+  width = App::AppRouter.routes.max_of(&.path.size)
+  App::AppRouter.routes.each do |entry|
+    puts "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}#{entry.contract.empty? ? "" : "  " + entry.contract}"
+  end
   exit
 end
 unless %w(serve migrate seed).includes?(command)

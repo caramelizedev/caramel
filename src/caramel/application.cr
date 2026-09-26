@@ -2,9 +2,10 @@ require "http/server"
 require "mime"
 require "uuid"
 require "log"
-require "./router"
-require "./form"
 require "./csrf"
+require "./http/request_input"
+require "./http/request_context"
+require "./http/router"
 {% if flag?(:caramel_development) %}
   require "./development_error"
 {% end %}
@@ -19,31 +20,31 @@ module Caramel
     @authority : String
     @public_root : String?
 
-    def initialize(@router : Router, origin : String, public_root : String? = nil)
-      uri = URI.parse(origin)
-      unless uri.scheme == "https" && uri.host && uri.path.empty? && uri.user.nil? && uri.password.nil? && uri.query.nil? && uri.fragment.nil?
-        raise ArgumentError.new("Application origin must be an HTTPS origin")
-      end
-      @authority = uri.authority.not_nil!
+    def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
+      @authority = URI.parse(@csrf.origin).authority.not_nil!
       @public_root = public_root.try { |root| File.realpath(root) }
     end
 
     def handle(request : HTTP::Request) : Response
       return secure(Response.new(400, "Malformed path")) unless request.path.starts_with?("/")
-      response = if request.headers["Host"]? != @authority
-                   Response.new(421, "Unknown project host")
-                 else
-                   static_response(request) || @router.call(request)
-                 end
-      secure(response)
+      return secure(Response.new(421, "Unknown project host")) if request.headers["Host"]? != @authority
+      if static = static_response(request)
+        return secure(static)
+      end
+      input = RequestInput.read(request)
+      context = RequestContext.new(request, @csrf, input)
+      if RequestInput::BODY_METHODS.includes?(request.method)
+        raise Forbidden.new unless @csrf.valid?(request, input.csrf_token || request.headers["X-CSRF-Token"]?)
+      end
+      secure(@router.dispatch(context))
     rescue Forbidden
       secure(Response.new(403, "This form has expired or came from another site. Reload the page and try again."))
-    rescue Form::TooLarge
-      secure(Response.new(413, "Form is too large"))
-    rescue Form::UnsupportedMediaType
-      secure(Response.new(415, "Expected a URL-encoded form"))
-    rescue Form::InvalidEncoding
-      secure(Response.new(400, "Malformed form"))
+    rescue RequestInput::TooLarge
+      secure(Response.new(413, "Request body is too large"))
+    rescue RequestInput::UnsupportedMediaType
+      secure(Response.new(415, "Expected a URL-encoded or multipart form"))
+    rescue RequestInput::InvalidEncoding
+      secure(Response.new(400, "Malformed request"))
     rescue error
       request_id = UUID.random.to_s
       # Do not log arbitrary exception messages: dependency errors may include
@@ -56,6 +57,8 @@ module Caramel
       {% end %}
       headers = HTTP::Headers{"X-Request-ID" => request_id, "Cache-Control" => "no-store", "Content-Type" => "text/plain; charset=utf-8"}
       secure(Response.new(500, "Something went wrong. Reference: #{request_id}", headers))
+    ensure
+      input.try(&.cleanup)
     end
 
     def call(context : HTTP::Server::Context) : Nil

@@ -11,6 +11,8 @@ module Caramel
     COOKIE_NAME = "__Host-caramel_csrf"
     LIFETIME    = 24.hours
 
+    getter origin : String
+
     def initialize(@secret : String, @origin : String)
       raise ArgumentError.new("CSRF secret must be at least 32 bytes") if @secret.bytesize < 32
       uri = URI.parse(@origin)

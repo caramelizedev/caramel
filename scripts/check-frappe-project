@@ -108,7 +108,10 @@ with (ROOT / "environment.log").open("w") as daemon_log, (ROOT / "app.log").open
         assert len(set(values[key] for key in ("DATABASE_URL", "MIGRATION_DATABASE_URL", "SPEC_DATABASE_URL", "SPEC_MIGRATION_DATABASE_URL"))) == 4
         run([FRAPPE, "make", "resource", "Book", "title:string", "author:string"], cwd=project)
         run([FRAPPE, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], cwd=project)
-        run([FRAPPE, "routes"], cwd=project)
+        routes = run([FRAPPE, "routes"], cwd=project, capture_output=True, text=True).stdout
+        print(routes, end="", flush=True)
+        assert any(line.split() == ["GET", "/books/:id", "App::Books::Show", "id:Int64(min=1)"] for line in routes.splitlines()), routes
+        assert any(line.split() == ["PATCH", "/people/:id", "App::People::Update", "id:Int64(min=1)", "name:String", "age:Int32", "total:Int64", "active:Bool", "rating:Float64?", "joined_at:Time?"] for line in routes.splitlines()), routes
         run([FRAPPE, "migrate"], cwd=project)
         sql(values["MIGRATION_DATABASE_URL"], "CREATE TABLE dev_sentinel (value text NOT NULL); INSERT INTO dev_sentinel VALUES ('keep');")
         run([FRAPPE, "test"], cwd=project)

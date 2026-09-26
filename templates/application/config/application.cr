@@ -15,10 +15,10 @@ module App
 end
 
 require "../app/models/*"
-require "../app/inputs/*"
 require "./paths"
-require "../app/controllers/application_controller"
-require "../app/controllers/*"
+require "../app/actions/application_action"
+require "../app/actions/*"
+require "../app/actions/**"
 require "../db/migrations/*"
 require "../db/seeds"
 require "./routes"
@@ -26,7 +26,6 @@ require "./routes"
 module App
   def self.build(db : DB::Database, secret : String, origin : String) : Caramel::Application
     Caramel::Model.database = db
-    csrf = Caramel::CSRF.new(secret, origin)
-    Caramel::Application.new(Routes.build(csrf), origin, "#{__DIR__}/../public")
+    Caramel::Application.new(App::AppRouter.new, Caramel::CSRF.new(secret, origin), "#{__DIR__}/../public")
   end
 end

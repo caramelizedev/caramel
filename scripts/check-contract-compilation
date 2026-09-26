@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Verify invalid request contract declarations fail at compile time."""
+from pathlib import Path
+import subprocess
+
+REPO = Path(__file__).resolve().parents[1]
+cases = {
+    "compile_unsupported_type": "unsupported Caramel::RequestContract field type",
+    "compile_bounds_on_bool": "min/max apply only to String, Int32, Int64 and Float64 fields",
+    "compile_unknown_access": "undefined method 'admin'",
+}
+for name, error in cases.items():
+    result = subprocess.run([str(REPO / "scripts/crystal"), "build",
+                             "spec/fixtures/contracts/" + name + ".cr", "--no-codegen"],
+                            cwd=REPO, capture_output=True, text=True, timeout=90)
+    if error is None:
+        assert result.returncode == 0, name + "\n" + result.stdout + result.stderr
+    else:
+        assert result.returncode != 0 and error in result.stderr, name + "\n" + result.stdout + result.stderr
+    print("PASS: " + name)

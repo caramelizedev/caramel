@@ -1,0 +1,174 @@
+require "spec"
+require "../../src/caramel"
+
+abstract class ActionSpecAction < Caramel::Action
+  def layout(page : Caramel::Page) : String
+    "<!DOCTYPE html><html><head><title>#{Caramel::HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>"
+  end
+end
+
+class ActionSpecShow < ActionSpecAction
+  contract do
+    field id : Int64, min: 1
+  end
+
+  struct Result
+    include JSON::Serializable
+    getter id : Int64
+    getter name : String
+
+    def initialize(@id, @name)
+    end
+  end
+
+  def handle(contract : Contract) : Result | Caramel::Response
+    return Caramel::Response.new(404, "Item not found") if contract.id == 404
+    Result.new(contract.id, "Item #{contract.id}")
+  end
+
+  def render(result : Result) : Caramel::Page
+    Caramel::Page.new("Item", "<p>item #{result.id}</p>")
+  end
+end
+
+class ActionSpecPass < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    Caramel::Response.new(418, "teapot")
+  end
+end
+
+class ActionSpecCreate < ActionSpecAction
+  contract do
+    field seats : Int32, min: 1
+  end
+
+  struct Result
+    include JSON::Serializable
+    getter seats : Int32
+
+    def initialize(@seats)
+    end
+  end
+
+  def handle(contract : Contract) : Result | Caramel::Response
+    self.status = 201
+    Result.new(contract.seats)
+  end
+
+  def respond_html(result : Result) : Caramel::Response
+    redirect_to("/items/#{result.seats}")
+  end
+end
+
+class ActionSpecParts < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    partials([Caramel::Partial.new("#a", "<p>A</p>"), Caramel::Partial.new("#b", "<p>B</p>", "outerHTML")])
+  end
+end
+
+module ActionSpecApp
+  Caramel::Router.draw do
+    get "/items/:id", ActionSpecShow
+    get "/pass", ActionSpecPass
+    post "/items", ActionSpecCreate
+    get "/parts", ActionSpecParts
+  end
+end
+
+private ACTION_SPEC_CSRF = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+private ACTION_SPEC_APP  = Caramel::Application.new(ActionSpecApp::AppRouter.new, ACTION_SPEC_CSRF)
+
+private def get(path : String, headers = HTTP::Headers.new) : Caramel::Response
+  headers["Host"] = "bookshelf.caramel"
+  ACTION_SPEC_APP.handle(HTTP::Request.new("GET", path, headers))
+end
+
+private def post(body : String, headers = HTTP::Headers.new, token : String? = ACTION_SPEC_CSRF.issue) : Caramel::Response
+  headers["Host"] = "bookshelf.caramel"
+  headers["Origin"] = "https://bookshelf.caramel"
+  headers["Content-Type"] = "application/x-www-form-urlencoded"
+  if token
+    headers["Cookie"] = "#{Caramel::CSRF::COOKIE_NAME}=#{token}"
+    body = "_csrf=#{token}&#{body}" unless headers.has_key?("X-CSRF-Token")
+  end
+  ACTION_SPEC_APP.handle(HTTP::Request.new("POST", "/items", headers, body))
+end
+
+describe Caramel::Action do
+  it "negotiates a full page, an htmx fragment or JSON from one result" do
+    full = get("/items/5")
+    full.status.should eq(200)
+    full.body.should start_with("<!DOCTYPE html>")
+    full.body.should contain("<p>item 5</p>")
+    full.headers["Vary"].should eq("Accept, HX-Request, HX-Request-Type")
+    full.headers["Set-Cookie"].should start_with(Caramel::CSRF::COOKIE_NAME)
+
+    partial = get("/items/5", HTTP::Headers{"HX-Request-Type" => "partial"})
+    partial.body.should eq("<title>Item</title><p>item 5</p>")
+
+    json = get("/items/5", HTTP::Headers{"Accept" => "application/json"})
+    json.headers["Content-Type"].should eq("application/json")
+    json.headers["Vary"].should eq("Accept, HX-Request, HX-Request-Type")
+    json.headers.has_key?("Set-Cookie").should be_false
+    JSON.parse(json.body).should eq(JSON.parse(%({"id":5,"name":"Item 5"})))
+
+    htmx = get("/items/5", HTTP::Headers{"Accept" => "application/json", "HX-Request" => "true"})
+    htmx.body.should start_with("<!DOCTYPE html>")
+    get("/items/5", HTTP::Headers{"Accept" => "text/html;q=0.9, application/json"}).headers["Content-Type"].should eq("application/json")
+    get("/items/5", HTTP::Headers{"Accept" => "text/html, application/json;q=0.5"}).body.should start_with("<!DOCTYPE html>")
+  end
+
+  it "passes a Response from handle through unchanged" do
+    response = get("/pass", HTTP::Headers{"Accept" => "application/json"})
+    response.status.should eq(418)
+    response.body.should eq("teapot")
+    missing = get("/items/404", HTTP::Headers{"Accept" => "application/json"})
+    missing.status.should eq(404)
+    missing.body.should eq("Item not found")
+  end
+
+  it "renders contract failures for browsers, JSON clients and other clients" do
+    html = post("seats=0", HTTP::Headers{"Accept" => "text/html"})
+    html.status.should eq(422)
+    html.body.should contain(%(<li><code>seats</code>: must be at least 1</li>))
+    html.headers["Content-Type"].should eq("text/html; charset=utf-8")
+
+    json = post("seats=0", HTTP::Headers{"Accept" => "application/json"})
+    json.status.should eq(422)
+    json.body.should eq(%({"errors":{"seats":["must be at least 1"]}}))
+
+    text = post("seats=0&extra=1", HTTP::Headers{"Accept" => "*/*"})
+    text.status.should eq(422)
+    text.headers["Content-Type"].should eq("text/plain; charset=utf-8")
+    text.body.should eq("ERR CONTRACT_INVALID:422 at POST /items\nFIELD seats: must be at least 1\nFIELD _base: Unknown field: extra\n")
+  end
+
+  it "requires CSRF for writes and accepts the header token" do
+    post("seats=2", token: nil).status.should eq(403)
+    token = ACTION_SPEC_CSRF.issue
+    accepted = post("seats=2", HTTP::Headers{"X-CSRF-Token" => token}, token)
+    accepted.status.should eq(303)
+  end
+
+  it "redirects browsers and returns created JSON to API clients" do
+    native = post("seats=3")
+    native.status.should eq(303)
+    native.headers["Location"].should eq("/items/3")
+    htmx = post("seats=3", HTTP::Headers{"HX-Request" => "true", "Accept" => "text/html"})
+    htmx.status.should eq(200)
+    htmx.headers["HX-Location"].should eq("/items/3")
+    created = post("seats=3", HTTP::Headers{"Accept" => "application/json"})
+    created.status.should eq(201)
+    created.body.should eq(%({"seats":3}))
+  end
+
+  it "renders several targets in one response" do
+    get("/parts").body.should eq(%(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial><hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>))
+  end
+end

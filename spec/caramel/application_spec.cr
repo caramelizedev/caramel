@@ -1,12 +1,45 @@
 require "spec"
-require "../../src/caramel/application"
+require "../../src/caramel"
 require "file_utils"
+
+abstract class ApplicationSpecAction < Caramel::Action
+  def layout(page : Caramel::Page) : String
+    page.body
+  end
+end
+
+class ApplicationSpecHello < ApplicationSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    Caramel::Response.new(body: "hello")
+  end
+end
+
+class ApplicationSpecBroken < ApplicationSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    raise "database password=do-not-disclose"
+  end
+end
+
+module ApplicationSpecApp
+  Caramel::Router.draw do
+    get "/", ApplicationSpecHello
+    get "/broken", ApplicationSpecBroken
+  end
+end
+
+private def application_spec_app(root : String? = nil) : Caramel::Application
+  Caramel::Application.new(ApplicationSpecApp::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel"), root)
+end
 
 describe Caramel::Application do
   it "checks the configured Host and adds browser security headers" do
-    router = Caramel::Router.new
-    router.get("/") { |_, _| Caramel::Response.new(body: "hello") }
-    app = Caramel::Application.new(router, "https://bookshelf.caramel")
+    app = application_spec_app
     good = app.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "bookshelf.caramel"}))
     good.body.should eq("hello")
     good.headers["X-Content-Type-Options"].should eq("nosniff")
@@ -14,10 +47,8 @@ describe Caramel::Application do
   end
 
   it "returns a traceable error without exposing an exception or secrets" do
-    router = Caramel::Router.new
-    router.get("/") { |_, _| raise "database password=do-not-disclose"; Caramel::Response.new }
-    app = Caramel::Application.new(router, "https://bookshelf.caramel")
-    response = app.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    app = application_spec_app
+    response = app.handle(HTTP::Request.new("GET", "/broken", HTTP::Headers{"Host" => "bookshelf.caramel"}))
     response.status.should eq(500)
     response.body.should_not contain("do-not-disclose")
     response.headers["X-Request-ID"].should match(/\A[0-9a-f-]{36}\z/)
@@ -34,7 +65,7 @@ describe Caramel::Application do
     File.write("#{root}/secret", "private")
     File.symlink("#{root}/secret", "#{root}/public/link")
     begin
-      app = Caramel::Application.new(Caramel::Router.new, "https://bookshelf.caramel", "#{root}/public")
+      app = application_spec_app("#{root}/public")
       ["/../secret", "/%2e%2e/secret", "/link", "/.env", "/app/"].each do |path|
         app.handle(HTTP::Request.new("GET", path, HTTP::Headers{"Host" => "bookshelf.caramel"})).status.should eq(404)
       end
