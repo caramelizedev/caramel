@@ -1,0 +1,5 @@
+<label for="search-<%= mode %>-q">Search with <%= swap %></label>
+<input id="search-<%= mode %>-q" name="q" type="search" value="<%= query %>" autocomplete="off" hx-get="/probe/search/<%= mode %>" hx-trigger="input changed delay:150ms" hx-target="#search-<%= mode %>" hx-swap="<%= swap %>">
+<ul id="search-<%= mode %>-results" class="probe-results" data-query="<%= query %>">
+<% results.each do |result| %>  <li><%= result %></li>
+<% end %></ul>

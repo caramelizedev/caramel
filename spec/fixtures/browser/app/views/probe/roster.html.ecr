@@ -1,0 +1,9 @@
+<h1>Roster</h1>
+<p id="roster-note" class="probe-note">This region is not part of any response.</p>
+<p>Members: <output id="roster-count"><%= names.size %></output></p>
+<ul id="roster"><%= list %></ul>
+<form id="enroll" hx-post="/probe/roster">
+  <label for="enroll-name">Name</label>
+  <input id="enroll-name" name="name" autocomplete="off">
+  <button id="enroll-submit" type="submit">Enroll</button>
+</form>

@@ -1,91 +1,16 @@
-require "./support/unix_http"
+require "./support/latte_fixture"
 require "uri"
 require "http/params"
 
 module Caramel::Checks
-  class FrappeProject
-    getter root : String
+  class FrappeProject < LatteFixture
     getter project : String
-    getter repo : String
-    getter ports : Array(Int32)
-    getter env : Hash(String, String?)
-    getter daemon : Process?
 
     def initialize
-      @repo = REPO
       toolchain = Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the managed toolchain")
+      super("caramel-frappe-")
       @psql = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin/psql")
-      @root = Checks.private_temp("caramel-frappe-")
-      @state = File.join(@root, "state")
-      Dir.mkdir(@state, 0o700)
-      @projects = File.join(@root, "projects")
-      Dir.mkdir(@projects, 0o700)
-      @runtime = Checks.runtime_root(@state)
-      @socket = File.join(@runtime, "latte.sock")
-      @env = {} of String => String?
-      ENV.each { |key, value| @env[key] = value unless key.starts_with?("PG") || key.ends_with?("DATABASE_URL") }
-      @env["CARAMEL_HOME"] = @state
-      @env["CARAMEL_FRAMEWORK_ROOT"] = @repo
-      @frappe = File.join(@repo, "bin/frappe")
       @project = File.join(@projects, "bookshelf")
-      @daemon = nil
-      @app = nil
-      @ports = [] of Int32
-    end
-
-    def assert!(condition : Bool, message : String = "fixture assertion failed") : Nil
-      raise message unless condition
-    end
-
-    def command(argv : Array(String), *, chdir : String = @repo, timeout : Time::Span = 180.seconds, echo : Bool = true, environment : Hash(String, String?) = @env, input : String? = nil) : Caramel::Latte::ProcessResult
-      result = Checks.run(argv, chdir: chdir, env: environment, input: input, timeout: timeout)
-      if echo || !result.success?
-        STDOUT.print result.stdout
-        STDERR.print result.stderr
-      end
-      raise "Command failed (#{result.diagnostic}): #{argv.first}" unless result.success?
-      result
-    end
-
-    def attempt(argv : Array(String), *, chdir : String = @repo, timeout : Time::Span = 180.seconds, environment : Hash(String, String?) = @env) : Caramel::Latte::ProcessResult
-      Checks.run(argv, chdir: chdir, env: environment, timeout: timeout)
-    end
-
-    def environment(extra : Hash(String, String)) : Hash(String, String?)
-      merged = @env.dup
-      extra.each { |key, value| merged[key] = value }
-      merged
-    end
-
-    def rpc(method : String, path : String, body : JSON::Any? = nil) : JSON::Any
-      UnixHTTP.json!(@socket, method, path, body)
-    end
-
-    def wait_state(state : String, timeout : Time::Span = 100.seconds) : Nil
-      deadline = Time.instant + timeout
-      while Time.instant < deadline
-        raise "Fixture daemon exited" if @daemon.try(&.terminated?)
-        begin
-          document = rpc("GET", "/v1/status")
-          states = %w(postgres dns proxy).map { |name| document["services"][name]["state"].as_s }
-          return if states.all? { |item| item == state }
-          raise "Fixture services failed" if state != "stopped" && states.includes?("failed")
-        rescue ex : IO::Error | Socket::Error
-          # The socket may not exist yet during startup.
-        end
-        sleep 100.milliseconds
-      end
-      raise "Fixture services did not reach #{state}"
-    end
-
-    def local_values(directory : String) : Hash(String, String)
-      values = {} of String => String
-      File.each_line(File.join(directory, ".env")) do |line|
-        next if line.empty? || line.starts_with?('#')
-        key, value = line.split('=', 2)
-        values[key] = JSON.parse(value).as_s
-      end
-      values
     end
 
     def sql(url : String, statement : String) : String
@@ -95,27 +20,11 @@ module Caramel::Checks
       command([@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", query["host"], "-p", query["port"]? || "5432", "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')], environment: pg_env, input: statement, echo: false, timeout: 15.seconds).stdout.strip
     end
 
-    def site(name : String) : JSON::Any
-      rpc("GET", "/v1/sites")["sites"].as_a.find { |item| item["name"].as_s == name } || raise "Missing site: #{name}"
-    end
-
-    def self.wait_exit(process : Process, timeout : Time::Span, label : String) : Process::Status
-      raise "Timed out waiting for #{label}" unless Checks.wait_until(timeout, 50.milliseconds) { process.terminated? }
-      process.wait
-    end
-
     def execute(args : Array(String)) : Nil
       puts "Frappé fixture: #{@root}"
-      daemon_log = File.open(File.join(@root, "environment.log"), "w")
-      app_log = File.open(File.join(@root, "app.log"), "w")
-      cleanup_ok = false
       failed = true
       begin
-        command([File.join(@repo, "scripts/build-frappe")])
-        command([File.join(@repo, "scripts/crystal"), "build", "spec/fixtures/frappe_environment.cr", "-o", File.join(@root, "environment")])
-        @ports = [Checks.free_udp_port, Checks.free_tcp_port, Checks.free_tcp_port]
-        @daemon = Process.new(File.join(@root, "environment"), [@state] + @ports.map(&.to_s), env: @env, output: daemon_log, error: daemon_log)
-        wait_state("running")
+        start
         command([@frappe, "new", "bookshelf"], chdir: @projects)
         values = local_values(@project)
         assert!(File.info(File.join(@project, ".env")).permissions.value == 0o600)
@@ -203,52 +112,13 @@ module Caramel::Checks
         Dev.new(self, clone).check if args.includes?("--dev")
         Benchmark.new(self, edit_only: args.includes?("--edit-benchmark")).check if args.includes?("--benchmark") || args.includes?("--edit-benchmark")
 
-        selected = site("bookshelf")
-        app_dir = File.join(@runtime, "sites", selected["id"].as_s)
-        FileUtils.mkdir_p(app_dir)
-        File.chmod(app_dir, 0o700)
-        app_socket = File.join(app_dir, "app.sock")
-        app_env = environment(values.merge({"CARAMEL_ENV" => "development", "CARAMEL_SOCKET" => app_socket}))
-        @app = Process.new(File.join(@project, ".caramel/application"), ["serve"], chdir: @project, env: app_env, output: app_log, error: app_log)
-        assert!(Checks.wait_until(10.seconds, 50.milliseconds) { File.exists?(app_socket) || @app.not_nil!.terminated? } && File.exists?(app_socket), "Generated application failed to start")
-        rpc("POST", "/v1/sites/#{selected["id"].as_s}/upstream", JSON.parse({socket: app_socket}.to_json))
-        certificate = File.join(@state, "services/caddy/storage/pki/authorities/caramel/root.crt")
+        serve(@project, "bookshelf", values)
         page = command(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--max-time", "5", "--noproxy", "*", "--cacert", certificate, "--resolve", "bookshelf.caramel:#{@ports[2]}:127.0.0.1", "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{@ports[2]}/"], echo: false)
         assert!(page.stdout.includes?("A little less setup.") && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
         puts "PASS: real frappe new/setup/migrate/routes/test, clone secrets, failed-dependency recovery, source preservation, test refusal for development URL, retained development data, and generated native app over CA-verified named HTTPS"
         failed = false
       ensure
-        begin
-          if app = @app
-            Checks.stop(app, 15.seconds) unless app.terminated?
-          end
-          if daemon = @daemon
-            unless daemon.terminated?
-              begin
-                rpc("POST", "/v1/services/stop", JSON.parse("{}"))
-                wait_state("stopped", 70.seconds)
-                cleanup_ok = true
-              ensure
-                Checks.stop(daemon, 90.seconds)
-              end
-            end
-          else
-            cleanup_ok = true
-          end
-          if cleanup_ok
-            if failed
-              STDERR.puts "Services stopped; preserved failed fixture for inspection: #{@root}"
-            else
-              FileUtils.rm_rf(@runtime)
-              FileUtils.rm_rf(@root)
-            end
-          else
-            STDERR.puts "Cleanup needs inspection; preserved #{@root}"
-          end
-        ensure
-          daemon_log.close
-          app_log.close
-        end
+        finish(failed)
       end
     end
   end
