@@ -625,7 +625,8 @@ module Caramel::Latte
         AND current_setting('log_statement') = 'none'
         AND current_setting('log_min_error_statement') = 'panic'
         AND current_setting('log_parameter_max_length') = '0'
-        AND current_setting('log_parameter_max_length_on_error') = '0';
+        AND current_setting('log_parameter_max_length_on_error') = '0'
+        AND current_setting('file_copy_method') = 'clone';
       SQL
       run_psql(sql, "postgres", ADMIN_USER, admin_material.password).strip == "t"
     rescue
@@ -708,6 +709,8 @@ module Caramel::Latte
       log_min_error_statement = 'panic'
       log_parameter_max_length = 0
       log_parameter_max_length_on_error = 0
+      # STRATEGY FILE_COPY branches clone files copy-on-write (APFS clonefile).
+      file_copy_method = clone
       CONF
       config_text = File.read(config)
       managed_text = managed_block.strip

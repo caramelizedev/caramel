@@ -23,9 +23,15 @@ module Caramel::Latte
         server = Server.new(@registry, @supervisor)
         Signal::TERM.trap { server.close }
         Signal::INT.trap { server.close }
-        @supervisor.start_services
-        @supervisor.monitor
-        server.listen
+        begin
+          @supervisor.start_services
+          @supervisor.monitor
+          server.listen
+        ensure
+          # Exit abandons in-flight fibers, including a guarded clone whose
+          # own release would never run.
+          @supervisor.release_guards
+        end
         # Daemon shutdown releases only IPC. Managed shared services survive
         # and are adopted on restart. Explicit Stop Services stops those too.
       end

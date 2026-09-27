@@ -1,4 +1,5 @@
 require "./support/unix_http"
+require "../../src/latte/postgres"
 
 module Caramel::Checks::LatteDaemon
   extend self
@@ -53,6 +54,30 @@ module Caramel::Checks::LatteDaemon
     Process.new([File.join(Checks::REPO, "bin/latte"), "daemon"], env: environment, output: log, error: log, input: Process::Redirect::Close)
   end
 
+  # Runs *sql* as Latte's PostgreSQL administrator over the private socket.
+  private def admin(root : String, runtime : String, sql : String) : String
+    toolchain = Caramel::Latte::Toolchain.new
+    password = JSON.parse(File.read(File.join(root, "secrets/postgres-admin.json")))["password"].as_s
+    passfile = File.join(root, "check-admin.pgpass")
+    File.write(passfile, "*:*:*:#{Caramel::Latte::Postgres::ADMIN_USER}:#{password}\n", perm: 0o600)
+    result = Checks.run([toolchain.psql, "-X", "-v", "ON_ERROR_STOP=1", "-A", "-t", "-h", File.join(runtime, "postgres"), "-U", Caramel::Latte::Postgres::ADMIN_USER, "-d", "postgres"],
+      env: toolchain.environment({"PGPASSFILE" => passfile}), input: sql, timeout: 10.seconds)
+    raise "Administrator query failed: #{result.stderr}" unless result.success?
+    result.stdout.strip
+  ensure
+    File.delete?(passfile) if passfile
+  end
+
+  # Leaves *database* the way a guard interrupted before its release would.
+  private def strand_guard(root : String, runtime : String, database : String) : Nil
+    admin(root, runtime, "ALTER DATABASE #{Caramel::Latte::Postgres.quote_identifier(database)} WITH ALLOW_CONNECTIONS false;")
+    raise "Could not disable connections to #{database}" unless connections_allowed(root, runtime, database) == "f"
+  end
+
+  private def connections_allowed(root : String, runtime : String, database : String) : String
+    admin(root, runtime, "SELECT datallowconn FROM pg_database WHERE datname = #{Caramel::Latte::Postgres.quote_literal(database)};")
+  end
+
   def main : Int32
     root = Checks.private_temp("latte-daemon-")
     runtime = Checks.runtime_root(root)
@@ -68,10 +93,20 @@ module Caramel::Checks::LatteDaemon
       site = request(socket, "POST", "/v1/sites", JSON.parse({name: "bookshelf", directory: root}.to_json))["site"]
       dns_ready!(site["domain"].as_s)
       before = caddy_pid(root) || raise "Caddy has no process record after startup"
-      process.terminate(graceful: false)
-      process.wait
+      database = Caramel::Latte::Postgres.database_names(site["id"].as_s).development
+      strand_guard(root, runtime, database)
+      process.terminate
+      raise "Daemon did not exit cleanly on SIGTERM" unless process.wait.success?
+      raise "SIGTERM left #{database} refusing connections" unless connections_allowed(root, runtime, database) == "t"
       process = launch(root, log, environment)
       wait_state(socket, "running")
+      strand_guard(root, runtime, database)
+      process.terminate(graceful: false)
+      process.wait
+      raise "A killed daemon cannot release guards" unless connections_allowed(root, runtime, database) == "f"
+      process = launch(root, log, environment)
+      wait_state(socket, "running")
+      raise "Restart after SIGKILL left #{database} refusing connections" unless connections_allowed(root, runtime, database) == "t"
       after = caddy_pid(root) || raise "Caddy has no process record after daemon restart"
       raise "Daemon restart should adopt its verified service" unless before == after
       raise "Site registry was not preserved" unless request(socket, "GET", "/v1/sites")["sites"].as_a.first["id"] == site["id"]
@@ -104,12 +139,16 @@ module Caramel::Checks::LatteDaemon
       request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
       wait_state(socket, "stopped")
       raise "PostgreSQL cluster was not retained" unless File.exists?(File.join(root, "services/postgres/18/data/PG_VERSION"))
-      puts "PASS: daemon singleton, crash recovery, service adoption, proxy recovery, CA/registry persistence, native menu and explicit stop"
+      puts "PASS: daemon singleton, crash recovery, service adoption, guard release on SIGTERM and on restart after SIGKILL, proxy recovery, CA/registry persistence, native menu and explicit stop"
       0
     rescue ex
       STDERR.puts ex.message
       1
     ensure
+      # A failure while the daemon is down would otherwise leave services running.
+      if process && process.terminated? && File.exists?(File.join(root, "services/postgres/18/data/postmaster.pid"))
+        process = launch(root, log, environment)
+      end
       if process && !process.terminated?
         begin
           # A failed assertion can land during automatic recovery; wait for

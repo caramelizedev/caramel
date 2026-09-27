@@ -6,6 +6,7 @@ require "./tools"
 require "./latte_client"
 require "./site_log"
 require "../latte/project_status"
+require "../latte/watcher"
 
 module Caramel::Frappe
   class DevSession
@@ -27,13 +28,19 @@ module Caramel::Frappe
     @open_browser = false
     @retry_at : Time::Instant? = nil
     @binary : String? = nil
+    # The newest confirmed source fingerprint not yet handed to a build; while
+    # set, any running check or build is obsolete.
+    @pending : String? = nil
     @id : String
     @directory = ""
     @socket = ""
 
-    def initialize(@project : Project, @tools : Tools, @client : LatteClient, @values : Hash(String, String), @output : IO = STDOUT, @error : IO = STDERR)
+    # *runtime_url* replaces the application's DATABASE_URL, e.g. with a
+    # Latte branch's runtime URL for `frappe dev --branch`.
+    def initialize(@project : Project, @tools : Tools, @client : LatteClient, @values : Hash(String, String), @output : IO = STDOUT, @error : IO = STDERR, *, @runtime_url : String? = nil)
       @id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
       secrets = @values.select { |key, _| key.matches?(/SECRET|PASSWORD|TOKEN|URL/) }.values
+      @runtime_url.try { |url| secrets << url }
       @gateway = DevGateway.new(@project.origin, secrets)
     end
 
@@ -75,58 +82,68 @@ module Caramel::Frappe
       @registered = true
       @client.set_upstream(@id, @socket)
       files = DevFiles.new(@project.root)
-      files.publish_assets
-      observed = files.snapshot
-      pending : String? = observed.source
-      changed_at = Time.instant - 1.second
-      @output.puts("Watching #{@project.name} at #{@project.origin}. Ctrl-C stops this project.")
-      @output.flush
-      until @stopping
-        @retirement.check!
-        cleanup_binaries if @cleanup_pending && @retirement.empty?
-        begin
-          current = files.snapshot
-          if current.source != observed.source
-            pending = current.source
-            changed_at = Time.instant
-            @retry_at = nil
-            @gateway.building
-            @compiler.try(&.stop)
+      # Watching starts before the first snapshot so no edit falls between them.
+      watcher = Latte::Watcher.new(@project.root, DevFiles::WATCHED)
+      begin
+        files.publish_assets
+        observed = files.snapshot
+        @pending = observed.source
+        changed_at = Time.instant - 1.second
+        @output.puts("Watching #{@project.name} at #{@project.origin}. Ctrl-C stops this project.")
+        @output.flush
+        until @stopping
+          @retirement.check!
+          cleanup_binaries if @cleanup_pending && @retirement.empty?
+          begin
+            # A kernel event is only a hint: hashing confirms a real change and
+            # whether it touched sources, assets or both.
+            if watcher.changed?(100.milliseconds)
+              current = files.snapshot
+              if current.source != observed.source
+                @pending = current.source
+                changed_at = Time.instant
+                @retry_at = nil
+                @gateway.building
+                @compiler.try(&.stop)
+              end
+              if current.assets != observed.assets
+                files.publish_assets
+                current = files.snapshot
+                @gateway.assets_changed
+              end
+              observed = current
+              if @files_failed
+                @pending = current.source
+                changed_at = Time.instant - 1.second
+                @files_failed = false
+              end
+            end
+            if !@busy && (source = @pending) && Time.instant - changed_at >= 200.milliseconds
+              @pending = nil
+              launch_build(source)
+            elsif !@busy && (retry_at = @retry_at) && Time.instant >= retry_at && (binary = @binary)
+              @retry_at = nil
+              launch_boot(binary)
+            end
+            if !@busy && @gateway.state == "ready" && (application = @application) && !application.running?
+              @gateway.failed("Application exited. Fix the problem and save a source file to restart.\n#{application.output.contents}")
+            end
+          rescue ex
+            @files_failed = true
+            @gateway.failed("Development files need attention: #{ex.message}") unless @gateway.state == "failed"
+            sleep 100.milliseconds
           end
-          if current.assets != observed.assets
-            files.publish_assets
-            current = files.snapshot
-            @gateway.assets_changed
-          end
-          observed = current
-          if @files_failed
-            pending = current.source
-            changed_at = Time.instant - 1.second
-            @files_failed = false
-          end
-          if !@busy && (source = pending) && Time.instant - changed_at >= 200.milliseconds
-            pending = nil
-            launch_build(source, files)
-          elsif !@busy && (retry_at = @retry_at) && Time.instant >= retry_at && (binary = @binary)
-            @retry_at = nil
-            launch_boot(binary)
-          end
-          if !@busy && @gateway.state == "ready" && (application = @application) && !application.running?
-            @gateway.failed("Application exited. Fix the problem and save a source file to restart.\n#{application.output.contents}")
-          end
-        rescue ex
-          @files_failed = true
-          @gateway.failed("Development files need attention: #{ex.message}") unless @gateway.state == "failed"
         end
-        sleep 100.milliseconds
+      ensure
+        watcher.close
       end
     end
 
-    private def launch_build(source : String, files : DevFiles) : Nil
+    private def launch_build(source : String) : Nil
       @busy = true
       spawn do
         begin
-          build(source, files)
+          build(source)
         rescue ex
           @gateway.failed("Development build failed: #{ex.message}") unless @stopping
         ensure
@@ -148,7 +165,7 @@ module Caramel::Frappe
       end
     end
 
-    private def build(fingerprint : String, files : DevFiles) : Nil
+    private def build(fingerprint : String) : Nil
       @gateway.building
       started = Time.instant
       current = Project.load(@project.root)
@@ -161,20 +178,24 @@ module Caramel::Frappe
       metadata = File.join(directory, "build.json")
       cached = cached?(metadata, binary, fingerprint)
       unless cached
+        # Tier 1: semantic feedback before paying for code generation.
+        checked = Time.instant
+        command = compile(["--no-codegen"], "check")
+        return if @stopping || @pending
+        elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
+        unless command.status.try(&.success?)
+          @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
+          @output.puts("Type check failed in #{elapsed} ms")
+          @output.flush
+          return
+        end
+        @output.puts("Type check passed in #{elapsed} ms")
         temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
         begin
           @output.puts("Building #{@project.name}…")
           @output.flush
-          @compiler_log.try(&.mark("build #{@project.name}"))
-          command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", temporary], @tools.environment, @project.root, @error, log: @compiler_log)
-          @compiler = command
-          deadline = Time.instant + 180.seconds
-          while command.running? && !@stopping && Time.instant < deadline
-            sleep 50.milliseconds
-          end
-          command.stop if command.running?
-          @compiler = nil
-          return if @stopping || files.snapshot.source != fingerprint
+          command = compile(["-o", temporary], "build")
+          return if @stopping || @pending
           unless command.status.try(&.success?)
             @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
             return
@@ -193,7 +214,7 @@ module Caramel::Frappe
         end
       end
       @binary = binary
-      return if @stopping || files.snapshot.source != fingerprint
+      return if @stopping || @pending
       if boot(binary)
         elapsed = (Time.instant - started).total_milliseconds.round.to_i64
         @output.puts("Build ready#{cached ? " (cached)" : ""} in #{elapsed} ms · #{@project.origin}")
@@ -202,12 +223,28 @@ module Caramel::Frappe
       end
     end
 
+    # Runs the dev build command with *arguments* until it exits, the session
+    # stops, a newer source change supersedes it, or 180 seconds pass.
+    private def compile(arguments : Array(String), event : String) : DevCommand
+      @compiler_log.try(&.mark("#{event} #{@project.name}"))
+      command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace"] + arguments, @tools.environment, @project.root, @error, log: @compiler_log)
+      @compiler = command
+      deadline = Time.instant + 180.seconds
+      while command.running? && !@stopping && !@pending && Time.instant < deadline
+        sleep 50.milliseconds
+      end
+      command.stop if command.running?
+      @compiler = nil
+      command
+    end
+
     private def boot(binary : String) : Bool
       return false if @stopping
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
       # Request serving receives only the runtime role, never migration/spec credentials.
       values = @values.reject { |key, _| key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL" }
-      values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "CARAMEL_EXPECTED_DATABASE_URL" => @values["DATABASE_URL"]})
+      database = @runtime_url || @values["DATABASE_URL"]
+      values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "DATABASE_URL" => database, "CARAMEL_EXPECTED_DATABASE_URL" => database})
       @app_log.try(&.mark("start #{@project.name}"))
       candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, @output, log: @app_log)
       accepted = false

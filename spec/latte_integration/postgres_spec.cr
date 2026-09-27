@@ -81,6 +81,7 @@ describe "Latte managed PostgreSQL" do
       admin_query("SELECT current_setting('log_parameter_max_length');", service, paths, toolchain, root).strip.should eq("0")
       admin_query("SELECT current_setting('log_parameter_max_length_on_error');", service, paths, toolchain, root).strip.should eq("0")
       db.query_one("SELECT rolconnlimit FROM pg_roles WHERE rolname = current_user", as: Int32).should eq(1)
+      db.query_one("SHOW file_copy_method", as: String).should eq("clone")
     ensure
       db.close
     end

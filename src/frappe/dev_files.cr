@@ -5,19 +5,23 @@ require "./project"
 module Caramel::Frappe
   class DevFiles
     record Snapshot, source : String, assets : String
+    SOURCE_TREES = %w(src config db app vendor/caramel/src)
+    SOURCE_FILES = %w(shard.yml shard.lock .caramel-version .env)
+    # Every path whose change can alter a snapshot (app/assets is inside app).
+    WATCHED = SOURCE_TREES + SOURCE_FILES + %w(public)
 
     def initialize(@root : String)
     end
 
     def snapshot : Snapshot
       source = {} of String => String
-      %w(src config db app vendor/caramel/src).each do |directory|
+      SOURCE_TREES.each do |directory|
         tree(directory).each do |path, hash|
           next if path.starts_with?("app/assets/")
           source[path] = hash
         end
       end
-      %w(shard.yml shard.lock .caramel-version .env).each do |path|
+      SOURCE_FILES.each do |path|
         source[path] = digest(File.join(@root, path)) if File.file?(File.join(@root, path))
       end
       Snapshot.new(signature(source), signature(tree("app/assets").merge(tree("public"))))

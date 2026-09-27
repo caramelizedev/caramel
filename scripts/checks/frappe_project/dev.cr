@@ -34,10 +34,11 @@ module Caramel::Checks
       raise "Timed out waiting for #{name}: #{status}\n#{body[0, Math.min(3000, body.size)]}"
     end
 
-    private def start(directory : String, name : String) : Process
+    private def start(directory : String, name : String, runtime_url : String? = nil) : Process
       log = File.open(File.join(@fixture.root, "#{name}-dev.log"), "w")
       @logs << log
-      process = Process.new(@executable, [directory], chdir: directory, env: @fixture.env, output: log, error: log)
+      environment = runtime_url ? @fixture.env.merge({"CARAMEL_DEV_RUNTIME_URL" => runtime_url}) : @fixture.env
+      process = Process.new(@executable, [directory], chdir: directory, env: environment, output: log, error: log)
       @processes << process
       process
     end
@@ -69,7 +70,10 @@ module Caramel::Checks
         duplicate = p.attempt([@executable, project], chdir: project, timeout: 20.seconds)
         assert!(!duplicate.success? && duplicate.stderr.includes?("already running"))
 
-        start(@clone, "bookshelf-clone")
+        # Taken before the clone migrates, this branch keeps its pending migration.
+        branch_url = p.command([File.join(p.repo, "bin/frappe"), "db", "branch", "create", "unmigrated"], chdir: @clone, echo: false).stdout.strip
+        assert!(branch_url.starts_with?("postgresql://") && branch_url.includes?("_unmigrated?"), "branch create did not print a runtime URL")
+        clone_session = start(@clone, "bookshelf-clone")
         wait_for("bookshelf-clone") { |code, content| code == 503 && content.includes?("Pending migrations") }
         p.command([File.join(p.repo, "bin/frappe"), "migrate"], chdir: @clone)
         wait_for("bookshelf-clone") { |code, content| code == 200 && content.includes?("A little less setup.") }
@@ -98,7 +102,7 @@ module Caramel::Checks
         listed = p.command([File.join(p.repo, "bin/frappe"), "sites"], echo: false).stdout
         assert!(listed.lines.any? { |line| line.includes?("bookshelf ") && line.includes?("build-error (terminal)") }, listed)
         compiler_log = p.command([File.join(p.repo, "bin/frappe"), "logs", "compiler"], chdir: project, echo: false).stdout
-        assert!(compiler_log.includes?("app/actions/home/show.cr") && compiler_log.includes?("build bookshelf"), compiler_log)
+        assert!(compiler_log.includes?("app/actions/home/show.cr") && compiler_log.includes?("check bookshelf") && compiler_log.includes?("build bookshelf"), compiler_log)
         application_log = p.command([File.join(p.repo, "bin/frappe"), "logs"], chdir: project, echo: false).stdout
         assert!(application_log.includes?("start bookshelf"), application_log)
         p.command([File.join(p.repo, "scripts/build-latte-menu")])
@@ -109,6 +113,21 @@ module Caramel::Checks
         assert!(request("bookshelf-clone")[0] == 200)
         File.write(controller, original)
         wait_for("bookshelf") { |code, content| code == 200 && content.includes?("A little less setup.") }
+        log_path = File.join(p.root, "bookshelf-dev.log")
+        builds = File.read(log_path).scan("Building bookshelf").size
+        failures = File.read(log_path).scan(/Type check failed in \d+ ms/).size
+        passes = File.read(log_path).scan(/Type check passed in \d+ ms/).size
+        File.write(controller, original.sub("def handle(contract : Contract)\n", "def handle(contract : Contract)\n      tier_one_probe = 1 + \"two\"\n"))
+        body = wait_for("bookshelf") { |code, content| code == 503 && content.includes?("app/actions/home/show.cr") }
+        assert!(body.includes?("to &#39;Int32#+&#39;") && body.includes?("not String"), body[Math.max(0, body.size - 3000)..])
+        assert!(Checks.wait_until(5.seconds, 50.milliseconds) { File.read(log_path).scan(/Type check failed in \d+ ms/).size == failures + 1 }, "type error did not print Type check failed")
+        assert!(File.read(log_path).scan("Building bookshelf").size == builds, "type error reached code generation")
+        assert!(site("bookshelf")["state"].as_s == "build-error")
+        File.write(controller, original + "\n# Tier-1 recovery proof\n")
+        wait_for("bookshelf") { |code, content| code == 200 && content.includes?("A little less setup.") }
+        assert!(File.read(log_path).scan(/Type check passed in \d+ ms/).size > passes, "fixed source did not print Type check passed")
+        assert!(File.read(log_path).scan("Building bookshelf").size == builds + 1, "fixed source did not build once")
+        puts "PASS: Tier-1 type check shows a planted type error without code generation, then the fix type-checks and builds"
         diagnostic_headers = ["X-Diagnostic-Proof: 1"]
         File.write(controller, original.sub("def handle(contract : Contract)\n", "def handle(contract : Contract)\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\"\n"))
         assert!(File.read(controller) != original)
@@ -122,12 +141,12 @@ module Caramel::Checks
         assert!(status == 200 && JSON.parse(state)["generation"].as_i64 > initial_generation)
 
         source = File.join(project, "app/assets/stylesheets/app.css")
-        log_path = File.join(p.root, "bookshelf-dev.log")
         before = File.read(log_path).scan("Build ready").size
+        checks = File.read(log_path).scan("Type check").size
         File.write(source, File.read(source) + "\n/* dev-asset-refresh-proof */\n")
         assert!(Checks.wait_until(8.seconds, 100.milliseconds) { request("bookshelf", "/assets/app.css")[1].includes?("dev-asset-refresh-proof") }, "asset changes did not publish")
         sleep 500.milliseconds
-        assert!(File.read(log_path).scan("Build ready").size == before, "CSS triggered a Crystal compile")
+        assert!(File.read(log_path).scan("Build ready").size == before && File.read(log_path).scan("Type check").size == checks, "CSS triggered a Crystal compile")
         destination = File.join(project, "public/assets/app.css")
         File.write(destination, "A public edit that must be preserved")
         wait_for("bookshelf") { |code, content| code == 503 && content.includes?("Asset output conflict") }
@@ -177,6 +196,12 @@ module Caramel::Checks
         assert!(body.split("<details>")[0].includes?("app/actions/home/show.cr:"), body[0, Math.min(16000, body.size)])
         assert!(File.file?(debug_files[0]))
         assert!(!File.read(log_path).includes?("Build ready (cached)"))
+        finish(clone_session)
+        branched = start(@clone, "bookshelf-clone", runtime_url: branch_url)
+        wait_for("bookshelf-clone") { |code, content| code == 503 && content.includes?("Pending migrations") }
+        finish(branched)
+        p.command([File.join(p.repo, "bin/frappe"), "db", "branch", "delete", "unmigrated"], chdir: @clone, echo: false)
+        puts "PASS: a runtime URL override runs the migrated clone against its unmigrated Latte branch, whose pending migration shows"
         puts "PASS: runtime application locations, cached traces, missing debug-file recovery, and live CLI/native menu state"
         puts "PASS: cached restart, abrupt terminal death cleanup, stale socket recovery, and asset-conflict recovery"
         puts "PASS: watched native builds, same-origin diagnostics/recovery, pending-migration recovery, authenticated refresh, CSS without compilation, duplicate session refusal, and independent project shutdown"

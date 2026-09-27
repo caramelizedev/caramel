@@ -117,6 +117,14 @@ module Caramel::Latte
       end
     end
 
+    # Re-allows connections to every Caramel database a guard disabled. Runs at
+    # daemon exit; startup releases them again after any crash.
+    def release_guards : Nil
+      @postgres.release_guards if @postgres.running?
+    rescue ex
+      STDERR.puts("Latte guard release: #{ex.class}: #{ex.message}")
+    end
+
     def register(name : String, directory : String, suffix : String) : Site
       require_ready!
       @lock.synchronize do
