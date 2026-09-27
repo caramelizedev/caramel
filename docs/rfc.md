@@ -100,7 +100,7 @@
 
 # RFC-0001: Caramel Core (Runtime, Routing, & Hypermedia Engine)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0003](decisions/0003-core-routing-and-contracts.md), [ADR 0004](decisions/0004-htmx4-fragment-negotiation.md) and [ADR 0005](decisions/0005-island-props-helper.md))
 
 **Classification:** Foundational Architecture
 
@@ -116,94 +116,78 @@ Caramel Core provides an opinionated, statically compiled full-stack runtime wri
 
 #### 2.1. Compile-Time Macro Router (`Caramel::Router`)
 
-Routes are registered inside a `Caramel::Router.draw` block. When a route contains dynamic segment tokens (`:param_name`), the macro engine inspects the target Action’s nested `Contract` struct using Crystal's macro introspection methods (`@type.constant("Contract").instance_vars`).
-
-* **Verification Rule:** If a route declares `/:team_id` and the Action’s `Contract` lacks an instance variable `team_id`, or if the types are incompatible, compilation terminates immediately via `{{ raise }}`.
-* **Dispatch Table:** The router expands into an inlined, non-allocating radix tree dispatch method without runtime regex evaluation.
+Routes are declared once in a `Caramel::Router.draw` block. Each declaration is a verb (`get`, `post`, `put`, `patch` or `delete`), a literal path and an Action constant. Dynamic segments are `:snake_case` tokens. Every `field` in an Action's `contract` block records a compile-time constant (`CARAMEL_FIELD_<NAME>`: name, type, nilability, default). The router macro reads those constants to verify each route against its Action ([ADR 0003](decisions/0003-core-routing-and-contracts.md)).
 
 ```crystal
-# src/caramel/http/router.cr
-module Caramel::Router
-  macro draw(&block)
-    class AppRouter
-      def call(context : HTTP::Server::Context)
-        path = context.request.path
-        method = context.request.method
-
-        {{ block.body }}
-
-        context.response.status_code = 404
-        context.response.print("Not Found")
-        context
-      end
-    end
-  end
-
-  macro route(http_method, path, action)
-    {% tokens = path.split("/").select { |t| t.starts_with?(":") }.map { |t| t.gsub(/^:/, "") } %}
-
-    {% unless action.resolve? %}
-      {{ raise "Compile Error: Action '#{action}' is undefined." }}
-    {% end %}
-
-    {% contract = action.resolve.constant("Contract") %}
-    {% unless contract %}
-      {{ raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block." }}
-    {% end %}
-
-    {% contract_fields = contract.instance_vars.map(&.name.stringify) %}
-    {% for token in tokens %}
-      {% unless contract_fields.includes?(token) %}
-        {{ raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{token.id}'\nAction: '#{action.id}::Contract' is missing 'field #{token.id} : Type'\n" }}
-      {% end %}
-    {% end %}
-
-    if method == {{ http_method }} && path_matches?({{ path }}, path)
-      params = extract_params({{ path }}, path, context)
-      contract_instance = {{ action }}::Contract.from_hash(params)
-      action_instance = {{ action }}.new(context)
-
-      if contract_instance.valid?
-        return action_instance.handle(contract_instance)
-      else
-        return action_instance.render_contract_failure(contract_instance)
-      end
-    end
+# config/routes.cr
+module App
+  Caramel::Router.draw do
+    get "/teams/new", Teams::New
+    get "/teams/:team_id", Teams::Show
+    patch "/teams/:team_id", Teams::Update
   end
 end
-
 ```
+
+* **Verification Rules:** Compilation stops with the route's source location and a one-line remediation in each of these cases:
+  * The Action is undefined, does not inherit from `Caramel::Action`, or lacks an explicit `contract do ... end` block. An empty block is allowed.
+  * A route declares `:team_id` and the contract has no `field team_id`.
+  * The bound field is not a non-nilable `String`, `Int32` or `Int64` without a default.
+  * A path segment is malformed, a parameter repeats, or the path exceeds 32 segments.
+  * Two routes match the same requests, or routes overlap ambiguously (§3).
+* **Dispatch Table:** `draw` generates an `AppRouter` class that holds the verified route table, with one generated method per route. At boot the table becomes a segment trie. Static children win over the parameter child, and matching backtracks, so `/teams/new/members` still reaches `/teams/:team_id/members`.
+  * Matching walks byte offsets in a stack-allocated `Segments` value. It evaluates no regular expression and allocates nothing.
+  * Binding then decodes only the matched parameters, parses the contract and calls the route's method.
+  * Unknown paths answer 404. Known paths requested with another verb answer 405 with an `Allow` header. `HEAD` reuses `GET` without a body.
+* **Route Listing:** `AppRouter.routes` returns every route with its contract summary, which `frappe routes` prints.
 
 #### 2.2. Request Contracts (`Caramel::RequestContract`)
 
-Input validation is decoupled from the database layer. All query params, route parameters, and URL-encoded or multipart bodies bind to a typed contract struct that performs coercion, bounds checking, and error aggregation; route matching itself allocates nothing.
+Input validation is decoupled from the database layer. Route parameters, the query and URL-encoded or multipart bodies bind by name to a typed contract struct. The struct coerces values, checks bounds and aggregates errors. Route matching itself allocates nothing.
 
 ```crystal
-# src/caramel/contracts/request_contract.cr
-abstract struct Caramel::RequestContract
-  getter errors = Hash(String, Array(String)).new
-
-  def valid? : Bool
-    @errors.empty?
+# app/actions/teams/update.cr
+struct Teams::Update < ApplicationAction
+  contract do
+    field team_id : Int64, min: 1
+    field name : String, max: 80
+    field seats : Int32, min: 1, default: 5
+    field billing_email : String?
+    field logo : Caramel::UploadedFile?
   end
 
-  macro schema(&block)
-    {{ block.body }}
-  end
-
-  macro field(decl, min = nil, max = nil, default = nil)
-    property {{ decl }} {% if default != nil %} = {{ default }} {% end %}
+  def handle(contract : Contract)
+    # contract.team_id : Int64, contract.billing_email : String?
   end
 end
-
 ```
+
+* **Types:** Fields are `String`, `Int32`, `Int64`, `Float64`, `Bool`, `Time` (RFC 3339 with a zone, normalised to UTC) or `Caramel::UploadedFile`, each optionally nilable.
+* **Options:** `min:` and `max:` bound numbers and string lengths. `default:` fills a missing or blank field. An unsupported type or option fails compilation at the declaration.
+* **Binding errors:**
+  * A name supplied by more than one source is a `Duplicate field` error.
+  * A body key that no field declares is an `Unknown field` error. So is an undeclared query key on a write.
+  * A missing required field is `is required`.
+* **Parsing and failure:** `Contract.parse(input)` returns the contract with every error aggregated. The router calls `handle` only with a valid contract. Otherwise the Action answers 422 through content negotiation (§2.5), as one of:
+  * its own HTML form page;
+  * `{"errors": …}` for JSON clients;
+  * MRDP text for other clients.
+
+  A route parameter that fails conversion or bounds answers 404 instead. `contract.values` keeps the submitted text so a form can re-render it.
 
 #### 2.3. Hypermedia Egress (htmx 4 + Idiomorph)
 
-The default presentation engine targets **htmx 4**:
+The default presentation engine targets **htmx 4**, bundled locally with every generated application:
 
-* **Morph Streaming:** Responses use built-in idiomorph swapping (`hx-swap="innerMorph"`) to preserve DOM focus and scroll position.
-* **Multi-Target Ingestion (`hx-partial`):** A single controller invocation can target multiple disjoint elements on the page in a single round-trip:
+* **Morph Swaps:** `Caramel::Partial` and `Action#morph` default to `innerMorph`. The generated layout inherits `hx-swap="innerMorph"` for boosted navigation. Swaps therefore preserve DOM focus, the caret and scroll position.
+* **Multi-Target Ingestion (`hx-partial`):** A single action invocation can target multiple disjoint elements on the page in one round trip. `partials` renders one `<hx-partial>` per target, and htmx 4 swaps each into its own target:
+
+```crystal
+partials [
+  Caramel::Partial.new("#team-roster", view("teams/_roster", team: team)),
+  Caramel::Partial.new("#seat-counter", "<span>14 / 20 Seats Used</span>", swap: "innerHTML"),
+]
+```
 
 ```html
 <hx-partial hx-target="#team-roster" hx-swap="innerMorph">
@@ -212,37 +196,58 @@ The default presentation engine targets **htmx 4**:
 <hx-partial hx-target="#seat-counter" hx-swap="innerHTML">
   <span>14 / 20 Seats Used</span>
 </hx-partial>
-
 ```
+
+`morph "#team-roster", with: html` is the one-target form. `scripts/check browser` drives Safari through a live application to verify focus and scroll preservation and multi-target ingestion.
 
 #### 2.4. The Island Escape Hatch (`Caramel Islands`)
 
-To prevent the "htmx-only complexity cliff" when developers need rich client-side interactivity (spreadsheets, canvas tools, drag-and-drop workflow builders), Caramel Core provides official Web Component wrappers. These components receive server-rendered data attributes and isolate client-side frameworks without turning the application into an SPA:
+Rich client-side interactivity can hit an "htmx-only complexity cliff": spreadsheets, canvas tools, drag-and-drop workflow builders. To avoid it, Caramel Core provides official Web Component wrappers. They receive server-rendered props and isolate client-side code without turning the application into an SPA ([ADR 0005](decisions/0005-island-props-helper.md)):
 
 ```html
 <div class="canvas-container">
   <h2>Workflow Designer</h2>
-  <caramel-island 
-    component="WorkflowCanvas" 
-    props="<%= { nodes: workflow.nodes, edges: workflow.edges }.to_json %>">
-  </caramel-island>
+  <%= island("WorkflowCanvas", {nodes: workflow.nodes, edges: workflow.edges}) %>
 </div>
-
 ```
+
+```js
+// app/assets/javascript/app.js
+CaramelIslands.define("WorkflowCanvas", (element, props) => {
+  const canvas = drawCanvas(element, props);
+  return { update: (next) => canvas.load(next), unmount: () => canvas.destroy() };
+});
+```
+
+`island` validates the PascalCase name and serializes and escapes `props` exactly once. It emits `<caramel-island component="WorkflowCanvas" props="…" hx-morph-skip-children>`. The element's lifecycle:
+
+* **Mount:** The element mounts once it is both connected and registered, in either order. Until then it is `data-island-state="pending"`.
+* **Update:** A morph that changes `props` calls `update(props)` and leaves client-rendered children untouched.
+* **Unmount:** Removing the element calls `unmount`.
+* **Errors:** Invalid props or a throwing mount set `data-island-state="error"` and dispatch `caramel:island-error`.
 
 #### 2.5. Dual Egress Protocol
 
-Every Action automatically performs content negotiation based on inbound headers:
+Every Action negotiates its egress from inbound headers ([ADR 0004](decisions/0004-htmx4-fragment-negotiation.md)):
 
-1. `HX-Request: true` $\to$ Returns the compiled HTML fragment / `<hx-partial>`.
-2. `Accept: application/json` $\to$ Bypasses HTML generation entirely, serializing the Action's assigned internal response struct directly to JSON for native mobile clients or external consumers.
+1. `HX-Request-Type: partial` $\to$ returns the compiled HTML fragment (the page body with its `<title>`, which htmx extracts) or `<hx-partial>` blocks.
+   * htmx 4 sends `HX-Request: true` on every request.
+   * It sends `HX-Request-Type: full` when it targets `<body>` or uses `hx-select`, and those requests receive the full document.
+   * Redirects answer htmx requests with `HX-Location`.
+2. `Accept: application/json` preferred over `text/html` by q-value, on a request without `HX-Request` $\to$ bypasses HTML generation entirely. The value `handle` returned is serialized directly to JSON for native mobile clients or external consumers.
+   * An action whose `handle` returns a `Caramel::Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) has chosen its egress explicitly, so the response passes through unchanged.
+3. A client that accepts neither receives contract failures as MRDP text (RFC-0005).
+
+Responses carry `Vary: Accept, HX-Request, HX-Request-Type`.
 
 ### 3. Failure Modes & Mitigations
 
 * **Route Collision Overhead:** Deep nesting of dynamic routes can lead to ambiguous path matching.  
-  *Mitigation:* The radix compiler verifies path uniqueness at compile time and rejects overlapping route patterns (e.g., `/teams/:id` vs `/teams/new`) unless precedence is explicitly defined.
-* **Large Request Body Memory Pressure:** Parsing massive multipart payloads on the stack can exceed memory limits.  
-  *Mitigation:* `RequestContracts` enforce a default 2MB cap on standard form bodies. Larger uploads stream directly to disk tempfiles via `HTTP::FormData.parse`.
+  *Mitigation:* The router macro verifies path uniqueness at compile time. It rejects two routes that match the same requests. It also rejects a static route (`/teams/new`) declared after an overlapping dynamic route (`/teams/:id`). Precedence is explicit: declare the static route first, and it wins.
+* **Large Request Body Memory Pressure:** Parsing massive multipart payloads in memory can exceed memory limits.  
+  *Mitigation:* `Caramel::RequestInput` reads every request before its contract binds ([ADR 0003](decisions/0003-core-routing-and-contracts.md)).
+  * It caps URL-encoded bodies and multipart text parts at 2 MiB and answers 413 beyond that.
+  * It streams file parts to private request-scoped tempfiles through `HTTP::FormData.parse`, up to 64 MiB in total, and deletes them when the request ends.
 
 ---
 

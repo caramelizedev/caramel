@@ -21,7 +21,13 @@ The binary also implements `setup`, `dev`, `seed`, `services`, `sites`, `doctor`
 
 ## Source and secrets
 
-The versioned environment manifest records its schema version, project name, PostgreSQL major, requested extensions and domain suffix. This release accepts PostgreSQL 18, `.caramel` and explicit `.test`. Extension names are validated metadata; automatic extension provisioning is not implemented.
+The versioned environment manifest records its schema version, project name, PostgreSQL major, requested extensions and domain suffix. This release accepts PostgreSQL 18 and three suffixes:
+
+- `.caramel`, the default;
+- `.test`, which must be chosen explicitly;
+- `.localhost`, which must be chosen explicitly. macOS and browsers resolve `.localhost` names to loopback without a resolver entry (RFC 6761); see [ADR 0006](../decisions/0006-browser-acceptance-and-localhost-sites.md).
+
+Extension names are validated metadata; automatic extension provisioning is not implemented.
 
 Latte supplies four distinct connection URLs over owner-only IPC: development runtime/migration and spec runtime/migration. Frappé writes them with a fresh application secret to mode-0600 `.env`. Temporary secret files stay under ignored, private `.caramel/`. Neither public status nor site listings include these credentials.
 
@@ -51,7 +57,7 @@ Generation preflights every destination and requires a unique insertion marker i
 
 `scripts/check frappe-project` executes the real CLI in disposable state. It creates Book and mixed-scalar Person resources, compiles the app, applies migrations and runs generated request specs against separately provisioned PostgreSQL databases. Those specs exercise persisted create/update/delete, rendering, escaping, CSRF rejection, invalid-input responses and native/enhanced response contracts. The harness also checks clone setup with fresh credentials, retained edits, failed dependency installation followed by setup recovery, and development data retention when running specs. Pointing the spec URL at development is refused before migration or test execution.
 
-The final HTTP check serves the generated application through Caddy on a private test port with a named Host and explicitly supplied fixture CA. It establishes native app/proxy/TLS behavior; it does not establish system DNS, browser certificate trust, public port 443, or real htmx interaction.
+The final HTTP check serves the generated application through Caddy on a private test port with a named Host and an explicitly supplied fixture CA. It establishes native app/proxy/TLS behavior. It does not establish system DNS, browser certificate trust or public port 443. `scripts/check browser` covers real htmx interaction in Safari against a `.localhost` fixture site.
 
 Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation.
 

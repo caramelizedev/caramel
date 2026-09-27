@@ -38,7 +38,7 @@ The gateway reads ordinary responses whole, with a 30-second upstream read timeo
 - Streams are not tied to the refresh generation. After a rebuild, an open stream stays on the process that accepted it and ends when that process is retired; the browser's `EventSource` reconnects to the new build.
 - HEAD requests never stream; they return headers only.
 
-Unit coverage proxies a real Unix-socket upstream and reads the first event before the upstream sends the second. Delivery through Latte's Caddy proxy is unverified: Caddy is expected to pass `text/event-stream` through unbuffered, and `src/latte/proxy.cr` sets no `flush_interval`. If events arrive in batches under `frappe dev`, set `"flush_interval": -1` on the emitted `reverse_proxy` handler.
+Unit coverage proxies a real Unix-socket upstream and reads the first event before the upstream sends the second. `scripts/check browser` also verifies delivery through Latte's Caddy proxy. Safari's `EventSource` receives the first event while the application holds the stream open, and receives the second only after the check releases it. Caddy flushes `text/event-stream` responses without a `flush_interval` setting.
 
 ## Live project state
 
@@ -60,4 +60,4 @@ These HTTPS checks use private fixture ports and an explicitly supplied fixture 
 
 ## Remaining development acceptance
 
-Real browser refresh, htmx history/focus/422 behavior, native HTML forms and visual review remain open. The [initial warm-cache performance baseline and compiler profile](development-performance.md) include 20 edits per category on small/larger fixtures and separate empty-cache compiler measurements, and expose a missed compiled-edit target. Cold installation and service-startup measurements, full compiler resource accounting and browser timing remain unverified. Functional checks alone do not establish a timing promise. Independent review remains pending while the requested Luna workers are unavailable.
+`scripts/check browser` covers morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE through Caddy in Safari. Still open: the development refresh script in a real browser, htmx history, 422 handling, native HTML forms and visual review. The [initial warm-cache performance baseline and compiler profile](development-performance.md) records 20 edits per category on small and larger fixtures, plus separate empty-cache compiler measurements, and shows that the compiled-edit target is missed. Cold installation, service startup, full compiler resource use and browser timing have not been measured. Functional checks alone do not establish a timing promise.

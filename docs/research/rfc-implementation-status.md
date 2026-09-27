@@ -1,14 +1,16 @@
 # RFC implementation status
 
-Reviewed against commit `2652484` on 2026-09-27. Each row compares a requirement in [the RFCs](../rfc.md) with source code, tests and the records in `docs/decisions/` and `docs/research/`. No checks were run for this review; the Coverage column names existing specs and `scripts/check` targets.
+Reviewed against commit `2652484` on 2026-09-27. Each row compares a requirement in [the RFCs](../rfc.md) with source code, tests and the records in `docs/decisions/` and `docs/research/`. No checks were run for that review; the Coverage column names existing specs and `scripts/check` targets. Rows have since been updated as the implementation closed each gap, and each updated row cites the check that proves it.
 
 Status values:
 
-- **Implemented**: the requirement works as specified.
+- **Implemented**: the requirement works as specified, or as the RFC now states after an amendment recorded in an ADR.
 - **Diverged**: a working alternative uses a different design or name.
 - **Partial**: only part of the requirement works.
 - **Absent**: there is no implementation.
 - **Unverifiable**: a performance, scale or business claim has no measurement.
+- **Deferred (performance)**: the row is only a performance, scale or token-savings number. Another row implements its functional behaviour, and the measurement is deferred.
+- **Blocked**: the work needs an action outside the repository. The row names the command that unblocks it.
 
 Update a row when its status changes, and cite the change or check that proves it.
 
@@ -18,7 +20,7 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 
 | RFC | Overall | State |
 |---|---|---|
-| 0001 Caramel Core | Mostly implemented | Compile-time routes and contracts, multi-target partials, islands and JSON responses work. The dispatch design and fragment header differ from the RFC, and browser behaviour is unverified. |
+| 0001 Caramel Core | Implemented | Compile-time routes and contracts, allocation-free matching, multi-target partials, islands and dual egress all work. `scripts/check browser` verifies morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE through Caddy in Safari. The RFC text is amended by ADRs [0003](../decisions/0003-core-routing-and-contracts.md), [0004](../decisions/0004-htmx4-fragment-negotiation.md) and [0005](../decisions/0005-island-props-helper.md). |
 | 0002 SugarORM | Diverged (narrowed) | By [decision 0002](../decisions/0002-typed-persistence.md), `Caramel::Model` provides scalar CRUD and explicit SQL migrations. Associations, changesets, schema diffs and migration lints are absent. |
 | 0003 Cold Brew | Absent | Only the generic streaming response `Action#stream` exists. |
 | 0004 Latte | Partial | Native PostgreSQL, CoreDNS and Caddy supervision and per-site databases work. Database branching is absent. System DNS, standard ports and CA trust are prepared but not applied. |
@@ -32,13 +34,13 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 1. **No production path (RFC-0007).** There is no static Linux artifact, embedded assets, deployment command, cutover or rollback, so Caramel cannot ship an application it builds. The Linux/musl artifact is an open gate in `docs/research/frappe-workflow.md` and `docs/decisions/0001-managed-toolchain-provider.md`.
 2. **Data-layer guarantees are missing (RFC-0002, RFC-0008).** Caramel lacks associations and preload safety, changesets, schema diffs and migration lints. The migrator runs each batch in one transaction, so `CREATE INDEX CONCURRENTLY` cannot run. Most applications need relations early; decision 0002 names that need as the trigger to reconsider an upstream ORM.
 3. **No background work or PubSub (RFC-0003).** Jobs, scheduling, `LISTEN`/`NOTIFY` and caching are absent. RFC-0006 queue draining and RFC-0008 `invite`-style operations depend on them, and dual-write safety has no mechanism.
-4. **The real user path is unproven.** The system resolver, ports 80/443 and CA trust are prepared but not applied. Morph focus and scroll, `hx-partial` ingestion, islands and SSE through Caddy have no real-browser checks; current HTTPS checks pass an explicit CA to `curl --resolve`.
+4. **The real user path is partly proven.** `scripts/check browser` drives Safari through Latte's Caddy proxy to a live generated application on a `.localhost` site. That covers morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE. Still unapplied: the `.caramel` system resolver, ports 80/443 and CA trust. Safari accepts the check's untrusted local CA only through WebDriver's `acceptInsecureCerts`.
 5. **Test isolation (RFC-0006).** Examples share one spec database and clean up with `ensure` blocks. Without savepoint rollback or per-worker databases, suites will slow down and leak state as applications grow.
 6. **Edit-loop latency (RFC-0004 §2.1, RFC-0005 §2.2).** Polling plus full native builds give p95 compiled-edit latencies of 4.55 s and 7.76 s. The RFCs promise feedback under 200 ms and set a three-second target. Semantic checks take 1.67 s and 3.74 s against the promised 180 ms. The compiler profile shows that faster process handoff alone cannot close the gap.
 7. **No database branching (RFC-0004 §2.2).** Per-site development and spec databases stand in for branches. `db:branch`, per-worker test databases and the diff engine's scratch catalog all depend on branching.
 8. **No agent tooling (RFC-0005).** There is no `agent-manifest`, `check` command or `--agent` mode. MRDP output exists only for HTTP 422 contract errors, and invalid CLI input exits 2 rather than the RFC's 1.
 9. **The RFC text no longer matches the code.** Examples:
-   - RFC-0001 §2.5 uses `HX-Request: true`; the code uses `HX-Request-Type: partial`.
+   - RFC-0001 no longer differs: ADRs 0003–0005 amended its routing, contract, island and fragment-header text.
    - RFC-0005 §3 specifies exit code 1; the CLI returns 2.
    - The RFCs name a `caramel` CLI; the implemented CLI is `frappe`.
    - The planned `src/core/**` tree is actually `src/caramel`, `src/latte` and `src/frappe`.
@@ -51,16 +53,16 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 
 | Requirement | Status | Evidence | Coverage | Notes |
 |---|---|---|---|---|
-| §2.1 compile-time route and contract verification | Implemented | `Caramel::Router.draw` (`src/caramel/http/router.cr`) resolves each action, requires a `contract`, and checks `:param` fields and types | `scripts/check route-compilation`, `spec/caramel/router_spec.cr` | Unlike the RFC sketch, the macro reads generated `CARAMEL_FIELD_*` constants rather than instance variables. |
-| §2.1 inlined, non-allocating radix dispatch | Diverged | `Router::Tree` is built once from the compile-time table; segment scanning uses a `StaticArray` | `spec/caramel/router_spec.cr` | Parameter decoding, route hashes and contracts allocate. No allocation benchmark exists, so the claim is unverifiable. |
-| §2.2 request contracts | Implemented | `Caramel::RequestContract` (`src/caramel/contracts/request_contract.cr`), `RequestInput` (`src/caramel/http/request_input.cr`) | `spec/caramel/request_contract_spec.cr`, `spec/caramel/request_input_spec.cr`, `scripts/check contract-compilation` | Syntax: `contract do; field …; end` and `Contract.parse`, not `schema`/`property`/`from_hash`. Invalid route parameters return 404; other invalid fields return 422. |
-| §2.3 morph swaps preserving focus and scroll | Partial | `Partial` defaults to `innerMorph` (`src/caramel/hypermedia.cr`); the generated layout loads bundled htmx 4 | `spec/caramel/hypermedia_spec.cr` | No real-browser check exists (see remaining gates in `docs/research/frappe-workflow.md`). |
-| §2.3 multi-target `hx-partial` | Implemented | `Action#partials`, `Action#morph`, `Hypermedia.render` | `spec/caramel/action_spec.cr`, `spec/caramel/hypermedia_spec.cr` | Only server markup is tested; htmx ingestion has no browser test. |
-| §2.4 islands | Implemented | `Action#island`, `Caramel::Island` (`src/caramel/islands.cr`), `src/caramel/islands.js` | `spec/caramel/hypermedia_spec.cr` | Use `island("Name", props)`, not the RFC's raw `props="<%= … %>"`, which compiled ECR escapes. Client lifecycle has no browser test, and the starter has no island component. |
-| §2.5 `HX-Request: true` returns a fragment | Diverged | `RequestContext#partial?` tests `HX-Request-Type: partial`; `HX-Request: true` only selects HTML over JSON (`src/caramel/http/request_context.cr`) | `spec/caramel/action_spec.cr`, `templates/application/spec/requests/home_spec.cr` | Undocumented divergence. |
-| §2.5 `Accept: application/json` serializes the result | Implemented | `RequestContext#wants_json?`, `Action#json` (`src/caramel/action.cr`) | `spec/caramel/action_spec.cr`, generated resource request specs | A `Response` returned by `handle` passes through unchanged. The starter home action returns `page`, so `/` has no JSON form. |
-| §3 route-collision rejection | Implemented | `Router.draw` rejects duplicate routes and ambiguous ordering at compile time | `scripts/check route-compilation` | A static route declared before a dynamic one takes precedence. |
-| §3 2 MB form cap; uploads streamed to disk | Implemented | `RequestInput::MAX_FORM_BYTES` (2 MiB) and `MAX_UPLOAD_BYTES` (64 MiB); `HTTP::FormData.parse` into `File.tempfile` | `spec/caramel/request_input_spec.cr` | Enforced in `RequestInput`, not `RequestContract`. |
+| §2.1 compile-time route and contract verification | Implemented | `Caramel::Router.draw` (`src/caramel/http/router.cr`) resolves each action and requires a `contract`. It checks each `:param` against the generated `CARAMEL_FIELD_*` constants: the field must exist, have type String, Int32 or Int64, and be neither nilable nor defaulted. | `scripts/check route-compilation` (including `compile_defaulted_param`), `spec/caramel/router_spec.cr` | RFC-0001 §2.1 now describes the constants ([ADR 0003](../decisions/0003-core-routing-and-contracts.md)). |
+| §2.1 regex-free radix dispatch; matching allocates nothing | Implemented | `Router::Tree` is built once from the compile-time table. `Segments` is a stack value holding byte offsets, and each route has a generated method. | `spec/caramel/router_spec.cr` (the GC allocation counter shows that matching, including backtracking and method masks, allocates nothing) | RFC-0001 §2.1 is amended: binding allocates the decoded parameters and the contract ([ADR 0003](../decisions/0003-core-routing-and-contracts.md)). Full-dispatch throughput is a deferred performance question. |
+| §2.2 request contracts | Implemented | `Caramel::RequestContract` (`src/caramel/contracts/request_contract.cr`), `RequestInput` (`src/caramel/http/request_input.cr`) | `spec/caramel/request_contract_spec.cr`, `spec/caramel/request_input_spec.cr`, `scripts/check contract-compilation` | RFC-0001 §2.2 now shows the `contract do; field …; end` and `Contract.parse` API ([ADR 0003](../decisions/0003-core-routing-and-contracts.md)). Invalid route parameters return 404; other invalid fields return 422. |
+| §2.3 morph swaps preserving focus and scroll | Implemented | `Partial` and `morph` default to `innerMorph` (`src/caramel/hypermedia.cr`, `src/caramel/action.cr`), and the generated layout inherits it | `scripts/check browser` | In Safari, a live-search morph keeps the same input element focused with its caret and value, and keeps a scrolled list's `scrollTop`. The `innerHTML` control loses focus, which shows the check can fail. |
+| §2.3 multi-target `hx-partial` | Implemented | `Action#partials`, `Action#morph`, `Hypermedia.render` | `spec/caramel/action_spec.cr`, `spec/caramel/hypermedia_spec.cr`, `scripts/check browser` | In Safari, one CSRF-protected htmx POST updates two disjoint targets with different swaps and leaves an unrelated region untouched. |
+| §2.4 islands | Implemented | `Action#island`, `Caramel::Island` (`src/caramel/islands.cr`), `src/caramel/islands.js` | `spec/caramel/hypermedia_spec.cr`, `scripts/check browser` | RFC-0001 §2.4 now shows `island("Name", props)` and the client lifecycle ([ADR 0005](../decisions/0005-island-props-helper.md)). Safari confirms mount, late registration, `update` on a props morph with client state intact, and `unmount`. |
+| §2.5 `HX-Request-Type: partial` returns a fragment | Implemented | `RequestContext#partial?` tests `HX-Request-Type: partial`. `HX-Request: true` selects HTML over JSON and `HX-Location` redirects (`src/caramel/http/request_context.cr`, `src/caramel/response.cr`). | `spec/caramel/action_spec.cr`, `templates/application/spec/requests/home_spec.cr`, `scripts/check browser` | RFC-0001 §2.5 is amended because htmx 4 sends `HX-Request: true` for full-document requests too ([ADR 0004](../decisions/0004-htmx4-fragment-negotiation.md)). |
+| §2.5 `Accept: application/json` serializes the result | Implemented | `RequestContext#wants_json?`, `Action#json`, `Action#respond` (`src/caramel/action.cr`) | `spec/caramel/action_spec.cr`, generated resource request specs | RFC-0001 §2.5 now says that a `Response` returned by `handle` is explicit egress and passes through unchanged ([ADR 0004](../decisions/0004-htmx4-fragment-negotiation.md)). |
+| §3 route-collision rejection | Implemented | `Router.draw` rejects duplicate routes and ambiguous ordering at compile time | `scripts/check route-compilation` | A static route declared before a dynamic one takes precedence, as the amended §3 states. |
+| §3 2 MB form cap; uploads streamed to disk | Implemented | `RequestInput::MAX_FORM_BYTES` (2 MiB) and `MAX_UPLOAD_BYTES` (64 MiB); `HTTP::FormData.parse` into `File.tempfile` | `spec/caramel/request_input_spec.cr` | RFC-0001 §3 now names `RequestInput` ([ADR 0003](../decisions/0003-core-routing-and-contracts.md)). |
 
 ## RFC-0002 SugarORM
 
@@ -81,7 +83,7 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 |---|---|---|---|---|
 | §2.1 `caramel_jobs` table; transactional enqueue with `SKIP LOCKED` | Absent | — | none | |
 | §2.2 worker fibers; `run_at` scheduling | Absent | — | none | |
-| §2.3 PubSub over SSE | Partial | `Action#stream`, `Response.stream` and streaming in `Caramel::Application`; Frappé's `DevGateway` forwards event streams unbuffered | `spec/caramel/streaming_spec.cr`, `spec/frappe/dev_gateway_spec.cr` | No `LISTEN`/`NOTIFY` broker or subscriptions. Delivery through Caddy is unverified (`docs/research/frappe-development.md`). |
+| §2.3 PubSub over SSE | Partial | `Action#stream`, `Response.stream` and streaming in `Caramel::Application`; Frappé's `DevGateway` forwards event streams unbuffered | `spec/caramel/streaming_spec.cr`, `spec/frappe/dev_gateway_spec.cr`, `scripts/check browser` | No `LISTEN`/`NOTIFY` broker or subscriptions exist yet. In Safari, events arrive through Caddy unbuffered. |
 | §2.4 `UNLOGGED` cache | Absent | — | none | |
 | §3 time-partitioned job tables | Absent | — | none | |
 
