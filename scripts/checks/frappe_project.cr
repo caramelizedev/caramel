@@ -142,6 +142,8 @@ module Caramel::Checks
       assert!(!refused.stdout.includes?("Applied"), refused.stdout)
       puts "PASS: frappe corretto refuses a planted allow( with its file and line before migrating or compiling"
 
+      rfc_example
+
       File.write(File.join(@project, "spec/requests/corretto_probe_spec.cr"), CORRETTO_PROBE)
       File.write(File.join(@project, "app/jobs/probe_job.cr"), PROBE_JOB)
       Dir.mkdir_p(File.join(@project, "app/actions/probe"))
@@ -150,15 +152,111 @@ module Caramel::Checks
       File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/probe/jobs", App::Probe::Enqueue\n    # Frappé resource routes)))
       result = command([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
-      assert!(result.stdout.includes?("Corretto: 4 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
+      assert!(result.stdout.includes?("Corretto: 5 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
       %w([w1] [w2]).each do |prefix|
         assert!(result.stdout.lines.any? { |line| line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors") }, output)
       end
-      assert!(result.stderr.includes?("corretto_probe_spec.cr:25 changed the database catalog outside its transaction; worker 2 was reset"), output)
+      assert!(result.stderr.matches?(/corretto_probe_spec\.cr:25 changed the database catalog outside its transaction; worker [12] was reset/), output)
       id = site("bookshelf")["id"].as_s
       assert!(sql(values["SPEC_DATABASE_URL"], "SELECT count(*) FROM pg_database WHERE starts_with(datname, 'caramel_spec_#{id}_w')") == "0")
       puts "PASS: frappe corretto --concurrency=2 runs the generated Corretto specs in two Latte test workers with savepoint isolation, catalog resets, wire isolation and a synchronously drained Cold Brew job, then drops the workers"
     end
+
+    # RFC-0006 §2.1's example spec, copied byte for byte from docs/rfc.md, runs
+    # green against the minimal application it describes: top-level User, Team
+    # and Notification schemas, a Teams::Create action and a Cold Brew job.
+    def rfc_example : Nil
+      rfc = File.read_lines(File.join(@repo, "docs/rfc.md"), chomp: false)
+      start = rfc.index { |line| line == "# spec/actions/teams/create_spec.cr\n" } || raise "docs/rfc.md lacks the RFC-0006 example spec"
+      assert!(rfc[start - 1] == "```crystal\n", "the RFC-0006 example must start a crystal code block")
+      finish = (start...rfc.size).find { |index| rfc[index].starts_with?("```") } || raise "the RFC-0006 example code block is not closed"
+      example = rfc[start...finish].join
+      assert!(example.includes?("describe Teams::Create do") && example.includes?("Notification::Query.where(user_id: user.id).count(db).should eq(1)"), example)
+      spec = File.join(@project, "spec/actions/teams/create_spec.cr")
+      Dir.mkdir_p(File.dirname(spec))
+      File.write(spec, example)
+      RFC_APP.each do |relative, source|
+        Dir.mkdir_p(File.join(@project, File.dirname(relative)))
+        File.write(File.join(@project, relative), source)
+      end
+      routes = File.join(@project, "config/routes.cr")
+      File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/teams", Teams::Create\n    # Frappé resource routes)))
+
+      before = Dir.glob(File.join(@project, "db/migrations/*.cr"))
+      command([@frappe, "db", "diff", "--name", "create_teams"], chdir: @project, timeout: 300.seconds)
+      derived = Dir.glob(File.join(@project, "db/migrations/*.cr")) - before
+      assert!(!derived.empty? && derived.all?(&.includes?("_create_teams")), derived.inspect)
+      migrated = command([@frappe, "migrate"], chdir: @project, timeout: 300.seconds)
+      assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
+
+      result = command([@frappe, "corretto", "spec/actions/teams/create_spec.cr"], chdir: @project, timeout: 600.seconds)
+      assert!(File.read(spec) == example, "the RFC-0006 example spec changed on disk")
+      assert!(result.stdout.includes?("[w1] 1 examples, 0 failures, 0 errors, 0 pending") && result.stdout.includes?("Corretto: 1 of 1 workers passed"), result.stdout + result.stderr)
+      puts "PASS: RFC-0006 §2.1's example spec, verbatim from docs/rfc.md, passes under frappe corretto with a derived create_teams migration and a drained Cold Brew notification job"
+    end
+
+    RFC_APP = {
+      "app/models/user.cr" => <<-CRYSTAL,
+        struct User < SugarORM::Schema
+          schema "users" do
+            field id : Int64, primary: true
+            field email : String
+          end
+        end
+        CRYSTAL
+      "app/models/team.cr" => <<-CRYSTAL,
+        struct Team < SugarORM::Schema
+          schema "teams" do
+            field id : Int64, primary: true
+            field name : String
+            field seats : Int32
+            belongs_to owner : User
+          end
+        end
+        CRYSTAL
+      "app/models/notification.cr" => <<-CRYSTAL,
+        struct Notification < SugarORM::Schema
+          schema "notifications" do
+            field id : Int64, primary: true
+            belongs_to user : User
+          end
+        end
+        CRYSTAL
+      "app/jobs/notify_team_owner.cr" => <<-CRYSTAL,
+        # Tells a team's owner that the team exists.
+        struct NotifyTeamOwner < Caramel::ColdBrew::Job
+          param user_id : Int64
+
+          def perform
+            Notification.create!(user_id: user_id)
+          end
+        end
+        CRYSTAL
+      "app/actions/teams/create.cr" => <<-CRYSTAL,
+        module Teams
+          struct Create < App::ApplicationAction
+            contract do
+              field name : String
+              field seats : Int32, min: 1
+            end
+
+            # The signed-in user owns the new team; the owner's notification is
+            # enqueued in the same transaction, so it exists only if the team does.
+            def handle(contract : Contract)
+              owner_id = session["user_id"]?.try(&.to_i64?)
+              return Caramel::Response.new(403, "Sign in to create a team") unless owner_id
+              team = nil.as(Team?)
+              SugarORM::Repo.transaction do
+                team = Team.create!(name: contract.name, seats: contract.seats, owner_id: owner_id)
+                NotifyTeamOwner.enqueue(user_id: owner_id)
+              end
+              created = team.not_nil!
+              partials [Caramel::Partial.new("#team-list", "<li>\#{Caramel::HTML.escape(created.name)} · \#{created.seats} seats</li>", "innerMorph")]
+            end
+          end
+        end
+        CRYSTAL
+    }
 
     CORRETTO_PROBE = <<-CRYSTAL
       require "../spec_helper"

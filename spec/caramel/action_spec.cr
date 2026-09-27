@@ -66,6 +66,16 @@ struct ActionSpecMorph < ActionSpecAction
   end
 end
 
+# Inherits Caramel::Action directly, with no layout of its own.
+struct ActionSpecBare < Caramel::Action
+  contract do
+  end
+
+  def handle(contract : Contract)
+    page "Tom & Jerry", "<p>bare</p>"
+  end
+end
+
 module ActionSpecApp
   Caramel::Router.draw do
     get "/items/:id", ActionSpecShow
@@ -73,6 +83,7 @@ module ActionSpecApp
     post "/items", ActionSpecCreate
     get "/parts", ActionSpecParts
     get "/morph", ActionSpecMorph
+    get "/bare", ActionSpecBare
     get "/greetings/:name", Greetings::Show
   end
 end
@@ -175,5 +186,11 @@ describe Caramel::Action do
   it "renders conventional views with escaped locals and trusted partial views" do
     response = get("/greetings/%3CAda%3E", HTTP::Headers{"HX-Request-Type" => "partial"})
     response.body.should end_with("<p>Hello, &lt;Ada&gt;</p><footer>Caramel</footer>")
+  end
+
+  it "wraps pages of actions without a layout in a minimal escaped document" do
+    bare = get("/bare")
+    bare.body.should eq(%(<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Tom &amp; Jerry</title></head><body><p>bare</p></body></html>))
+    get("/bare", HTTP::Headers{"HX-Request-Type" => "partial"}).body.should eq("<title>Tom &amp; Jerry</title><p>bare</p>")
   end
 end

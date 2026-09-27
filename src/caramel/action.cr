@@ -28,8 +28,12 @@ module Caramel
       end
     end
 
-    # The full HTML document around a page body.
-    abstract def layout(page : Page) : String
+    # The full HTML document around a page body. Applications override it
+    # (the generated ApplicationAction renders its layout view); actions that
+    # only stream, morph or answer JSON never need to.
+    def layout(page : Page) : String
+      %(<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>#{HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>)
+    end
 
     def title_for(page : Page) : String
       page.title

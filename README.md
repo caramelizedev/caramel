@@ -38,6 +38,7 @@ scripts/check compiler
 scripts/check orm-compilation
 scripts/check route-compilation
 scripts/check contract-compilation
+scripts/check cold-brew-compilation
 scripts/check toolchain-paths
 scripts/check integration
 ```

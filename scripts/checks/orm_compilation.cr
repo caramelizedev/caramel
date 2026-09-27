@@ -5,6 +5,8 @@ require "./support/harness"
 # with `-->` (Crystal reports class-body macro errors on the class line).
 cases = {
   "compile_valid"                     => nil,
+  "compile_rfc_examples"              => nil,
+  "compile_rfc_n_plus_one"            => ["compile_rfc_n_plus_one.cr:5:35", "undefined method 'each' for Team::UsersNotLoaded", "Association 'users' of Team was not preloaded", ".preload(:users)"],
   "compile_n_plus_one"                => ["compile_n_plus_one.cr:4:", "undefined method 'each' for Team::UsersNotLoaded", "Association 'users' of Team was not preloaded", "Remediation: add .preload(:users) to the query that loaded this Team"],
   "compile_unknown_preload"           => ["compile_unknown_preload.cr:3:", "Team::QueryOf(NamedTuple())#preload", "Team::QueryOf::PreloadOwner, Team::QueryOf::PreloadProfile or Team::QueryOf::PreloadUsers, not Symbol"],
   "compile_unknown_where_field"       => ["compile_unknown_where_field.cr:3:", "no parameter named 'title'", "Overloads are:", "name : ::String | Array(::String)"],
