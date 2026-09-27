@@ -59,3 +59,4 @@ Principles followed:
   - wire isolation;
   - a Cold Brew job drained synchronously;
   - refusal of a planted `allow(`.
+- The sub-millisecond per-example isolation target is a performance claim and is deferred.

@@ -88,7 +88,7 @@
 │ SugarORM          │ Pure schemas, explicit changesets, branch-and-diff   │
 │ Caramel Cold Brew │ Background queue (SKIP LOCKED) & SSE streaming       │
 │ Caramel Latte     │ Bare-metal local runner & database branching engine  │
-│ Caramel Frappé    │ Fast, stateless agent CLI suite (POSIX / sub-20ms)   │
+│ Caramel Frappé    │ Stateless agent CLI suite (POSIX; sub-20ms target)   │
 │ Caramel Corretto  │ Zero-mock, integration-first verification harness    │
 │ Caramel Roast     │ Single-binary static compilation & SSH deployment    │
 │ Caramel Prose     │ Poetic ergonomics, semantic units & Slang templates  │
@@ -587,7 +587,7 @@ The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table (`caramel_cache
 
 Docker for local development incurs massive resource penalties: VirtioFS disk translation drag, high idle RAM usage (3–5 GB), and slow file-watcher events on macOS. Conversely, running databases locally without virtualization historically risked environment contamination and made testing concurrent operations messy. Furthermore, template-based database cloning fails catastrophically if active pool connections remain open during the clone command.
 
-Caramel Latte establishes a zero-Docker, bare-metal local development environment. It leverages the host OS kernel and native PostgreSQL capabilities to deliver instant file-watching, **sub-100ms database branching**, and connection-guarded isolation.
+Caramel Latte establishes a zero-Docker, bare-metal local development environment. It uses the host OS kernel and native PostgreSQL capabilities to deliver kernel-event file watching, **copy-on-write database branching**, and connection-guarded isolation. The sub-100ms branching target is deferred ([ADR 0012](decisions/0012-latte-supervision-watching-branching.md)).
 
 ### 2. Technical Specification
 
@@ -738,7 +738,7 @@ PATCH: INSERT "field tenant_id : String" AT 15:7
 
 Mock-driven unit tests provide a false sense of security. They test whether internal stubs were called with expected strings rather than verifying real production behavior. Full-stack browser automation (Playwright, Selenium) is brittle and slow, while naive database integration testing causes massive test-suite slowdowns. Furthermore, background queue execution in tests often results in race conditions that force developers into flaky `sleep()` loops.
 
-Caramel Corretto enforces an **integration-first, zero-mock testing harness** that verifies application behavior subcutaneously against real PostgreSQL branches, synchronous queue drains, and real morphed HTML with sub-millisecond per-test isolation.
+Caramel Corretto enforces an **integration-first, zero-mock testing harness**. It verifies application behavior subcutaneously against real PostgreSQL branches, synchronous queue drains and real morphed HTML, with savepoint isolation for each test. The sub-millisecond isolation target is deferred ([ADR 0010](decisions/0010-corretto-harness.md)).
 
 ### 2. Technical Specification
 
