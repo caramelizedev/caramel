@@ -21,7 +21,9 @@ The implementation has to survive terminal sessions, several projects and daemon
    - The `latte daemon` is a per-user service supervisor. It starts, adopts after restart and recovers the shared PostgreSQL 18 cluster, CoreDNS and Caddy.
    - Applications run under terminal-owned `frappe dev` sessions. These register a development gateway socket with Latte and stop when the terminal does.
    - The daemon owns processes and databases. It carries no agent protocol state: Frappé commands stay one-shot processes (RFC-0005).
-2. **Unix sockets.** PostgreSQL listens only on a private, owner-only socket directory inside Latte's state (`listen_addresses = ''`) with SCRAM authentication. It does not use the shared `/tmp/.s.PGSQL.5432`, because `/tmp` is shared by every user on the machine.
+2. **Unix sockets.**
+   - PostgreSQL listens only on a private, owner-only socket directory inside Latte's state (`listen_addresses = ''`) with SCRAM authentication. It does not use the shared `/tmp/.s.PGSQL.5432`, because `/tmp` is shared by every user on the machine.
+   - Application sockets live in the site's owner-only run directory under the same runtime root, not at the charter's `/tmp/caramel_app.sock`, for the same reason.
 3. **Kernel watching.**
    - `Caramel::Latte::Watcher` registers `EVFILT_VNODE` kqueue filters on every watched directory and file (opened `O_EVTONLY`) and rescans a directory when it changes.
    - `frappe dev` hashes the tree only after a kernel event, keeping the 200 ms debounce.

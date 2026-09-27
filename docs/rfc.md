@@ -67,6 +67,8 @@
 
 ```
 
+The application and PostgreSQL sockets live in Latte's owner-only runtime directory, not at shared `/tmp` paths ([ADR 0012](decisions/0012-latte-supervision-watching-branching.md)).
+
 ### The Lineage of Design Decisions
 
 * **From Ruby on Rails:** The **Omakase Monolith** and syntactic elegance. We reject runtime duck-typing and un-traced metaprogramming in favor of compile-time macro ASTs.
