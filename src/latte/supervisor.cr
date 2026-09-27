@@ -193,6 +193,31 @@ module Caramel::Latte
       raise PublicError.new("branch_failed", ex.message || "Database branch operation failed")
     end
 
+    # Creates, or resets to a fresh clone of the migrated spec database, the
+    # site's Corretto test worker `index`.
+    def test_worker_json(id : String, index : Int32) : String
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        worker = @postgres.reset_test_worker(registered(id), index)
+        {version: 1, worker: {index: index, database: worker.database, migration_url: worker.migration_url, runtime_url: worker.runtime_url}}.to_json
+      end
+    rescue ex : Postgres::SecretMissing
+      raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
+    rescue ex : Postgres::Error
+      raise PublicError.new("test_worker_failed", ex.message || "Test worker database operation failed")
+    end
+
+    def drop_test_worker(id : String, index : Int32) : Bool
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        @postgres.drop_test_worker(registered(id), index)
+      end
+    rescue ex : Postgres::Error
+      raise PublicError.new("test_worker_failed", ex.message || "Test worker database operation failed")
+    end
+
     private def registered(id : String) : Site
       @registry.find(id) || raise PublicError.new("not_found", "Project is not registered", 404)
     end

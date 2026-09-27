@@ -45,15 +45,15 @@ module Caramel::Checks
         assert!(Dir.glob(File.join(@project, "db/migrations/*drift_probe*")).empty?)
         puts "PASS: generated SugarORM resources migrate without drift, and frappe db diff --name drift_probe derives nothing"
         sql(values["MIGRATION_DATABASE_URL"], "CREATE TABLE dev_sentinel (value text NOT NULL); INSERT INTO dev_sentinel VALUES ('keep');")
-        command([@frappe, "test"], chdir: @project)
+        corretto(values)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
         env_path = File.join(@project, ".env")
         original_env = File.read(env_path)
         changed = original_env.sub("SPEC_DATABASE_URL=#{values["SPEC_DATABASE_URL"].to_json}", "SPEC_DATABASE_URL=#{values["DATABASE_URL"].to_json}")
         assert!(changed != original_env)
         File.write(env_path, changed)
-        refused = attempt([@frappe, "test"], chdir: @project, timeout: 30.seconds)
-        assert!(!refused.success? && refused.stderr.includes?("test refused"), refused.stderr)
+        refused = attempt([@frappe, "corretto"], chdir: @project, timeout: 30.seconds)
+        assert!(!refused.success? && refused.stderr.includes?("specs refused"), refused.stderr)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
         File.write(env_path, original_env)
         command([@frappe, "setup"], chdir: @project)
@@ -78,7 +78,7 @@ module Caramel::Checks
         assert!(clone_values["APP_SECRET"] != values["APP_SECRET"])
         assert!(clone_values["DATABASE_URL"] != values["DATABASE_URL"])
         assert!(File.read(readme).ends_with?("An application-specific note.\n"))
-        command([@frappe, "test"], chdir: clone)
+        command([@frappe, "corretto"], chdir: clone, timeout: 600.seconds)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
 
         injected = File.join(@root, "package-with-failed-installer")
@@ -122,12 +122,138 @@ module Caramel::Checks
         serve(@project, "bookshelf", values)
         page = command(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--max-time", "5", "--noproxy", "*", "--cacert", certificate, "--resolve", "bookshelf.caramel:#{@ports[2]}:127.0.0.1", "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{@ports[2]}/"], echo: false)
         assert!(page.stdout.includes?("A little less setup.") && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
-        puts "PASS: real frappe new/setup/migrate/routes/test, clone secrets, failed-dependency recovery, source preservation, test refusal for development URL, retained development data, and generated native app over CA-verified named HTTPS"
+        puts "PASS: real frappe new/setup/migrate/routes/corretto, clone secrets, failed-dependency recovery, source preservation, spec refusal for development URL, retained development data, and generated native app over CA-verified named HTTPS"
         failed = false
       ensure
         finish(failed)
       end
     end
+
+    # Generated specs and probes run in two Latte test workers: a savepoint
+    # hides one example's rows from the next, catalog and leaked DDL reset the
+    # worker, a job an action enqueued drains synchronously, and a planted
+    # mocking call is refused before anything compiles.
+    def corretto(values : Hash(String, String)) : Nil
+      mocked = File.join(@project, "spec/requests/mock_probe_spec.cr")
+      File.write(mocked, %(require "../spec_helper"\n\ndescribe "Mocks" do\n  it("stubs") { allow(App::Book).to receive(:create) }\nend\n))
+      refused = attempt([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 30.seconds)
+      File.delete(mocked)
+      assert!(refused.status.exit_code == 1 && refused.stderr.includes?("spec/requests/mock_probe_spec.cr:4: `allow(` is a mocking API") && refused.stderr.includes?("Specs refused: 1 mocking call"), refused.stderr)
+      assert!(!refused.stdout.includes?("Applied"), refused.stdout)
+      puts "PASS: frappe corretto refuses a planted allow( with its file and line before migrating or compiling"
+
+      File.write(File.join(@project, "spec/requests/corretto_probe_spec.cr"), CORRETTO_PROBE)
+      File.write(File.join(@project, "app/jobs/probe_job.cr"), PROBE_JOB)
+      Dir.mkdir_p(File.join(@project, "app/actions/probe"))
+      File.write(File.join(@project, "app/actions/probe/enqueue.cr"), PROBE_ACTION)
+      routes = File.join(@project, "config/routes.cr")
+      File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/probe/jobs", App::Probe::Enqueue\n    # Frappé resource routes)))
+      result = command([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 900.seconds)
+      output = result.stdout + result.stderr
+      assert!(result.stdout.includes?("Corretto: 4 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
+      %w([w1] [w2]).each do |prefix|
+        assert!(result.stdout.lines.any? { |line| line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors") }, output)
+      end
+      assert!(result.stderr.includes?("corretto_probe_spec.cr:25 changed the database catalog outside its transaction; worker 2 was reset"), output)
+      id = site("bookshelf")["id"].as_s
+      assert!(sql(values["SPEC_DATABASE_URL"], "SELECT count(*) FROM pg_database WHERE starts_with(datname, 'caramel_spec_#{id}_w')") == "0")
+      puts "PASS: frappe corretto --concurrency=2 runs the generated Corretto specs in two Latte test workers with savepoint isolation, catalog resets, wire isolation and a synchronously drained Cold Brew job, then drops the workers"
+    end
+
+    CORRETTO_PROBE = <<-CRYSTAL
+      require "../spec_helper"
+
+      describe "Corretto isolation probe" do
+        it "creates a book inside the example's savepoint" do
+          Corretto.session do |client, db|
+            App::Book.create!(db, title: "Savepoint probe", author: "Corretto")
+            db.should have_row(App::Book, title: "Savepoint probe")
+          end
+        end
+
+        it "no longer sees the previous example's book" do
+          Corretto.session do |client, db|
+            db.should_not have_row(App::Book, title: "Savepoint probe")
+            App::Book.query.count(db).should eq(0)
+          end
+        end
+
+        it "runs DDL unwrapped as a catalog example", tags: "catalog" do
+          Corretto.session do |client, db|
+            db.exec("CREATE INDEX CONCURRENTLY catalog_probe ON books (title)")
+            db.exec("CREATE TABLE catalog_probe_table (id integer)")
+          end
+        end
+
+        it "leaks DDL through a second connection" do
+          leak = Caramel::Database.open(App.database_url(migration: true), 1)
+          leak.exec("CREATE TABLE leaked_probe (id integer)")
+          leak.close
+        end
+
+        it "starts from the migrated template after each reset and answers outbound HTTP only from stubs" do
+          Corretto.session do |client, db|
+            %w(catalog_probe catalog_probe_table leaked_probe).each do |relation|
+              db.query_one("SELECT to_regclass($1)::text", relation, as: String?).should be_nil
+            end
+            client.get("/books").should render_page("Books")
+            Caramel::Outbound.get("https://api.stripe.com/v1/customers").status_code.should eq(502)
+            Corretto.stub_wire("https://api.stripe.com/v1/customers", method: "GET").to_return(status: 200, body: %({"data":[]}), headers: {"Content-Type" => "application/json"})
+            Caramel::Outbound.get("https://api.stripe.com/v1/customers").body.should eq(%({"data":[]}))
+            Corretto.wire_requests.size.should eq(2)
+          end
+        end
+
+        it "starts each example with no wire stubs" do
+          Corretto.wire_requests.should be_empty
+          Caramel::Outbound.get("https://api.stripe.com/v1/customers").status_code.should eq(502)
+        end
+
+        it "drains the job an action enqueued, synchronously and inside the example's transaction" do
+          Corretto.session do |client, db|
+            client.post("/probe/jobs", headers: {"HX-Request" => "true"}, params: {"title" => "Drained probe"}).should render_partial("#jobs")
+            db.should_not have_row(App::Book, title: "Drained probe")
+            Caramel::ColdBrew.drain_queue!(db, "default").should eq(1)
+            db.should have_row(App::Book, title: "Drained probe", author: "Cold Brew")
+            Caramel::ColdBrew.drain_queue!(db, "default").should eq(0)
+          end
+        end
+
+        it "rolled back the drained job's writes" do
+          Corretto.session do |client, db|
+            db.should_not have_row(App::Book, title: "Drained probe")
+          end
+        end
+      end
+      CRYSTAL
+
+    # A Cold Brew job, and the action that enqueues it, which the probe spec drains.
+    PROBE_JOB = <<-CRYSTAL
+      module App
+        struct ProbeJob < Caramel::ColdBrew::Job
+          param title : String
+
+          def perform
+            App::Book.create!(title: title, author: "Cold Brew")
+          end
+        end
+      end
+      CRYSTAL
+
+    PROBE_ACTION = <<-CRYSTAL
+      module App::Probe
+        struct Enqueue < App::ApplicationAction
+          contract do
+            field title : String
+          end
+
+          def handle(contract : Contract)
+            App::ProbeJob.enqueue(title: contract.title)
+            morph("#jobs", "Queued \#{Caramel::HTML.escape(contract.title)}")
+          end
+        end
+      end
+      CRYSTAL
   end
 end
 require "./frappe_project/dev"

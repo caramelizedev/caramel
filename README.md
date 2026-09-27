@@ -12,6 +12,8 @@ Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configur
 
 The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts, actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI. It creates and restores projects, generates typed resources, derives and applies migrations, and runs specs against separately provisioned PostgreSQL databases. Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs. The watched development loop now rebuilds safely, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes. Smaller individual generators, custom commands, dependency editing, optional authentication, and production deployment remain unfinished. Consumer installation and the complete browser experience still need acceptance testing. Mise provides the pinned private toolchain.
 
+Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`.
+
 - [Caramel RFCs](docs/rfc.md)
 - [RFC implementation status and ranked gaps](docs/research/rfc-implementation-status.md)
 - [SugarORM and request contract APIs, verification and limits](docs/research/typed-application-apis.md)
@@ -30,7 +32,7 @@ Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) 
 
 ```sh
 scripts/shards install --frozen
-scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm
+scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm spec/corretto spec/cold_brew
 scripts/check views
 scripts/check compiler
 scripts/check orm-compilation
@@ -62,6 +64,6 @@ scripts/check runtime-diagnostics
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
 
-`scripts/check browser` drives Safari through `safaridriver` against a generated app served by that isolated Latte stack to prove morph focus/scroll, `hx-partial`, islands and SSE behavior; it needs Safari's "Allow Remote Automation", enabled once with `safaridriver --enable`.
+`scripts/check browser` drives Safari through `safaridriver` against a generated app served by that isolated Latte stack to prove morph focus/scroll, `hx-partial`, islands, SSE behavior, and a Cold Brew job whose PubSub event reaches an `EventSource`; it needs Safari's "Allow Remote Automation", enabled once with `safaridriver --enable`.
 
 Optional language servers for Zed and other editors: `scripts/build-frappe`, `bin/frappe lsp install`, then `scripts/check editor-tools`; see [docs/editor-tools.md](docs/editor-tools.md).

@@ -7,12 +7,13 @@ require "./dev_session"
 require "./site_log"
 require "./schema_diff"
 require "./editor_tools"
+require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    COMMANDS = %w(new setup dev make migrate seed routes test db logs services sites installations doctor open lsp)
+    COMMANDS = %w(new setup dev make migrate seed routes corretto db logs services sites installations doctor open lsp)
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
     end
@@ -38,7 +39,7 @@ module Caramel::Frappe
         @output.puts(usage(command))
         return 0
       end
-      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (command == "migrate" && args != [] of String && args != ["--dev-override"]) || (!{"new", "dev", "make", "migrate", "test", "db", "logs", "services", "sites", "installations", "lsp"}.includes?(command) && !args.empty?)
+      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (command == "migrate" && args != [] of String && args != ["--dev-override"]) || (command == "corretto" && CorrettoRunner.arguments(args).nil?) || (!{"new", "dev", "make", "migrate", "corretto", "db", "logs", "services", "sites", "installations", "lsp"}.includes?(command) && !args.empty?)
         @error.puts(usage(command))
         return 2
       end
@@ -114,8 +115,9 @@ module Caramel::Frappe
         else
           tools.app_command(project, [command], values)
         end
-      when "test"
-        test(Project.load, args)
+      when "corretto"
+        paths, concurrency = CorrettoRunner.arguments(args).not_nil!
+        CorrettoRunner.new(@framework_root, Project.load, @output, @error).run(paths, concurrency)
       when "db"
         return db(args)
       when "services"
@@ -179,46 +181,6 @@ module Caramel::Frappe
       end
       raise Error.new("APP_ORIGIN differs from this project; run frappe setup") unless values["APP_ORIGIN"]? == project.origin
       values
-    end
-
-    private def test(project : Project, args : Array(String)) : Nil
-      NewProject.new(@framework_root).verify_snapshot(project)
-      client = LatteClient.new
-      client.ready!
-      id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
-      authoritative = client.environment(id, project.root)
-      local = project.local_environment
-      %w(SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL).each do |key|
-        raise Error.new("#{key} differs from this project's Latte credentials; test refused") unless local[key]? == authoritative[key]?
-      end
-      config = Caramel::Database::Config.parse(authoritative["SPEC_DATABASE_URL"])
-      migration_config = Caramel::Database::Config.parse(authoritative["SPEC_MIGRATION_DATABASE_URL"])
-      development = Caramel::Database::Config.parse(authoritative["DATABASE_URL"])
-      expected_spec = Latte::Postgres.database_names(id).spec
-      unless config.database == expected_spec && config.database != development.database && migration_config.database == config.database && migration_config.host == config.host && migration_config.port == config.port
-        raise Error.new("Spec database identity is not isolated from development; test refused")
-      end
-      db = Caramel::Database.open(authoritative["SPEC_DATABASE_URL"])
-      begin
-        unless db.query_one("SELECT current_database()", as: String) == config.database && db.query_one("SELECT current_user", as: String) == config.user
-          raise Error.new("Connected spec database identity differs; test refused")
-        end
-      ensure
-        db.close
-      end
-      values = {
-        "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => config.database,
-        "APP_ORIGIN" => project.origin, "APP_SECRET" => Random::Secure.hex(32),
-        "DATABASE_URL" => authoritative["SPEC_DATABASE_URL"],
-        "MIGRATION_DATABASE_URL" => authoritative["SPEC_MIGRATION_DATABASE_URL"],
-        "SPEC_DATABASE_URL" => authoritative["SPEC_DATABASE_URL"],
-        "SPEC_MIGRATION_DATABASE_URL" => authoritative["SPEC_MIGRATION_DATABASE_URL"],
-        "CARAMEL_EXPECTED_DATABASE_URL" => authoritative["SPEC_MIGRATION_DATABASE_URL"],
-      }
-      tools = Tools.new(@framework_root, @output, @error)
-      tools.app_command(project, ["migrate"], values)
-      values["CARAMEL_EXPECTED_DATABASE_URL"] = authoritative["SPEC_DATABASE_URL"]
-      tools.specs(project, args, values)
     end
 
     private def lsp(args : Array(String)) : Int32
@@ -427,7 +389,7 @@ module Caramel::Frappe
       when "dev"      then "frappe dev [--no-open]"
       when "make"     then "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"
       when "new"      then "frappe new NAME"
-      when "test"     then "frappe test [SPEC_OPTIONS]"
+      when "corretto" then "frappe corretto [SPEC_PATHS...] [--concurrency=1..#{CorrettoRunner::MAX_CONCURRENCY}]"
       when "db"       then "frappe db dump | frappe db restore FILE | frappe db diff --name NAME [--dev-override]"
       when "migrate"  then "frappe migrate [--dev-override]"
       when "sites"    then "frappe sites [remove NAME]"

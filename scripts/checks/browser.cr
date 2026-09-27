@@ -1,5 +1,7 @@
 require "./support/latte_fixture"
 require "./support/webdriver"
+require "uri"
+require "http/params"
 
 module Caramel::Checks
   # Drives Safari against a generated app served through Latte's Caddy to
@@ -63,10 +65,12 @@ module Caramel::Checks
     @driver : WebDriver?
 
     def initialize
-      Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the managed toolchain")
+      toolchain = Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the managed toolchain")
+      @psql = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin/psql")
       @fixture = LatteFixture.new("caramel-browser-")
       @project = File.join(@fixture.projects, NAME)
       @origin = ""
+      @database_url = ""
     end
 
     def execute : Nil
@@ -77,6 +81,7 @@ module Caramel::Checks
       begin
         fixture.start
         values = create_project
+        @database_url = values["DATABASE_URL"]
         @origin = "https://#{NAME}.localhost:#{fixture.https_port}"
         fixture.serve(@project, NAME, values.merge({"APP_ORIGIN" => @origin}))
         File.open(File.join(fixture.root, "safaridriver.log"), "w") do |log|
@@ -86,6 +91,8 @@ module Caramel::Checks
             check_partials
             check_islands
             check_events
+            check_pubsub
+            check_graceful_stop
           ensure
             @driver = nil
           end
@@ -124,6 +131,9 @@ module Caramel::Checks
     private def install_probe : Nil
       %w(app/actions/probe app/views/probe).each do |relative|
         FileUtils.cp_r(File.join(PROBE, relative), File.join(@project, relative))
+      end
+      %w(app/jobs/probe_delivery.cr db/migrations/20260927130000_create_probe_deliveries.cr).each do |relative|
+        File.copy(File.join(PROBE, relative), File.join(@project, relative))
       end
       routes = File.join(@project, "config/routes.cr")
       marker = "    # Frappé resource routes\n"
@@ -261,6 +271,71 @@ module Caramel::Checks
         assert!(state["events"].as_a.map(&.as_s) == ["first", "second"] && state["errors"].as_a.empty?, "Unexpected stream state: #{state.to_json}")
         puts "PASS: SSE through Caddy to the app socket delivered event 1 before release (#{first.total_milliseconds.round.to_i} ms after opening) and event 2 after release (#{second.total_milliseconds.round.to_i} ms later)"
       end
+    end
+
+    # The page streams the RFC-0003 §2.3 action; a POST commits a business row
+    # with its job; serve's worker runs the job, whose publish reaches Safari.
+    private def check_pubsub : Nil
+      group("Cold Brew job to PubSub through Caddy", "#pubsub") do
+        visit("/probe/pubsub")
+        driver.click(driver.find("#pubsub-open"))
+        # That action sends its headers with its first event: ping until one arrives.
+        live = false
+        deadline = Time.instant + 15.seconds
+        until live || Time.instant > deadline
+          driver.click(driver.find("#pubsub-ping"))
+          live = Checks.wait_until(1.second, 50.milliseconds) { js("return window.__probe.pubsub.includes('ping')").as_bool }
+        end
+        assert!(live, "No ping reached the board stream within 15 s: #{js("return window.__probe.pubsubErrors").to_json}")
+        requested = Time.instant
+        driver.click(driver.find("#pubsub-deliver"))
+        wait_for("the delivery POST to answer") { js("return document.getElementById('pubsub-delivery').textContent !== ''").as_bool }
+        delivery = js("return document.getElementById('pubsub-delivery').textContent").as_s.to_i64
+        wait_for("the job's event", 15.seconds) { js("return window.__probe.pubsub.some((data) => data !== 'ping')").as_bool }
+        latency = Time.instant - requested
+        state = js("return {events: window.__probe.pubsub.filter((data) => data !== 'ping'), errors: window.__probe.pubsubErrors, requests: window.__probe.requests.filter((request) => request.method === 'POST')}")
+        assert!(state["events"].as_a.map(&.as_s) == [{delivery: delivery}.to_json] && state["errors"].as_a.empty?, "Unexpected board stream state: #{state.to_json}")
+        assert!(state["requests"].as_a.all? { |request| request["csrf"] == true }, "A probe POST lacked CSRF: #{state.to_json}")
+        assert!(job_state(delivery) == "1:true:true:default", "The job row is not finished after one attempt: #{job_state(delivery).inspect}")
+        assert!(sql("SELECT delivered_at IS NOT NULL FROM probe_deliveries WHERE id = #{delivery}") == "t", "The job's write did not commit")
+        puts "PASS: a POST committed delivery #{delivery} with its Cold Brew job; serve's worker finished the job (1 attempt) and its publish reached Safari's EventSource on the RFC-0003 §2.3 action through Caddy #{latency.total_milliseconds.round.to_i} ms after the click"
+      end
+    end
+
+    # SIGTERM while a job runs: serve stops fetching, lets the job finish and exits.
+    private def check_graceful_stop : Nil
+      group("Cold Brew graceful stop on SIGTERM", "#pubsub") do
+        previous = js("return document.getElementById('pubsub-delivery').textContent").as_s
+        driver.click(driver.find("#pubsub-deliver-slow"))
+        wait_for("the slow delivery POST to answer") { js("return document.getElementById('pubsub-delivery').textContent !== arguments[0]", previous).as_bool }
+        delivery = js("return document.getElementById('pubsub-delivery').textContent").as_s.to_i64
+        wait_for("serve's worker to start the slow job") { job_state(delivery) == "1:false:true:default" }
+        app = @fixture.app || raise "The fixture app is not running"
+        stopping = Time.instant
+        app.signal(Signal::TERM)
+        status = LatteFixture.wait_exit(app, 15.seconds, "serve to exit after SIGTERM")
+        stopped = Time.instant - stopping
+        assert!(status.success?, "serve exited with #{status} after SIGTERM")
+        assert!(job_state(delivery) == "1:true:true:default", "The in-flight job did not finish before exit: #{job_state(delivery).inspect}")
+        assert!(sql("SELECT delivered_at IS NOT NULL FROM probe_deliveries WHERE id = #{delivery}") == "t", "The in-flight job's write did not commit")
+        puts "PASS: SIGTERM while delivery #{delivery}'s job ran: serve let the job finish (1 attempt, committed) and exited 0 after #{stopped.total_milliseconds.round.to_i} ms"
+      end
+    end
+
+    # attempts:finished:not failed:queue of the delivery's job.
+    private def job_state(delivery : Int64) : String
+      sql(<<-SQL)
+        SELECT attempts || ':' || (finished_at IS NOT NULL) || ':' || (failed_at IS NULL) || ':' || queue
+        FROM caramel_jobs WHERE class_name = 'App::ProbeDelivery' AND (payload->>'delivery_id')::bigint = #{delivery}
+        SQL
+    end
+
+    private def sql(statement : String) : String
+      uri = URI.parse(@database_url)
+      query = HTTP::Params.parse(uri.query || "")
+      environment = @fixture.environment({"PGPASSWORD" => URI.decode(uri.password || "")})
+      @fixture.command([@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", query["host"], "-p", query["port"]? || "5432", "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')],
+        environment: environment, input: statement, echo: false, timeout: 15.seconds).stdout.strip
     end
 
     private def type_search(mode : String, keys : String, query : String) : JSON::Any

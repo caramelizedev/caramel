@@ -62,6 +62,19 @@ private class TestServices < Caramel::Latte::ServiceControl
     Caramel::Latte::Postgres.branch_database(id, name)
     !@branches.delete(name).nil?
   end
+
+  getter workers = [] of Int32
+
+  def test_worker_json(id : String, index : Int32) : String
+    database = Caramel::Latte::Postgres.test_worker_database(id, index)
+    @workers << index unless @workers.includes?(index)
+    {version: 1, worker: {index: index, database: database, migration_url: "private-migration-w#{index}", runtime_url: "private-runtime-w#{index}"}}.to_json
+  end
+
+  def drop_test_worker(id : String, index : Int32) : Bool
+    Caramel::Latte::Postgres.test_worker_database(id, index)
+    !@workers.delete(index).nil?
+  end
 end
 
 describe Caramel::Latte::Server do
@@ -152,6 +165,41 @@ describe Caramel::Latte::Server do
       server.handle(HTTP::Request.new("DELETE", "#{endpoint}/DROP%20DATABASE")).status.should eq(400)
       server.handle(HTTP::Request.new("GET", "#{endpoint}/diff_1a2b")).status.should eq(404)
       services.branches.should be_empty
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "creates, resets and drops Corretto test worker databases through the versioned API" do
+    root = File.join("/private/tmp", "latte-api-workers-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      services = TestServices.new(registry)
+      server = Caramel::Latte::Server.new(registry, services)
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+      endpoint = "/v1/sites/0123456789abcdef/test-workers"
+      created = server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, "{}"))
+      created.status.should eq(200)
+      worker = JSON.parse(created.body)["worker"]
+      worker["database"].as_s.should eq("caramel_spec_0123456789abcdef_w2")
+      worker["runtime_url"].as_s.should eq("private-runtime-w2")
+      worker["migration_url"].as_s.should eq("private-migration-w2")
+      created.headers["Cache-Control"].should eq("no-store")
+      # Posting again resets the same worker.
+      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, "{}")).status.should eq(200)
+      services.workers.should eq([2])
+      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, %({"template":"caramel_dev_0123456789abcdef"}))).status.should eq(400)
+      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", HTTP::Headers.new, "{}")).status.should eq(415)
+      %w(0 9 two 100).each do |index|
+        server.handle(HTTP::Request.new("POST", "#{endpoint}/#{index}", headers, "{}")).status.should eq(400)
+      end
+      server.handle(HTTP::Request.new("GET", "#{endpoint}/2")).status.should eq(404)
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/2")).status.should eq(200)
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/2")).status.should eq(404)
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/9")).status.should eq(400)
+      services.workers.should be_empty
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)

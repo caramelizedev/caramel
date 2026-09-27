@@ -69,10 +69,11 @@ module Caramel::Checks
         created = diff("create_books")
         assert!(created.size == 1 && created[0].includes?("    CREATE TABLE \"books\" (\n      \"id\" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n      \"title\" text NOT NULL,"), created.inspect)
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
-        assert!(migrated.includes?("Applied 1 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
+        # Three framework-owned Cold Brew migrations precede the application's.
+        assert!(migrated.includes?("Applied 4 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
         assert!(sql(runtime_url, "SELECT count(*) FROM books") == "0")
         unchanged = command([@frappe, "db", "diff", "--name", "nothing"], chdir: @project, timeout: COMPILE).stdout
-        assert!(unchanged.includes?("already matches the declared schema") && unchanged.includes?("ignored table caramel_migrations"), unchanged)
+        assert!(unchanged.includes?("already matches the declared schema") && unchanged.includes?("ignored table caramel_migrations") && unchanged.includes?("ignored table caramel_jobs (owned by Caramel)"), unchanged)
         assert!(branches(id).empty?, "scratch branches remain: #{branches(id)}")
         puts "PASS: frappe db diff wrote a CREATE TABLE migration from the schema, frappe migrate applied it, and a second diff found nothing"
 
@@ -110,7 +111,7 @@ module Caramel::Checks
         app = File.join(@project, ".caramel/application")
         app_env = environment(values.merge({"CARAMEL_ENV" => "development", "CARAMEL_EXPECTED_DATABASE_URL" => runtime_url}))
         linted = attempt([app, "lint"], chdir: @project, environment: app_env)
-        assert!(!linted.success? && linted.stderr.includes?("LINT not-null-default") && sql(runtime_url, "SELECT count(*) FROM caramel_migrations") == "3", linted.stdout + linted.stderr)
+        assert!(!linted.success? && linted.stderr.includes?("LINT not-null-default") && sql(runtime_url, "SELECT count(*) FROM caramel_migrations") == "6", linted.stdout + linted.stderr)
         linted = command([app, "lint", "--dev-override"], chdir: @project, environment: app_env, echo: false)
         assert!(linted.stdout.includes?("Pending migrations pass the zero-lock linter.") && linted.stderr.includes?("WARN (--dev-override) LINT not-null-default"), linted.stdout + linted.stderr)
         applied = command([@frappe, "migrate", "--dev-override"], chdir: @project, timeout: COMPILE)

@@ -2,7 +2,7 @@ require "caramel"
 require "yaml"
 
 module App
-  MIGRATIONS = [] of SugarORM::Migration
+  MIGRATIONS = Caramel::ColdBrew::MIGRATIONS.dup
   DATABASE_SETTINGS = YAML.parse({{ read_file("#{__DIR__}/database.yml") }})
   TITLE = "@@TITLE@@"
 
@@ -16,6 +16,7 @@ end
 
 require "../app/models/*"
 require "../app/changesets/*"
+require "../app/jobs/*"
 require "./paths"
 require "../app/actions/application_action"
 require "../app/actions/*"

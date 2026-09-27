@@ -50,10 +50,6 @@ module Caramel::Frappe
       run(binary, args, project.root, values)
     end
 
-    def specs(project : Project, args : Array(String), values : Hash(String, String)) : Nil
-      run(File.join(@framework_root, "scripts/crystal"), ["spec", "spec", *args], project.root, values)
-    end
-
     def run(command : String, args : Array(String), directory : String, values : Hash(String, String) = {} of String => String) : Nil
       status = Process.run(command, args, chdir: directory, env: environment(values), clear_env: true, output: @output, error: @error, input: Process::Redirect::Inherit)
       raise Error.new("Command failed (exit #{status.exit_code}); see the diagnostic above") unless status.success?

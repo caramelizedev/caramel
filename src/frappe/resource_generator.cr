@@ -72,6 +72,16 @@ module Caramel::Frappe
       else                "2026-09-20T13:00:00Z"
       end
     end
+
+    # `value` (a sample) as a Crystal literal of this field's type.
+    def literal(value : String) : String
+      case @kind
+      when "string"                   then value.to_json
+      when "int64"                    then "#{value}_i64"
+      when "int32", "bool", "float64" then value
+      else                                 "Time.parse_rfc3339(#{value.to_json})"
+      end
+    end
   end
 
   class ResourceGenerator
@@ -111,11 +121,11 @@ module Caramel::Frappe
         "@@TABLE_CELLS@@" => fields.map { |f| "<td><%= record.#{f.name} %></td>" }.join,
         "@@SHOW_FIELDS@@" => fields.map { |f| "  <dt>#{f.label}</dt><dd><%= record.#{f.name} %></dd>" }.join('\n'),
         "@@SAMPLE_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.sample.to_json}" }.join(", "),
+        "@@SAMPLE_CONDITIONS@@" => fields.map { |f| "#{f.name}: #{f.literal(f.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => fields.map { |f| "      persisted.#{f.name}.should eq(Caramel::RequestContract.convert(#{f.updated_sample.to_json}, #{ResourceField::TYPES[f.kind][0]}))" }.join('\n'),
         "@@ASSERT_PRESENCE@@" => assert_presence(name, required_text),
         "@@ASSERT_ESCAPING@@" => fields.select { |f| f.kind == "string" }.map { |f| "      shown.body.should contain(Caramel::HTML.escape(#{f.sample.to_json}))\n      shown.body.should_not contain(#{f.sample.to_json})" }.join('\n'),
-        "@@HOST@@" => "#{project.name}.#{project.metadata.domain_suffix}",
       }
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")

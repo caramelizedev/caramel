@@ -7,3 +7,7 @@
     get "/probe/events", App::Probe::Events
     get "/probe/events/stream", App::Probe::Stream
     get "/probe/events/release", App::Probe::Release
+    get "/probe/pubsub", App::Probe::Pubsub
+    get "/probe/pubsub/:board_id/live", App::Probe::Live
+    post "/probe/pubsub/:board_id/ping", App::Probe::Ping
+    post "/probe/pubsub/:board_id/deliveries", App::Probe::Deliver

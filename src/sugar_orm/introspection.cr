@@ -156,7 +156,8 @@ module SugarORM
         if !valid
           invalid << name
         elsif special
-          skipped << "skipped index #{name} on #{table} (expression, partial or constraint index)"
+          # The differ ignores Caramel-owned tables whole, indexes included.
+          skipped << "skipped index #{name} on #{table} (expression, partial or constraint index)" unless table.starts_with?("caramel_")
         else
           indexes[table] << Catalog::Index.new(name, names, unique)
         end
@@ -165,7 +166,7 @@ module SugarORM
         if size == 1
           keys[table] << Catalog::ForeignKey.new(name, column, target, target_column, ON_DELETE[action])
         else
-          skipped << "skipped foreign key #{name} on #{table} (multi-column)"
+          skipped << "skipped foreign key #{name} on #{table} (multi-column)" unless table.starts_with?("caramel_")
         end
       end
       tables = db.query_all(TABLES, as: String).map do |table|

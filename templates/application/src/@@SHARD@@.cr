@@ -28,7 +28,7 @@ database_url = App.database_url(migration: command == "migrate")
 if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
   abort("Database connection differs from the verified launcher configuration") unless database_url == expected
 elsif ENV["CARAMEL_ENV"]? == "test"
-  abort("Run specs through frappe test")
+  abort("Run specs through frappe corretto")
 end
 db = Caramel::Database.open(database_url)
 status = 0
@@ -67,6 +67,8 @@ begin
     server = HTTP::Server.new([App.build(db, secret, origin)])
     server.bind_unix(socket_path)
     File.chmod(socket_path, 0o600)
+    # Workers, maintenance, schedules and PubSub. Specs drain queues instead.
+    cold_brew = Caramel::ColdBrew.start(database_url) unless ENV["CARAMEL_ENV"]? == "test"
     Signal::INT.trap { server.close }
     Signal::TERM.trap { server.close }
     puts "@@TITLE@@ is ready at #{origin}"
@@ -75,9 +77,11 @@ begin
     ensure
       server.close unless server.closed?
       File.delete?(socket_path)
+      # In-flight jobs finish; no new ones start.
+      cold_brew.try(&.stop)
     end
   end
-rescue ex : SugarORM::Linter::Refused | SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed
+rescue ex : SugarORM::Linter::Refused | SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed | Caramel::ColdBrew::ConfigurationError
   STDERR.puts(ex.message)
   status = 1
 ensure

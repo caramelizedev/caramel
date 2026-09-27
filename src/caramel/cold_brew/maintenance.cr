@@ -1,0 +1,68 @@
+require "log"
+require "wait_group"
+require "../../sugar_orm"
+require "../cache"
+
+module Caramel::ColdBrew
+  # The background housekeeping fiber: every `interval` it releases stale
+  # job locks, deletes expired cache rows, creates the daily job partitions
+  # for today through today + 7 (UTC) and drops partitions that ended more
+  # than `retention` ago and hold only finished or failed jobs.
+  class Maintenance
+    Log = ::Log.for("cold_brew.maintenance")
+
+    DAYS_AHEAD = 7
+
+    record Report, released : Int64, expired : Int64, created : Int32, dropped : Int32
+
+    RELEASE = <<-SQL
+      UPDATE caramel_jobs SET locked_at = NULL, locked_by = NULL
+      WHERE locked_at < now() - make_interval(secs => $1)
+        AND finished_at IS NULL AND failed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM pg_stat_activity activity WHERE activity.pid::text = caramel_jobs.locked_by)
+      SQL
+
+    def initialize(@db : DB::Database = SugarORM::Repo.database, @retention : Time::Span = 7.days,
+                   @stale_after : Time::Span = 15.minutes, @interval : Time::Span = 60.seconds)
+      @stopping = Channel(Nil).new
+      @done = WaitGroup.new
+    end
+
+    def start : self
+      @done.add(1)
+      spawn(name: "cold_brew:maintenance") do
+        until @stopping.closed?
+          begin
+            run_once
+          rescue error
+            Log.error { "maintenance failed error_type=#{error.class}" }
+          end
+          select
+          when @stopping.receive?
+          when timeout(@interval)
+          end
+        end
+      ensure
+        @done.done
+      end
+      self
+    end
+
+    def stop : Nil
+      @stopping.close
+      @done.wait
+    end
+
+    # One pass. A job whose lock is older than `stale_after` and whose
+    # locking backend no longer exists runs again.
+    def run_once : Report
+      SugarORM::Repo.using(@db) do
+        released = SugarORM.sql_exec(RELEASE, @stale_after.total_seconds)
+        expired = Cache.vacuum
+        created = SugarORM.sql("SELECT caramel_jobs_create_partitions((now() AT TIME ZONE 'UTC')::date, $1) AS created", DAYS_AHEAD, as: {created: Int32}).first[:created]
+        dropped = SugarORM.sql("SELECT caramel_jobs_drop_partitions(make_interval(secs => $1)) AS dropped", @retention.total_seconds, as: {dropped: Int32}).first[:dropped]
+        Report.new(released, expired, created, dropped)
+      end
+    end
+  end
+end

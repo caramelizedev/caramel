@@ -46,6 +46,12 @@ module Caramel
       Crypto::Subtle.constant_time_compare(sign("#{timestamp}.#{nonce}"), signature)
     end
 
+    # A key for another purpose (such as the session signature), derived from
+    # the application secret so that neither signature can stand in for the other.
+    def derive_key(purpose : String) : Bytes
+      OpenSSL::HMAC.digest(:sha256, @secret, "caramel.#{purpose}")
+    end
+
     private def sign(payload : String) : String
       OpenSSL::HMAC.hexdigest(:sha256, @secret, payload)
     end

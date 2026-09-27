@@ -43,6 +43,15 @@ module Caramel
       @context.csrf_token
     end
 
+    # The signed session; changes are saved in the response's cookie.
+    def session : Hash(String, String)
+      @context.session
+    end
+
+    def sign_out : Nil
+      @context.session.clear
+    end
+
     def island(component : String, props) : HTML::Safe
       Island.tag(component, props)
     end

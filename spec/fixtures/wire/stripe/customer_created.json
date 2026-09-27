@@ -1,0 +1,6 @@
+{
+  "id": "cus_Corretto123",
+  "object": "customer",
+  "email": "a@acme.test",
+  "livemode": false
+}

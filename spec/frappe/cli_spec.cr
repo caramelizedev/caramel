@@ -36,12 +36,14 @@ describe Caramel::Frappe::CLI do
       "frappe sites [remove NAME]",
       "frappe installations [list|register|remove VERSION]",
       "frappe migrate [--dev-override]",
+      "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]",
     ]
     usages.each { |usage| output.to_s.should contain(usage) }
     {["db"] => usages[0], ["db", "restore"] => usages[0], ["db", "diff"] => usages[0], ["db", "diff", "--name"] => usages[0],
      ["db", "diff", "--name", "a", "--force"] => usages[0], ["logs", "bogus"] => usages[1],
      ["sites", "remove"] => usages[2], ["installations", "remove"] => usages[3], ["migrate", "--force"] => usages[4],
-     ["migrate", "--dev-override", "--dev-override"] => usages[4]}.each do |arguments, usage|
+     ["migrate", "--dev-override", "--dev-override"] => usages[4], ["corretto", "--concurrency=9"] => usages[5],
+     ["corretto", "spec", "--order=random"] => usages[5]}.each do |arguments, usage|
       errors.clear
       cli.run(arguments).should eq(2)
       errors.to_s.should contain(usage)

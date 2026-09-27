@@ -2,59 +2,38 @@ require "../spec_helper"
 
 describe "@@COLLECTION_LABEL@@" do
   it "creates, reads, updates and deletes through CSRF-protected browser forms" do
-    app = App.build(SPEC_DB, "s" * 64, "https://@@HOST@@")
-    headers = HTTP::Headers{"Host" => "@@HOST@@"}
-    page = app.handle(HTTP::Request.new("GET", "/@@PLURAL@@/new", headers))
-    page.status.should eq(200)
-    cookie = page.headers["Set-Cookie"].split(';').first
-    token = cookie.split('=', 2).last
-    headers["Cookie"] = cookie
-    headers["Origin"] = "https://@@HOST@@"
-    headers["Content-Type"] = "application/x-www-form-urlencoded"
-    values = {@@SAMPLE_FIELDS@@}
-    values["_csrf"] = token
-    created = app.handle(HTTP::Request.new("POST", "/@@PLURAL@@", headers, URI::Params.encode(values)))
-    created.status.should eq(303)
-    path = created.headers["Location"]
-    id = path.split('/').last.to_i64
-    begin
-      App::@@MODEL@@.query.find(id).should_not be_nil
-      shown = app.handle(HTTP::Request.new("GET", path, headers))
-      shown.status.should eq(200)
-      json_headers = headers.dup
-      json_headers["Accept"] = "application/json"
-      json = app.handle(HTTP::Request.new("GET", path, json_headers))
-      json.status.should eq(200)
-      JSON.parse(json.body)["record"]["id"].as_i64.should eq(id)
+    Corretto.session do |client, db|
+      client.get("/@@PLURAL@@/new").should render_page("New @@LABEL@@")
+      created = client.post("/@@PLURAL@@", params: {@@SAMPLE_FIELDS@@})
+      record = App::@@MODEL@@.query.order_by(:id, :desc).first!(db)
+      path = "/@@PLURAL@@/#{record.id}"
+      created.should have_status(303)
+      created.should redirect_to(path)
+      db.should have_row(App::@@MODEL@@, id: record.id, @@SAMPLE_CONDITIONS@@)
+      shown = client.follow_redirect
+      shown.should render_page("@@MODEL@@")
 @@ASSERT_ESCAPING@@
-      app.handle(HTTP::Request.new("GET", "/@@PLURAL@@", headers)).status.should eq(200)
-      app.handle(HTTP::Request.new("GET", path + "/edit", headers)).status.should eq(200)
-      values["_method"] = "PATCH"
-      values.merge!({@@UPDATED_FIELDS@@})
-      headers["HX-Request"] = "true"
-      updated = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(values)))
-      updated.status.should eq(200)
-      updated.headers["HX-Location"].should eq(path)
-      persisted = App::@@MODEL@@.query.find!(id)
+      json = client.get(path, headers: {"Accept" => "application/json"})
+      json.should have_status(200)
+      JSON.parse(json.body)["record"]["id"].as_i64.should eq(record.id)
+      client.get("/@@PLURAL@@").should render_page("@@COLLECTION_LABEL@@")
+      client.get("#{path}/edit").should render_page("Edit @@LABEL@@")
+      updated = client.patch(path, headers: {"HX-Request" => "true"}, params: {@@UPDATED_FIELDS@@})
+      updated.should have_status(200)
+      updated.should have_header("HX-Location", path)
+      persisted = App::@@MODEL@@.query.find!(db, record.id)
 @@ASSERT_FIELDS@@
 @@ASSERT_PRESENCE@@
-      headers.delete("HX-Request")
-      forged = values.merge({"_csrf" => "invalid", "_method" => "DELETE"})
-      app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(forged))).status.should eq(403)
-      App::@@MODEL@@.query.find(id).should_not be_nil
-      invalid = values.merge({"unexpected_field" => "refuse"})
-      headers["HX-Request-Type"] = "partial"
-      rejected = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(invalid)))
-      rejected.status.should eq(422)
-      rejected.body.should_not contain("<!DOCTYPE")
+      client.delete(path, headers: {"X-CSRF-Token" => "forged"}).should have_status(403)
+      client.delete(path, headers: {"Origin" => "https://attacker.example"}).should have_status(403)
+      db.should have_row(App::@@MODEL@@, id: record.id)
+      rejected = client.patch(path, headers: {"HX-Request-Type" => "partial"}, params: {@@UPDATED_FIELDS@@, "unexpected_field" => "refuse"})
+      rejected.should have_status(422)
+      rejected.should_not render_page("Edit @@LABEL@@")
       rejected.body.should contain("Unknown field: unexpected_field")
-      headers.delete("HX-Request-Type")
-      deleted = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode({"_csrf" => token, "_method" => "DELETE"})))
-      deleted.status.should eq(303)
-      App::@@MODEL@@.query.find(id).should be_nil
-      app.handle(HTTP::Request.new("GET", path, headers)).status.should eq(404)
-    ensure
-      App::@@MODEL@@.query.find(id).try(&.delete)
+      client.delete(path).should redirect_to("/@@PLURAL@@")
+      db.should_not have_row(App::@@MODEL@@, id: record.id)
+      client.get(path).should have_status(404)
     end
   end
 end

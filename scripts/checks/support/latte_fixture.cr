@@ -11,6 +11,7 @@ module Caramel::Checks
     getter ports : Array(Int32)
     getter env : Hash(String, String?)
     getter daemon : Process?
+    getter app : Process?
 
     def initialize(prefix : String)
       @repo = REPO

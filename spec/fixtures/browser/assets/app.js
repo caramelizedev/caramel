@@ -1,7 +1,7 @@
 
 // Probes for scripts/check browser. The check reads window.__probe.
 (() => {
-  const probe = { requests: [], responses: [], settled: [], islands: [], sse: [], sseErrors: [], inflight: 0 };
+  const probe = { requests: [], responses: [], settled: [], islands: [], sse: [], sseErrors: [], pubsub: [], pubsubErrors: [], inflight: 0 };
   window.__probe = probe;
 
   document.addEventListener('htmx:before:request', (event) => {
@@ -76,12 +76,29 @@
     });
   }
 
+  // Streams the board's Cold Brew channel through the RFC-0003 §2.3 action.
+  function openBoard() {
+    const board = document.getElementById('pubsub').dataset.board;
+    const log = document.getElementById('pubsub-log');
+    const source = new EventSource(`/probe/pubsub/${board}/live`);
+    source.addEventListener('BoardUpdated', (event) => {
+      probe.pubsub.push(event.data);
+      const item = document.createElement('li');
+      item.textContent = event.data;
+      log.append(item);
+    });
+    source.addEventListener('error', () => {
+      probe.pubsubErrors.push(source.readyState);
+    });
+  }
+
   document.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return;
-    const button = event.target.closest('#define-late, #sse-open');
+    const button = event.target.closest('#define-late, #sse-open, #pubsub-open');
     if (!button) return;
     button.disabled = true;
     if (button.id === 'define-late') defineLate();
+    else if (button.id === 'pubsub-open') openBoard();
     else openStream();
   });
 })();

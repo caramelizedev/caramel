@@ -238,17 +238,43 @@ module Caramel
       raise ex
     end
 
+    # One connection outside any pool under the same transport policy, for a
+    # session that waits by design, such as LISTEN: its handshake keeps
+    # IO_TIMEOUT, later reads wait indefinitely. The protocol connection is
+    # for the caller's own frame loop.
+    def self.listener(url : String) : {PG::Connection, PQ::Connection}
+      config = Config.parse(url, 1)
+      if config.unix_socket?
+        listener_on(unix_socket(config), config)
+      else
+        listener_on(open_tls_socket(config), config)
+      end
+    end
+
+    private def self.listener_on(socket : UNIXSocket | OpenSSL::SSL::Socket::Client, config : Config) : {PG::Connection, PQ::Connection}
+      pq = PQ::Connection.new(socket, config.conninfo)
+      connection = PG::Connection.new(config.connection_options, pq)
+      socket.read_timeout = nil
+      {connection, pq}
+    rescue ex
+      close_failed_connection(nil, socket)
+      raise ex
+    end
+
     private def self.build_connection(config : Config, options : DB::Connection::Options) : PG::Connection
       if config.unix_socket?
-        socket = UNIXSocket.new(File.join(config.host, ".s.PGSQL.#{config.port}"))
-        socket.sync = false
-        socket.read_timeout = IO_TIMEOUT
-        socket.write_timeout = IO_TIMEOUT
-        connection_from(socket, config, options)
+        connection_from(unix_socket(config), config, options)
       else
-        socket = open_tls_socket(config)
-        connection_from(socket, config, options)
+        connection_from(open_tls_socket(config), config, options)
       end
+    end
+
+    private def self.unix_socket(config : Config) : UNIXSocket
+      socket = UNIXSocket.new(File.join(config.host, ".s.PGSQL.#{config.port}"))
+      socket.sync = false
+      socket.read_timeout = IO_TIMEOUT
+      socket.write_timeout = IO_TIMEOUT
+      socket
     end
 
     private def self.connection_from(socket : UNIXSocket | OpenSSL::SSL::Socket::Client, config : Config, options : DB::Connection::Options) : PG::Connection

@@ -95,6 +95,20 @@ module Caramel::Frappe
       nil
     end
 
+    # Creates Corretto test worker `index`, or resets it to a fresh clone of the
+    # migrated spec database. The document holds `database`, `migration_url`
+    # and `runtime_url`.
+    def test_worker(id : String, index : Int32) : JSON::Any
+      validate_id(id)
+      request("POST", "/v1/sites/#{id}/test-workers/#{index}", "{}")["worker"]
+    end
+
+    def drop_test_worker(id : String, index : Int32) : Nil
+      validate_id(id)
+      request("DELETE", "/v1/sites/#{id}/test-workers/#{index}")
+      nil
+    end
+
     def site_directory(id : String) : String
       validate_id(id)
       Latte::StateSecurity.validate_owned_directory(@runtime)

@@ -216,6 +216,34 @@ describe "Latte managed PostgreSQL" do
     end
   end
 
+  it "restores over a database that holds partitioned tables" do
+    migration = open_database(credentials.development_migration, 1)
+    begin
+      migration.exec("CREATE TABLE partition_probe (id bigint NOT NULL, day date NOT NULL, title text NOT NULL, PRIMARY KEY (id, day)) PARTITION BY RANGE (day)")
+      migration.exec("CREATE TABLE partition_probe_2026 PARTITION OF partition_probe FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')")
+      migration.exec("CREATE INDEX partition_probe_title ON partition_probe (title)")
+      migration.exec("INSERT INTO partition_probe VALUES (1, '2026-09-27', 'kept')")
+    ensure
+      migration.close
+    end
+    backup = File.join(root, "partitioned-backup.dump")
+    service.backup(site, backup)
+    migration = open_database(credentials.development_migration, 1)
+    begin
+      migration.exec("DELETE FROM partition_probe")
+    ensure
+      migration.close
+    end
+    service.restore(site, backup)
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      runtime.query_all("SELECT title FROM partition_probe", as: String).should eq(["kept"])
+      runtime.query_one("SELECT title FROM durability_probe WHERE id = 1", as: String).should eq("before restart")
+    ensure
+      runtime.close
+    end
+  end
+
   it "branches the development database behind the connection guard, then lists and drops the branch" do
     source = credentials.development_database
     migration = open_database(credentials.development_migration, 1)
@@ -288,6 +316,72 @@ describe "Latte managed PostgreSQL" do
     admin_query("ALTER DATABASE #{Caramel::Latte::Postgres.quote_identifier(source)} WITH ALLOW_CONNECTIONS false;", service, paths, toolchain, root)
     service.release_guards
     allowed.call.should eq("t")
+  end
+
+  it "clones, resets and drops Corretto test workers from the migrated spec database behind the guard" do
+    template = open_database(credentials.spec_migration, 1)
+    begin
+      template.exec("CREATE TABLE IF NOT EXISTS worker_probe (title text NOT NULL)")
+      template.exec("TRUNCATE worker_probe")
+      template.exec("INSERT INTO worker_probe VALUES ('migrated')")
+    ensure
+      template.close
+    end
+    held = open_database(credentials.spec_runtime, 1)
+    held_pid = held.query_one("SELECT pg_backend_pid()", as: Int32)
+    first = service.reset_test_worker(site, 1)
+    second = service.reset_test_worker(site, 2)
+    begin
+      admin_query("SELECT count(*) FROM pg_stat_activity WHERE pid = #{held_pid};", service, paths, toolchain, root).strip.should eq("0")
+      admin_query("SELECT datallowconn FROM pg_database WHERE datname = '#{credentials.spec_database}';", service, paths, toolchain, root).strip.should eq("t")
+      first.database.should eq("#{credentials.spec_database}_w1")
+      second.database.should eq("#{credentials.spec_database}_w2")
+
+      # Each worker's migration role may hold a connection at the same time.
+      first_migration = open_database(first.migration_url, 1)
+      second_migration = open_database(second.migration_url, 1)
+      begin
+        first_migration.exec("CREATE TABLE leaked_ddl (id integer)")
+        second_migration.query_one("SELECT current_database()", as: String).should eq(second.database)
+      ensure
+        first_migration.close
+        second_migration.close
+      end
+      runtime = open_database(first.runtime_url, 1)
+      begin
+        runtime.query_one("SHOW timezone", as: String).should eq("UTC")
+        runtime.exec("INSERT INTO worker_probe VALUES ('dirty')")
+        runtime.query_all("SELECT title FROM worker_probe ORDER BY title", as: String).should eq(["dirty", "migrated"])
+        expect_database_failure(first.runtime_url, "CREATE TABLE runtime_ddl (id integer)")
+      ensure
+        runtime.close
+      end
+
+      reset = service.reset_test_worker(site, 1)
+      reset.runtime_url.should eq(first.runtime_url)
+      clean = open_database(reset.runtime_url, 1)
+      begin
+        clean.query_all("SELECT title FROM worker_probe", as: String).should eq(["migrated"])
+        clean.query_one("SELECT to_regclass('leaked_ddl')::text", as: String?).should be_nil
+      ensure
+        clean.close
+      end
+      expect_database_failure(credentials.development_runtime.sub("/#{credentials.development_database}?", "/#{first.database}?"), "SELECT 1")
+      template = open_database(credentials.spec_runtime, 1)
+      begin
+        template.query_all("SELECT title FROM worker_probe", as: String).should eq(["migrated"])
+      ensure
+        template.close
+      end
+      expect_raises(ArgumentError, "test worker index must be 1 to 8") { service.reset_test_worker(site, 9) }
+      expect_raises(ArgumentError, "test worker index must be 1 to 8") { service.drop_test_worker(site, 0) }
+    ensure
+      held.close
+      service.drop_test_worker(site, 1).should be_true
+      service.drop_test_worker(site, 2).should be_true
+    end
+    service.drop_test_worker(site, 1).should be_false
+    admin_query("SELECT count(*) FROM pg_database WHERE datname LIKE '#{credentials.spec_database}_w%';", service, paths, toolchain, root).strip.should eq("0")
   end
 
   it "refuses a wrong major without changing the owned data directory" do

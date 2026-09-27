@@ -42,6 +42,14 @@ module Caramel::Latte
     def drop_branch(id : String, name : String) : Bool
       raise PublicError.new("unavailable", "Database branching is unavailable")
     end
+
+    def test_worker_json(id : String, index : Int32) : String
+      raise PublicError.new("unavailable", "Test worker databases are unavailable")
+    end
+
+    def drop_test_worker(id : String, index : Int32) : Bool
+      raise PublicError.new("unavailable", "Test worker databases are unavailable")
+    end
   end
 
   class PublicError < Exception
@@ -171,6 +179,21 @@ module Caramel::Latte
           fields = body(request, %w(name))
           OperationDeadline.check!
           return json(OperationDeadline.run(12.seconds) { @services.create_branch_json(id, string(fields, "name")) }, 201)
+        end
+      end
+      # POST creates or resets Corretto test worker N; DELETE drops it. The
+      # service validates N (a non-numeric segment arrives as 0).
+      if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})\/test-workers\/([^\/]+)\z/)
+        id = match[1]
+        index = match[2].matches?(/\A[0-9]{1,2}\z/) ? match[2].to_i : 0
+        if request.method == "POST"
+          body(request, [] of String)
+          OperationDeadline.check!
+          return json(OperationDeadline.run(12.seconds) { @services.test_worker_json(id, index) })
+        elsif request.method == "DELETE"
+          removed = OperationDeadline.run(12.seconds) { @services.drop_test_worker(id, index) }
+          return failure("not_found", "Test worker does not exist", 404) unless removed
+          return json({version: 1, removed: index}.to_json)
         end
       end
       if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})(\/(?:upstream|environment))?\z/)

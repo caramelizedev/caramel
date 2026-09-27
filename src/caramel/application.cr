@@ -17,12 +17,15 @@ module Caramel
   # validation uses the configured origin; forwarded headers grant no trust.
   class Application
     include HTTP::Handler
+    getter csrf : CSRF
+    getter sessions : Session
     @authority : String
     @public_root : String?
 
     def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
       @authority = URI.parse(@csrf.origin).authority.not_nil!
       @public_root = public_root.try { |root| File.realpath(root) }
+      @sessions = Session.new(@csrf.derive_key("session"))
     end
 
     def handle(request : HTTP::Request) : Response
@@ -32,11 +35,15 @@ module Caramel
         return secure(static)
       end
       input = RequestInput.read(request)
-      context = RequestContext.new(request, @csrf, input)
+      context = RequestContext.new(request, @csrf, @sessions, input)
       if RequestInput::BODY_METHODS.includes?(request.method)
         raise Forbidden.new unless @csrf.valid?(request, input.csrf_token || request.headers["X-CSRF-Token"]?)
       end
-      secure(@router.dispatch(context))
+      response = @router.dispatch(context)
+      if cookie = context.session_cookie
+        response.headers.add("Set-Cookie", cookie.to_set_cookie_header)
+      end
+      secure(response)
     rescue Forbidden
       secure(Response.new(403, "This form has expired or came from another site. Reload the page and try again."))
     rescue RequestInput::TooLarge

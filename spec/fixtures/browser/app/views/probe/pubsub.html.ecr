@@ -1,0 +1,12 @@
+<h1>PubSub</h1>
+<section id="pubsub" data-board="<%= board %>">
+  <button id="pubsub-open" type="button">Open the board stream</button>
+  <button id="pubsub-ping" type="button" hx-post="/probe/pubsub/<%= board %>/ping">Ping</button>
+  <button id="pubsub-deliver" type="button" hx-post="/probe/pubsub/<%= board %>/deliveries">Deliver</button>
+  <form id="pubsub-slow" hx-post="/probe/pubsub/<%= board %>/deliveries">
+    <input type="hidden" name="pause_ms" value="1500">
+    <button id="pubsub-deliver-slow" type="submit">Deliver slowly</button>
+  </form>
+  <p>Pinged: <output id="pubsub-pinged"></output> Delivery: <output id="pubsub-delivery"></output></p>
+  <ol id="pubsub-log"></ol>
+</section>

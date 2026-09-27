@@ -231,7 +231,7 @@ module Caramel::Checks
           @sampler.phase = "#{scenario}/semantic-check"
           metrics.as_h["semantic_check_ms"] = json(elapsed { p.command([File.join(p.repo, "scripts/crystal"), "build", "src/bookshelf.cr", "--no-codegen"], chdir: p.project) })
           @sampler.phase = "#{scenario}/specs"
-          metrics.as_h["spec_command_ms"] = json(elapsed { p.command([File.join(p.repo, "bin/frappe"), "test"], chdir: p.project) })
+          metrics.as_h["spec_command_ms"] = json(elapsed { p.command([File.join(p.repo, "bin/frappe"), "corretto"], chdir: p.project, timeout: 600.seconds) })
           @sampler.phase = "#{scenario}/release-build"
           release_binary = File.join(p.root, "#{scenario}-release")
           metrics.as_h["release_build_ms"] = json(elapsed { p.command([File.join(p.repo, "scripts/crystal"), "build", "src/bookshelf.cr", "--release", "-o", release_binary], chdir: p.project) })

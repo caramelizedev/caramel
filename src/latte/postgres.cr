@@ -14,16 +14,28 @@ module Caramel::Latte
   class Postgres
     MAJOR                      = Toolchain::POSTGRES_MAJOR
     MAX_CONNECTIONS            = 64
-    RUNTIME_CONNECTION_LIMIT   =  4
+    RUNTIME_CONNECTION_LIMIT   = 24
     MIGRATION_CONNECTION_LIMIT =  1
+    MAX_TEST_WORKERS           =  8 # Corretto workers; each may hold one spec migration connection
     ADMIN_USER                 = "caramel_admin"
     BRANCH_NAME                = /\A[a-z][a-z0-9_]{0,30}\z/
     RELEASE_GUARDS_SQL         = <<-SQL
       DO $$
       DECLARE target text;
       BEGIN
-        FOR target IN SELECT datname FROM pg_database WHERE NOT datallowconn AND starts_with(datname, 'caramel_dev_') LOOP
+        FOR target IN SELECT datname FROM pg_database WHERE NOT datallowconn AND (starts_with(datname, 'caramel_dev_') OR starts_with(datname, 'caramel_spec_')) LOOP
           EXECUTE format('ALTER DATABASE %I WITH ALLOW_CONNECTIONS true', target);
+        END LOOP;
+      END
+      $$;
+      SQL
+    DROP_PARTITIONED_SQL = <<-SQL
+      DO $$
+      DECLARE target text;
+      BEGIN
+        FOR target IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                      WHERE n.nspname = 'public' AND c.relkind = 'p' AND NOT c.relispartition LOOP
+          EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', target);
         END LOOP;
       END
       $$;
@@ -309,7 +321,7 @@ module Caramel::Latte
         @toolchain.verify_postgres_version!(Toolchain::POSTGRES_VERSION)
         ensure_role(material.roles.development_migration, material.development_migration_password, MIGRATION_CONNECTION_LIMIT)
         ensure_role(material.roles.development_runtime, material.development_runtime_password, RUNTIME_CONNECTION_LIMIT)
-        ensure_role(material.roles.spec_migration, material.spec_migration_password, MIGRATION_CONNECTION_LIMIT)
+        ensure_role(material.roles.spec_migration, material.spec_migration_password, MAX_TEST_WORKERS)
         ensure_role(material.roles.spec_runtime, material.spec_runtime_password, RUNTIME_CONNECTION_LIMIT)
 
         ensure_database(material.databases.development, material.roles.development_migration)
@@ -351,6 +363,10 @@ module Caramel::Latte
       StateSecurity.validate_owned_directory(File.dirname(backup_file))
       raise ArgumentError.new("backup must be an owned regular file") if info.symlink? || !info.file? || info.owner_id.to_i64? != StateSecurity.current_uid
       raise ArgumentError.new("backup must be mode 0600") unless info.permissions.value == 0o600
+      # pg_restore --clean drops each partition's inherited primary key and
+      # indexes one by one, which PostgreSQL refuses; drop partitioned tables
+      # whole first (the backup recreates them).
+      run_psql(DROP_PARTITIONED_SQL, database, role, password)
       run_with_password_file(role, password) do |passfile|
         result = ProcessRunner.run(
           [@toolchain.pg_restore, "--exit-on-error", "--clean", "--if-exists", "--no-owner", "--dbname", self.class.connection_url(role, "", database, @socket_directory), backup_file],
@@ -368,19 +384,10 @@ module Caramel::Latte
     def create_branch(site : Site, name : String) : Branch
       database = self.class.branch_database(site.id, name)
       material = load_material(site)
-      source = material.databases.development
       migration, runtime = material.roles.development_migration, material.roles.development_runtime
       @lock.synchronize do
         raise BranchExists.new("branch #{name} already exists") if database_exists?(database)
-        guard_connections(source) do
-          run_psql(self.class.branch_clone_sql(source, database, migration), "postgres", ADMIN_USER, admin_material.password)
-        end
-        begin
-          run_psql(self.class.branch_access_sql(database, migration, runtime), "postgres", ADMIN_USER, admin_material.password)
-        rescue ex
-          OperationDeadline.without { run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password) }
-          raise ex
-        end
+        clone_guarded(material.databases.development, database, migration, runtime)
       end
       Branch.new(name, database,
         self.class.connection_url(migration, material.development_migration_password, database, @socket_directory),
@@ -388,12 +395,27 @@ module Caramel::Latte
     end
 
     def drop_branch(site : Site, name : String) : Bool
-      database = self.class.branch_database(site.id, name)
+      drop_database(self.class.branch_database(site.id, name))
+    end
+
+    # Replaces Corretto test worker `index` with a fresh guarded clone of the
+    # site's migrated spec database: creating a worker and resetting it after
+    # leaked DDL are the same operation. The worker admits only the spec roles.
+    def reset_test_worker(site : Site, index : Int32) : Branch
+      database = self.class.test_worker_database(site.id, index)
+      material = load_material(site)
+      migration, runtime = material.roles.spec_migration, material.roles.spec_runtime
       @lock.synchronize do
-        return false unless database_exists?(database)
         run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password)
-        true
+        clone_guarded(material.databases.spec, database, migration, runtime)
       end
+      Branch.new("w#{index}", database,
+        self.class.connection_url(migration, material.spec_migration_password, database, @socket_directory),
+        self.class.connection_url(runtime, material.spec_runtime_password, database, @socket_directory))
+    end
+
+    def drop_test_worker(site : Site, index : Int32) : Bool
+      drop_database(self.class.test_worker_database(site.id, index))
     end
 
     def list_branches(site : Site) : Array(String)
@@ -447,6 +469,13 @@ module Caramel::Latte
       validate_site_id!(site_id)
       validate_branch_name!(name)
       "caramel_branch_#{site_id}_#{name}"
+    end
+
+    def self.test_worker_database(site_id : String, index : Int32) : String
+      unless (1..MAX_TEST_WORKERS).includes?(index)
+        raise ArgumentError.new("test worker index must be 1 to #{MAX_TEST_WORKERS}")
+      end
+      "#{database_names(site_id).spec}_w#{index}"
     end
 
     def self.branch_guard_sql(database : String) : String
@@ -929,6 +958,28 @@ module Caramel::Latte
     private def database_exists?(database : String) : Bool
       output = run_psql("SELECT 1 FROM pg_database WHERE datname = #{self.class.quote_literal(database)};", "postgres", ADMIN_USER, admin_material.password)
       output.strip == "1"
+    end
+
+    # Clones `source` into `database` behind the connection guard and admits
+    # exactly `migration` and `runtime`; the caller holds @lock.
+    private def clone_guarded(source : String, database : String, migration : String, runtime : String) : Nil
+      guard_connections(source) do
+        run_psql(self.class.branch_clone_sql(source, database, migration), "postgres", ADMIN_USER, admin_material.password)
+      end
+      begin
+        run_psql(self.class.branch_access_sql(database, migration, runtime), "postgres", ADMIN_USER, admin_material.password)
+      rescue ex
+        OperationDeadline.without { run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password) }
+        raise ex
+      end
+    end
+
+    private def drop_database(database : String) : Bool
+      @lock.synchronize do
+        return false unless database_exists?(database)
+        run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password)
+        true
+      end
     end
 
     private def configure_database(database : String, migration_role : String, runtime_role : String) : Nil
