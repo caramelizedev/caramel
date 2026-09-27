@@ -7,14 +7,14 @@ module App::@@COLLECTION@@
     end
 
     def handle(contract : Contract)
-      record = App::@@MODEL@@.new(@@ATTRIBUTES@@)
-      return render_form(contract.values, record.errors, nil, 422) unless record.save
+      changes = App::@@MODEL@@.create(@@ATTRIBUTES@@)
+      return render_form(contract.values, changes.errors, nil, 422) unless changes.saved?
       self.status = 201
-      {record: record}
+      {record: changes.record}
     end
 
     def render(result)
-      redirect_to(@@SINGULAR@@_path(result[:record].id.not_nil!))
+      redirect_to(@@SINGULAR@@_path(result[:record].id))
     end
   end
 end

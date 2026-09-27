@@ -18,7 +18,7 @@ describe "@@COLLECTION_LABEL@@" do
     path = created.headers["Location"]
     id = path.split('/').last.to_i64
     begin
-      App::@@MODEL@@.find(id).should_not be_nil
+      App::@@MODEL@@.query.find(id).should_not be_nil
       shown = app.handle(HTTP::Request.new("GET", path, headers))
       shown.status.should eq(200)
       json_headers = headers.dup
@@ -35,12 +35,13 @@ describe "@@COLLECTION_LABEL@@" do
       updated = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(values)))
       updated.status.should eq(200)
       updated.headers["HX-Location"].should eq(path)
-      persisted = App::@@MODEL@@.find(id).not_nil!
+      persisted = App::@@MODEL@@.query.find!(id)
 @@ASSERT_FIELDS@@
+@@ASSERT_PRESENCE@@
       headers.delete("HX-Request")
       forged = values.merge({"_csrf" => "invalid", "_method" => "DELETE"})
       app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(forged))).status.should eq(403)
-      App::@@MODEL@@.find(id).should_not be_nil
+      App::@@MODEL@@.query.find(id).should_not be_nil
       invalid = values.merge({"unexpected_field" => "refuse"})
       headers["HX-Request-Type"] = "partial"
       rejected = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode(invalid)))
@@ -50,10 +51,10 @@ describe "@@COLLECTION_LABEL@@" do
       headers.delete("HX-Request-Type")
       deleted = app.handle(HTTP::Request.new("POST", path, headers, URI::Params.encode({"_csrf" => token, "_method" => "DELETE"})))
       deleted.status.should eq(303)
-      App::@@MODEL@@.find(id).should be_nil
+      App::@@MODEL@@.query.find(id).should be_nil
       app.handle(HTTP::Request.new("GET", path, headers)).status.should eq(404)
     ensure
-      App::@@MODEL@@.find(id).try(&.delete)
+      App::@@MODEL@@.query.find(id).try(&.delete)
     end
   end
 end

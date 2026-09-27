@@ -58,5 +58,13 @@ module Caramel::Frappe
       status = Process.run(command, args, chdir: directory, env: environment(values), clear_env: true, output: @output, error: @error, input: Process::Redirect::Inherit)
       raise Error.new("Command failed (exit #{status.exit_code}); see the diagnostic above") unless status.success?
     end
+
+    # Runs a command, returning its status and standard output; standard
+    # error passes through to the terminal unless `error` redirects it.
+    def capture(command : String, args : Array(String), directory : String, values : Hash(String, String) = {} of String => String, error : IO = @error) : Tuple(Process::Status, String)
+      output = IO::Memory.new
+      status = Process.run(command, args, chdir: directory, env: environment(values), clear_env: true, output: output, error: error, input: Process::Redirect::Close)
+      {status, output.to_s}
+    end
   end
 end

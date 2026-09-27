@@ -235,4 +235,37 @@ describe Caramel::Latte::Postgres do
     credentials.inspect.should_not contain("secret")
     credentials.to_s.should_not contain("postgresql://")
   end
+
+  it "accepts only short lowercase branch names and derives an identifier within PostgreSQL's limit" do
+    id = "0123456789abcdef"
+    longest = "a" + "b" * 30
+    database = Caramel::Latte::Postgres.branch_database(id, longest)
+    database.should eq("caramel_branch_0123456789abcdef_#{longest}")
+    database.bytesize.should eq(63)
+    Caramel::Latte::Postgres.branch_database(id, "diff_1a2b").should eq("caramel_branch_0123456789abcdef_diff_1a2b")
+    [longest + "c", "", "1diff", "_diff", "Diff", "feat-stripe", "a b", "a\"b", "é"].each do |name|
+      expect_raises(ArgumentError, "branch name must be lowercase") { Caramel::Latte::Postgres.branch_database(id, name) }
+    end
+    expect_raises(ArgumentError) { Caramel::Latte::Postgres.branch_database("not-a-site", "diff") }
+  end
+
+  it "guards the source by refusing connections and terminating every other backend before cloning" do
+    guard = Caramel::Latte::Postgres.branch_guard_sql("caramel_dev_0123456789abcdef")
+    guard.lines.map(&.strip).should eq([
+      %(ALTER DATABASE "caramel_dev_0123456789abcdef" WITH ALLOW_CONNECTIONS false;),
+      %(SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'caramel_dev_0123456789abcdef' AND pid <> pg_backend_pid();),
+    ])
+    Caramel::Latte::Postgres.branch_clone_sql("caramel_dev_0123456789abcdef", "caramel_branch_0123456789abcdef_diff", "caramel_dev_migration_0123456789abcdef").should eq(
+      %(CREATE DATABASE "caramel_branch_0123456789abcdef_diff" WITH TEMPLATE "caramel_dev_0123456789abcdef" OWNER "caramel_dev_migration_0123456789abcdef" STRATEGY FILE_COPY;))
+    Caramel::Latte::Postgres.branch_release_sql("caramel_dev_0123456789abcdef").should eq(%(ALTER DATABASE "caramel_dev_0123456789abcdef" WITH ALLOW_CONNECTIONS true;))
+    access = Caramel::Latte::Postgres.branch_access_sql("caramel_branch_0123456789abcdef_diff", "caramel_dev_migration_0123456789abcdef", "caramel_dev_runtime_0123456789abcdef")
+    access.should contain(%(REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE "caramel_branch_0123456789abcdef_diff" FROM PUBLIC;))
+    access.should contain(%(GRANT CONNECT ON DATABASE "caramel_branch_0123456789abcdef_diff" TO "caramel_dev_migration_0123456789abcdef", "caramel_dev_runtime_0123456789abcdef";))
+  end
+
+  it "redacts branch URLs from inspection" do
+    branch = Caramel::Latte::Postgres::Branch.new("diff", "caramel_branch_0123456789abcdef_diff", "postgresql://migration:secret@/b", "postgresql://runtime:secret@/b")
+    branch.inspect.should_not contain("secret")
+    branch.to_s.should contain("caramel_branch_0123456789abcdef_diff")
+  end
 end

@@ -75,6 +75,8 @@ module Caramel::Checks::Integration
       env["CARAMEL_OWNED_TLS_URL"] = url("caramel_spec", "caramel_spec", password, "localhost", port, File.join(owned, "ca.crt"))
       env["CARAMEL_OWNED_WRONG_HOST_URL"] = url("caramel_spec", "caramel_spec", password, "127.0.0.1", port, File.join(owned, "ca.crt"))
       env["CARAMEL_OWNED_UNTRUSTED_URL"] = url("caramel_spec", "caramel_spec", password, "localhost", port, File.join(owned, "untrusted.crt"))
+      # Superuser over the owned socket (trust), for specs that create scratch databases.
+      env["CARAMEL_OWNED_ADMIN_URL"] = url("postgres", "caramel_admin", "", sock, port)
       status = Process.new([File.join(Checks::REPO, "scripts/crystal"), "spec", "spec/integration", "--error-trace"] + ARGV,
         env: env, chdir: Checks::REPO, input: Process::Redirect::Close,
         output: Process::Redirect::Inherit, error: Process::Redirect::Inherit).wait

@@ -1,6 +1,5 @@
 require "spec"
 require "../../src/caramel/database"
-require "../../src/caramel/migration"
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
 # Never accept DATABASE_URL: integration checks must not target application data.
@@ -21,28 +20,6 @@ describe "PostgreSQL integration" do
       ensure
         dev.close
       end
-    ensure
-      db.close
-    end
-  end
-
-  it "applies explicit migrations once and rolls back a failed batch" do
-    db = Caramel::Database.open(url)
-    begin
-      migration = Caramel::Migration.new(1_i64, "Create books", ["CREATE TABLE books (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text NOT NULL)"])
-      runner = Caramel::Migrator.new(db, [migration])
-      runner.pending.map(&.version).should eq([1_i64])
-      db.query_one("SELECT to_regclass('caramel_migrations')::text", as: String?).should be_nil
-      runner.migrate.should eq(1)
-      runner.migrate.should eq(0)
-      db.exec("INSERT INTO books (title) VALUES ($1)", "A book")
-      db.query_one("SELECT title FROM books", as: String).should eq("A book")
-      broken = Caramel::Migration.new(2_i64, "Broken", ["CREATE TABLE rollback_probe (id int)", "INSERT INTO absent_table VALUES (1)"])
-      expect_raises(PQ::PQError) { Caramel::Migrator.new(db, [migration, broken]).migrate }
-      db.query_one("SELECT to_regclass('rollback_probe')::text", as: String?).should be_nil
-      runner.pending.should be_empty
-      changed = Caramel::Migration.new(1_i64, "Create books", ["CREATE TABLE changed (id int)"])
-      expect_raises(Caramel::Migrator::Drift) { Caramel::Migrator.new(db, [changed]).pending }
     ensure
       db.close
     end

@@ -8,15 +8,15 @@ module App::@@COLLECTION@@
     end
 
     def handle(contract : Contract)
-      record = App::@@MODEL@@.find(contract.id)
+      record = App::@@MODEL@@.query.find(contract.id)
       return not_found("@@MODEL@@ not found") unless record
-@@ASSIGNMENTS@@
-      return render_form(contract.values, record.errors, contract.id, 422) unless record.save
-      {record: record}
+      changes = record.update(@@ATTRIBUTES@@)
+      return render_form(contract.values, changes.errors, contract.id, 422) unless changes.saved?
+      {record: changes.record}
     end
 
     def render(result)
-      redirect_to(@@SINGULAR@@_path(result[:record].id.not_nil!))
+      redirect_to(@@SINGULAR@@_path(result[:record].id))
     end
   end
 end

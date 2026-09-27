@@ -37,7 +37,19 @@ The unpublished preview includes the framework under `vendor/caramel`, with a ve
 
 `make resource` takes a singular class name and `field:type` declarations. Supported types are `string`, `int32`, `int64`, `bool`, `float64` and RFC 3339 `time`, optionally nullable with `?`. Quote nullable declarations in globbing shells. Ordinary plurals follow a small predictable inflector; irregular names use `--plural=people`.
 
-Generated source contains an explicit typed model, seven actions (index, show, new, create, edit, update, destroy) with their request contracts, a shared form module, five views including the shared form, SQL migration, route/path declarations and a request spec. Required strings get presence validation. Index pages show the newest 100 rows; pagination and associations are outside this generator's current scope. Models and actions use a fixed `App` namespace. All generated files are application-owned and editable.
+Generated source contains:
+
+- a SugarORM schema (`app/models/<singular>.cr`);
+- one changeset, `App::<Name>::Changeset`, aliased as `CreateChangeset` and `UpdateChangeset` so that `App::<Name>.create` and `record.update` both use it (`app/changesets/<singular>.cr`);
+- seven actions (index, show, new, create, edit, update, destroy) with their request contracts, and a shared form module;
+- five views, including the shared form;
+- the `create_<plural>` migration;
+- route and path declarations;
+- a request spec.
+
+The changeset refuses blank required strings. Actions write through the facade: create calls `App::Book.create(...)` and update calls `record.update(...)`. Each re-renders the form with status 422 and the changeset's errors unless it reports `saved?`. Destroy calls `record.delete`, and show and edit read with `App::Book.query.find(id)`. Index pages show the newest 100 rows through `App::Book.query.order_by(:id, :desc).limit(100)`; pagination and associations are outside this generator's current scope.
+
+The generator builds the new table's catalog and diffs it against an empty database with `SugarORM::Differ`, offline. It writes exactly the file that `frappe db diff --name create_<plural>` would derive for the generated schema. Later schema changes go through `frappe db diff`. Schemas, changesets and actions use a fixed `App` namespace. Field names that would collide with system columns, the schema DSL, the facade, changeset or request contract APIs, or Crystal keywords are refused. All generated files are application-owned and editable.
 
 Routes are explicit verb declarations inside the single `Caramel::Router.draw` block in `config/routes.cr`:
 
@@ -55,17 +67,17 @@ Generation preflights every destination and requires a unique insertion marker i
 
 ## Verification
 
-`scripts/check frappe-project` executes the real CLI in disposable state. It creates Book and mixed-scalar Person resources, compiles the app, applies migrations and runs generated request specs against separately provisioned PostgreSQL databases. Those specs exercise persisted create/update/delete, rendering, escaping, CSRF rejection, invalid-input responses and native/enhanced response contracts. The harness also checks clone setup with fresh credentials, retained edits, failed dependency installation followed by setup recovery, and development data retention when running specs. Pointing the spec URL at development is refused before migration or test execution.
+`scripts/check frappe-project` executes the real CLI in disposable state. It creates Book and mixed-scalar Person resources, compiles the app and applies migrations. `frappe migrate` must report that the database matches the declared schemas, and `frappe db diff --name drift_probe` must find nothing to derive and write no file, which proves that the generated migrations are exactly what the differ derives. The check then runs the generated request specs against separately provisioned PostgreSQL databases. Those specs exercise persisted create/update/delete through the SugarORM facade, rendering, escaping, CSRF rejection, invalid-input responses, blank-text refusal by the generated changeset on create and update, and native/enhanced response contracts. The harness also checks clone setup with fresh credentials, retained edits, failed dependency installation followed by setup recovery, and development data retention when running specs. Pointing the spec URL at development is refused before migration or test execution.
 
 The final HTTP check serves the generated application through Caddy on a private test port with a named Host and an explicitly supplied fixture CA. It establishes native app/proxy/TLS behavior. It does not establish system DNS, browser certificate trust or public port 443. `scripts/check browser` covers real htmx interaction in Safari against a `.localhost` fixture site.
 
-Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation.
+Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, reserved field names, byte equality between a generated migration and the differ's derivation, route binding, redirects and CLI grammar. `scripts/check route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation. `scripts/check schema-diff` covers `frappe db diff` end to end.
 
 ## Remaining gates
 
 - Complete development acceptance: real browsers, runtime exception diagnostics, CLI/menu project state and measured performance. The watcher, build-error recovery, isolated child ownership and asset publishing are implemented.
 - Individual model/action/migration/command generators, custom commands, explicit dependency add/update and spec worker isolation.
-- Schema snapshot output; `db/schema.cr` is currently a placeholder and migrations remain authoritative.
+- A committed schema snapshot file. The application's `schema` command prints the declared catalog, and migrations remain authoritative.
 - Complete optional authentication, native Linux/musl production artifact and its assets/configuration.
 - Full macOS installation, native menu acceptance, system DNS/ports, CA trust and real browser CRUD, including htmx history/focus/422 handling and JavaScript-disabled forms.
 - Independent implementation review and clean-machine installation proof.

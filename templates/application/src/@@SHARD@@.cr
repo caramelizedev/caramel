@@ -1,15 +1,26 @@
 require "../config/application"
 
+USAGE = "Usage: @@SHARD@@ serve|seed|routes|schema|drift|migrate [--dev-override]|lint [--dev-override]"
+
 command = ARGV.shift? || "help"
-if command == "routes"
+dev_override = ARGV == ["--dev-override"] && {"migrate", "lint"}.includes?(command)
+unless ARGV.empty? || dev_override
+  STDERR.puts(USAGE)
+  exit 2
+end
+case command
+when "routes"
   width = App::AppRouter.routes.max_of(&.path.size)
   App::AppRouter.routes.each do |entry|
     puts "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}#{entry.contract.empty? ? "" : "  " + entry.contract}"
   end
   exit
-end
-unless %w(serve migrate seed).includes?(command)
-  puts "Usage: @@SHARD@@ serve|migrate|seed|routes"
+when "schema"
+  puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
+  exit
+when "serve", "seed", "migrate", "lint", "drift"
+else
+  puts USAGE
   exit(command == "help" ? 0 : 2)
 end
 
@@ -20,12 +31,26 @@ elsif ENV["CARAMEL_ENV"]? == "test"
   abort("Run specs through frappe test")
 end
 db = Caramel::Database.open(database_url)
+status = 0
 begin
-  Caramel::Model.database = db
-  migrator = Caramel::Migrator.new(db, App::MIGRATIONS)
+  SugarORM::Repo.database = db
+  migrator = SugarORM::Migrator.new(db, App::MIGRATIONS)
   case command
   when "migrate"
-    puts "Applied #{migrator.migrate} migrations."
+    puts "Applied #{migrator.migrate(dev_override: dev_override)} migrations."
+  when "lint"
+    SugarORM::Linter.enforce(migrator.lint, dev_override)
+    puts "Pending migrations pass the zero-lock linter."
+  when "drift"
+    drift = SugarORM::Differ.diff(SugarORM::Catalog.declared, SugarORM::Introspection.read(db))
+    if drift.clean?
+      puts "The database matches the declared schema."
+    else
+      puts "The database differs from the declared schema:"
+      print drift
+      puts "  Remediation: run frappe db diff --name NAME, then frappe migrate."
+      status = 1
+    end
   when "seed"
     abort("Pending migrations. Run frappe migrate first.") unless migrator.pending.empty?
     App.seed(db)
@@ -52,6 +77,10 @@ begin
       File.delete?(socket_path)
     end
   end
+rescue ex : SugarORM::Linter::Refused | SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed
+  STDERR.puts(ex.message)
+  status = 1
 ensure
   db.close
 end
+exit status

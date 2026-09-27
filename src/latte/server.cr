@@ -30,6 +30,18 @@ module Caramel::Latte
     def environment_json(id : String, directory : String) : String
       raise PublicError.new("unavailable", "Project environment is unavailable")
     end
+
+    def create_branch_json(id : String, name : String) : String
+      raise PublicError.new("unavailable", "Database branching is unavailable")
+    end
+
+    def branches_json(id : String) : String
+      raise PublicError.new("unavailable", "Database branching is unavailable")
+    end
+
+    def drop_branch(id : String, name : String) : Bool
+      raise PublicError.new("unavailable", "Database branching is unavailable")
+    end
   end
 
   class PublicError < Exception
@@ -146,6 +158,20 @@ module Caramel::Latte
         OperationDeadline.check!
         @services.stop_services
         return json(@services.status_json)
+      end
+      if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})\/branches(?:\/([^\/]+))?\z/)
+        id, name = match[1], match[2]?
+        if name && request.method == "DELETE"
+          removed = OperationDeadline.run(12.seconds) { @services.drop_branch(id, name) }
+          return failure("not_found", "Branch does not exist", 404) unless removed
+          return json({version: 1, removed: name}.to_json)
+        elsif name.nil? && request.method == "GET"
+          return json(OperationDeadline.run(12.seconds) { @services.branches_json(id) })
+        elsif name.nil? && request.method == "POST"
+          fields = body(request, %w(name))
+          OperationDeadline.check!
+          return json(OperationDeadline.run(12.seconds) { @services.create_branch_json(id, string(fields, "name")) }, 201)
+        end
       end
       if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})(\/(?:upstream|environment))?\z/)
         id = match[1]

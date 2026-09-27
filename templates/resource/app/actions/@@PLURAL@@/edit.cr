@@ -7,7 +7,7 @@ module App::@@COLLECTION@@
     end
 
     def handle(contract : Contract)
-      record = App::@@MODEL@@.find(contract.id)
+      record = App::@@MODEL@@.query.find(contract.id)
       return not_found("@@MODEL@@ not found") unless record
       values = {@@VALUES@@}
       render_form(values, {} of String => Array(String), contract.id)

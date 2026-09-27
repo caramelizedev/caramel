@@ -1,6 +1,7 @@
 require "spec"
 require "file_utils"
 require "../../src/latte/server"
+require "../../src/latte/postgres"
 
 private class TestServices < Caramel::Latte::ServiceControl
   getter starts = 0
@@ -42,6 +43,24 @@ private class TestServices < Caramel::Latte::ServiceControl
     raise Caramel::Latte::PublicError.new("not_found", "Project is not registered", 404) unless site
     raise ArgumentError.new("Project directory differs from registration") unless site.directory == File.realpath(directory)
     {version: 1, environment: {DATABASE_URL: "private-test-connection", SPEC_DATABASE_URL: "private-test-spec"}}.to_json
+  end
+
+  getter branches = [] of String
+
+  def create_branch_json(id : String, name : String) : String
+    database = Caramel::Latte::Postgres.branch_database(id, name)
+    raise Caramel::Latte::PublicError.new("branch_exists", "Branch #{name} already exists; delete it first", 409) if @branches.includes?(name)
+    @branches << name
+    {version: 1, branch: {name: name, database: database, migration_url: "private-migration", runtime_url: "private-runtime"}}.to_json
+  end
+
+  def branches_json(id : String) : String
+    {version: 1, branches: @branches.map { |name| {name: name, database: Caramel::Latte::Postgres.branch_database(id, name)} }}.to_json
+  end
+
+  def drop_branch(id : String, name : String) : Bool
+    Caramel::Latte::Postgres.branch_database(id, name)
+    !@branches.delete(name).nil?
   end
 end
 
@@ -103,6 +122,36 @@ describe Caramel::Latte::Server do
       Dir.exists?(root).should be_true
       registry.list.should be_empty
       server.handle(HTTP::Request.new("GET", "/unknown")).status.should eq(404)
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "creates, lists and deletes database branches through the versioned API" do
+    root = File.join("/private/tmp", "latte-api-branches-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      services = TestServices.new(registry)
+      server = Caramel::Latte::Server.new(registry, services)
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+      endpoint = "/v1/sites/0123456789abcdef/branches"
+      created = server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "diff_1a2b"}.to_json))
+      created.status.should eq(201)
+      JSON.parse(created.body)["branch"]["runtime_url"].as_s.should eq("private-runtime")
+      created.headers["Cache-Control"].should eq("no-store")
+      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "diff_1a2b"}.to_json)).status.should eq(409)
+      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "Feat-Stripe"}.to_json)).status.should eq(400)
+      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "x", template: "postgres"}.to_json)).status.should eq(400)
+      listed = JSON.parse(server.handle(HTTP::Request.new("GET", endpoint)).body)["branches"].as_a
+      listed.map(&.["name"].as_s).should eq(["diff_1a2b"])
+      listed.to_json.should_not contain("private-")
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/diff_1a2b")).status.should eq(200)
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/diff_1a2b")).status.should eq(404)
+      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/DROP%20DATABASE")).status.should eq(400)
+      server.handle(HTTP::Request.new("GET", "#{endpoint}/diff_1a2b")).status.should eq(404)
+      services.branches.should be_empty
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)

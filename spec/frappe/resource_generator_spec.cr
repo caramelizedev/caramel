@@ -21,6 +21,7 @@ describe Caramel::Frappe::ResourceGenerator do
       generator = Caramel::Frappe::ResourceGenerator.new(package)
       paths = generator.generate(project, "Book", ["title:string", "author:string"], version: 20260919000001_i64)
       paths.should contain("app/models/book.cr")
+      paths.should contain("app/changesets/book.cr")
       paths.should contain("app/actions/books.cr")
       paths.should contain("app/actions/books/index.cr")
       paths.should contain("spec/requests/books_spec.cr")
@@ -42,25 +43,42 @@ describe Caramel::Frappe::ResourceGenerator do
   it "rejects malformed declarations, reserved fields and route conflicts before writing source" do
     resource_project do |project, package|
       generator = Caramel::Frappe::ResourceGenerator.new(package)
-      ["../Book", "book", "ApplicationRecord", "Home"].each do |name|
+      ["../Book", "book", "SugarORM", "Home"].each do |name|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
       end
-      [["title:json"], ["id:int64"], ["save:string"], ["if:string"], ["to_s:string"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"]].each do |fields|
+      reserved = %w(id created_at query with create update delete changes record errors values schema field timestamps if to_s)
+      ([["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"]] + reserved.map { |field| ["#{field}:string"] }).each do |fields|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
       expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
-      Dir.children(File.join(project.root, "app/models")).should eq(["application_record.cr"])
+      %w(app/models app/changesets db/migrations).each do |directory|
+        Dir.children(File.join(project.root, directory)).should eq([".keep"])
+      end
     end
   end
 
   it "supports every scalar, nullable values and explicit irregular plurals" do
     resource_project do |project, package|
-      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people")
+      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people", version: 20260919000003_i64)
       model = File.read(File.join(project.root, "app/models/person.cr"))
       model.should contain("field rating : Float64?")
       model.should contain("field joined_at : Time?")
       File.read(File.join(project.root, "config/routes.cr")).should contain("App::People::Index")
+
+      # The catalog SugarORM declares for the generated schema; frappe db diff
+      # would write exactly this file for it against an empty database.
+      column = ->(name : String, type : String, nullable : Bool) { SugarORM::Catalog::Column.new(name, type, nullable, nil) }
+      stamp = ->(name : String) { SugarORM::Catalog::Column.new(name, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
+      declared = SugarORM::Catalog::Table.new("people", [
+        SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+        column.call("name", "text", false), column.call("age", "integer", false), column.call("total", "bigint", false),
+        column.call("active", "boolean", false), column.call("rating", "double precision", true),
+        column.call("joined_at", "timestamp with time zone", true), stamp.call("created_at"), stamp.call("updated_at"),
+      ])
+      statements = SugarORM::DDL.statements(SugarORM::Differ.diff([declared], [] of SugarORM::Catalog::Table).transactional)
+      expected = Caramel::Frappe::SchemaDiff.source(SugarORM::Migration.new(20260919000003_i64, "create_people", statements))
+      File.read(File.join(project.root, "db/migrations/20260919000003_create_people.cr")).should eq(expected)
     end
   end
 end

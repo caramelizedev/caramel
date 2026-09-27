@@ -5,6 +5,7 @@ require "./tools"
 require "./resource_generator"
 require "./dev_session"
 require "./site_log"
+require "./schema_diff"
 require "./editor_tools"
 require "../caramel/database"
 require "../latte/postgres"
@@ -37,7 +38,7 @@ module Caramel::Frappe
         @output.puts(usage(command))
         return 0
       end
-      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "db", "logs", "services", "sites", "installations", "lsp"}.includes?(command) && !args.empty?)
+      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (command == "migrate" && args != [] of String && args != ["--dev-override"]) || (!{"new", "dev", "make", "migrate", "test", "db", "logs", "services", "sites", "installations", "lsp"}.includes?(command) && !args.empty?)
         @error.puts(usage(command))
         return 2
       end
@@ -107,7 +108,12 @@ module Caramel::Frappe
         if command != "routes"
           values["CARAMEL_EXPECTED_DATABASE_URL"] = values[command == "migrate" ? "MIGRATION_DATABASE_URL" : "DATABASE_URL"]
         end
-        Tools.new(@framework_root, @output, @error).app_command(project, [command], values)
+        tools = Tools.new(@framework_root, @output, @error)
+        if command == "migrate"
+          migrate(project, tools, values, args)
+        else
+          tools.app_command(project, [command], values)
+        end
       when "test"
         test(Project.load, args)
       when "db"
@@ -140,6 +146,20 @@ module Caramel::Frappe
     rescue ex
       @error.puts("Frappé could not complete this command (#{ex.class}). Run frappe doctor.")
       1
+    end
+
+    # Lints and applies pending migrations, then reports schema drift through
+    # the application's read-only runtime connection as a warning.
+    private def migrate(project : Project, tools : Tools, values : Hash(String, String), flags : Array(String)) : Nil
+      binary = tools.compile(project)
+      tools.run(binary, ["migrate"] + flags, project.root, values)
+      status, report = tools.capture(binary, ["drift"], project.root, values.merge({"CARAMEL_EXPECTED_DATABASE_URL" => values["DATABASE_URL"]}))
+      if status.success?
+        @output.print(report)
+      else
+        @error.puts("WARNING: schema drift (read-only check; nothing was changed):")
+        @error.print(report)
+      end
     end
 
     private def configure(project : Project, client : LatteClient) : Nil
@@ -295,6 +315,7 @@ module Caramel::Frappe
     end
 
     private def db(args : Array(String)) : Int32
+      return schema_diff(args[1..]) if args.first? == "diff"
       unless args == ["dump"] || (args.size == 2 && args[0] == "restore")
         @error.puts(usage("db"))
         return 2
@@ -325,6 +346,20 @@ module Caramel::Frappe
       raise Error.new("frappe db: #{project.not_nil!.name} has no provisioned database; run frappe setup first")
     rescue ex : Latte::Postgres::Error | Latte::OwnershipError | ArgumentError
       raise Error.new("frappe db: #{ex.message}")
+    end
+
+    private def schema_diff(args : Array(String)) : Int32
+      dev_override = !args.delete("--dev-override").nil?
+      unless args.size == 2 && args[0] == "--name"
+        @error.puts(usage("db"))
+        return 2
+      end
+      project = Project.load
+      tools = Tools.new(@framework_root, @output, @error)
+      client = LatteClient.new
+      client.ready!
+      SchemaDiff.new(project, tools, client, @output, @error).run(args[1], dev_override)
+      0
     end
 
     private def logs(args : Array(String)) : Int32
@@ -393,7 +428,8 @@ module Caramel::Frappe
       when "make"     then "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"
       when "new"      then "frappe new NAME"
       when "test"     then "frappe test [SPEC_OPTIONS]"
-      when "db"       then "frappe db dump | frappe db restore FILE"
+      when "db"       then "frappe db dump | frappe db restore FILE | frappe db diff --name NAME [--dev-override]"
+      when "migrate"  then "frappe migrate [--dev-override]"
       when "sites"    then "frappe sites [remove NAME]"
       when "installations" then "frappe installations [list|register|remove VERSION]"
       when "logs"     then "frappe logs [app|compiler] [--follow]"

@@ -216,6 +216,80 @@ describe "Latte managed PostgreSQL" do
     end
   end
 
+  it "branches the development database behind the connection guard, then lists and drops the branch" do
+    source = credentials.development_database
+    migration = open_database(credentials.development_migration, 1)
+    begin
+      migration.exec("CREATE TABLE IF NOT EXISTS branch_probe (title text NOT NULL)")
+      migration.exec("TRUNCATE branch_probe")
+      migration.exec("INSERT INTO branch_probe VALUES ('from development')")
+    ensure
+      migration.close
+    end
+    held = open_database(credentials.development_runtime, 1)
+    held_pid = held.query_one("SELECT pg_backend_pid()", as: Int32)
+    branch = service.create_branch(site, "feature_probe")
+    begin
+      admin_query("SELECT count(*) FROM pg_stat_activity WHERE pid = #{held_pid};", service, paths, toolchain, root).strip.should eq("0")
+      admin_query("SELECT datallowconn FROM pg_database WHERE datname = '#{source}';", service, paths, toolchain, root).strip.should eq("t")
+      branch.database.should eq("caramel_branch_#{site.id}_feature_probe")
+      service.list_branches(site).should eq(["feature_probe"])
+      expect_raises(Caramel::Latte::Postgres::BranchExists) { service.create_branch(site, "feature_probe") }
+
+      writer = open_database(branch.migration_url, 1)
+      begin
+        writer.query_one("SELECT current_database()", as: String).should eq(branch.database)
+        writer.query_one("SHOW timezone", as: String).should eq("UTC")
+        writer.exec("INSERT INTO branch_probe VALUES ('on the branch')")
+        writer.exec("CREATE TABLE branch_only (id integer)")
+      ensure
+        writer.close
+      end
+      reader = open_database(branch.runtime_url, 1)
+      begin
+        reader.query_all("SELECT title FROM branch_probe ORDER BY title", as: String).should eq(["from development", "on the branch"])
+      ensure
+        reader.close
+      end
+      development = open_database(credentials.development_runtime, 1)
+      begin
+        development.query_all("SELECT title FROM branch_probe", as: String).should eq(["from development"])
+        development.query_one("SELECT to_regclass('branch_only')::text", as: String?).should be_nil
+      ensure
+        development.close
+      end
+      expect_database_failure(credentials.spec_runtime.sub("/#{credentials.spec_database}?", "/#{branch.database}?"), "SELECT 1")
+    ensure
+      held.close
+      service.drop_branch(site, "feature_probe").should be_true
+    end
+    service.list_branches(site).should be_empty
+    service.drop_branch(site, "feature_probe").should be_false
+  end
+
+  it "re-allows connections to the source database when a guarded operation fails, and after a crash" do
+    source = credentials.development_database
+    allowed = -> { admin_query("SELECT datallowconn FROM pg_database WHERE datname = '#{source}';", service, paths, toolchain, root).strip }
+    expect_raises(Exception, "clone failed") do
+      service.guard_connections(source) do
+        allowed.call.should eq("f")
+        expect_database_failure(credentials.development_runtime, "SELECT 1")
+        raise "clone failed"
+      end
+    end
+    allowed.call.should eq("t")
+    db = open_database(credentials.development_runtime, 1)
+    begin
+      db.query_one("SELECT count(*) FROM branch_probe", as: Int64).should eq(1_i64)
+    ensure
+      db.close
+    end
+
+    admin_query("ALTER DATABASE #{Caramel::Latte::Postgres.quote_identifier(source)} WITH ALLOW_CONNECTIONS false;", service, paths, toolchain, root)
+    service.release_guards
+    allowed.call.should eq("t")
+  end
+
   it "refuses a wrong major without changing the owned data directory" do
     service.stop
     version = File.join(paths.postgres_data, "PG_VERSION")

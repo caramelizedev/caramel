@@ -1,51 +1,103 @@
-# Typed models and request contracts
+# SugarORM schemas, changesets and request contracts
 
-The Frappé workflow branch implements these application APIs over the existing database pool and bounded form parser. They are exported by `require "caramel"`. The CLI and generated-project workflow are still in progress.
+These application APIs are exported by `require "caramel"`. SugarORM is Caramel's persistence layer (RFC-0002, [ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md)); it runs over the application's verified `crystal-db` pool. Migrations are derived from the schemas ([ADR 0008](../decisions/0008-branch-and-diff-migrations.md)); see [the Frappé workflow](frappe-workflow.md).
 
-## Models
+## Schemas
 
 ```crystal
-abstract class ApplicationRecord < Caramel::Model
-end
-
-class Book < ApplicationRecord
-  table :books
-  field id : Int64?, primary: true
-  field title : String
-  field author : String
-  timestamps
-  validates :title, presence: true
+module App
+  struct Book < SugarORM::Schema
+    schema "books" do
+      field id : Int64, primary: true
+      field title : String
+      field author : String
+      field rating : Float64?
+      timestamps
+    end
+  end
 end
 ```
 
-Configure `Caramel::Model.database = db` once during application boot, using the already verified `Caramel::Database.open` connection. All models share that application-owned pool. Model methods neither open another URL nor change schema. The application closes the pool on shutdown.
+A schema is an immutable value. Every instance is a stored row with getters only; `book.with(title: "Dune")` returns a changed copy and never persists. Schemas hold no connection and have no callbacks. JSON output lists the declared columns in declaration order.
 
-Construct with declared writable fields: `Book.new(title: "Dune", author: "Frank Herbert")`. Required fields must be supplied with the declared type; nullable fields default to nil. Primary keys must be `Int64?`, are nil before insertion, and have no setter. Timestamp getters are `Time?`; matching migrations must provide PostgreSQL timestamp defaults. Ordinary application instance variables are not persisted.
+- **Fields** are `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, optionally nilable. A field may take a literal default (`field seats : Int32 = 5`) or `renamed_from: :old_name`.
+- **Primary key.** It must be `field id : Int64, primary: true` and becomes an identity column.
+- **`timestamps`** adds `created_at` and `updated_at`, which are NOT NULL and managed by SugarORM.
+- **Other declarations** are `belongs_to`, `has_many`, `has_one`, `index :a, :b, unique: true` and `drop_column :legacy`.
+- **Compile errors.** Unsupported types, non-literal defaults, unknown options, duplicate or reserved names and a missing primary key fail compilation at the declaration, with a remediation.
 
-`save` validates and then inserts or updates, returning a Boolean. Presence validation rejects nil and blank strings; false and zero are present. Invalid records expose `errors : Hash(String, Array(String))` and perform no write. Saving a deleted or externally removed record returns false with an `_base` error; it does not insert a replacement. Database constraint and transport exceptions propagate to the application's exception boundary. There are no callbacks, implicit transactions across several saves, or association loading.
+`SugarORM::Repo.database = db` binds the application pool once at boot; the generated `App.build` does this, and generated specs bind the verified spec database. `SugarORM::Repo.transaction { ... }` runs in a transaction and nests as savepoints. `SugarORM::Repo.bind(connection) { ... }` binds a connection or transaction to the current fiber.
 
-`Book.find(id)` returns `Book?`. `delete` (also `destroy`) returns whether a row was deleted; repeated deletion returns false. Saving an existing identity-only record checks existence without issuing an empty update or firing update triggers.
+## Changesets and the facade
+
+Every write goes through a changeset. `frappe make resource` generates one changeset that serves both writes:
 
 ```crystal
-Book.where(author: "Frank Herbert").order(created_at: :desc).limit(20).to_a
+module App
+  class Book::Changeset < SugarORM::Changeset(App::Book)
+    param title : String
+    param author : String
+    param rating : Float64?
+
+    def validate(cs)
+      cs.validate_presence(:title)
+      cs.validate_presence(:author)
+    end
+  end
+
+  alias Book::CreateChangeset = Book::Changeset
+  alias Book::UpdateChangeset = Book::Changeset
+end
 ```
 
-Conditions accept declared scalar field types or nil; nil produces `IS NULL`. Values use PostgreSQL bind parameters. Unknown source-level fields fail compilation. Ordering permits only `:asc` and `:desc`; limits must be positive. Queries are lazy until `to_a` and **mutate when chained**. Create separate query objects for independently varying searches. This API does not validate runtime database schema: apply the matching migrations explicitly.
+`App::Book.create(**params)` builds `App::Book::CreateChangeset`, and `book.update(**params)` builds `App::Book::UpdateChangeset`; a schema without them uses a generated `DefaultChangeset` that permits every non-system field. Both run the changeset through the Repo and return it:
 
-Supported fields are `String`, `Int32`, `Int64`, `Bool`, `Float64`, `Time`, and their nullable equivalents. Unsupported field types and field/validation options fail compilation. This intentionally small surface is documented in the [persistence decision](../decisions/0002-typed-persistence.md).
+```crystal
+changes = App::Book.create(title: contract.title, author: contract.author, rating: contract.rating)
+if changes.saved?
+  changes.record    # the stored App::Book
+else
+  changes.errors    # Hash(String, Array(String)), for example {"title" => ["can't be blank"]}
+end
+```
+
+- **Params.** A `param` must name a non-system field with a compatible type. Facade and constructor keywords are the chosen changeset's params, so an unknown keyword or a mistyped value fails to compile at the caller.
+- **Validity.** An invalid changeset performs no write. An insert reports every missing NOT NULL field without a default as `is required`.
+- **Updates** write only the changed columns plus `updated_at`. Updating a row that no longer exists yields a `_base` error.
+- **Bang forms.** `create!` and `update!` return the record or raise `SugarORM::Invalid`.
+- **Delete.** `book.delete` returns whether a row was deleted.
+- **Validators** are `validate_required`, `validate_presence` (non-blank text), `validate_greater_than`, `validate_less_than`, `validate_length`, `validate_format` and `validate_inclusion`. `unique_constraint(:email)` maps a unique violation on that column's index to a field error instead of raising.
+- **Explicit handles.** Every facade method and query terminal also accepts a `DB::Database` or `DB::Connection` first, for example `App::Book.create!(db, title: "Dune", author: "Frank Herbert")`.
+
+A generated resource uses one class because its create and update forms submit the same fields under the same rules. When they differ, replace an alias with its own class.
+
+## Queries
+
+```crystal
+App::Book.query.where(author: "Frank Herbert").order_by(:id, :desc).limit(20).to_a
+App::Book.query.find(id)   # App::Book?
+```
+
+- **Immutability.** Queries are immutable, and every clause returns a new query.
+- **`where`** keywords are checked against the fields at compile time. A value may be the field type, `nil` (`IS NULL`), an `Array` (`= ANY`) or a `Range`; `where("rating > ?", 3.0)` is a raw fragment with binds.
+- **`order_by`** field names are checked at compile time.
+- **Terminals** are `to_a`, `each`, `first`, `first!`, `find`, `find!` (raises `SugarORM::NotFound`), `count`, `exists?` and `delete_all`.
+- **Scopes.** Named scopes (`scope active { where(archived: false) }`) chain like clauses.
+- **Preloads.** `preload(:users)` loads an association with one extra query. Using an association that was not preloaded fails to compile, and the error names the `.preload(...)` remedy.
+- **Typed SQL.** `SugarORM.sql(query, *args, as: {team_id: Int64, total: Int64})` returns typed rows for hand-written SQL and checks the result's column names and order.
 
 ## Request contracts and actions
 
 ```crystal
 module App::Books
-  class Update < App::ApplicationAction
+  struct Update < App::ApplicationAction
     contract do
       field id : Int64, min: 1
       field title : String, max: 200
       field note : String?
     end
 
-    def handle(contract : Contract) : Result | Caramel::Response
+    def handle(contract : Contract)
       # contract.id : Int64, contract.title : String, contract.note : String?
     end
   end
@@ -56,15 +108,18 @@ Fields bind by name from route parameters, then the form body, then the query; a
 
 Bodies must be URL-encoded (2 MiB cap) or multipart; multipart files are streamed to request-scoped tempfiles (64 MiB total) and bind to `Caramel::UploadedFile` fields. Other media types answer 415. The application checks the signed CSRF token (`_csrf` field or `X-CSRF-Token` header) and exact origin before dispatching any POST, PUT, PATCH or DELETE.
 
-Contracts support `String`, `Int32`, `Int64`, `Bool`, `Float64`, `Time` and `Caramel::UploadedFile`, optionally nilable, with `min:`/`max:` bounds for numbers and string lengths and `default:` values. Integers accept signed decimal text within range; floats accept finite decimal/exponent notation. Booleans accept exactly `true` or `false`. Timestamps accept RFC3339 with a timezone and become UTC. Numeric underscores, hexadecimal integers, truthy synonyms, nonfinite floats and date-only timestamps are rejected. Missing or whitespace-only fields become the default, nil when nilable, or an `is required` error. `contract.values` keeps the submitted text for redisplay. No automatic model assignment is provided.
+Contracts support `String`, `Int32`, `Int64`, `Bool`, `Float64`, `Time` and `Caramel::UploadedFile`, optionally nilable, with `min:`/`max:` bounds for numbers and string lengths and `default:` values. Integers accept signed decimal text within range; floats accept finite decimal/exponent notation. Booleans accept exactly `true` or `false`. Timestamps accept RFC3339 with a timezone and become UTC. Numeric underscores, hexadecimal integers, truthy synonyms, nonfinite floats and date-only timestamps are rejected. Missing or whitespace-only fields become the default, nil when nilable, or an `is required` error. `contract.values` keeps the submitted text for redisplay.
 
-## Verification and remaining gates
+Contracts and changesets stay separate. An action passes contract fields to the facade explicitly, as the generated `App::Book.create(title: contract.title, ...)` does. A failed changeset re-renders the form with status 422 and the changeset's errors, just as a failed contract does.
 
-Verified on the pinned Crystal 1.21.0 / PostgreSQL 18.6 toolchain:
+## Verification and limits
 
-- 77 runtime and Latte unit examples, including seven typed-input examples. Latte process/socket tests require normal host permissions; the initial sandbox-only run could not inspect processes or bind sockets, and the permitted rerun passed.
-- 11 disposable PostgreSQL integration examples, including restricted-role model CRUD, bound SQL-looking values, every supported scalar, timestamp and no-timestamp models, primary-key declaration order, stale records and nullable queries. The runtime role cannot create tables.
-- Ten model and six input compile fixtures cover valid API use and expected type/field/option failures.
-- The existing native Bookshelf named-HTTPS/Unix-upstream smoke still passes with the exported APIs. That reference app is hand-authored; this is not generated-app or browser acceptance.
+Run these with the pinned toolchain:
 
-Run `scripts/check model-compilation`, `scripts/check contract-compilation`, `scripts/check route-compilation`, `scripts/crystal spec spec/caramel spec/latte`, `scripts/check integration` and `scripts/check frappe-project` with the pinned toolchain. Fresh independent review remains pending: the Luna workers stopped at the account usage limit. Frappé generation, browser interaction and consumer installation remain separate acceptance gates.
+- `scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm`: unit behaviour of schemas, changesets, queries, the differ, DDL, linter, contracts and the generator. The generator spec checks that a generated migration equals what the differ derives for the declared catalog.
+- `scripts/check integration`: SugarORM against disposable PostgreSQL through a restricted runtime role that cannot create tables. It covers facade and changeset CRUD, `unique_constraint`, preload statement counts, scopes and conditions, savepoints and fiber binding, and typed SQL.
+- `scripts/check orm-compilation`: compile-time failures for N+1 access, unknown preloads, `where` and `order_by` fields, mistyped values, changeset and facade keywords, param mismatches, unsupported types, non-literal defaults and a missing primary key.
+- `scripts/check contract-compilation` and `scripts/check route-compilation`: contract and route declaration errors.
+- `scripts/check frappe-project`: generated SugarORM resources end to end. It migrates, checks for drift, runs `frappe db diff --name drift_probe` (which must find nothing to write), and runs the generated request specs, including blank-text refusal through the generated changeset on create and update.
+
+Some compile errors are Crystal's own overload messages rather than custom text: unknown `where` keys, mistyped values, unknown changeset or facade keywords, and N+1 access. Each is still reported at the caller's line, and its message lists the accepted keywords or names the `.preload(...)` remedy. `order_by` directions are checked at runtime.

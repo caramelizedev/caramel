@@ -2,7 +2,7 @@ require "caramel"
 require "yaml"
 
 module App
-  MIGRATIONS = [] of Caramel::Migration
+  MIGRATIONS = [] of SugarORM::Migration
   DATABASE_SETTINGS = YAML.parse({{ read_file("#{__DIR__}/database.yml") }})
   TITLE = "@@TITLE@@"
 
@@ -15,6 +15,7 @@ module App
 end
 
 require "../app/models/*"
+require "../app/changesets/*"
 require "./paths"
 require "../app/actions/application_action"
 require "../app/actions/*"
@@ -25,7 +26,7 @@ require "./routes"
 
 module App
   def self.build(db : DB::Database, secret : String, origin : String) : Caramel::Application
-    Caramel::Model.database = db
+    SugarORM::Repo.database = db
     Caramel::Application.new(App::AppRouter.new, Caramel::CSRF.new(secret, origin), "#{__DIR__}/../public")
   end
 end

@@ -1,0 +1,309 @@
+module SugarORM
+  # The type-independent part of every changeset; `SugarORM::Invalid` holds one.
+  abstract class AnyChangeset
+    getter errors : Hash(String, Array(String)) = {} of String => Array(String)
+
+    def valid? : Bool
+      @errors.empty?
+    end
+
+    abstract def saved? : Bool
+
+    # Adds an error under a column name or `"_base"`.
+    def add_error(field : String, message : String) : Nil
+      (@errors[field] ||= [] of String) << message
+    end
+
+    def error_messages : Array(String)
+      @errors.flat_map { |field, messages| messages.map { |message| field == "_base" ? message : "#{field} #{message}" } }
+    end
+  end
+
+  # Raised by the bang facade methods (`create!`, `update!`).
+  class Invalid < Error
+    getter changeset : AnyChangeset
+
+    def initialize(@changeset : AnyChangeset)
+      super("#{changeset.class} is invalid: #{changeset.error_messages.join("; ")}")
+    end
+  end
+
+  # An explicit, validated mutation of schema `T`:
+  #
+  #     class Team::UpdateChangeset < SugarORM::Changeset(Team)
+  #       param seats : Int32
+  #
+  #       def validate(cs)
+  #         cs.validate_greater_than(:seats, 0)
+  #       end
+  #     end
+  #
+  # `Changeset.new(record, **changes)` builds an update and `Changeset.new(**changes)`
+  # an insert; both accept exactly the declared params (checked at compile time).
+  # Validations run on construction; `Repo.insert`/`Repo.update` persist.
+  abstract class Changeset(T) < AnyChangeset
+    @original : T? = nil
+    @record : T? = nil
+    @saved = false
+    @changes = {} of String => Value
+    @unique_constraints = [] of {String, String}
+
+    # Declares a permitted param; it must name a non-system field of `T` with a
+    # compatible type.
+    macro param(declaration)
+      {% unless declaration.is_a?(TypeDeclaration) && declaration.value.is_a?(Nop) %}
+        {% declaration.raise "param expects `param name : Type` (no default).\nRemediation: write it like `param seats : Int32`, naming a field of the schema." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      {% schema = nil %}
+      {% for ancestor in @type.ancestors %}
+        {% if ancestor.name(generic_args: false).stringify == "SugarORM::Changeset" %}
+          {% schema = ancestor.type_vars[0] %}
+        {% end %}
+      {% end %}
+      {% fields = schema.constant(:SUGAR_FIELDS) %}
+      {% unless fields %}
+        {% declaration.raise "#{schema} has no `schema` block yet, so #{@type} cannot declare params.\nRemediation: define #{@type} after `schema \"table\" do ... end` in #{schema}." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      {% name = declaration.var.id.stringify %}
+      {% field = fields[name] %}
+      {% unless field %}
+        {% declaration.raise "param '#{name.id}' is not a field of #{schema}.\nFields: #{fields.keys.join(", ").id}\nRemediation: rename the param to one of these fields, or add `field #{name.id} : Type` to #{schema}'s schema block." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      {% if field[:system] %}
+        {% declaration.raise "param '#{name.id}' names #{schema}'s system-managed column '#{name.id}' (primary key or timestamp), which changesets never write.\nRemediation: remove `param #{name.id}`." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      {% declared = declaration.type.resolve %}
+      {% column = parse_type(field[:type]).resolve %}
+      {% unless declared <= column %}
+        {% declaration.raise "param '#{name.id} : #{declaration.type}' does not match #{schema} field '#{name.id} : #{column}'.\nRemediation: declare `param #{name.id} : #{field[:declared].id}`#{field[:nullable] ? " (or its non-nil form)".id : "".id}." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      {% constant = "SUGAR_PARAM_#{name.upcase.id}".id %}
+      {% if @type.has_constant?(constant) %}
+        {% declaration.raise "param '#{name.id}' is declared twice in #{@type}.\nRemediation: remove the duplicate `param #{name.id}`." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+      {% end %}
+      # {name, accepted value type}
+      {{constant}} = { {{name}}, {{declared.union_types.map { |member| "::#{member}" }.join(" | ")}} }
+    end
+
+    macro inherited
+      # The typed constructors are generated once every `param` is known, so an
+      # unknown keyword or a mistyped value fails at the caller's line.
+      macro finished
+        \{% params = @type.constants.select(&.starts_with?("SUGAR_PARAM_")).map { |name| @type.constant(name) } %}
+        \{% schema = nil %}
+        \{% for ancestor in @type.ancestors %}
+          \{% if ancestor.name(generic_args: false).stringify == "SugarORM::Changeset" %}
+            \{% schema = ancestor.type_vars[0] %}
+          \{% end %}
+        \{% end %}
+        \{% keywords = params.map { |param| "#{param[0].id} : #{param[1].id} | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET" }.join(", ") %}
+
+        def initialize(record : ::\{{schema}}\{% unless params.empty? %}, *, \{{keywords.id}}\{% end %})
+          @original = record
+          \{% for param in params %}
+            __sugar_put(\{{param[0]}}, \{{param[0].id}}) unless \{{param[0].id}}.is_a?(::SugarORM::Unset)
+          \{% end %}
+          __sugar_prepare
+        end
+
+        def initialize\{% unless params.empty? %}(*, \{{keywords.id}})\{% end %}
+          \{% for param in params %}
+            __sugar_put(\{{param[0]}}, \{{param[0].id}}) unless \{{param[0].id}}.is_a?(::SugarORM::Unset)
+          \{% end %}
+          __sugar_prepare
+        end
+      end
+    end
+
+    # Override to validate; called once on construction with the changeset itself.
+    def validate(cs) : Nil
+    end
+
+    def insert? : Bool
+      @original.nil?
+    end
+
+    def saved? : Bool
+      @saved
+    end
+
+    # The fields this changeset writes; for an update only those that differ
+    # from the record.
+    def changes : Hash(String, Value)
+      @changes.dup
+    end
+
+    # The stored row after a save; for an update the original before it.
+    def record : T
+      @record || @original || raise Error.new("#{self.class} has not been inserted, so it has no record yet")
+    end
+
+    def add_error(field : T::Field, message : String) : Nil
+      add_error(T.__sugar_column(field), message)
+    end
+
+    # Each field must be present: not nil and, for strings, not blank.
+    def validate_required(*fields : T::Field, message : String = "is required") : Nil
+      fields.each do |field|
+        value = current(field)
+        add_error(field, message) if value.nil? || (value.is_a?(String) && value.blank?)
+      end
+    end
+
+    # A changed string must not be blank.
+    def validate_presence(field : T::Field, message : String = "can't be blank") : Nil
+      column = T.__sugar_column(field)
+      return unless @changes.has_key?(column)
+      value = @changes[column]
+      add_error(column, message) if value.nil? || (value.is_a?(String) && value.blank?)
+    end
+
+    def validate_greater_than(field : T::Field, than : Number, message : String = "must be greater than #{than}") : Nil
+      number(field) { |value| add_error(field, message) unless value > than }
+    end
+
+    def validate_less_than(field : T::Field, than : Number, message : String = "must be less than #{than}") : Nil
+      number(field) { |value| add_error(field, message) unless value < than }
+    end
+
+    def validate_length(field : T::Field, min : Int32? = nil, max : Int32? = nil) : Nil
+      string(field) do |value|
+        if min && value.size < min
+          add_error(field, "should be at least #{min} character(s)")
+        elsif max && value.size > max
+          add_error(field, "should be at most #{max} character(s)")
+        end
+      end
+    end
+
+    def validate_format(field : T::Field, format : Regex, message : String = "has invalid format") : Nil
+      string(field) { |value| add_error(field, message) unless format.matches?(value) }
+    end
+
+    def validate_inclusion(field : T::Field, in values : Enumerable, message : String = "is invalid") : Nil
+      column = T.__sugar_column(field)
+      return unless @changes.has_key?(column)
+      value = @changes[column]
+      add_error(field, message) unless value.nil? || values.includes?(value)
+    end
+
+    # Maps a unique violation (SQLSTATE 23505) of the index that leads with
+    # `field` to an error on it, instead of raising, when this changeset saves.
+    def unique_constraint(field : T::Field, message : String = "has already been taken") : Nil
+      @unique_constraints << {T.__sugar_column(field), message}
+    end
+
+    # :nodoc:
+    def __sugar_insert : Nil
+      raise ArgumentError.new("#{self.class} was built from a record; use SugarORM::Repo.update") unless insert?
+      return if @saved || !valid?
+      columns = @changes.keys
+      sql = String.build do |io|
+        io << "INSERT INTO " << T.__sugar_quoted_table
+        if columns.empty?
+          io << " DEFAULT VALUES"
+        else
+          io << " (" << columns.map { |column| %("#{column}") }.join(", ") << ") VALUES ("
+          io << (1..columns.size).join(", ") { |index| "$#{index}" } << ")"
+        end
+        io << " RETURNING " << T.__sugar_select_list
+      end
+      write { Repo.query_one?(sql, @changes.values) { |rows| T.from_row(rows) } }
+    end
+
+    # :nodoc:
+    def __sugar_update : Nil
+      original = @original || raise ArgumentError.new("#{self.class} was built without a record; use SugarORM::Repo.insert")
+      return if @saved || !valid?
+      if @changes.empty?
+        @record = original
+        @saved = true
+        return
+      end
+      assignments = @changes.keys.map_with_index { |column, index| %("#{column}" = $#{index + 1}) }
+      assignments << %("updated_at" = CURRENT_TIMESTAMP) if T.__sugar_timestamps?
+      sql = "UPDATE #{T.__sugar_quoted_table} SET #{assignments.join(", ")} WHERE \"#{T.__sugar_primary_key}\" = $#{@changes.size + 1} RETURNING #{T.__sugar_select_list}"
+      args = @changes.values
+      args << original.__sugar_primary_value
+      write { Repo.query_one?(sql, args) { |rows| T.from_row(rows) } }
+    end
+
+    # :nodoc:
+    def __sugar_delete : Nil
+      original = @original || raise ArgumentError.new("#{self.class} was built without a record; there is nothing to delete")
+      if Repo.delete(original)
+        @record = original
+        @saved = true
+      else
+        add_error("_base", "Record no longer exists")
+      end
+    end
+
+    private def __sugar_put(column : String, value) : Nil
+      original = @original
+      return if original && original.__sugar_get(column) == value
+      @changes[column] = value
+    end
+
+    # NOT NULL checks (an insert must supply every column without a default),
+    # then the user's `validate(cs)`.
+    private def __sugar_prepare : Nil
+      T.__sugar_not_null_columns.each do |column|
+        missing = @changes.has_key?(column) ? @changes[column].nil? : insert? && T.__sugar_required_columns.includes?(column)
+        add_error(column, "is required") if missing
+      end
+      validate(self)
+    end
+
+    # Runs the write; inside a transaction a changeset with unique constraints
+    # writes under a savepoint so a mapped violation leaves the transaction usable.
+    private def write(& : -> T?) : Nil
+      stored = if @unique_constraints.empty?
+                 yield
+               else
+                 begin
+                   Repo.in_transaction? ? Repo.transaction { yield } : yield
+                 rescue violation : UniqueViolation
+                   constraint = @unique_constraints.find { |(column, _)| violation.on?(T.__sugar_table_name, column) }
+                   raise violation unless constraint
+                   add_error(constraint[0], constraint[1])
+                   return
+                 end
+               end
+      if stored
+        @record = stored
+        @saved = true
+      else
+        add_error("_base", "Record no longer exists")
+      end
+    end
+
+    private def current(field : T::Field) : Value
+      column = T.__sugar_column(field)
+      return @changes[column] if @changes.has_key?(column)
+      @original.try(&.__sugar_get(column))
+    end
+
+    private def number(field : T::Field, & : Float64 | Int32 | Int64 ->) : Nil
+      column = T.__sugar_column(field)
+      return unless @changes.has_key?(column)
+      case value = @changes[column]
+      when Int32, Int64, Float64 then yield value
+      when Nil
+      else
+        raise ArgumentError.new("#{self.class}: '#{column}' is not numeric, so it cannot take a numeric validation")
+      end
+    end
+
+    private def string(field : T::Field, & : String ->) : Nil
+      column = T.__sugar_column(field)
+      return unless @changes.has_key?(column)
+      case value = @changes[column]
+      when String then yield value
+      when Nil
+      else
+        raise ArgumentError.new("#{self.class}: '#{column}' is not a String, so it cannot take a string validation")
+      end
+    end
+  end
+end

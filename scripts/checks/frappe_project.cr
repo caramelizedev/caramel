@@ -36,7 +36,14 @@ module Caramel::Checks
         print routes
         assert!(routes.lines.any? { |line| line.split == %w(GET /books/:id App::Books::Show id:Int64(min=1)) }, routes)
         assert!(routes.lines.any? { |line| line.split == %w(PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?) }, routes)
-        command([@frappe, "migrate"], chdir: @project)
+        migrated = command([@frappe, "migrate"], chdir: @project)
+        assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
+        # The generated create_* migrations must be exactly what the differ
+        # derives, so diffing the migrated database finds nothing to write.
+        probe = command([@frappe, "db", "diff", "--name", "drift_probe"], chdir: @project, timeout: 300.seconds)
+        assert!(probe.stdout.includes?("already matches the declared schema; no migration was written"), probe.stdout)
+        assert!(Dir.glob(File.join(@project, "db/migrations/*drift_probe*")).empty?)
+        puts "PASS: generated SugarORM resources migrate without drift, and frappe db diff --name drift_probe derives nothing"
         sql(values["MIGRATION_DATABASE_URL"], "CREATE TABLE dev_sentinel (value text NOT NULL); INSERT INTO dev_sentinel VALUES ('keep');")
         command([@frappe, "test"], chdir: @project)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")

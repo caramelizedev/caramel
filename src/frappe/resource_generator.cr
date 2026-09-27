@@ -1,10 +1,29 @@
 require "./project"
+require "./schema_diff"
+require "../sugar_orm/catalog"
+require "../sugar_orm/differ"
+require "../sugar_orm/ddl"
+require "../sugar_orm/migration"
 require "file_utils"
 
 module Caramel::Frappe
   struct ResourceField
-    TYPES    = {"string" => {"String", "text"}, "int32" => {"Int32", "integer"}, "int64" => {"Int64", "bigint"}, "bool" => {"Bool", "boolean"}, "float64" => {"Float64", "double precision"}, "time" => {"Time", "timestamptz"}}
-    RESERVED = %w(id created_at updated_at errors values save delete valid database initialize class self nil true false end def module require property getter setter abstract private protected macro field table timestamps validates query find all new order where to_s inspect hash clone dup object_id if else elsif unless until while for do then case when begin rescue ensure return break next yield include extend enum struct alias lib fun out with as is_a responds_to sizeof typeof instance_sizeof union uninitialized super previous_def annotation asm of select pointerof offsetof)
+    TYPES = {"string" => {"String", "text"}, "int32" => {"Int32", "integer"}, "int64" => {"Int64", "bigint"}, "bool" => {"Bool", "boolean"}, "float64" => {"Float64", "double precision"}, "time" => {"Time", "timestamp with time zone"}}
+    # A field becomes a schema getter, a changeset param, a facade keyword and
+    # a request contract getter, so it must not collide with system columns,
+    # the SugarORM schema DSL, facade or changeset API, the request contract
+    # API, or Crystal keywords and core methods.
+    RESERVED = %w(
+      id created_at updated_at
+      schema field timestamps belongs_to has_many has_one index drop_column scope
+      query with create update delete db from_row to_json record
+      param changes errors valid saved insert validate add_error error_messages unique_constraint
+      values contract route_error to_mrdp parse
+      initialize class self nil true false end def module require property getter setter abstract private protected macro
+      new to_s inspect hash clone dup object_id if else elsif unless until while for do then case when in begin rescue ensure
+      return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
+      union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
+    )
     getter name : String
     getter kind : String
     getter nullable : Bool
@@ -24,8 +43,8 @@ module Caramel::Frappe
       TYPES[@kind][0] + (@nullable ? "?" : "")
     end
 
-    def sql : String
-      "\"#{@name}\" #{TYPES[@kind][1]}#{@nullable ? "" : " NOT NULL"}"
+    def column : SugarORM::Catalog::Column
+      SugarORM::Catalog::Column.new(@name, TYPES[@kind][1], @nullable, nil)
     end
 
     def label : String
@@ -60,7 +79,7 @@ module Caramel::Frappe
     end
 
     def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil) : Array(String)
-      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && !%w(App ApplicationRecord ApplicationAction Home Health Caramel Object String Time Int32 Int64 Bool Float64).includes?(name)
+      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && !%w(App ApplicationAction Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64).includes?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
       singular = name.underscore
@@ -76,18 +95,17 @@ module Caramel::Frappe
       while used_versions.includes?(migration_version)
         migration_version += 1
       end
+      required_text = fields.select { |f| f.kind == "string" && !f.nullable }
       tokens = {
         "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
         "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
         "@@COLLECTION_LABEL@@" => collection.tr("_", " ").capitalize,
-        "@@VERSION@@" => migration_version.to_s,
-        "@@MODEL_FIELDS@@" => fields.map { |f| "    field #{f.name} : #{f.type}" }.join('\n'),
+        "@@MODEL_FIELDS@@" => fields.map { |f| "      field #{f.name} : #{f.type}" }.join('\n'),
         "@@CONTRACT_FIELDS@@" => fields.map { |f| "      field #{f.name} : #{f.type}" }.join('\n'),
-        "@@PRESENCE@@" => fields.select { |f| f.kind == "string" && !f.nullable }.map { |f| "    validates :#{f.name}, presence: true" }.join('\n'),
+        "@@PARAMS@@" => fields.map { |f| "    param #{f.name} : #{f.type}" }.join('\n'),
+        "@@VALIDATIONS@@" => required_text.map { |f| "      cs.validate_presence(:#{f.name})" }.join('\n'),
         "@@ATTRIBUTES@@" => fields.map { |f| "#{f.name}: contract.#{f.name}" }.join(", "),
-        "@@ASSIGNMENTS@@" => fields.map { |f| "      record.#{f.name} = contract.#{f.name}" }.join('\n'),
         "@@VALUES@@" => fields.map { |f| "#{f.name.to_json} => record.#{f.name}.try { |value| #{f.kind == "time" ? "value.to_rfc3339" : "value.to_s"} } || \"\"" }.join(", "),
-        "@@SQL_FIELDS@@" => fields.map { |f| "    #{f.sql}," }.join('\n'),
         "@@FORM_FIELDS@@" => fields.map { |f| form_field(f, singular) }.join('\n'),
         "@@TABLE_HEADERS@@" => fields.map { |f| "<th scope=\"col\">#{f.label}</th>" }.join,
         "@@TABLE_CELLS@@" => fields.map { |f| "<td><%= record.#{f.name} %></td>" }.join,
@@ -95,6 +113,7 @@ module Caramel::Frappe
         "@@SAMPLE_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.sample.to_json}" }.join(", "),
         "@@UPDATED_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => fields.map { |f| "      persisted.#{f.name}.should eq(Caramel::RequestContract.convert(#{f.updated_sample.to_json}, #{ResourceField::TYPES[f.kind][0]}))" }.join('\n'),
+        "@@ASSERT_PRESENCE@@" => assert_presence(name, required_text),
         "@@ASSERT_ESCAPING@@" => fields.select { |f| f.kind == "string" }.map { |f| "      shown.body.should contain(Caramel::HTML.escape(#{f.sample.to_json}))\n      shown.body.should_not contain(#{f.sample.to_json})" }.join('\n'),
         "@@HOST@@" => "#{project.name}.#{project.metadata.domain_suffix}",
       }
@@ -108,6 +127,8 @@ module Caramel::Frappe
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
+      migration = SugarORM::Migration.new(migration_version, "create_#{collection}", create_table(collection, fields))
+      files["db/migrations/#{migration.version}_#{migration.name}.cr"] = SchemaDiff.source(migration)
       originals = {} of String => String
       actions = "App::#{collection.camelcase}"
       routes = [
@@ -137,6 +158,30 @@ module Caramel::Frappe
       return name[0...-1] + "ies" if name.matches?(/[^aeiou]y\z/)
       return name + "es" if name.matches?(/(?:s|x|z|ch|sh)\z/)
       name + "s"
+    end
+
+    # Diffs the generated schema's table against an empty database, exactly as
+    # `frappe db diff --name create_<plural>` would: id identity key, the
+    # fields in order, then the timestamps.
+    private def create_table(table : String, fields : Array(ResourceField)) : Array(String)
+      columns = [SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)]
+      columns.concat(fields.map(&.column))
+      %w(created_at updated_at).each { |stamp| columns << SugarORM::Catalog::Column.new(stamp, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
+      plan = SugarORM::Differ.diff([SugarORM::Catalog::Table.new(table, columns)], [] of SugarORM::Catalog::Table)
+      SugarORM::DDL.statements(plan.transactional)
+    end
+
+    # Blank required text must fail through the generated changeset on both
+    # facade writes.
+    private def assert_presence(model : String, fields : Array(ResourceField)) : String
+      return "" if fields.empty?
+      blanks = fields.join(", ") { |f| "#{f.name}: \" \"" }
+      String.build do |io|
+        io << "      [App::" << model << ".create(" << blanks << "), persisted.update(" << blanks << ")].each do |blank|\n"
+        io << "        blank.saved?.should be_false\n"
+        fields.each { |f| io << "        blank.errors[" << f.name.to_json << "]?.should eq([\"can't be blank\"])\n" }
+        io << "      end"
+      end
     end
 
     private def form_field(field : ResourceField, singular : String) : String

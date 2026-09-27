@@ -12,7 +12,6 @@ require "./caramel/http/paths"
 require "./caramel/application"
 require "./caramel/view"
 require "./caramel/database"
-require "./caramel/migration"
-require "./caramel/model"
+require "./sugar_orm"
 
 require "./caramel/version"

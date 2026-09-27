@@ -51,7 +51,9 @@ module Caramel::Frappe
         result[path] = content
       end
       framework = tree(File.join(@framework_root, "src/caramel"), "src/caramel")
+      framework.merge!(tree(File.join(@framework_root, "src/sugar_orm"), "src/sugar_orm"))
       framework["src/caramel.cr"] = File.read(File.join(@framework_root, "src/caramel.cr"))
+      framework["src/sugar_orm.cr"] = File.read(File.join(@framework_root, "src/sugar_orm.cr"))
       %w(shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md).each do |file|
         framework[file] = File.read(File.join(@framework_root, file))
       end

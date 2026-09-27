@@ -1,6 +1,7 @@
 require "http/client"
 require "socket/unix_socket"
 require "./project"
+require "../latte/postgres"
 
 module Caramel::Frappe
   # Frappé and the menu application speak to the same private service owner.
@@ -73,6 +74,25 @@ module Caramel::Frappe
     def clear_upstream(id : String, socket : String) : Bool
       validate_id(id)
       request("DELETE", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["cleared"].as_bool
+    end
+
+    # A disposable copy of the site's development database. The returned
+    # document holds `name`, `database`, `migration_url` and `runtime_url`.
+    def create_branch(id : String, name : String) : JSON::Any
+      validate_id(id)
+      request("POST", "/v1/sites/#{id}/branches", {name: name}.to_json)["branch"]
+    end
+
+    def branches(id : String) : Array(JSON::Any)
+      validate_id(id)
+      request("GET", "/v1/sites/#{id}/branches")["branches"].as_a
+    end
+
+    def drop_branch(id : String, name : String) : Nil
+      validate_id(id)
+      raise Error.new("Invalid branch name") unless name.matches?(Latte::Postgres::BRANCH_NAME)
+      request("DELETE", "/v1/sites/#{id}/branches/#{name}")
+      nil
     end
 
     def site_directory(id : String) : String

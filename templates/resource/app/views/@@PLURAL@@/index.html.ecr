@@ -2,6 +2,6 @@
 <% if records.empty? %><section class="empty-state"><h2>A fresh start.</h2><p>Add your first @@LABEL@@ to get going.</p></section>
 <% else %>
 <div class="table-scroll"><table><thead><tr>@@TABLE_HEADERS@@<th scope="col">Actions</th></tr></thead><tbody>
-<% records.each do |record| %><tr>@@TABLE_CELLS@@<td><a href="<%= @@SINGULAR@@_path(record.id.not_nil!) %>">View</a> <a href="<%= edit_@@SINGULAR@@_path(record.id.not_nil!) %>">Edit</a></td></tr><% end %>
+<% records.each do |record| %><tr>@@TABLE_CELLS@@<td><a href="<%= @@SINGULAR@@_path(record.id) %>">View</a> <a href="<%= edit_@@SINGULAR@@_path(record.id) %>">Edit</a></td></tr><% end %>
 </tbody></table></div><p class="muted">Showing the newest 100 records.</p>
 <% end %>

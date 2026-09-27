@@ -17,6 +17,17 @@ module Caramel::Latte
     RUNTIME_CONNECTION_LIMIT   =  4
     MIGRATION_CONNECTION_LIMIT =  1
     ADMIN_USER                 = "caramel_admin"
+    BRANCH_NAME                = /\A[a-z][a-z0-9_]{0,30}\z/
+    RELEASE_GUARDS_SQL         = <<-SQL
+      DO $$
+      DECLARE target text;
+      BEGIN
+        FOR target IN SELECT datname FROM pg_database WHERE NOT datallowconn AND starts_with(datname, 'caramel_dev_') LOOP
+          EXECUTE format('ALTER DATABASE %I WITH ALLOW_CONNECTIONS true', target);
+        END LOOP;
+      END
+      $$;
+      SQL
 
     class Error < Exception
     end
@@ -34,6 +45,33 @@ module Caramel::Latte
     end
 
     class SecretMissing < Error
+    end
+
+    class BranchExists < Error
+    end
+
+    # A disposable clone of a site's development database, with URLs for the
+    # site's development migration and runtime roles.
+    struct Branch
+      getter name : String
+      getter database : String
+      getter migration_url : String
+      getter runtime_url : String
+
+      def initialize(@name : String, @database : String, @migration_url : String, @runtime_url : String)
+      end
+
+      def inspect(io : IO) : Nil
+        io << "Caramel::Latte::Postgres::Branch(name="
+        @name.inspect(io)
+        io << ", database="
+        @database.inspect(io)
+        io << ", urls=[REDACTED])"
+      end
+
+      def to_s(io : IO) : Nil
+        inspect(io)
+      end
     end
 
     struct DatabaseNames
@@ -324,6 +362,64 @@ module Caramel::Latte
       end
     end
 
+    # Clones the site's development database into a disposable branch behind
+    # the RFC-0004 connection guard. The branch belongs to the development
+    # migration role and admits exactly the development roles.
+    def create_branch(site : Site, name : String) : Branch
+      database = self.class.branch_database(site.id, name)
+      material = load_material(site)
+      source = material.databases.development
+      migration, runtime = material.roles.development_migration, material.roles.development_runtime
+      @lock.synchronize do
+        raise BranchExists.new("branch #{name} already exists") if database_exists?(database)
+        guard_connections(source) do
+          run_psql(self.class.branch_clone_sql(source, database, migration), "postgres", ADMIN_USER, admin_material.password)
+        end
+        begin
+          run_psql(self.class.branch_access_sql(database, migration, runtime), "postgres", ADMIN_USER, admin_material.password)
+        rescue ex
+          OperationDeadline.without { run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password) }
+          raise ex
+        end
+      end
+      Branch.new(name, database,
+        self.class.connection_url(migration, material.development_migration_password, database, @socket_directory),
+        self.class.connection_url(runtime, material.development_runtime_password, database, @socket_directory))
+    end
+
+    def drop_branch(site : Site, name : String) : Bool
+      database = self.class.branch_database(site.id, name)
+      @lock.synchronize do
+        return false unless database_exists?(database)
+        run_psql(self.class.branch_drop_sql(database), "postgres", ADMIN_USER, admin_material.password)
+        true
+      end
+    end
+
+    def list_branches(site : Site) : Array(String)
+      prefix = self.class.branch_database(site.id, "a").rchop("a")
+      output = @lock.synchronize do
+        run_psql("SELECT datname FROM pg_database WHERE starts_with(datname, #{self.class.quote_literal(prefix)}) ORDER BY 1;", "postgres", ADMIN_USER, admin_material.password)
+      end
+      output.lines.map(&.strip).reject(&.empty?).map(&.lchop(prefix))
+    end
+
+    # RFC-0004 connection guard: while the block runs, `database` refuses new
+    # connections and has no other backends. Connections are re-allowed in
+    # every outcome, including an expired operation deadline.
+    def guard_connections(database : String, &) : Nil
+      run_psql(self.class.branch_guard_sql(database), "postgres", ADMIN_USER, admin_material.password)
+      yield
+    ensure
+      OperationDeadline.without { run_psql(self.class.branch_release_sql(database), "postgres", ADMIN_USER, admin_material.password) }
+    end
+
+    # A crash between guard and release would lock developers out of their
+    # database (RFC-0004 §3); Latte re-allows connections whenever it starts.
+    def release_guards : Nil
+      @lock.synchronize { run_psql(RELEASE_GUARDS_SQL, "postgres", ADMIN_USER, admin_material.password) }
+    end
+
     def self.database_names(site_id : String) : DatabaseNames
       validate_site_id!(site_id)
       DatabaseNames.new("caramel_dev_#{site_id}", "caramel_spec_#{site_id}")
@@ -341,6 +437,44 @@ module Caramel::Latte
 
     def self.connection_url(user : String, password : String, database : String, socket_directory : String) : String
       "postgresql://#{user}:#{password}@/#{database}?host=#{URI.encode_www_form(socket_directory)}&port=5432"
+    end
+
+    def self.validate_branch_name!(name : String) : Nil
+      raise ArgumentError.new("branch name must be lowercase: a letter, then up to 30 letters, digits or underscores") unless name.matches?(BRANCH_NAME)
+    end
+
+    def self.branch_database(site_id : String, name : String) : String
+      validate_site_id!(site_id)
+      validate_branch_name!(name)
+      "caramel_branch_#{site_id}_#{name}"
+    end
+
+    def self.branch_guard_sql(database : String) : String
+      <<-SQL
+      ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS false;
+      SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = #{quote_literal(database)} AND pid <> pg_backend_pid();
+      SQL
+    end
+
+    def self.branch_release_sql(database : String) : String
+      "ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS true;"
+    end
+
+    def self.branch_clone_sql(source : String, branch : String, owner : String) : String
+      "CREATE DATABASE #{quote_identifier(branch)} WITH TEMPLATE #{quote_identifier(source)} OWNER #{quote_identifier(owner)} STRATEGY FILE_COPY;"
+    end
+
+    # Database-level settings and grants are not copied from a template.
+    def self.branch_access_sql(branch : String, migration_role : String, runtime_role : String) : String
+      <<-SQL
+      ALTER DATABASE #{quote_identifier(branch)} SET timezone TO 'UTC';
+      REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{quote_identifier(branch)} FROM PUBLIC;
+      GRANT CONNECT ON DATABASE #{quote_identifier(branch)} TO #{quote_identifier(migration_role)}, #{quote_identifier(runtime_role)};
+      SQL
+    end
+
+    def self.branch_drop_sql(branch : String) : String
+      "DROP DATABASE IF EXISTS #{quote_identifier(branch)} WITH (FORCE);"
     end
 
     def self.quote_identifier(identifier : String) : String

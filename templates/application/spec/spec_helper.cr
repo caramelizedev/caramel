@@ -18,4 +18,5 @@ unless SPEC_DB.query_one("SELECT current_database()", as: String) == ENV["CARAME
   SPEC_DB.close
   abort("Connected spec database identity differs")
 end
+SugarORM::Repo.database = SPEC_DB
 Spec.after_suite { SPEC_DB.close }

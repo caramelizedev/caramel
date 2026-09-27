@@ -54,6 +54,7 @@ module Caramel::Latte
           @dns.write(@registry.list)
           @proxy.write
           @postgres.start
+          @postgres.release_guards
           @states["postgres"] = "running"
           @dns_child.start
           wait_ready("DNS", 5.seconds) { child_ready?(@dns_child) { dns_ready? } }
@@ -156,6 +157,44 @@ module Caramel::Latte
           SPEC_MIGRATION_DATABASE_URL: credentials.spec_migration,
         }}.to_json
       end
+    end
+
+    def create_branch_json(id : String, name : String) : String
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        branch = @postgres.create_branch(registered(id), name)
+        {version: 1, branch: {name: branch.name, database: branch.database, migration_url: branch.migration_url, runtime_url: branch.runtime_url}}.to_json
+      end
+    rescue ex : Postgres::BranchExists
+      raise PublicError.new("branch_exists", "Branch #{name} already exists; delete it first", 409)
+    rescue ex : Postgres::SecretMissing
+      raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
+    rescue ex : Postgres::Error
+      raise PublicError.new("branch_failed", ex.message || "Database branch operation failed")
+    end
+
+    def branches_json(id : String) : String
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        names = @postgres.list_branches(registered(id))
+        {version: 1, branches: names.map { |name| {name: name, database: Postgres.branch_database(id, name)} }}.to_json
+      end
+    end
+
+    def drop_branch(id : String, name : String) : Bool
+      require_ready!
+      @lock.synchronize do
+        OperationDeadline.check!
+        @postgres.drop_branch(registered(id), name)
+      end
+    rescue ex : Postgres::Error
+      raise PublicError.new("branch_failed", ex.message || "Database branch operation failed")
+    end
+
+    private def registered(id : String) : Site
+      @registry.find(id) || raise PublicError.new("not_found", "Project is not registered", 404)
     end
 
     def set_upstream(id : String, socket : String) : Site
