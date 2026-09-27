@@ -113,7 +113,7 @@ module Caramel::Latte
       @http_server = server
       server.listen
     ensure
-      server.try(&.close)
+      server.try { |http| http.close unless http.closed? }
       @http_server = nil
     end
 

@@ -41,8 +41,12 @@ module Caramel::Checks::LatteDaemon
     dns.try(&.close)
   end
 
-  private def caddy_pid(root : String) : Int64
+  # The record is rewritten while the supervisor restarts Caddy; a missing
+  # record means the restart has not finished yet.
+  private def caddy_pid(root : String) : Int64?
     JSON.parse(File.read(File.join(root, "services/caddy/process.json")))["pid"].as_i64
+  rescue File::NotFoundError
+    nil
   end
 
   private def launch(root : String, log : File, environment : Hash(String, String?)) : Process
@@ -63,12 +67,12 @@ module Caramel::Checks::LatteDaemon
       raise "Two daemons acquired the same instance" if duplicate.success?
       site = request(socket, "POST", "/v1/sites", JSON.parse({name: "bookshelf", directory: root}.to_json))["site"]
       dns_ready!(site["domain"].as_s)
-      before = caddy_pid(root)
+      before = caddy_pid(root) || raise "Caddy has no process record after startup"
       process.terminate(graceful: false)
       process.wait
       process = launch(root, log, environment)
       wait_state(socket, "running")
-      after = caddy_pid(root)
+      after = caddy_pid(root) || raise "Caddy has no process record after daemon restart"
       raise "Daemon restart should adopt its verified service" unless before == after
       raise "Site registry was not preserved" unless request(socket, "GET", "/v1/sites")["sites"].as_a.first["id"] == site["id"]
       certificate_path = File.join(root, "services/caddy/storage/pki/authorities/caramel/root.crt")
@@ -76,7 +80,7 @@ module Caramel::Checks::LatteDaemon
       Process.signal(Signal::KILL, after)
       deadline = Time.instant + 15.seconds
       loop do
-        break if caddy_pid(root) != after
+        break if (current = caddy_pid(root)) && current != after
         raise "Proxy crash was not recovered automatically" if Time.instant >= deadline
         sleep 100.milliseconds
       end
@@ -84,7 +88,7 @@ module Caramel::Checks::LatteDaemon
       raise "Proxy CA was not preserved" unless File.read(certificate_path) == certificate
       menu = Checks.run([File.join(Checks::REPO, "bin/Latte.app/Contents/MacOS/Latte"), "--check"], env: environment, timeout: 10.seconds)
       raise menu.stdout + menu.stderr unless menu.success?
-      Process.signal(Signal::KILL, caddy_pid(root))
+      Process.signal(Signal::KILL, caddy_pid(root) || raise "Caddy has no process record after recovery")
       deadline = Time.instant + 10.seconds
       loop do
         status = request(socket, "GET", "/v1/status")
@@ -108,7 +112,18 @@ module Caramel::Checks::LatteDaemon
     ensure
       if process && !process.terminated?
         begin
-          request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
+          # A failed assertion can land during automatic recovery; wait for
+          # that operation instead of leaving services behind.
+          stop_deadline = Time.instant + 60.seconds
+          loop do
+            begin
+              request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
+              break
+            rescue busy
+              raise busy if Time.instant >= stop_deadline
+              sleep 250.milliseconds
+            end
+          end
           wait_state(socket, "stopped")
         rescue ex
           puts "Cleanup needs inspection: #{root}: #{ex.message}"
