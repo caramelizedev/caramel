@@ -1,9 +1,9 @@
 module App::Health
-  class Show < App::ApplicationAction
+  struct Show < App::ApplicationAction
     contract do
     end
 
-    def handle(contract : Contract) : Caramel::Response
+    def handle(contract : Contract)
       Caramel::Response.new(body: "ok")
     end
   end

@@ -4,13 +4,12 @@ module App::@@COLLECTION@@
     private def render_form(values : Hash(String, String), errors : Hash(String, Array(String)), id : Int64? = nil, status : Int32 = 200) : Caramel::Response
       action = id ? @@SINGULAR@@_path(id) : @@PLURAL@@_path
       method = id ? "PATCH" : "POST"
-      form = Caramel::HTML::Safe.new(Caramel::View.render "#{__DIR__}/../views/@@PLURAL@@/_form.html.ecr")
-      content = if id
-                  Caramel::View.render "#{__DIR__}/../views/@@PLURAL@@/edit.html.ecr"
-                else
-                  Caramel::View.render "#{__DIR__}/../views/@@PLURAL@@/new.html.ecr"
-                end
-      page(Caramel::Page.new(id ? "Edit @@LABEL@@" : "New @@LABEL@@", content), status)
+      form = Caramel::HTML::Safe.new(view("@@PLURAL@@/_form"))
+      if id
+        page "Edit @@LABEL@@", view("@@PLURAL@@/edit"), status
+      else
+        page "New @@LABEL@@", view("@@PLURAL@@/new"), status
+      end
     end
 
     # Re-renders the submitted form with every contract error.

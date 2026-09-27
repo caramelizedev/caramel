@@ -5,12 +5,15 @@ require "./hypermedia"
 require "./islands"
 require "./contracts/request_contract"
 require "./http/request_context"
+require "./view"
 
 module Caramel
-  # One instance handles one request. Subclasses declare a `contract` and
+  # One instance handles one request. Subtypes declare a `contract` and
   # `def handle(contract : Contract)` returning either a `Caramel::Response`
-  # or a JSON-serializable result that `render(result) : Page` turns into HTML.
-  abstract class Action
+  # or a JSON-serializable result that `render(result)` turns into HTML.
+  abstract struct Action
+    include Templates
+
     VARY = "Accept, HX-Request, HX-Request-Type"
 
     getter context : RequestContext
@@ -44,18 +47,24 @@ module Caramel
       Island.tag(component, props)
     end
 
-    def page(page : Page, status : Int32 = @status) : Response
-      body = if @context.partial?
+    def page(title : String, body : String, status : Int32 = @status) : Response
+      page = Page.new(title, body)
+      html = if @context.partial?
                # htmx extracts and removes this title before swapping a fragment.
                "<title>#{HTML.escape(title_for(page))}</title>#{page.body}"
              else
                layout(page)
              end
-      Response.new(status, body, html_headers)
+      Response.new(status, html, html_headers)
     end
 
     def partials(fragments : Enumerable(Partial), status : Int32 = @status) : Response
       Response.new(status, Hypermedia.render(fragments), html_headers)
+    end
+
+    # Replaces one target's content; `html` is trusted.
+    def morph(target : String, with html, swap : String = "innerMorph", status : Int32 = @status) : Response
+      partials([Partial.new(target, html.to_s, swap)], status)
     end
 
     def json(value, status : Int32 = @status) : Response
@@ -67,15 +76,22 @@ module Caramel
       Response.navigate(request, path)
     end
 
-    # A `Response` from `handle` passes through unchanged; any other result is
-    # JSON for clients that prefer it and `respond_html` otherwise.
-    def respond(outcome) : Response
-      return outcome if outcome.is_a?(Response)
-      @context.wants_json? ? json(outcome) : respond_html(outcome)
+    def not_found(message : String = "Not found") : Response
+      Response.new(404, message)
     end
 
-    def respond_html(result) : Response
-      page(render(result))
+    # Streams the body; uploaded files are already deleted when the block runs.
+    def stream(content_type : String, status : Int32 = @status, &block : IO -> Nil) : Response
+      Response.stream(status, HTTP::Headers{"Content-Type" => content_type, "Cache-Control" => "no-store", "Vary" => VARY}, &block)
+    end
+
+    # A `Response` from `handle` passes through unchanged; any other result is
+    # JSON for clients that prefer it and `render(result)` otherwise.
+    # `render(result)` is the action's own HTML egress (a page, redirect,
+    # morph, …); a missing `render` for a non-Response result is a compile error.
+    def respond(outcome) : Response
+      return outcome if outcome.is_a?(Response)
+      @context.wants_json? ? json(outcome) : render(outcome)
     end
 
     def render_contract_failure(contract : RequestContract) : Response
@@ -98,7 +114,7 @@ module Caramel
         end
         io << "</ul></section>"
       end
-      page(Page.new("Check your request", html), 422)
+      page("Check your request", html, 422)
     end
 
     private def html_headers : HTTP::Headers

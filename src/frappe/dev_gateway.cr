@@ -65,7 +65,16 @@ module Caramel::Frappe
       response = handle(context.request)
       context.response.status_code = response.status
       response.headers.each { |name, values| context.response.headers[name] = values }
-      context.response.print(response.body) unless context.request.method == "HEAD"
+      return if context.request.method == "HEAD"
+      if streamer = response.streamer
+        begin
+          streamer.call(context.response)
+        rescue IO::Error
+          # The browser closed the stream.
+        end
+      else
+        context.response.print(response.body)
+      end
     end
 
     private def endpoint(request : HTTP::Request) : Caramel::Response
@@ -101,7 +110,22 @@ module Caramel::Frappe
       response
     end
 
+    # Forwards one request to the ready application over a fresh Unix socket.
+    #
+    # Buffered responses (everything except event streams) are read whole
+    # under a 30-second read timeout; full HTML gets the refresh script.
+    #
+    # A non-HEAD response whose Content-Type starts with `text/event-stream`
+    # is returned as a streaming `Caramel::Response` instead: bytes are copied
+    # to the browser and flushed as they arrive, with no refresh script and no
+    # read timeout, so an idle stream stays open indefinitely. The upstream
+    # exchange therefore runs in its own fiber, which owns the socket and
+    # closes it when the copy ends (the app finished, the app process exited,
+    # or the browser disconnected) or 30 seconds after handoff if the
+    # response is never consumed. Open streams are not tied to the refresh
+    # generation: they stay on the process that accepted them.
     private def forward(request : HTTP::Request, path : String, generation : Int64) : Caramel::Response
+      spawned = false
       socket = Socket.unix
       socket.connect(Socket::UNIXAddress.new(path), timeout: 1.second)
       socket.read_timeout = 30.seconds
@@ -111,21 +135,65 @@ module Caramel::Frappe
       remove_hop_headers(headers)
       headers["Accept-Encoding"] = "identity"
       headers["Connection"] = "close"
-      client.exec(request.method, request.resource, headers, request.body) do |upstream|
-        body = upstream.body_io.gets_to_end
-        returned = upstream.headers.dup
-        remove_hop_headers(returned)
-        returned.delete("Content-Length")
-        returned["Cache-Control"] = "no-store"
-        if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
-          body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
-          returned.delete("ETag")
-          returned["Cache-Control"] = "no-store"
+      outcome = Channel(Caramel::Response | Exception).new(1)
+      started = Channel(Nil).new(1)
+      released = Channel(Nil).new(1)
+      spawned = true
+      spawn do
+        begin
+          client.exec(request.method, request.resource, headers, request.body) do |upstream|
+            returned = upstream.headers.dup
+            remove_hop_headers(returned)
+            returned.delete("Content-Length")
+            returned["Cache-Control"] = "no-store"
+            if request.method != "HEAD" && returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
+              socket.read_timeout = nil
+              body_io = upstream.body_io
+              response = Caramel::Response.stream(upstream.status_code, returned) do |io|
+                begin
+                  started.send(nil)
+                  buffer = Bytes.new(4096)
+                  while (count = body_io.read(buffer)) > 0
+                    io.write(buffer[0, count])
+                    io.flush
+                  end
+                ensure
+                  released.send(nil)
+                end
+              end
+              add_cookie(response)
+              outcome.send(response)
+              select
+              when started.receive
+                released.receive
+              when timeout(30.seconds)
+              end
+              # An unfinished event stream never ends; closing stops the
+              # client from draining it after this block.
+              socket.close
+            else
+              body = upstream.body_io.gets_to_end
+              if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
+                body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
+                returned.delete("ETag")
+                returned["Cache-Control"] = "no-store"
+              end
+              response = Caramel::Response.new(upstream.status_code, body, returned)
+              add_cookie(response)
+              outcome.send(response)
+            end
+          end
+        rescue error
+          # Buffered: after a stream was handed off nobody receives this.
+          outcome.send(error)
+        ensure
+          client.close
+          socket.close
         end
-        response = Caramel::Response.new(upstream.status_code, body, returned)
-        add_cookie(response)
-        response
       end
+      result = outcome.receive
+      raise result if result.is_a?(Exception)
+      result
     rescue IO::Error
       if generation == @generation && @state == "ready"
         failed("The application stopped responding. Check the terminal output; Frappé will retry after your next source change.")
@@ -134,8 +202,7 @@ module Caramel::Frappe
         diagnostic(request, generation)
       end
     ensure
-      client.try(&.close)
-      socket.try(&.close)
+      socket.try(&.close) unless spawned
     end
 
     private def script(generation : Int64) : String

@@ -1,7 +1,7 @@
 require "../../../src/caramel"
 
 module Fixture
-  class TeamIndex < Caramel::Action
+  struct TeamIndex < Caramel::Action
     contract do
       field active : Bool, min: 1
     end

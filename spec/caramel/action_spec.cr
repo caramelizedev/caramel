@@ -1,37 +1,30 @@
 require "spec"
 require "../../src/caramel"
+require "../fixtures/app/actions/greetings"
+require "../fixtures/app/actions/greetings/show"
 
-abstract class ActionSpecAction < Caramel::Action
+abstract struct ActionSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
     "<!DOCTYPE html><html><head><title>#{Caramel::HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>"
   end
 end
 
-class ActionSpecShow < ActionSpecAction
+struct ActionSpecShow < ActionSpecAction
   contract do
     field id : Int64, min: 1
   end
 
-  struct Result
-    include JSON::Serializable
-    getter id : Int64
-    getter name : String
-
-    def initialize(@id, @name)
-    end
+  def handle(contract : Contract)
+    return not_found("Item not found") if contract.id == 404
+    {id: contract.id, name: "Item #{contract.id}"}
   end
 
-  def handle(contract : Contract) : Result | Caramel::Response
-    return Caramel::Response.new(404, "Item not found") if contract.id == 404
-    Result.new(contract.id, "Item #{contract.id}")
-  end
-
-  def render(result : Result) : Caramel::Page
-    Caramel::Page.new("Item", "<p>item #{result.id}</p>")
+  def render(result)
+    page "Item", "<p>item #{result[:id]}</p>"
   end
 end
 
-class ActionSpecPass < ActionSpecAction
+struct ActionSpecPass < ActionSpecAction
   contract do
   end
 
@@ -40,35 +33,36 @@ class ActionSpecPass < ActionSpecAction
   end
 end
 
-class ActionSpecCreate < ActionSpecAction
+struct ActionSpecCreate < ActionSpecAction
   contract do
     field seats : Int32, min: 1
   end
 
-  struct Result
-    include JSON::Serializable
-    getter seats : Int32
-
-    def initialize(@seats)
-    end
-  end
-
-  def handle(contract : Contract) : Result | Caramel::Response
+  def handle(contract : Contract)
     self.status = 201
-    Result.new(contract.seats)
+    {seats: contract.seats}
   end
 
-  def respond_html(result : Result) : Caramel::Response
-    redirect_to("/items/#{result.seats}")
+  def render(result)
+    redirect_to("/items/#{result[:seats]}")
   end
 end
 
-class ActionSpecParts < ActionSpecAction
+struct ActionSpecParts < ActionSpecAction
   contract do
   end
 
   def handle(contract : Contract) : Caramel::Response
     partials([Caramel::Partial.new("#a", "<p>A</p>"), Caramel::Partial.new("#b", "<p>B</p>", "outerHTML")])
+  end
+end
+
+struct ActionSpecMorph < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    morph "#panel", with: "<p>x</p>"
   end
 end
 
@@ -78,6 +72,8 @@ module ActionSpecApp
     get "/pass", ActionSpecPass
     post "/items", ActionSpecCreate
     get "/parts", ActionSpecParts
+    get "/morph", ActionSpecMorph
+    get "/greetings/:name", Greetings::Show
   end
 end
 
@@ -170,5 +166,14 @@ describe Caramel::Action do
 
   it "renders several targets in one response" do
     get("/parts").body.should eq(%(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial><hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>))
+  end
+
+  it "morphs one target" do
+    get("/morph").body.should eq(%(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>))
+  end
+
+  it "renders conventional views with escaped locals and trusted partial views" do
+    response = get("/greetings/%3CAda%3E", HTTP::Headers{"HX-Request-Type" => "partial"})
+    response.body.should end_with("<p>Hello, &lt;Ada&gt;</p><footer>Caramel</footer>")
   end
 end

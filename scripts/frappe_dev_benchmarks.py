@@ -154,7 +154,7 @@ def check(run, repo, root, project, rpc, ports, env, daemon_pid, *, edit_only=Fa
                 for index in range(20):
                     marker = f"benchmark-{scenario}-{kind}-{index}"
                     if kind == "crystal":
-                        updated = original_controller.replace('Caramel::Page.new("Welcome", content)', f'Caramel::Page.new("Welcome", content + "<!-- {marker} -->")')
+                        updated = original_controller.replace('view("home/index")', f'view("home/index") + "<!-- {marker} -->"')
                         assert updated != original_controller
                     elif kind == "template":
                         updated = original_template + f"\n<!-- {marker} -->\n"

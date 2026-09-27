@@ -87,4 +87,51 @@ describe Caramel::Frappe::DevGateway do
       Dir.delete(directory)
     end
   end
+
+  it "streams upstream event streams without buffering them" do
+    directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
+    Dir.mkdir(directory, 0o700)
+    socket_path = File.join(directory, "app.sock")
+    gate = Channel(Nil).new
+    upstream = HTTP::Server.new do |context|
+      context.response.headers["Content-Type"] = "text/event-stream"
+      context.response.print("data: one\n\n")
+      context.response.flush
+      gate.receive
+      context.response.print("data: two\n\n")
+    end
+    upstream.bind_unix(socket_path)
+    spawn { upstream.listen }
+    begin
+      gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+      gateway.ready(socket_path)
+      response = gateway.handle(HTTP::Request.new("GET", "/events", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+      response.streamer.should_not be_nil
+      response.headers["Content-Type"].should eq("text/event-stream")
+      reader, writer = IO.pipe
+      spawn do
+        response.streamer.not_nil!.call(writer)
+        writer.close
+      end
+      line = Channel(String?).new(1)
+      spawn { line.send(reader.gets) }
+      select
+      when value = line.receive
+        value.should eq("data: one")
+      when timeout(2.seconds)
+        fail "timed out waiting for the first proxied event"
+      end
+      gate.send(nil)
+      lines = [] of String
+      while text = reader.gets(chomp: true)
+        lines << text
+        break if text == "data: two"
+      end
+      lines.should contain("data: two")
+    ensure
+      upstream.close
+      File.delete?(socket_path)
+      Dir.delete(directory)
+    end
+  end
 end

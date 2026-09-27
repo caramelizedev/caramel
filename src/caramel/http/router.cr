@@ -33,7 +33,11 @@ module Caramel
 
     def self.head(response : Response) : Response
       headers = response.headers.dup
-      headers["Content-Length"] = response.body.bytesize.to_s
+      if response.streamer
+        headers.delete("Content-Length")
+      else
+        headers["Content-Length"] = response.body.bytesize.to_s
+      end
       Response.new(response.status, "", headers)
     end
 
@@ -179,17 +183,97 @@ module Caramel
 
     # Expands in the calling module: route actions resolve like any other
     # constant there, and the generated `AppRouter` is defined there.
+    #
+    # Checks that need only the route text run here, where each statement
+    # still carries its source location, so errors highlight the route line.
     macro draw(&block)
-      __caramel_router_draw do
+      {% if block.body.is_a?(Expressions) %}
+        {% statements = block.body.expressions %}
+      {% elsif block.body.is_a?(Nop) %}
+        {% statements = [] of Nil %}
+      {% else %}
+        {% statements = [block.body] %}
+      {% end %}
+      {% routes = [] of Nil %}
+      {% locations = [] of Nil %}
+      {% for stmt in statements %}
+        {% ok = false %}
+        {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.block.is_a?(Nop) %}
+          {% if ["get", "post", "put", "patch", "delete"].includes?(stmt.name.stringify) && stmt.args.size == 2 %}
+            {% ok = stmt.args[0].is_a?(StringLiteral) && stmt.args[1].is_a?(Path) %}
+          {% end %}
+        {% end %}
+        {% unless ok %}
+          {% stmt.raise "Caramel::Router.draw accepts only get, post, put, patch and delete declarations with a string path and an Action constant: #{stmt}" %}
+        {% end %}
+        {% method = stmt.name.stringify.upcase %}
+        {% path = stmt.args[0] %}
+        {% unless path.starts_with?("/") %}
+          {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+        {% end %}
+        {% segments = path == "/" ? [] of Nil : path[1..-1].split("/") %}
+        {% names = [] of Nil %}
+        {% for segment in segments %}
+          {% if segment.starts_with?(":") %}
+            {% unless segment =~ /\A:[a-z_][a-z0-9_]*\z/ %}
+              {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+            {% end %}
+            {% name = segment[1..-1] %}
+            {% if names.includes?(name) %}
+              {% path.raise "Route '#{path.id}' repeats parameter ':#{name.id}'" %}
+            {% end %}
+            {% names << name %}
+          {% else %}
+            {% unless segment =~ /\A[A-Za-z0-9._~-]+\z/ %}
+              {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% if segments.size > 32 %}
+          {% path.raise "Route '#{path.id}' exceeds 32 path segments" %}
+        {% end %}
+        {% for earlier in routes %}
+          {% if earlier[0] == method && earlier[2].size == segments.size %}
+            {% overlap = true %}
+            {% identical = true %}
+            {% mixed = nil %}
+            {% for segment, position in segments %}
+              {% other = earlier[2][position] %}
+              {% if segment.starts_with?(":") && other.starts_with?(":") %}
+              {% elsif !segment.starts_with?(":") && !other.starts_with?(":") %}
+                {% if segment != other %}
+                  {% overlap = false %}
+                {% end %}
+              {% else %}
+                {% identical = false %}
+                {% if mixed == nil %}
+                  {% mixed = segment.starts_with?(":") ? "earlier" : "later" %}
+                {% end %}
+              {% end %}
+            {% end %}
+            {% if overlap && identical %}
+              {% stmt.raise "\n\n❌ DUPLICATE ROUTE\n'#{method.id} #{earlier[1].id}' and '#{method.id} #{path.id}' match the same requests\n" %}
+            {% end %}
+            {% if overlap && mixed == "later" %}
+              {% stmt.raise "\n\n❌ AMBIGUOUS ROUTE ORDER\n'#{method.id} #{path.id}' must be declared before '#{method.id} #{earlier[1].id}'\n" %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% routes << {method, path, segments} %}
+        {% locations << (stmt.filename ? "#{stmt.filename.id}:#{stmt.line_number}:#{stmt.column_number}" : "") %}
+      {% end %}
+      __caramel_router_draw({{locations}}) do
         {{block.body}}
       end
     end
   end
 end
 
-# Implementation of `Caramel::Router.draw`. A receiverless top-level macro
-# expands in the caller's scope, so relative action paths resolve there.
-macro __caramel_router_draw(&block)
+# Implementation of `Caramel::Router.draw`, which has already checked the
+# route text. A receiverless top-level macro expands in the caller's scope, so
+# relative action paths resolve there. `locations` holds each route's source
+# location for the checks that need resolved types.
+macro __caramel_router_draw(locations, &block)
   {% if block.body.is_a?(Expressions) %}
     {% statements = block.body.expressions %}
   {% elsif block.body.is_a?(Nop) %}
@@ -198,98 +282,45 @@ macro __caramel_router_draw(&block)
     {% statements = [block.body] %}
   {% end %}
   {% routes = [] of Nil %}
-  {% for stmt in statements %}
-    {% ok = false %}
-    {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.block.is_a?(Nop) %}
-      {% if ["get", "post", "put", "patch", "delete"].includes?(stmt.name.stringify) && stmt.args.size == 2 %}
-        {% ok = stmt.args[0].is_a?(StringLiteral) && stmt.args[1].is_a?(Path) %}
-      {% end %}
-    {% end %}
-    {% unless ok %}
-      {% raise "Caramel::Router.draw accepts only get, post, put, patch and delete declarations with a string path and an Action constant: #{stmt}" %}
-    {% end %}
+  {% for stmt, i in statements %}
     {% method = stmt.name.stringify.upcase %}
     {% path = stmt.args[0] %}
     {% action = stmt.args[1] %}
-    {% unless path.starts_with?("/") %}
-      {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
-    {% end %}
+    {% where = locations[i] == "" ? "" : "  --> #{locations[i].id}\n" %}
     {% segments = path == "/" ? [] of Nil : path[1..-1].split("/") %}
     {% params = [] of Nil %}
-    {% names = [] of Nil %}
     {% for segment, position in segments %}
       {% if segment.starts_with?(":") %}
-        {% unless segment =~ /\A:[a-z_][a-z0-9_]*\z/ %}
-          {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
-        {% end %}
-        {% name = segment[1..-1] %}
-        {% if names.includes?(name) %}
-          {% raise "Route '#{path.id}' repeats parameter ':#{name.id}'" %}
-        {% end %}
-        {% names << name %}
-        {% params << {name, position} %}
-      {% else %}
-        {% unless segment =~ /\A[A-Za-z0-9._~-]+\z/ %}
-          {% raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
-        {% end %}
+        {% params << {segment[1..-1], position} %}
       {% end %}
-    {% end %}
-    {% if segments.size > 32 %}
-      {% raise "Route '#{path.id}' exceeds 32 path segments" %}
     {% end %}
     {% type = action.resolve? %}
     {% unless type %}
-      {% raise "Compile Error: Action '#{action}' is undefined." %}
+      {% raise "Compile Error: Action '#{action}' is undefined.\n#{where.id}Remediation: define `struct #{action} < Caramel::Action` or correct the route's action constant.\n" %}
     {% end %}
     {% unless type < ::Caramel::Action %}
-      {% raise "Compile Error: '#{action}' must inherit from Caramel::Action." %}
+      {% raise "Compile Error: '#{action}' must inherit from Caramel::Action.\n#{where.id}Remediation: declare it as `struct #{action} < Caramel::Action` (or your application's base action).\n" %}
     {% end %}
     {% contract = type.constant("Contract") %}
     {% unless contract %}
-      {% raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block." %}
+      {% raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block.\n#{where.id}Remediation: add `contract do ... end` inside #{action}; it may be empty.\n" %}
     {% end %}
     {% for param in params %}
       {% t = param[0] %}
+      {% suggest = (t == "id" || t.ends_with?("_id")) ? "Int64" : "String" %}
       {% field = contract.constant("CARAMEL_FIELD_#{t.upcase.id}") %}
       {% unless field %}
-        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n" %}
+        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n#{where.id}Remediation: add `field #{t.id} : #{suggest.id}` to the contract block of #{action.id}.\n" %}
       {% end %}
       {% scalar = field[1] %}
       {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
-        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n" %}
+        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n#{where.id}Remediation: declare `field #{t.id} : #{suggest.id}` (String, Int32 or Int64; no `?` and no `default:`).\n" %}
       {% end %}
     {% end %}
     {% summaries = [] of Nil %}
     {% for constant in contract.constants %}
       {% if constant.stringify.starts_with?("CARAMEL_FIELD_") %}
         {% summaries << contract.constant(constant)[4].id %}
-      {% end %}
-    {% end %}
-    {% for earlier in routes %}
-      {% if earlier[0] == method && earlier[3].size == segments.size %}
-        {% overlap = true %}
-        {% identical = true %}
-        {% mixed = nil %}
-        {% for segment, position in segments %}
-          {% other = earlier[3][position] %}
-          {% if segment.starts_with?(":") && other.starts_with?(":") %}
-          {% elsif !segment.starts_with?(":") && !other.starts_with?(":") %}
-            {% if segment != other %}
-              {% overlap = false %}
-            {% end %}
-          {% else %}
-            {% identical = false %}
-            {% if mixed == nil %}
-              {% mixed = segment.starts_with?(":") ? "earlier" : "later" %}
-            {% end %}
-          {% end %}
-        {% end %}
-        {% if overlap && identical %}
-          {% raise "\n\n❌ DUPLICATE ROUTE\n'#{method.id} #{earlier[1].id}' and '#{method.id} #{path.id}' match the same requests\n" %}
-        {% end %}
-        {% if overlap && mixed == "later" %}
-          {% raise "\n\n❌ AMBIGUOUS ROUTE ORDER\n'#{method.id} #{path.id}' must be declared before '#{method.id} #{earlier[1].id}'\n" %}
-        {% end %}
       {% end %}
     {% end %}
     {% routes << {method, path, type, segments, params, summaries.join(" "), action.stringify} %}

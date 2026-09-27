@@ -1,24 +1,16 @@
 module App::@@COLLECTION@@
-  class Destroy < App::ApplicationAction
+  struct Destroy < App::ApplicationAction
     contract do
       field id : Int64, min: 1
     end
 
-    struct Result
-      include JSON::Serializable
-      getter id : Int64
-
-      def initialize(@id)
-      end
-    end
-
-    def handle(contract : Contract) : Result | Caramel::Response
+    def handle(contract : Contract)
       record = App::@@MODEL@@.find(contract.id)
-      return Caramel::Response.new(404, "@@MODEL@@ not found") unless record && record.delete
-      Result.new(contract.id)
+      return not_found("@@MODEL@@ not found") unless record && record.delete
+      {id: contract.id}
     end
 
-    def respond_html(result : Result) : Caramel::Response
+    def render(result)
       redirect_to(@@PLURAL@@_path)
     end
   end

@@ -1,24 +1,14 @@
 module App::@@COLLECTION@@
-  class Index < App::ApplicationAction
+  struct Index < App::ApplicationAction
     contract do
     end
 
-    struct Result
-      include JSON::Serializable
-      getter records : Array(App::@@MODEL@@)
-
-      def initialize(@records)
-      end
+    def handle(contract : Contract)
+      {records: App::@@MODEL@@.order(id: :desc).limit(100).to_a}
     end
 
-    def handle(contract : Contract) : Result | Caramel::Response
-      Result.new(App::@@MODEL@@.order(id: :desc).limit(100).to_a)
-    end
-
-    def render(result : Result) : Caramel::Page
-      records = result.records
-      content = Caramel::View.render "#{__DIR__}/../../views/@@PLURAL@@/index.html.ecr"
-      Caramel::Page.new("@@COLLECTION_LABEL@@", content)
+    def render(result)
+      page "@@COLLECTION_LABEL@@", view("@@PLURAL@@/index", records: result[:records])
     end
   end
 end

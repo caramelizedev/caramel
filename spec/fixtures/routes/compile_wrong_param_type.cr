@@ -1,7 +1,7 @@
 require "../../../src/caramel"
 
 module Fixture
-  class TeamShow < Caramel::Action
+  struct TeamShow < Caramel::Action
     contract do
       field team_id : Float64
     end

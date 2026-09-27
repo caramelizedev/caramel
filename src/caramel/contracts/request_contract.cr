@@ -74,30 +74,34 @@ module Caramel
 
     macro field(decl, min = nil, max = nil, default = nil)
       {% name = decl.var.id %}
+      {% has_min = !min.is_a?(NilLiteral) %}
+      {% has_max = !max.is_a?(NilLiteral) %}
+      {% has_default = !default.is_a?(NilLiteral) %}
+      # Crystal reports a raise inside a type body at the enclosing type's
+      # name, so each message carries the declaration and its location.
+      {% source = "field #{decl}#{has_min ? ", min: #{min}".id : "".id}#{has_max ? ", max: #{max}".id : "".id}#{has_default ? ", default: #{default}".id : "".id}" %}
+      {% where = decl.filename ? "\n  --> #{decl.filename.id}:#{decl.line_number}:#{decl.column_number}\n      #{source.id}" : "\n      #{source.id}" %}
       {% type = decl.type.resolve %}
       {% scalar = type %}
       {% nilable = false %}
       {% if type.union? %}
         {% members = type.union_types.reject { |member| member.id.stringify == "Nil" } %}
         {% if members.size != 1 || type.union_types.size != 2 %}
-          {% raise "unsupported Caramel::RequestContract field type: #{decl.type}" %}
+          {% decl.raise "unsupported Caramel::RequestContract field type: #{decl.type}#{where.id}" %}
         {% end %}
         {% scalar = members.first %}
         {% nilable = true %}
       {% end %}
       {% full = scalar.id.stringify %}
       {% unless ["String", "Int32", "Int64", "Float64", "Bool", "Time", "Caramel::UploadedFile"].includes?(full) %}
-        {% raise "unsupported Caramel::RequestContract field type: #{decl.type}" %}
+        {% decl.raise "unsupported Caramel::RequestContract field type: #{decl.type}#{where.id}" %}
       {% end %}
       {% short = full.split("::").last %}
-      {% has_min = !min.is_a?(NilLiteral) %}
-      {% has_max = !max.is_a?(NilLiteral) %}
-      {% has_default = !default.is_a?(NilLiteral) %}
       {% if (has_min || has_max) && !["String", "Int32", "Int64", "Float64"].includes?(full) %}
-        {% raise "min/max apply only to String, Int32, Int64 and Float64 fields: #{name}" %}
+        {% decl.raise "min/max apply only to String, Int32, Int64 and Float64 fields: #{name}#{where.id}" %}
       {% end %}
       {% if has_default && full == "Caramel::UploadedFile" %}
-        {% raise "UploadedFile fields cannot declare defaults: #{name}" %}
+        {% decl.raise "UploadedFile fields cannot declare defaults: #{name}#{where.id}" %}
       {% end %}
       {% summary = "#{name}:#{short.id}#{nilable ? "?".id : "".id}" %}
       {% if has_min && has_max %}

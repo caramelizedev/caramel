@@ -65,7 +65,18 @@ module Caramel
       response = handle(context.request)
       context.response.status_code = response.status
       response.headers.each { |name, values| context.response.headers[name] = values }
-      context.response.print(response.body)
+      if streamer = response.streamer
+        begin
+          streamer.call(context.response)
+        rescue IO::Error
+          # The client disconnected.
+        rescue error
+          # The status line has already been sent; only the log can report this.
+          Log.error { "request_id=#{UUID.random} error_type=#{error.class} streaming=true" }
+        end
+      else
+        context.response.print(response.body)
+      end
     end
 
     private def secure(response : Response) : Response

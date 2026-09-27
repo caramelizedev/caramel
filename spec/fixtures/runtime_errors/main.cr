@@ -6,7 +6,7 @@ require "./app/controller"
 
 Log.setup(:error, Log::IOBackend.new(STDERR))
 
-class BrokenAction < Caramel::Action
+struct BrokenAction < Caramel::Action
   contract do
   end
 

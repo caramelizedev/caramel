@@ -47,7 +47,7 @@ try:
             if stage == "template_edit":
                 template.write_text(template.read_text() + "\n<!-- compiler-profile-template -->\n")
             elif stage == "controller_edit":
-                controller.write_text(controller.read_text().replace('Caramel::Page.new("Welcome", content)', 'Caramel::Page.new("Welcome", content + "<!-- compiler-profile-controller -->")'))
+                controller.write_text(controller.read_text().replace('view("home/index")', 'view("home/index") + "<!-- compiler-profile-controller -->"'))
             log = directory / (stage + ".log")
             command = [str(repo / "scripts/crystal"), "build", "src/bookshelf.cr", "-D", "caramel_development", "--stats", "--error-trace", "-o", str(directory / "application")]
             started = time.monotonic()

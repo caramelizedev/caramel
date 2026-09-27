@@ -2,13 +2,13 @@ require "spec"
 require "../../src/caramel"
 require "file_utils"
 
-abstract class ApplicationSpecAction < Caramel::Action
+abstract struct ApplicationSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
     page.body
   end
 end
 
-class ApplicationSpecHello < ApplicationSpecAction
+struct ApplicationSpecHello < ApplicationSpecAction
   contract do
   end
 
@@ -17,7 +17,7 @@ class ApplicationSpecHello < ApplicationSpecAction
   end
 end
 
-class ApplicationSpecBroken < ApplicationSpecAction
+struct ApplicationSpecBroken < ApplicationSpecAction
   contract do
   end
 

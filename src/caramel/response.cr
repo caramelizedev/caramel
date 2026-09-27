@@ -3,11 +3,19 @@ require "http"
 module Caramel
   # An application response, independent of its server transport.
   struct Response
+    alias Streamer = Proc(IO, Nil)
+
     getter status : Int32
     getter body : String
     getter headers : HTTP::Headers
+    # Writes the body directly to the transport when set; `body` is then empty.
+    getter streamer : Streamer?
 
-    def initialize(@status = 200, @body = "", @headers = HTTP::Headers.new)
+    def initialize(@status = 200, @body = "", @headers = HTTP::Headers.new, @streamer : Streamer? = nil)
+    end
+
+    def self.stream(status : Int32 = 200, headers : HTTP::Headers = HTTP::Headers.new, &block : IO -> Nil) : self
+      new(status, "", headers, block)
     end
 
     def self.html(request : HTTP::Request, *, full : String, partial : String, status = 200) : self

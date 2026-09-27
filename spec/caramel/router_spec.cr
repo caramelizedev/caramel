@@ -1,13 +1,13 @@
 require "spec"
 require "../../src/caramel"
 
-abstract class RouterSpecAction < Caramel::Action
+abstract struct RouterSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
     page.body
   end
 end
 
-class TeamNew < RouterSpecAction
+struct TeamNew < RouterSpecAction
   contract do
   end
 
@@ -16,7 +16,7 @@ class TeamNew < RouterSpecAction
   end
 end
 
-class TeamShow < RouterSpecAction
+struct TeamShow < RouterSpecAction
   contract do
     field team_id : Int64, min: 1
   end
@@ -26,7 +26,7 @@ class TeamShow < RouterSpecAction
   end
 end
 
-class TeamUpdate < RouterSpecAction
+struct TeamUpdate < RouterSpecAction
   contract do
     field team_id : Int64, min: 1
     field name : String?
@@ -37,7 +37,7 @@ class TeamUpdate < RouterSpecAction
   end
 end
 
-class TeamMembers < RouterSpecAction
+struct TeamMembers < RouterSpecAction
   contract do
     field team_id : String
   end
@@ -47,7 +47,7 @@ class TeamMembers < RouterSpecAction
   end
 end
 
-class FileShow < RouterSpecAction
+struct FileShow < RouterSpecAction
   contract do
     field name : String
   end

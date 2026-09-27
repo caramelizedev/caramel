@@ -1,11 +1,9 @@
 module App
-  abstract class ApplicationAction < Caramel::Action
+  abstract struct ApplicationAction < Caramel::Action
     include App::Paths
 
     def layout(page : Caramel::Page) : String
-      title = page.title
-      body = Caramel::HTML::Safe.new(page.body)
-      Caramel::View.render "#{__DIR__}/../views/layouts/application.html.ecr"
+      view("layouts/application", title: page.title, body: Caramel::HTML::Safe.new(page.body))
     end
 
     def title_for(page : Caramel::Page) : String

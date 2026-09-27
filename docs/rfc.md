@@ -176,7 +176,7 @@ end
 
 #### 2.2. Request Contracts (`Caramel::RequestContract`)
 
-Input validation is decoupled from the database layer. All query params, route parameters, and form-encoded bodies pass through stack-allocated structs that perform coercion, bounds checking, and error aggregation without heap allocations.
+Input validation is decoupled from the database layer. All query params, route parameters, and URL-encoded or multipart bodies bind to a typed contract struct that performs coercion, bounds checking, and error aggregation; route matching itself allocates nothing.
 
 ```crystal
 # src/caramel/contracts/request_contract.cr
@@ -202,14 +202,14 @@ end
 
 The default presentation engine targets **htmx 4**:
 
-* **Morph Streaming:** Responses use built-in idiomorph swapping (`swap="innerMorph"`) to preserve DOM focus and scroll position.
+* **Morph Streaming:** Responses use built-in idiomorph swapping (`hx-swap="innerMorph"`) to preserve DOM focus and scroll position.
 * **Multi-Target Ingestion (`hx-partial`):** A single controller invocation can target multiple disjoint elements on the page in a single round-trip:
 
 ```html
-<hx-partial target="#team-roster" swap="innerMorph">
+<hx-partial hx-target="#team-roster" hx-swap="innerMorph">
   <div id="member-42" class="member-row">Jane Doe</div>
 </hx-partial>
-<hx-partial target="#seat-counter" swap="innerHTML">
+<hx-partial hx-target="#seat-counter" hx-swap="innerHTML">
   <span>14 / 20 Seats Used</span>
 </hx-partial>
 
@@ -449,17 +449,19 @@ Cold Brew eliminates WebSockets for hypermedia updates. It dedicates a pool of l
 
 ```crystal
 struct Boards::Live < Caramel::Action
-  def handle(contract : Contract)
-    context.response.content_type = "text/event-stream"
-    context.response.headers["Cache-Control"] = "no-cache"
+  contract do
+    field board_id : Int64
+  end
 
+  def handle(contract : Contract)
     channel = Channel(String).new
     Caramel::ColdBrew.subscribe("board_#{contract.board_id}", channel)
 
-    loop do
-      payload = channel.receive
-      context.response.print "event: BoardUpdated\ndata: #{payload}\n\n"
-      context.response.flush
+    stream "text/event-stream" do |io|
+      loop do
+        io << "event: BoardUpdated\ndata: " << channel.receive << "\n\n"
+        io.flush
+      end
     end
   end
 end
@@ -840,7 +842,7 @@ Caramel Core adopts **Slang** (Crystal's native, whitespace-sensitive template e
 
 ```slang
 / src/app/views/teams/_card.slang
-hx-partial target="#team-#{team.id}" swap="innerMorph"
+hx-partial hx-target="#team-#{team.id}" hx-swap="innerMorph"
   .team-card class=(team.active? ? "border-emerald" : "border-slate")
     header.flex.items-center.justify-between
       h3.font-serif.text-lg = team.name

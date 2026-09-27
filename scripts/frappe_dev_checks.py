@@ -100,7 +100,7 @@ def check(run, repo, root, project, clone, rpc, ports, env):
         # Runtime diagnostics are distinct from compiler failures: the app is
         # still healthy overall and details remain confined to its dev build.
         diagnostic_headers = ("X-Diagnostic-Proof: 1",)
-        controller.write_text(original.replace("def handle(contract : Contract) : Caramel::Response", "def handle(contract : Contract) : Caramel::Response\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\""))
+        controller.write_text(original.replace("def handle(contract : Contract)\n", "def handle(contract : Contract)\n      raise \"runtime-diagnostic-proof <escaped>\" if request.headers[\"X-Diagnostic-Proof\"]? == \"1\"\n"))
         assert controller.read_text() != original
         body = wait_for("bookshelf", lambda status, body: status == 500 and "CARAMEL DEVELOPMENT EXCEPTION" in body, headers=diagnostic_headers)
         assert "runtime-diagnostic-proof &lt;escaped&gt;" in body and "app/actions/home/show.cr:" in body, body[:16000]

@@ -1,7 +1,7 @@
 require "../../../src/caramel"
 
 module Fixture
-  class TeamIndex < Caramel::Action
+  struct TeamIndex < Caramel::Action
     def handle : Caramel::Response
       Caramel::Response.new(body: "ok")
     end

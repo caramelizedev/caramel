@@ -1,7 +1,7 @@
 require "../../../src/caramel"
 
 module Fixture
-  class TeamIndex < Caramel::Action
+  struct TeamIndex < Caramel::Action
     contract do
     end
 
@@ -14,7 +14,7 @@ module Fixture
     end
   end
 
-  class TeamNew < Caramel::Action
+  struct TeamNew < Caramel::Action
     contract do
     end
 
@@ -27,7 +27,7 @@ module Fixture
     end
   end
 
-  class TeamShow < Caramel::Action
+  struct TeamShow < Caramel::Action
     contract do
       field team_id : Int64, min: 1
     end
@@ -41,7 +41,7 @@ module Fixture
     end
   end
 
-  class TeamUpdate < Caramel::Action
+  struct TeamUpdate < Caramel::Action
     contract do
       field team_id : Int64, min: 1
       field name : String, max: 40
@@ -56,7 +56,7 @@ module Fixture
     end
   end
 
-  class MemberShow < Caramel::Action
+  struct MemberShow < Caramel::Action
     contract do
       field team_id : Int64
       field member_id : Int32
@@ -71,7 +71,7 @@ module Fixture
     end
   end
 
-  class FileShow < Caramel::Action
+  struct FileShow < Caramel::Action
     contract do
       field name : String
     end

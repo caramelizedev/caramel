@@ -12,3 +12,9 @@ if result.returncode == 0 or not all(text in result.stdout for text in expected)
     print(result.stdout, file=sys.stderr)
     sys.exit("Template diagnostic did not identify the original expression at line 1, column 8")
 print("Typed template compile-failure and source-location check: passed")
+
+result = subprocess.run([str(repo / "scripts/crystal"), "build", "--no-codegen", "spec/fixtures/views/compile_view_outside_app.cr"], cwd=repo, env=os.environ.copy(), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+if result.returncode == 0 or "view must be called from a file under app/actions" not in result.stdout:
+    print(result.stdout, file=sys.stderr)
+    sys.exit("Conventional view lookup outside app/actions was not refused")
+print("Conventional view lookup refusal outside app/actions: passed")
