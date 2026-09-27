@@ -1,5 +1,7 @@
 # Development performance measurements
 
+The numbers below were measured before `frappe dev` switched from polling to kqueue watching and began type-checking before every build ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). They have not been re-measured, because performance work is deferred. Compilation dominates each compiled edit, so the targets are still missed. Re-run the benchmark below to refresh them.
+
 The measurement entry point is:
 
 ```sh

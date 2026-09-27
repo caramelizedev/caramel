@@ -1135,7 +1135,7 @@ caramel/
 ├── tools/                                 # Installers (Swift) & pinned toolchain definition
 ├── scripts/                               # crystal/shards wrappers, builds, `scripts/check` targets
 ├── spec/                                  # Unit & integration specs, compile fixtures
-└── vendor/htmx/                           # Bundled htmx 4
+└── vendor/                                # Bundled htmx 4 & third-party licenses
 
 ```
 
