@@ -496,6 +496,16 @@ describe Caramel::ColdBrew::Maintenance do
     ColdBrewSpec.scalar("SELECT caramel_jobs_create_partitions((now() AT TIME ZONE 'UTC')::date - 30, 0) AS value", as: Int32).should eq(0)
   end
 
+  it "refuses out-of-range partition requests from the runtime role" do
+    ColdBrewSpec.reset
+    runtime = ColdBrewSpec.runtime
+    expect_raises(PQ::PQError, /days must be between 0 and 366/) { runtime.exec("SELECT caramel_jobs_create_partitions(current_date, 367)") }
+    expect_raises(PQ::PQError, /days must be between 0 and 366/) { runtime.exec("SELECT caramel_jobs_create_partitions(current_date, -1)") }
+    expect_raises(PQ::PQError, /retention must be at least one day/) { runtime.exec("SELECT caramel_jobs_drop_partitions(interval '1 hour')") }
+    ColdBrewSpec.partitions.should contain(ColdBrewSpec.day(0))
+    expect_raises(ArgumentError, "retention must be at least one day") { Brew::Maintenance.new(runtime, retention: 1.hour) }
+  end
+
   it "releases a stale lock only when its backend is gone" do
     ColdBrewSpec.reset
     ColdBrewSpec.owner.using_connection do |live|

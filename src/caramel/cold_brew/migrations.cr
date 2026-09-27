@@ -41,6 +41,9 @@ module Caramel::ColdBrew
           partition text;
           created integer := 0;
         BEGIN
+          IF days IS NULL OR days < 0 OR days > 366 THEN
+            RAISE EXCEPTION 'caramel_jobs_create_partitions: days must be between 0 and 366';
+          END IF;
           FOR offset_days IN 0..days LOOP
             target_day := first_day + offset_days;
             partition := 'caramel_jobs_p' || to_char(target_day, 'YYYY_MM_DD');
@@ -67,6 +70,9 @@ module Caramel::ColdBrew
           pending boolean;
           dropped integer := 0;
         BEGIN
+          IF retention IS NULL OR retention < interval '1 day' THEN
+            RAISE EXCEPTION 'caramel_jobs_drop_partitions: retention must be at least one day';
+          END IF;
           FOR partition IN
             SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
             WHERE i.inhparent = 'caramel_jobs'::regclass AND c.relname ~ '^caramel_jobs_p[0-9]{4}_[0-9]{2}_[0-9]{2}$'

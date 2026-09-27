@@ -24,6 +24,8 @@ module Caramel::ColdBrew
 
     def initialize(@db : DB::Database = SugarORM::Repo.database, @retention : Time::Span = 7.days,
                    @stale_after : Time::Span = 15.minutes, @interval : Time::Span = 60.seconds)
+      # The partition function refuses shorter windows; fail at construction.
+      raise ArgumentError.new("retention must be at least one day") if @retention < 1.day
       @stopping = Channel(Nil).new
       @done = WaitGroup.new
     end
