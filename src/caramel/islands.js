@@ -10,10 +10,11 @@
   const pending = new Set();
 
   class CaramelIsland extends HTMLElement {
-    static observedAttributes = ["props"];
+    static observedAttributes = ["props", "data-island-state"];
 
     #instance = null;
     #mounted = false;
+    #state = null;
 
     connectedCallback() {
       this.#mount();
@@ -24,7 +25,12 @@
       this.#unmount();
     }
 
-    attributeChangedCallback(_name, previous, current) {
+    attributeChangedCallback(name, previous, current) {
+      if (name === "data-island-state") {
+        // Morphs copy the server's attributes and drop this client-owned one.
+        if (this.#state !== null && current !== this.#state) this.dataset.islandState = this.#state;
+        return;
+      }
       if (!this.#mounted || previous === current) return;
       const props = this.#props();
       if (props === undefined) {
@@ -49,7 +55,7 @@
       const mount = registry.get(name);
       if (!mount) {
         pending.add(this);
-        this.dataset.islandState = "pending";
+        this.#setState("pending");
         return;
       }
       pending.delete(this);
@@ -62,7 +68,7 @@
         return;
       }
       this.#mounted = true;
-      this.dataset.islandState = "mounted";
+      this.#setState("mounted");
     }
 
     #unmount() {
@@ -87,11 +93,16 @@
     }
 
     #fail(error) {
-      this.dataset.islandState = "error";
+      this.#setState("error");
       this.dispatchEvent(new CustomEvent("caramel:island-error", {
         bubbles: true,
         detail: { component: this.getAttribute("component"), error },
       }));
+    }
+
+    #setState(state) {
+      this.#state = state;
+      this.dataset.islandState = state;
     }
   }
 
