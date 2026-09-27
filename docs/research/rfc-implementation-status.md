@@ -16,38 +16,43 @@ Update a row when its status changes, and cite the change or check that proves i
 
 ## Summary
 
-All eight RFCs are marked Approved; none is complete. Work so far has concentrated on Caramel Core, the local environment (Latte) and the application CLI (Frappé). Queues, deployment, and most of the planned data-layer and agent tooling have not started.
+Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0014. The one remaining item is RFC-0004's system integration applied on this machine, which is **Blocked**: it needs the owner's administrator rights (see the RFC-0004 table). RFC-0007 (Roast) is out of scope and unchanged. RFC-0008 is a design constraint whose rows are updated as in-scope work touched them.
 
 | RFC | Overall | State |
 |---|---|---|
 | 0001 Caramel Core | Implemented | Compile-time routes and contracts, allocation-free matching, multi-target partials, islands and dual egress all work. `scripts/check browser` verifies morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE through Caddy in Safari. The RFC text is amended by ADRs [0003](../decisions/0003-core-routing-and-contracts.md), [0004](../decisions/0004-htmx4-fragment-negotiation.md) and [0005](../decisions/0005-island-props-helper.md). |
 | 0002 SugarORM | Implemented | Immutable schemas, class changesets, the fluent facade, type-tracked preloads with compile-time N+1 errors, typed SQL, branch-and-diff migrations, zero-lock lints and `--dev-override` all work. The generator emits SugarORM resources with derived migrations. The RFC text is amended by ADRs [0007](../decisions/0007-sugarorm-schemas-changesets-preload.md) and [0008](../decisions/0008-branch-and-diff-migrations.md); decision 0002 is superseded. |
 | 0003 Cold Brew | Implemented | Transactional enqueue, `SKIP LOCKED` workers with retries, a leased scheduler, `LISTEN`/`NOTIFY` PubSub bridged to SSE, the `UNLOGGED` cache and time-partitioned job tables all run inside `serve`. Safari receives a job's publish through Caddy. The RFC text is amended by [ADR 0009](../decisions/0009-cold-brew-queue-pubsub-cache.md). |
-| 0004 Latte | Partial | Native PostgreSQL, CoreDNS and Caddy supervision and per-site databases work. Database branching is absent. System DNS, standard ports and CA trust are prepared but not applied. |
-| 0005 Frappé | Partial | The `frappe` CLI covers the project workflow. The agent command surface, `check` and machine-output mode are absent. |
+| 0004 Latte | Implemented except one Blocked row | Shared-service supervision, a private-socket PostgreSQL, kqueue watching with a Tier-1 type check before every build, guarded APFS-clone branches and guard release on signals and restart all work, as do named `.caramel` and `.localhost` HTTPS and the resolver, relay and trust installers. **Blocked:** applying the resolver, ports 80/443 and CA trust on this machine needs the owner's administrator rights. The RFC text is amended by ADRs [0006](../decisions/0006-browser-acceptance-and-localhost-sites.md) and [0012](../decisions/0012-latte-supervision-watching-branching.md). |
+| 0005 Frappé | Implemented | One command table drives `frappe`. It provides `agent-manifest`, a Tier-1 `check` with MRDP and RFC-0008 typography (whose PATCH lines apply mechanically), `routes FILTER`, `db branch`, `db diff`, `corretto`, `expand`, and exit 1 with syntax on bad input. The RFC text is amended by [ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md). |
 | 0006 Corretto | Implemented | `Corretto.session` with an in-process client, `sign_in` and matchers. Every example runs in a rolled-back savepoint. Catalog changes trigger resets, `frappe corretto --concurrency` gives each worker its own Latte database, queues are drained synchronously, wire fakes run through a local proxy, and mocks are refused. The RFC text is amended by [ADR 0010](../decisions/0010-corretto-harness.md). |
 | 0007 Roast | Absent | There is no static artifact, asset embedding, deployment or SDK; only an optional release-build measurement exists. |
-| 0008 Poetic ergonomics | Partial | Contract, handle and response actions work with typed, nil-safe input. Domain DSLs, semantic units, Slang and `caramel expand` do not exist. |
+| 0008 Poetic ergonomics | Partial | Contract, handle and response actions, sentence scopes with `preload`, `retry_on`, RFC-0008 §2.6 terminal typography (`frappe check --human`) and `frappe expand` all work. Domain verbs, semantic units and Slang do not exist. |
 
 ## Ranked gaps and divergences
 
 1. **No production path (RFC-0007).** There is no static Linux artifact, embedded assets, deployment command, cutover or rollback, so Caramel cannot ship an application it builds. The Linux/musl artifact is an open gate in `docs/research/frappe-workflow.md` and `docs/decisions/0001-managed-toolchain-provider.md`.
 2. **Data-layer guarantees (RFC-0002) are in place.** SugarORM provides preload safety, changesets, schema diffs on a scratch branch, migration lints and online `CONCURRENTLY` migrations. What remains is RFC-0008's domain-verb facade, `team.invite`, which needs Cold Brew jobs.
 3. **Background work and PubSub (RFC-0003) are in place.** Jobs, retries, scheduling, `LISTEN`/`NOTIFY` and caching run on PostgreSQL inside the application. RFC-0008's `team.invite`-style domain verbs are still absent.
-4. **The real user path is partly proven.** `scripts/check browser` drives Safari through Latte's Caddy proxy to a live generated application on a `.localhost` site. That covers morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE. Still unapplied: the `.caramel` system resolver, ports 80/443 and CA trust. Safari accepts the check's untrusted local CA only through WebDriver's `acceptInsecureCerts`.
+4. **The real user path is proven except for owner-applied system integration.** `scripts/check browser` drives Safari through Latte's Caddy proxy to a live generated application on a `.localhost` site. It covers morph focus and scroll, `hx-partial` ingestion, the island lifecycle, SSE and Cold Brew PubSub.
+   - Still **Blocked**, because they need the owner's administrator rights: the `.caramel` system resolver, ports 80/443 and CA trust. The exact commands are in the RFC-0004 table.
+   - Safari accepts the check's untrusted local CA only through WebDriver's `acceptInsecureCerts`.
 5. **Test isolation (RFC-0006) is in place.** Examples run in rolled-back savepoints on per-worker Latte databases, with catalog-change resets.
-6. **Edit-loop latency (RFC-0004 §2.1, RFC-0005 §2.2).** Polling plus full native builds give p95 compiled-edit latencies of 4.55 s and 7.76 s. The RFCs promise feedback under 200 ms and set a three-second target. Semantic checks take 1.67 s and 3.74 s against the promised 180 ms. The compiler profile shows that faster process handoff alone cannot close the gap.
-7. **No database branching (RFC-0004 §2.2).** Per-site development and spec databases stand in for branches. `db:branch`, per-worker test databases and the diff engine's scratch catalog all depend on branching.
-8. **No agent tooling (RFC-0005).** There is no `agent-manifest`, `check` command or `--agent` mode. MRDP output exists only for HTTP 422 contract errors, and invalid CLI input exits 2 rather than the RFC's 1.
-9. **The RFC text no longer matches the code.** Examples:
-   - RFC-0001 no longer differs: ADRs 0003–0005 amended its routing, contract, island and fragment-header text.
-   - RFC-0005 §3 specifies exit code 1; the CLI returns 2.
-   - The RFCs name a `caramel` CLI; the implemented CLI is `frappe`.
-   - The planned `src/core/**` tree is actually `src/caramel`, `src/latte` and `src/frappe`.
-   - RFC-0004 names `/tmp/.s.PGSQL.5432`; Latte uses a private socket directory.
-   - RFC-0008 specifies Slang; views use ECR.
-   Every RFC still says only "Approved", so readers and agents following it write code that does not compile or behaves differently.
-10. **The rest of RFC-0008 is missing.** Semantic units, `caramel expand` and domain DSLs are absent.
+6. **Edit-loop latency (RFC-0004 §2.1, RFC-0005 §2.2) is a deferred performance item.** Kernel watching and a Tier-1 type check before every build now give feedback before code generation.
+   - The measured compiled-edit p95 (4.55 s and 7.76 s) and semantic-check times (1.67 s and 3.74 s) still miss the RFC targets of 200 ms and 180 ms.
+   - The compiler profile shows that faster process handoff alone cannot close the gap.
+7. **Database branching (RFC-0004 §2.2) is in place.** Guarded APFS-clone branches serve `frappe db branch`, `frappe db diff`'s scratch catalog and Corretto's per-worker test databases.
+8. **Agent tooling (RFC-0005) is in place.** `agent-manifest`, `check` and MRDP agent mode (with mechanically applicable PATCH lines) all work, and invalid input exits 1.
+9. **The RFC text matches the code for RFCs 0001–0006.** ADRs 0003–0014 amended:
+   - the fragment header;
+   - the contract and router sketches;
+   - the `frappe` CLI name and exit code;
+   - the private socket;
+   - kqueue-only watching;
+   - the Section 5 layout.
+   
+   Each in-scope RFC's status line links its ADRs. RFC-0008's Slang (which is out of scope) still differs from the ECR views.
+10. **The rest of RFC-0008 is missing.** Semantic units and domain DSLs are absent.
 
 ## RFC-0001 Caramel Core
 
@@ -95,30 +100,33 @@ The RFC-0003 code samples (`SendInvitation`, the transactional enqueue, `every` 
 
 | Requirement | Status | Evidence | Coverage | Notes |
 |---|---|---|---|---|
-| §2.1 native supervision without Docker | Diverged | The Latte daemon supervises PostgreSQL, CoreDNS and Caddy (`src/latte/supervisor.cr`, `src/latte/process.cr`); applications run under terminal-owned `frappe dev` | `spec/latte_integration/supervisor_spec.cr`, `scripts/check latte-daemon`, `scripts/check frappe-project --dev` | Design recorded in `docs/research/herd-comparison.md`. |
-| §2.1 Unix-socket PostgreSQL at `/tmp/.s.PGSQL.5432` | Diverged | Private socket directory, `listen_addresses = ''`, SCRAM (`src/latte/postgres.cr`) | `spec/latte_integration/postgres_spec.cr`, `scripts/check latte-postgres` | Uses a private per-state-root socket, not a shared `/tmp` socket. |
-| §2.1 kqueue/inotify watching; `--no-codegen` feedback under 200 ms | Diverged | `src/frappe/dev_files.cr` polls hashed snapshots; `src/frappe/dev_session.cr` debounces for 200 ms and runs a full `crystal build -D caramel_development` | `spec/frappe/dev_files_spec.cr`, `scripts/check frappe-project --dev` | Measured compiled-edit p95: 4.55 s and 7.76 s; semantic check: 1.67 s and 3.74 s (`docs/research/development-performance.md`). |
-| §2.2 `caramel latte branch create` with a connection guard and template clone | Absent | `latte` offers only `daemon` and `trust install\|remove` (`src/latte.cr`). Sites get `caramel_dev_<id>` and `caramel_spec_<id>` databases created from `template0`. | none for branching | Per-site databases plus `frappe db dump\|restore` stand in for branches. |
-| §2.2 50–100 ms reflink clone | Unverifiable | No clone exists | none | |
-| §3 restore `ALLOW_CONNECTIONS` on SIGINT/SIGTERM | Absent | Nothing disables connections. After a crash, the daemon adopts or restarts services. | `scripts/check latte-daemon` | General crash recovery exists. |
-| Named `.caramel` DNS and HTTPS | Partial | CoreDNS on 127.0.0.1:15353 and a Caddy local CA on ports 18080/18443 (`src/latte/dns.cr`, `src/latte/proxy.cr`, `src/latte/supervisor.cr`) | `spec/latte/network_config_spec.cr`, `scripts/check latte-network` | Checks pass an explicit CA to `curl --resolve`. |
-| System resolver, ports 80/443 and CA trust | Partial (prepared) | `tools/installer/install_local_integration.swift`, `latte/macos/PortRelay.swift`, `src/latte/trust.cr` | `scripts/check native` | Not yet applied; browser-trusted HTTPS acceptance is pending (`docs/research/latte-supervisor.md`). |
+| §2.1 native supervision without Docker | Implemented | The per-user Latte daemon supervises, adopts and recovers PostgreSQL, CoreDNS and Caddy (`src/latte/supervisor.cr`, `src/latte/process.cr`, `src/latte/daemon.cr`). Applications run under terminal-owned `frappe dev` sessions (`src/frappe/dev_session.cr`). | `spec/latte_integration/supervisor_spec.cr`, `scripts/check latte-daemon`, `scripts/check frappe-project --dev` | RFC-0004 §2.1 now describes the shared-service supervisor and terminal-owned apps ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). |
+| §2.1 Unix-socket PostgreSQL | Implemented | A private owner-only socket directory, `listen_addresses = ''` and SCRAM (`src/latte/postgres.cr`) | `spec/latte_integration/postgres_spec.cr`, `scripts/check latte-postgres` | RFC-0004 §2.1 is amended from the shared `/tmp/.s.PGSQL.5432` to the private socket ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). |
+| §2.1 kernel file watching; `--no-codegen` feedback on change | Implemented | `Caramel::Latte::Watcher` registers kqueue `EVFILT_VNODE` filters on every watched file and directory (`src/latte/watcher.cr`). `DevSession` hashes only after kernel events and runs `crystal build --no-codegen` before any code generation, showing `Type check failed/passed in N ms` (`src/frappe/dev_session.cr`). | `spec/latte/watcher_spec.cr`, `scripts/check frappe-project --dev` (a planted type error shows without code generation, and the fix recovers) | RFC-0004 §2.1 is amended to macOS kqueue only, because Latte is macOS-only ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). |
+| §2.1 feedback under 200 ms | Deferred (performance) | Feedback behaviour is Implemented in the row above. Measured compiled-edit p95 is 4.55 s and 7.76 s, and the semantic check takes 1.67 s and 3.74 s (`docs/research/development-performance.md`). | Row above | Performance is deferred. |
+| §2.2 branch create with a connection guard and template clone | Implemented | `frappe db branch create NAME \| list \| delete NAME` goes through Latte's `POST/GET/DELETE /v1/sites/:id/branches`. The guard (`ALLOW_CONNECTIONS false`, terminate, `CREATE DATABASE … TEMPLATE … STRATEGY FILE_COPY`, always re-allow) is in `src/latte/postgres.cr`. `frappe dev --branch NAME` runs the app against the branch. | `scripts/check latte-postgres`, `scripts/check frappe-project` (`db branch create` prints a connectable URL; list and delete), `scripts/check frappe-project --dev` (runtime override on a real branch) | RFC-0004 §2.2 is amended from `caramel latte branch create` to `frappe db branch create` ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md), [ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |
+| §2.2 reflink clone | Implemented | Latte's `postgresql.conf` sets `file_copy_method = clone`, and branches use `STRATEGY FILE_COPY`, which makes APFS copy-on-write clones (`src/latte/postgres.cr`) | `scripts/check latte-postgres` (`SHOW file_copy_method` is `clone`; branches clone) | |
+| §2.2 50–100 ms clone | Deferred (performance) | Clone behaviour is Implemented in the row above. Its time has not been measured. | Row above | Performance is deferred. |
+| §3 restore `ALLOW_CONNECTIONS` on SIGINT/SIGTERM | Implemented | The daemon's SIGINT/SIGTERM exit path and every start run `release_guards` on all Caramel databases (`src/latte/daemon.cr`, `src/latte/supervisor.cr`, `src/latte/postgres.cr`) | `scripts/check latte-daemon` (guard release on SIGTERM and after SIGKILL plus restart; fails if the SIGTERM release is removed) | |
+| Named `.caramel` DNS and HTTPS | Implemented | CoreDNS answers every site suffix, and Caddy serves each site from Latte's internal `caramel` CA, which never installs trust (`src/latte/dns.cr`, `src/latte/proxy.cr`, `src/latte/supervisor.cr`). Explicit `.localhost` sites resolve natively. | `spec/latte/network_config_spec.cr`, `scripts/check latte-network`, `scripts/check frappe-project` (named HTTPS with the fixture CA), `scripts/check browser` (Safari through Caddy on a `.localhost` site) | [ADR 0006](../decisions/0006-browser-acceptance-and-localhost-sites.md) adds `.localhost`. |
+| System resolver, ports 80/443 and CA trust: installers | Implemented | The owner-run installer prepares, validates, applies and uninstalls `/etc/resolver/caramel` and the launchd 80/443 relay (`tools/installer/install_local_integration.swift`, `latte/macos/PortRelay.swift`). `latte trust install\|remove` adds or removes exactly Latte's CA in the user keychain (`src/latte/trust.cr`). | `scripts/check native` (the installer in test mode: bundle validation, tampering refusal, port reservation, rollback; relay byte forwarding) | Latte never applies these implicitly. |
+| System resolver, ports 80/443 and CA trust: applied on this machine, with browser-trusted `https://<site>.caramel` | Blocked | Needs the owner's administrator password and a keychain trust change, which this work may not perform | Manual acceptance after the commands in the Notes | Run from the repository with `CARAMEL_TOOLCHAIN_ROOT` set: `scripts/build-latte && scripts/build-latte-relay`; `scripts/install-local-integration prepare /private/tmp/caramel-integration-bundle`; `sudo scripts/install-local-integration apply /private/tmp/caramel-integration-bundle`; with Latte running, `bin/latte trust install`. Then `frappe new demo && cd demo && frappe dev` must open `https://demo.caramel` without a certificate warning. |
 
 ## RFC-0005 Frappé
 
 | Requirement | Status | Evidence | Coverage | Notes |
 |---|---|---|---|---|
-| §2.1 stateless CLI surface | Diverged | `frappe` (`src/frappe/cli.cr`) with `new setup dev make migrate seed routes test db logs services sites installations doctor open lsp`; most project commands call the Latte daemon | `spec/frappe/cli_spec.cr`, `scripts/check frappe-project` | The command is `frappe`, not `caramel`. |
-| §2.1 `agent-manifest` | Absent | `frappe --help` is the discovery surface | none | |
-| §2.1–2.2 `check` (Tier-1 `--no-codegen` emitting MRDP) | Absent | `--no-codegen` runs only in contributor checks such as `scripts/checks/route_compilation.cr` and in benchmarks | `scripts/check route-compilation` | |
-| §2.1 `routes [filter]` | Diverged | `frappe routes` prints every route with its contract and has no filter | `scripts/check frappe-project` | |
-| §2.1 `db:branch`, `db:diff` | Absent | Only `frappe db dump\|restore` exists | none | These depend on RFC-0004 branching and RFC-0002 diffing. |
+| §2.1 stateless CLI surface | Implemented | `frappe` (`src/frappe/cli.cr`) is driven by one command table (`src/frappe/commands.cr`) for help, validation, dispatch and the manifest. Every command is a one-shot process; Latte is a service supervisor, not an agent protocol daemon. | `spec/frappe/commands_spec.cr`, `spec/frappe/cli_spec.cr`, `scripts/check frappe-project` | RFC-0005 is amended to the `frappe` command names ([ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |
+| §2.1 `agent-manifest` | Implemented | `frappe agent-manifest` prints `CARAMEL CLI INTERFACE (STRICT TOKENS)`, one `frappe <syntax>  # <description>` line per command, and the MRDP grammar | `spec/frappe/commands_spec.cr`, `scripts/check frappe-project` (lists every command without Latte) | |
+| §2.1–2.2 `check` (Tier-1 `--no-codegen` emitting MRDP) | Implemented | `frappe check [--agent\|--human]` runs `crystal build --no-codegen` with the development flags and parses real compiler output into CONTRACT_MISMATCH, N_PLUS_ONE, UNDEFINED_METHOD, UNDEFINED_CONSTANT, NO_OVERLOAD, SYNTAX and COMPILE (`src/frappe/check.cr`, `src/frappe/diagnostics.cr`, `src/frappe/mrdp.cr`) | `spec/frappe/diagnostics_spec.cr` (29 captured compiler outputs), `scripts/check frappe-project` (a planted contract mismatch's PATCH, applied mechanically, makes `check` pass; a planted N+1 yields N_PLUS_ONE) | |
+| §2.1 `routes [filter]` | Implemented | `frappe routes [FILTER]` keeps routes whose method, path or action contains FILTER, ignoring case | `spec/frappe/cli_spec.cr`, `scripts/check frappe-project` | |
+| §2.1 `db:branch`, `db:diff` | Implemented | `frappe db branch create\|list\|delete` (Latte branches) and `frappe db diff --name NAME` (RFC-0002 branch-and-diff) | `scripts/check frappe-project`, `scripts/check schema-diff`, `scripts/check latte-postgres` | RFC-0005 is amended to space-separated subcommands ([ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |
 | §2.1 `corretto [path]` | Implemented | `frappe corretto [SPEC_PATHS…] [--concurrency=N]` (`src/frappe/corretto_runner.cr`) replaces `frappe test` | `spec/frappe/corretto_runner_spec.cr`, `scripts/check frappe-project` | Queue drain comes from `Caramel::ColdBrew.drain_queue!`, called by specs ([ADR 0010](../decisions/0010-corretto-harness.md)). |
-| §2.2 native builds only at deployment | Diverged | `frappe dev`, `routes`, `migrate` and `seed` compile native binaries (`src/frappe/tools.cr`, `src/frappe/dev_session.cr`) | `scripts/check frappe-project` | |
-| §2.3 Mode A: human TTY diagnostics | Diverged | Compiler output is forwarded to the terminal. Build and runtime errors render as HTML pages at the site origin (`src/frappe/dev_gateway.cr`, `src/caramel/development_error.cr`). | `spec/frappe/dev_gateway_spec.cr`, `scripts/check runtime-diagnostics` | |
-| §2.3 Mode B: `--agent` or non-TTY MRDP | Partial | `RequestContract#to_mrdp` emits `ERR CONTRACT_INVALID:422` for HTTP clients that accept neither HTML nor JSON | `spec/caramel/request_contract_spec.cr` | There is no CLI agent mode, source location or `PATCH` line. |
-| §2.2–2.3 ~180 ms Tier-1 check; >70% token savings | Unverifiable | Semantic checks measured at 1.67 s and 3.74 s | `scripts/check frappe-project --benchmark` | Token use has not been measured. |
-| §3 unknown input exits 1 with one-line syntax | Diverged | Unknown commands and malformed arguments exit 2 with a usage line; unknown commands also get a suggestion | `spec/frappe/cli_spec.cr` | `frappe test` and `frappe lsp` forward extra arguments. |
+| §2.2 Tier 2 native builds | Implemented | Native builds serve the running app: `frappe dev`, `routes`, `migrate`, `seed`, `corretto` and the headless `schema` binary behind `db diff` (`src/frappe/tools.cr`, `src/frappe/dev_session.cr`). Tier 1 remains `frappe check` and precedes every `frappe dev` build. | `scripts/check frappe-project`, `scripts/check frappe-project --dev` | RFC-0005 §2.2 is amended: Crystal has no whole-application interpreter, and deployment artifacts belong to RFC-0007 ([ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |
+| §2.3 Mode A: human TTY diagnostics | Implemented | `frappe check` on a TTY, or with `--human`, draws RFC-0008 §2.6's box with the file and line, source line, caret, message and Remediation. Colour appears only on a TTY. | `spec/frappe/diagnostics_spec.cr`, `scripts/check frappe-project` (`--human` shows the box, caret and remediation) | Build and runtime errors also render at the site origin (`scripts/check runtime-diagnostics`). |
+| §2.3 Mode B: `--agent` or non-TTY MRDP | Implemented | MRDP (`ERR <CODE> at file:line:col`, `NODE`, `MISSING`, `MSG`, `FIX`, `PATCH … AT\|AFTER`, `SYNTAX`, `SUGGEST`, `OK`) for `check`, usage errors, migration lint refusals and `db diff` halts (`src/frappe/mrdp.cr`) | `spec/frappe/diagnostics_spec.cr`, `spec/frappe/commands_spec.cr`, `scripts/check frappe-project`, `scripts/check schema-diff` (`ERR DIFF_HALT`, `ERR LINT_NOT_NULL_DEFAULT`) | `RequestContract#to_mrdp` still answers HTTP clients that accept neither HTML nor JSON. |
+| §2.2–2.3 ~180 ms Tier-1 check; >70% token savings | Deferred (performance) | The Tier-1 and MRDP behaviour is Implemented in the `check` and Mode B rows. Semantic checks measured 1.67 s and 3.74 s; token use has not been measured. | `check` and Mode B rows | Performance is deferred. |
+| §3 unknown input exits 1 with one-line syntax | Implemented | The command table rejects unknown commands and arguments with exit 1, the exact `Usage:`/`SYNTAX:` line and a "Did you mean" or `SUGGEST:` hint | `spec/frappe/commands_spec.cr`, `spec/frappe/cli_spec.cr`, `scripts/check frappe-project` | |
 
 ## RFC-0006 Corretto
 
@@ -156,8 +164,8 @@ The RFC-0003 code samples (`SendInvitation`, the transactional enqueue, `every` 
 | §2.3 semantic and temporal units; `retry_on` | Partial | `Caramel::ColdBrew::Job.retry_on Error, attempts:, backoff: :exponential, base: 2.seconds`, globally and per job (`src/caramel/cold_brew/job.cr`) | `spec/cold_brew/job_spec.cr`, `spec/integration/cold_brew_spec.cr` | Semantic units such as `50.gigabytes` and `3.days.from_now.at_midnight` are absent; Crystal's built-in `Time::Span` literals are used. |
 | §2.4 Slang templates | Diverged | Compiled, escaping ECR (`src/caramel/view.cr`, `src/caramel/view/compiler.cr`) | `spec/caramel/view_spec.cr`, `scripts/check views` | Rationale: `docs/research/escaped-view-notes.md`. |
 | §2.5 contract, handle and response actions | Implemented | `abstract struct Caramel::Action` with `contract`, `handle`, `page`, `morph`, `partials`, `json` and `stream`; contracts support nilable `Time`, bounds and defaults | `spec/caramel/action_spec.cr`, `spec/caramel/request_contract_spec.cr`, generated resource request specs | Adopted in commit `528c162`; the RFC's `Subscriptions::Pause` domain example is not shipped. |
-| §2.6 terminal typography with remediation | Partial | Route-contract compile errors include a location and remediation. Un-preloaded association access fails at the caller's line with a `.preload(:name)` remedy (`scripts/check orm-compilation`). Runtime errors render an HTML exception page. | `scripts/check route-compilation`, `scripts/check orm-compilation`, `scripts/check runtime-diagnostics` | The RFC-0008 box-drawing layout awaits `frappe check` (RFC-0005). |
-| §3 `caramel expand` | Absent | Macros expand to ordinary Crystal, but no command shows the expansion | none | |
+| §2.6 terminal typography with remediation | Implemented | `frappe check --human` (or any TTY) draws the RFC's box with the file and line, the source line, a caret, the message and a Remediation block. The same applies to N+1 diagnostics from SugarORM's `NotLoaded` sentinels (`src/frappe/diagnostics.cr`). Route-contract compile errors carry locations and remediation. Runtime errors render an HTML exception page. | `spec/frappe/diagnostics_spec.cr`, `scripts/check frappe-project` (`--human` box), `scripts/check route-compilation`, `scripts/check orm-compilation`, `scripts/check runtime-diagnostics` | |
+| §3 `caramel expand` | Implemented | `frappe expand FILE:LINE:COL` prints the plain Crystal a macro call expands to, using `crystal tool expand` over the project's files (`src/frappe/cli.cr`) | `scripts/check frappe-project` (expands `Caramel::Router.draw` and a `contract` block; exits 1 where no macro is called) | RFC-0008 §3 now names `frappe expand` ([ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |
 | §3 zero-allocation unit extensions | Absent | — | none | |
 
 ## Charter and invariant matrix
@@ -174,25 +182,27 @@ SugarORM is implemented in `src/sugar_orm`. Cold Brew is in `src/caramel/cold_br
 | Core: no parameter-to-action contract drift via `Router.draw` | Implemented | Compile-time checks in `src/caramel/http/router.cr`. |
 | SugarORM: zero N+1 queries via `NotLoaded \| Array(T)` | Implemented | Un-preloaded association access fails to compile at the caller's line (`scripts/check orm-compilation`), and each preload costs exactly one query (`spec/integration/sugar_orm_spec.cr`). |
 | Cold Brew: no dual-write loss via in-transaction enqueue | Implemented | `T.enqueue` joins `SugarORM::Repo.transaction`: a rolled-back business write takes its job with it (`spec/integration/cold_brew_spec.cr`). A browser POST commits a row and its job together (`scripts/check browser`). |
-| Latte: instant iteration via Unix sockets and kqueue/inotify | Partial | Unix sockets are used, but watching is polled and compiled edits take seconds. |
-| Frappé: low token overhead via stateless MRDP tools | Partial | MRDP covers only HTTP 422 errors; most commands call the daemon. |
+| Latte: instant iteration via Unix sockets and kqueue | Implemented | A private-socket PostgreSQL, kernel kqueue watching and a Tier-1 type check before every build (`spec/latte/watcher_spec.cr`, `scripts/check frappe-project --dev`). The latency targets are deferred (RFC-0004 §2.1 row). |
+| Frappé: low token overhead via stateless MRDP tools | Implemented | One-shot `frappe` commands print MRDP for `check`, usage, lint and diff (`scripts/check frappe-project`, `scripts/check schema-diff`). The token-savings measurement is deferred (RFC-0005 row). |
 | Corretto: no false confidence via real PostgreSQL branches | Implemented | Each worker runs against its own Latte database cloned from the migrated spec template, and every example is subcutaneous against real PostgreSQL in a rolled-back savepoint (`scripts/check frappe-project`, `spec/integration/corretto_spec.cr`). |
 | Roast: one static binary of about 25 MB RSS, deployed over SSH | Absent | |
 | Prose: fluent facades expand to pure changesets | Partial | SugarORM's `create` and `update` facade expands to explicit changesets with no callbacks ([ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md)). RFC-0008 domain verbs such as `team.invite` are absent. |
 
 ## Repository blueprint (RFC Section 5)
 
+Section 5 of `docs/rfc.md` now shows the repository as built ([ADR 0014](../decisions/0014-repository-layout.md)). The table maps the original plan to it.
+
 | Planned | Actual |
 |---|---|
-| `ARCHITECTURE.md` | `docs/rfc.md` |
-| `bin/caramel`, `bin/latte`, `bin/roast` | `bin/` is ignored build output from `scripts/build-frappe` and `scripts/build-latte`. It contains `frappe`, `latte`, `Latte.app` and `latte-port-relay`; there is no `roast`. |
-| `src/core/**` | `src/caramel/`: `http/router.cr`, `http/request_context.cr`, `action.cr`, `contracts/request_contract.cr`, `hypermedia.cr`, `islands.cr` |
-| `src/core/prose/**` | Absent |
+| `ARCHITECTURE.md` | `docs/rfc.md`, with ADRs in `docs/decisions/` and this matrix |
+| `bin/caramel`, `bin/latte`, `bin/roast` | `bin/` is git-ignored build output from `scripts/build-*`: `frappe`, `latte`, `latte-port-relay` and `Latte.app`. `roast` is RFC-0007 and out of scope. |
+| `src/core/**` | `src/caramel/`: `http/router.cr`, `http/request_context.cr`, `http/request_input.cr`, `http/paths.cr`, `action.cr`, `contracts/request_contract.cr`, `hypermedia.cr`, `islands.cr`, `islands.js`, `view.cr`, `session.cr` |
+| `src/core/prose/**` | Absent (RFC-0008 semantic units) |
 | `src/orm/**` | `src/sugar_orm.cr` and `src/sugar_orm/`: `schema.cr`, `changeset.cr`, `query.cr`, `associations.cr`, `repo.cr`, `sql.cr`, `catalog.cr`, `introspection.cr`, `differ.cr`, `ddl.cr`, `linter.cr`, `migration.cr` |
 | `src/concurrency/**` | `src/caramel/cold_brew.cr` and `src/caramel/cold_brew/` (`job.cr`, `queue.cr`, `worker.cr`, `drain.cr`, `broker.cr`, `maintenance.cr`, `scheduler.cr`, `migrations.cr`), `src/caramel/cache.cr`, `src/caramel/sse.cr` |
-| `src/dx/**` | `src/latte/`; the database brancher is absent |
-| `src/agent/**` | `src/frappe/`; the manifest and Tier-1 checker are absent, and MRDP exists only in `RequestContract#to_mrdp` |
+| `src/dx/**` | `src/latte/`: `supervisor.cr`, `daemon.cr`, `postgres.cr` (branches, test workers, connection guards), `watcher.cr`, `dns.cr`, `proxy.cr`, `trust.cr` |
+| `src/agent/**` | `src/frappe/`: `commands.cr` (manifest), `check.cr` (Tier-1 checker), `diagnostics.cr`, `mrdp.cr` |
 | `src/testing/**` | `src/caramel/corretto.cr` and `src/caramel/corretto/` (`client.cr`, `matchers.cr`, `worker.cr`, `wire.cr`), `src/caramel/session.cr`, `src/caramel/outbound.cr`; the runner is `src/frappe/corretto_runner.cr` |
-| `src/ops/**` | Absent |
-| `packages/**` (five SDKs) | Absent |
-| Not in the blueprint | `templates/` (generated application and resources), `latte/macos/` (menu app, port relay), `tools/` (installers, toolchain definition), `vendor/` (bundled htmx) |
+| `src/ops/**` | Absent (RFC-0007, out of scope) |
+| `packages/**` (five SDKs) | Absent (RFC-0007, out of scope) |
+| Not in the original blueprint | `templates/` (generated application and resources), `latte/macos/` (menu app, port relay), `tools/` (installers, toolchain definition), `scripts/` (toolchain wrappers and checks), `vendor/` (bundled htmx) |

@@ -100,7 +100,7 @@
 
 # RFC-0001: Caramel Core (Runtime, Routing, & Hypermedia Engine)
 
-**Status:** Approved · Implemented (amended by [ADR 0003](decisions/0003-core-routing-and-contracts.md), [ADR 0004](decisions/0004-htmx4-fragment-negotiation.md) and [ADR 0005](decisions/0005-island-props-helper.md))
+**Status:** Approved · Implemented (amended by [ADR 0003](decisions/0003-core-routing-and-contracts.md), [ADR 0004](decisions/0004-htmx4-fragment-negotiation.md), [ADR 0005](decisions/0005-island-props-helper.md) and [ADR 0011](decisions/0011-default-action-layout.md))
 
 **Classification:** Foundational Architecture
 
@@ -238,7 +238,10 @@ Every Action negotiates its egress from inbound headers ([ADR 0004](decisions/00
    * An action whose `handle` returns a `Caramel::Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) has chosen its egress explicitly, so the response passes through unchanged.
 3. A client that accepts neither receives contract failures as MRDP text (RFC-0005).
 
-Responses carry `Vary: Accept, HX-Request, HX-Request-Type`.
+Responses carry `Vary: Accept, HX-Request, HX-Request-Type`. A full page wraps its body in the action's `layout(page)`:
+
+* Generated applications render `app/views/layouts/application.html.ecr` through `ApplicationAction`.
+* `Caramel::Action` itself provides a minimal escaped document ([ADR 0011](decisions/0011-default-action-layout.md)). Actions that only stream, morph or answer JSON therefore need no layout of their own.
 
 ### 3. Failure Modes & Mitigations
 
@@ -574,7 +577,7 @@ The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table (`caramel_cache
 
 # RFC-0004: Caramel Latte (Bare-Metal Local DX & Database Branching)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0006](decisions/0006-browser-acceptance-and-localhost-sites.md) and [ADR 0012](decisions/0012-latte-supervision-watching-branching.md)). Applying the system resolver, ports 80/443 and CA trust on a machine needs the owner's administrator rights.
 
 **Classification:** Local Developer Experience & Substrate
 
@@ -590,53 +593,68 @@ Caramel Latte establishes a zero-Docker, bare-metal local development environmen
 
 #### 2.1. Zero-Docker Native Process Supervision
 
-Latte manages the application lifecycle using direct POSIX host process signals:
+Latte manages the local substrate using direct POSIX host process signals ([ADR 0012](decisions/0012-latte-supervision-watching-branching.md)):
 
-* **UNIX Domain Socket Binding:** All internal communication (App to Postgres) bypasses the TCP network loopback, writing directly to `/tmp/.s.PGSQL.5432`.
-* **Kernel File Watching:** Latte watches source directories using `kqueue` (macOS) or `inotify` (Linux). Changes trigger an instant semantic AST rebuild (`crystal build --no-codegen`), providing compilation feedback in under 200ms.
+* **Shared service supervisor:** The per-user `latte daemon` starts, adopts after restart and recovers PostgreSQL 18, CoreDNS and Caddy.
+  * Applications run under terminal-owned `frappe dev` sessions, which register their development gateway socket with Latte.
+  * The daemon owns processes and databases. It holds no agent protocol state.
+* **UNIX Domain Socket Binding:** All internal communication (App to Postgres) bypasses the TCP network loopback.
+  * PostgreSQL listens only on `.s.PGSQL.5432` inside a private, owner-only socket directory in Latte's state, with `listen_addresses = ''` and SCRAM authentication.
+  * A shared `/tmp` socket is never used, because `/tmp` is shared by every local user.
+* **Named HTTPS:** Each site gets an HTTPS origin through Caddy and Latte's internal `caramel` CA.
+  * `.caramel` names resolve through CoreDNS.
+  * Explicit `.localhost` names resolve natively ([ADR 0006](decisions/0006-browser-acceptance-and-localhost-sites.md)).
+  * The owner-run system installer adds the `/etc/resolver/caramel` entry and the launchd relay for ports 80/443. `latte trust install` adds the CA to the user's keychain. Latte never installs trust implicitly.
+* **Kernel File Watching:** Latte watches source directories using `kqueue` on macOS, the platform Latte supports (`EVFILT_VNODE` on every watched file and directory).
+  * Changes trigger an instant semantic AST rebuild (`crystal build --no-codegen`) before any code generation.
+  * A type error appears on the site's error page and in the terminal without building native code.
+  * The feedback-time target of under 200ms is a deferred performance goal.
 
 #### 2.2. Connection-Guarded Database Branching Substrate
 
 Latte treats PostgreSQL databases like ephemeral Git branches, wrapping clone commands in strict connection guards:
 
 ```bash
-caramel latte branch create feat-stripe-webhooks
+frappe db branch create feat_stripe_webhooks   # prints the branch's connection URL
+frappe dev --branch feat_stripe_webhooks        # runs the app against it
+frappe db branch list
+frappe db branch delete feat_stripe_webhooks
 
 ```
 
 * **Execution Sequence:**
-1. Latte acquires an administrative pool connection to the root `postgres` catalog.
+1. Latte acquires an administrative connection to the root `postgres` catalog.
 2. Disconnect guard executed:
 ```sql
-ALTER DATABASE caramel_dev WITH ALLOW_CONNECTIONS false;
+ALTER DATABASE caramel_dev_<site> WITH ALLOW_CONNECTIONS false;
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity 
-WHERE datname = 'caramel_dev' AND pid <> pg_backend_pid();
+WHERE datname = 'caramel_dev_<site>' AND pid <> pg_backend_pid();
 
 ```
 
 
-3. Template clone command executed:
+3. Template clone command executed, and connections are re-allowed even if the clone fails:
 ```sql
-CREATE DATABASE caramel_feat_stripe_webhooks TEMPLATE caramel_dev;
-ALTER DATABASE caramel_dev WITH ALLOW_CONNECTIONS true;
+CREATE DATABASE caramel_branch_<site>_feat_stripe_webhooks TEMPLATE caramel_dev_<site> STRATEGY FILE_COPY;
+ALTER DATABASE caramel_dev_<site> WITH ALLOW_CONNECTIONS true;
 
 ```
 
 
-4. The clone operation completes via disk block pointers (APFS/ZFS reflink or Postgres page cloning) in **50ms – 100ms**.
+4. Latte's PostgreSQL runs with `file_copy_method = clone`, so the file copy completes via disk block pointers: APFS copy-on-write clones. The 50ms – 100ms target is a deferred performance goal.
 
-
+The same guarded clone backs `frappe db diff`'s scratch branch (RFC-0002 §2.5) and Corretto's per-worker test databases (RFC-0006 §2.2).
 
 ### 3. Failure Modes & Mitigations
 
 * **Postgres Access Lockups During Hard Crashes:** If the development supervisor crashes while connections to the template database are disabled, developers can get locked out.  
-  *Mitigation:* Latte registers host process signal traps (`SIGINT`, `SIGTERM`) to restore `ALLOW_CONNECTIONS true` on primary catalogs, and verifies connectivity on every supervisor reboot.
+  *Mitigation:* Latte registers host process signal traps (`SIGINT`, `SIGTERM`) to restore `ALLOW_CONNECTIONS true` on every Caramel database. It also restores them on every supervisor start, which repairs a guard left behind by a `SIGKILL`.
 
 ---
 
 # RFC-0005: Caramel Frappé (Stateless Agent CLI & Dual-Mode Diagnostics)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0013](decisions/0013-frappe-cli-check-mrdp.md))
 
 **Classification:** Autonomous Agent Tooling & Interface
 
@@ -646,46 +664,65 @@ ALTER DATABASE caramel_dev WITH ALLOW_CONNECTIONS true;
 
 Persistent background daemons like the Model Context Protocol (MCP) suffer from state drift, protocol framing overhead (JSON-RPC 2.0), and silent daemon crashes. Furthermore, verbose JSON diagnostic formats consume precious LLM attention windows, burning context on punctuation and brackets instead of semantic code logic. Conversely, human developers struggle to read raw, unformatted token streams in their terminals.
 
-Caramel Frappé discards long-running daemons in favor of **stateless, sub-20ms POSIX CLI commands** and **Dual-Mode Diagnostics** (rich ANSI visualization for humans; compact, token-dense text for AI agents).
+Caramel Frappé discards long-running daemons in favor of **stateless POSIX CLI commands** (the sub-20ms target is deferred) and **Dual-Mode Diagnostics** (rich ANSI visualization for humans; compact, token-dense text for AI agents).
 
 ### 2. Technical Specification
 
 #### 2.1. Stateless POSIX Tooling Surface
 
-Frappé provides an invariant discovery manifest via `caramel agent-manifest`:
+The CLI is `frappe` ([ADR 0013](decisions/0013-frappe-cli-check-mrdp.md)). Every command is a one-shot process. Commands that need services, databases or branches ask Latte's service supervisor (RFC-0004) and keep no session state.
+
+One command table drives `help`, `COMMAND --help`, validation and the invariant discovery manifest, `frappe agent-manifest` (excerpt):
 
 ```text
 CARAMEL CLI INTERFACE (STRICT TOKENS)
-caramel check                   # Runs Tier-1 AST type check (--no-codegen). Emits MRDP.
-caramel routes [filter]         # Dumps matched route contracts and parameter schemas.
-caramel db:branch [name]        # Forks isolated Postgres template DB (outputs URI).
-caramel db:diff --name [name]   # Diffs model AST against catalog; auto-generates safe DDL.
-caramel corretto [path]         # Runs integration probe with synchronous queue drain.
+frappe check [--agent|--human]  # Run the Tier-1 type check (crystal build --no-codegen) and report diagnostics; MRDP unless stdout is a TTY.
+frappe routes [FILTER]  # List routes with their contracts; FILTER keeps routes whose method, path or action contains it (any case).
+frappe db branch create NAME  # Clone the development database into branch NAME and print its connection URL.
+frappe db diff --name NAME [--dev-override] [--agent|--human]  # Derive migrations from the declared schema and prove them on a scratch branch.
+frappe corretto [SPEC_PATHS...] [--concurrency=1..8]  # Run specs in isolated Latte test databases with synchronous queue drains.
+frappe expand FILE:LINE:COL  # Print the plain Crystal that the macro call at FILE:LINE:COL expands to.
 
 ```
 
 #### 2.2. Two-Tier Compilation Pipeline
 
-1. **Tier 1 (Verification Loop):** Invoked via `caramel check`. Runs `crystal build --no-codegen`. Performs syntax parsing, macro evaluation, and whole-program type inference in **~180ms**. Machine code generation is skipped.
-2. **Tier 2 (Artifact Generation):** Full native LLVM machine code compilation and linking is deferred exclusively to deployment (`caramel roast`) or staging gates.
+1. **Tier 1 (Verification Loop):** Invoked via `frappe check`, and before every rebuild in `frappe dev`. Runs `crystal build --no-codegen` with the development flags. Performs syntax parsing, macro evaluation, and whole-program type inference; machine code generation is skipped. The ~180ms target is a deferred performance goal.
+2. **Tier 2 (Artifact Generation):** Full native LLVM machine code compilation and linking produces the binaries that must run. Crystal has no interpreter for whole applications, so these are:
+   * the development server (`frappe dev`);
+   * the spec workers (`frappe corretto`);
+   * `frappe routes`, `migrate` and `seed`;
+   * the headless schema dump behind `frappe db diff`.
+   Deployment artifacts belong to RFC-0007.
 
 #### 2.3. Dual-Mode Diagnostic Formatting
 
-* **Mode A: Human Interactive (TTY Output):** Outputs full-color ANSI formatting, showing exact line extracts, arrows pointing to syntax violations, and formatted Markdown remediation advice.
-* **Mode B: Agent Execution (`--agent` or Non-TTY Piped Stream):** Strips all ANSI codes and formatting boilerplate, outputting a **Dense Diagnostic Text (MRDP)** payload that saves over 70% in LLM token consumption:
+`frappe check` parses real compiler output. It classifies each diagnostic as `CONTRACT_MISMATCH`, `N_PLUS_ONE`, `UNDEFINED_METHOD`, `UNDEFINED_CONSTANT`, `NO_OVERLOAD`, `SYNTAX` or `COMPILE`, and prints it in one of two modes:
+
+* **Mode A: Human Interactive (TTY Output, or `--human`):** Full-color ANSI formatting in RFC-0008 §2.6's layout, showing:
+  * the exact file and line in a box;
+  * the source line, with a caret pointing to the violation;
+  * formatted remediation advice.
+* **Mode B: Agent Execution (`--agent` or Non-TTY Piped Stream):** Strips all ANSI codes and formatting boilerplate. The output is a **Dense Diagnostic Text (MRDP)** payload whose token savings are a deferred measurement:
 
 ```text
 ERR CONTRACT_MISMATCH:422 at src/app/actions/teams/create.cr:14:5
 NODE: RequestContract
 MISSING: tenant_id:String
-PATCH: INSERT "field tenant_id : String" AT 14:5
+PATCH: INSERT "field tenant_id : String" AT 15:7
 
 ```
+
+* **Locations:**
+  * `ERR` points at the action's `contract do`, which the router reports as `Contract: file:line:col`.
+  * `PATCH: INSERT "…" AT line:col` inserts a new line; `AFTER line:col` inserts inline, as N+1 fixes use for `.preload(:users)`.
+* **Other fields:** `MSG`, `FIX`, `SYNTAX` and `SUGGEST` carry the remaining detail. `OK check <n> files` reports success, and the exit status is 1 exactly when an `ERR` line was printed.
+* **Other producers:** Usage errors, migration lint refusals (`LINT_<RULE>`) and `frappe db diff` halts (`DIFF_HALT`) use the same MRDP.
 
 ### 3. Failure Modes & Mitigations
 
 * **Agent Hallucinating Obsolete CLI Flags:** LLM coding agents often hallucinate flags learned from other frameworks.  
-  *Mitigation:* Frappé strictly validates CLI inputs. Any unrecognized argument terminates immediately with exit code `1` and outputs the exact single-line syntax for the intended command.
+  *Mitigation:* Frappé strictly validates CLI inputs against its command table. Any unrecognized argument terminates immediately with exit code `1`. It outputs the exact single-line syntax for the intended command and the nearest valid token (`SYNTAX:` and `SUGGEST:` in MRDP).
 
 ---
 
@@ -1024,7 +1061,7 @@ Human developer feedback is rendered with visual clarity and actionable remediat
 ### 3. Failure Modes & Mitigations
 
 * **Over-Clever DSLs Obscuring Execution Flow:** Highly expressive macros can become opaque, making it difficult for developers or agents to trace code paths.  
-  *Mitigation:* Caramel Core enforces an invariant: all macros must compile down to explicit, standard Crystal code. Running `caramel expand <file>` outputs the generated Crystal code to demystify any abstraction.
+  *Mitigation:* Caramel Core enforces an invariant: all macros must compile down to explicit, standard Crystal code. Running `frappe expand FILE:LINE:COL` outputs the generated Crystal code for the macro call at that position to demystify any abstraction ([ADR 0013](decisions/0013-frappe-cli-check-mrdp.md)).
 * **Performance Tax on Semantic Extensions:** Semantic numbers and time spans (`3.days`, `50.gigabytes`) could introduce heap allocation overhead if implemented naively.  
   *Mitigation:* All temporal and numeric extensions are implemented as zero-allocation inline struct methods on primitive types, compiling directly down to LLVM integer constants.
 
@@ -1037,7 +1074,7 @@ Human developer feedback is rendered with visual clarity and actionable remediat
 | **Caramel Core (RFC-0001)** | No parameter-to-action contract drift. | Compile-time AST reflection via `Router.draw`. |
 | **SugarORM (RFC-0002)** | Zero runtime N+1 query failures. | Association typed as `NotLoaded | Array(T)`. |
 | **Caramel Cold Brew (RFC-0003)** | Zero dual-write data loss. | In-transaction enqueuing via PostgreSQL ACID boundaries. |
-| **Caramel Latte (RFC-0004)** | Instant local iteration without Docker. | Host OS UNIX domain sockets and kernel kqueue/inotify. |
+| **Caramel Latte (RFC-0004)** | Instant local iteration without Docker. | Host OS UNIX domain sockets, kernel `kqueue` watching and a Tier-1 type check before every build ([ADR 0012](decisions/0012-latte-supervision-watching-branching.md)). |
 | **Caramel Frappé (RFC-0005)** | Low token overhead for AI coding loops. | Stateless POSIX CLI tools emitting compact MRDP text. |
 | **Caramel Corretto (RFC-0006)** | Zero false-confidence test suites. | Subcutaneous testing against real Postgres branches. |
 | **Caramel Roast (RFC-0007)** | Minimal infrastructure footprint. | Single static native binary (~25MB RSS) over SSH. |
@@ -1047,75 +1084,59 @@ Human developer feedback is rendered with visual clarity and actionable remediat
 
 ## 5. Monorepo Repository Structure Blueprint
 
+The tree below is the repository as built ([ADR 0014](decisions/0014-repository-layout.md)). Each product lives in its own top-level source directory. Cold Brew and Corretto live under `src/caramel/` because applications reach them through `require "caramel"` and `require "caramel/corretto"`.
+
 ```text
 caramel/
-├── README.md                              # Manifest & Quickstart
-├── ARCHITECTURE.md                        # This Document (RFCs 0001 - 0008)
-├── shard.yml                              # Master workspace definition
+├── README.md                              # Current state & contributor checks
+├── docs/
+│   ├── rfc.md                             # This Document (RFCs 0001 - 0008)
+│   ├── decisions/                         # ADRs that amend the RFCs
+│   └── research/                          # Implementation status matrix & research notes
+├── shard.yml / shard.lock                 # The `caramel` shard (crystal-db, crystal-pg)
 │
-├── bin/                                   # Compiled developer toolchain
-│   ├── caramel                            # Primary POSIX CLI router
-│   ├── latte                              # Host process & DB branch supervisor
-│   └── roast                              # Static linking & deployment harness
+├── bin/                                   # Git-ignored build output (scripts/build-*)
+│   ├── frappe                             # Stateless POSIX CLI (RFC-0005)
+│   ├── latte                              # Service & database branch supervisor (RFC-0004)
+│   ├── latte-port-relay                   # Launchd 80/443 relay, installed by the owner
+│   └── Latte.app                          # Native macOS menu client
 │
 ├── src/
-│   ├── core/                              # RFC-0001: Caramel Core runtime
+│   ├── caramel.cr                         # `require "caramel"`: Core, SugarORM, Cold Brew
+│   ├── caramel/                           # RFC-0001: Caramel Core runtime
 │   │   ├── http/
-│   │   │   ├── router.cr                  # Radix tree AST macro router
-│   │   │   ├── action.cr                  # Base action handler & content negotiation
-│   │   │   └── context.cr                 # Non-allocating request/response context
+│   │   │   ├── router.cr                  # Compile-time route table & segment trie
+│   │   │   ├── request_context.cr         # Negotiation, CSRF token & session
+│   │   │   ├── request_input.cr           # Bounded form & streamed multipart input
+│   │   │   └── paths.cr                   # Typed resource path helpers
 │   │   ├── contracts/
-│   │   │   └── request_contract.cr        # Stack-allocated parameter coercion
-│   │   ├── hypermedia/
-│   │   │   ├── idiomorph.cr               # htmx 4 response builders
-│   │   │   └── islands.cr                 # Web Component island wrapper (<caramel-island>)
-│   │   └── prose/                         # RFC-0008: Temporal & semantic extensions
-│   │       ├── semantic_numbers.cr
-│   │       └── temporal_spans.cr
+│   │   │   └── request_contract.cr        # Typed request contracts
+│   │   ├── action.cr                      # Contract, handle & negotiated egress
+│   │   ├── hypermedia.cr                  # htmx 4 hx-partial builders
+│   │   ├── islands.cr / islands.js        # <caramel-island> helper & custom element
+│   │   ├── view.cr, view/compiler.cr      # Escaping compiled ECR views
+│   │   ├── application.cr, csrf.cr, session.cr, response.cr, database.cr, html.cr
+│   │   ├── cold_brew.cr, cold_brew/       # RFC-0003: job, queue, worker, drain, broker,
+│   │   │                                  #   maintenance, scheduler, system migrations
+│   │   ├── cache.cr, sse.cr               # RFC-0003: UNLOGGED cache & SSE framing
+│   │   ├── corretto.cr, corretto/         # RFC-0006: client, matchers, worker isolation, wire proxy
+│   │   └── outbound.cr                    # RFC-0006: proxy-aware outbound HTTP client
 │   │
-│   ├── orm/                               # RFC-0002: SugarORM
-│   │   ├── schema.cr                      # Pure immutable struct macro
-│   │   ├── changeset.cr                   # Pure validation & transformation boundary
-│   │   ├── facade.cr                      # Fluent Active Record macro facade
-│   │   ├── query.cr                       # Type-safe fluent query builder
-│   │   ├── associations.cr                # Compile-time NotLoaded union types
-│   │   ├── sql.cr                         # Typed SQL expression blocks
-│   │   └── migrations/
-│   │       ├── catalog.cr                 # pg_catalog introspection engine
-│   │       ├── differ.cr                  # AST-to-catalog diff derivation
-│   │       └── linter.cr                  # Zero-lock migration safety linters
-│   │
-│   ├── concurrency/                       # RFC-0003: Caramel Cold Brew
-│   │   ├── queue.cr                       # SKIP LOCKED PostgreSQL transaction queue
-│   │   ├── worker.cr                      # CSP Fiber pool supervisor
-│   │   ├── sse.cr                         # LISTEN/NOTIFY Server-Sent Events broker
-│   │   └── cache.cr                       # UNLOGGED table key-value cache facade
-│   │
-│   ├── dx/                                # RFC-0004: Caramel Latte
-│   │   ├── supervisor.cr                  # Native host process runner (kqueue/inotify)
-│   │   └── brancher.cr                    # Connection-guarded Postgres template cloner
-│   │
-│   ├── agent/                             # RFC-0005: Caramel Frappé
-│   │   ├── manifest.cr                    # Agent discovery manifest generator
-│   │   ├── tier1_checker.cr               # --no-codegen fast verification harness
-│   │   └── mrdp.cr                        # Dual-mode diagnostic formatter (ANSI / MRDP)
-│   │
-│   ├── testing/                           # RFC-0006: Caramel Corretto
-│   │   ├── runner.cr                      # Corretto test runner & savepoint harness
-│   │   ├── assertions.cr                  # Observable hypermedia & DB state matchers
-│   │   ├── queue_drainer.cr               # Synchronous queue execution coordinator
-│   │   └── wire_stub.cr                   # Socket-level HTTP proxy for external APIs
-│   │
-│   └── ops/                               # RFC-0007: Caramel Roast
-│       ├── compiler.cr                    # musl static binary compilation pipeline
-│       ├── asset_inliner.cr               # Compile-time macro asset embedding
-│       └── deployer.cr                    # SSH atomic socket handoff engine
+│   ├── sugar_orm.cr, sugar_orm/           # RFC-0002: schema, changeset, query, associations,
+│   │                                      #   repo, sql, catalog, introspection, differ, ddl,
+│   │                                      #   linter, migration
+│   ├── latte.cr, latte/                   # RFC-0004: daemon, supervisor, postgres (branches,
+│   │                                      #   test workers, guards), watcher, dns, proxy, trust
+│   └── frappe.cr, frappe/                 # RFC-0005: cli, commands, check, diagnostics, mrdp,
+│                                          #   schema_diff, corretto_runner, dev_session, …
 │
-└── packages/                              # The First-Party Five SDKs (RFC-0007)
-    ├── caramel-billing/                   # Stripe API & Webhook verification
-    ├── caramel-storage/                   # S3 / R2 / Local Disk streaming
-    ├── caramel-mail/                      # Postmark / Resend / SMTP client
-    ├── caramel-auth/                      # OAuth2, Passkeys & Session guards
-    └── caramel-notify/                    # Twilio SMS & Web Push
+├── templates/                             # `frappe new` application & `frappe make resource`
+├── latte/macos/                           # Native menu app & port relay (Swift)
+├── tools/                                 # Installers (Swift) & pinned toolchain definition
+├── scripts/                               # crystal/shards wrappers, builds, `scripts/check` targets
+├── spec/                                  # Unit & integration specs, compile fixtures
+└── vendor/htmx/                           # Bundled htmx 4
 
 ```
+
+Planned but not present, out of scope for this implementation: RFC-0007's `bin/roast`, `src/ops/**` and `packages/**` (the First-Party Five SDKs), and RFC-0008's semantic and temporal unit extensions.
