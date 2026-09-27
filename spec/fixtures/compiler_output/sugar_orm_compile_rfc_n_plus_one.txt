@@ -1,0 +1,7 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_rfc_n_plus_one.cr:5:35
+
+ 5 | Team.query.find!(team_id).users.each { |user| puts user.email }
+                                     ^---
+Error: undefined method 'each' for Team::UsersNotLoaded(NamedTuple("Association 'users' of Team was not preloaded; using it would run one query per Team (N+1). Remediation: add .preload(:users) to the query that loaded this Team, e.g. Team.query.preload(:users).find(id)": Nil))

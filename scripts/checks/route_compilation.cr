@@ -4,9 +4,10 @@ cases = {
   "compile_valid" => nil,
   "compile_missing_contract_field" => {[
     "ROUTE CONTRACT MISMATCH", "is missing 'field team_id : Type'", "compile_missing_contract_field.cr:",
+    "Contract: #{Caramel::Checks::REPO}/spec/fixtures/routes/compile_missing_contract_field.cr:5:5\n",
     "Remediation: add `field team_id : Int64` to the contract block of TeamShow.",
   ], [] of String},
-  "compile_wrong_param_type" => {["ROUTE CONTRACT TYPE MISMATCH", "compile_wrong_param_type.cr:", "Remediation: declare `field team_id : Int64`"], [] of String},
+  "compile_wrong_param_type" => {["ROUTE CONTRACT TYPE MISMATCH", "compile_wrong_param_type.cr:", "Contract: #{Caramel::Checks::REPO}/spec/fixtures/routes/compile_wrong_param_type.cr:5:5\n", "Remediation: declare `field team_id : Int64`"], [] of String},
   "compile_nilable_param" => {["ROUTE CONTRACT TYPE MISMATCH", "team_id : Int64?", "Remediation:"], [] of String},
   "compile_defaulted_param" => {["ROUTE CONTRACT TYPE MISMATCH", "without defaults", "Remediation:"], [] of String},
   "compile_undefined_action" => {["Action 'Missing::Show' is undefined", "compile_undefined_action.cr:"], [] of String},

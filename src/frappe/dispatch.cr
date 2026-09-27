@@ -1,15 +1,13 @@
 require "./installations"
+require "./commands"
 
 module Caramel::Frappe::Dispatch
   ENVIRONMENT_KEY = "CARAMEL_FRAPPE_DISPATCHED"
-  PROJECT_COMMANDS = %w(setup dev make migrate seed routes test db logs doctor open lsp)
   RELEASE = /\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?\z/
 
   def self.target(arguments : Array(String), directory : String = Dir.current, environment : ENV.class | Hash(String, String) = ENV) : String?
     return nil if environment[ENVIRONMENT_KEY]? == "1"
-    command = arguments.first?
-    return nil unless command && PROJECT_COMMANDS.includes?(command)
-    return nil if arguments[0..1] == ["lsp", "install"]
+    return nil unless Commands.project?(arguments)
     path = File.join(directory, ".caramel-version")
     info = File.info?(path, follow_symlinks: false)
     return nil unless info && info.file? && info.size <= 64

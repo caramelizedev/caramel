@@ -1,0 +1,11 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_unknown_changeset_keyword.cr:4:23
+
+ 4 | Team::UpdateChangeset.new(team, name: "Renamed")
+                           ^--
+Error: no parameter named 'name'
+
+Overloads are:
+ - Team::UpdateChangeset.new(record : ::Team, *, seats : ::Int32 | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET, billing_email : ::Nil | ::String | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET)
+ - Team::UpdateChangeset.new(*, seats : ::Int32 | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET, billing_email : ::Nil | ::String | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET)

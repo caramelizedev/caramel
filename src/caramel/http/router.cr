@@ -305,16 +305,18 @@ macro __caramel_router_draw(locations, &block)
     {% unless contract %}
       {% raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block.\n#{where.id}Remediation: add `contract do ... end` inside #{action}; it may be empty.\n" %}
     {% end %}
+    {% contract_location = contract.constant("CARAMEL_CONTRACT_LOCATION") %}
+    {% contract_where = contract_location ? "Contract: #{contract_location.id}\n" : "" %}
     {% for param in params %}
       {% t = param[0] %}
       {% suggest = (t == "id" || t.ends_with?("_id")) ? "Int64" : "String" %}
       {% field = contract.constant("CARAMEL_FIELD_#{t.upcase.id}") %}
       {% unless field %}
-        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n#{where.id}Remediation: add `field #{t.id} : #{suggest.id}` to the contract block of #{action.id}.\n" %}
+        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n#{where.id}#{contract_where.id}Remediation: add `field #{t.id} : #{suggest.id}` to the contract block of #{action.id}.\n" %}
       {% end %}
       {% scalar = field[1] %}
       {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
-        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n#{where.id}Remediation: declare `field #{t.id} : #{suggest.id}` (String, Int32 or Int64; no `?` and no `default:`).\n" %}
+        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n#{where.id}#{contract_where.id}Remediation: declare `field #{t.id} : #{suggest.id}` (String, Int32 or Int64; no `?` and no `default:`).\n" %}
       {% end %}
     {% end %}
     {% summaries = [] of Nil %}

@@ -1,0 +1,22 @@
+Showing last frame. Use --error-trace for full trace.
+
+There was a problem expanding macro 'draw'
+
+Code in spec/fixtures/routes/compile_not_action.cr:9:3
+
+ 9 | Caramel::Router.draw do
+     ^
+Called macro defined in src/caramel/http/router.cr:189:5
+
+ 189 | macro draw(&block)
+
+Which expanded to:
+
+   23 |         
+   24 |       
+ > 25 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_not_action.cr:10:5"]) do
+              ^--------------------
+Error: Compile Error: 'NotAction' must inherit from Caramel::Action.
+
+  --> @@ROOT@@/spec/fixtures/routes/compile_not_action.cr:10:5
+Remediation: declare it as `struct NotAction < Caramel::Action` (or your application's base action).

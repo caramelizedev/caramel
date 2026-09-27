@@ -1,0 +1,26 @@
+Showing last frame. Use --error-trace for full trace.
+
+There was a problem expanding macro 'draw'
+
+Code in spec/fixtures/routes/compile_nilable_param.cr:18:3
+
+ 18 | Caramel::Router.draw do
+      ^
+Called macro defined in src/caramel/http/router.cr:189:5
+
+ 189 | macro draw(&block)
+
+Which expanded to:
+
+   34 |         
+   35 |       
+ > 36 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_nilable_param.cr:19:5"]) do
+              ^--------------------
+Error: 
+
+❌ ROUTE CONTRACT TYPE MISMATCH
+Route: '/teams/:team_id' parameter ':team_id' binds to 'TeamShow::Contract' field 'team_id : Int64?'
+Path parameters must be non-nilable String, Int32 or Int64 fields without defaults
+  --> @@ROOT@@/spec/fixtures/routes/compile_nilable_param.cr:19:5
+Contract: @@ROOT@@/spec/fixtures/routes/compile_nilable_param.cr:5:5
+Remediation: declare `field team_id : Int64` (String, Int32 or Int64; no `?` and no `default:`).

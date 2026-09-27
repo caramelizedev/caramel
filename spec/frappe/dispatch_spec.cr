@@ -24,8 +24,13 @@ describe Caramel::Frappe::Dispatch do
     Caramel::Frappe::Installations.new(state).register("9.9.9", File.dirname(File.dirname(binary)))
     Caramel::Frappe::Dispatch.target(["routes"], project, env).should eq(binary)
     Caramel::Frappe::Dispatch.target(["routes"], project, env.merge({"CARAMEL_FRAPPE_DISPATCHED" => "1"})).should be_nil
-    %w(new sites installations).each { |command| Caramel::Frappe::Dispatch.target([command], project, env).should be_nil }
+    %w(new sites installations services agent-manifest help).each { |command| Caramel::Frappe::Dispatch.target([command], project, env).should be_nil }
     Caramel::Frappe::Dispatch.target(["lsp", "install"], project, env).should be_nil
+    # Project commands, including malformed ones, run under the pinned release,
+    # which validates them with its own command table.
+    [["check", "--agent"], ["corretto"], ["expand", "x"], ["db", "branch", "create", "x"], ["db", "bogus"], ["lsp", "crystalline"]].each do |arguments|
+      Caramel::Frappe::Dispatch.target(arguments, project, env).should eq(binary)
+    end
     File.write(pin, "not-a-release\n")
     Caramel::Frappe::Dispatch.target(["routes"], project, env).should be_nil
     File.write(pin, "9.9.9\n")

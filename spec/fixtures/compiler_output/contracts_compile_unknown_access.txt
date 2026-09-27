@@ -1,0 +1,7 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/contracts/compile_unknown_access.cr:10:44
+
+ 10 | Caramel::Response.new(body: contract.admin.to_s)
+                                           ^----
+Error: undefined method 'admin' for Fixture::TeamIndex::Contract

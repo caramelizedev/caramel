@@ -81,7 +81,11 @@ begin
       cold_brew.try(&.stop)
     end
   end
-rescue ex : SugarORM::Linter::Refused | SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed | Caramel::ColdBrew::ConfigurationError
+rescue ex : SugarORM::Linter::Refused
+  # frappe migrate sets CARAMEL_DIAGNOSTICS=mrdp for coding agents.
+  STDERR.print(ENV["CARAMEL_DIAGNOSTICS"]? == "mrdp" ? ex.to_mrdp : "#{ex.message}\n")
+  status = 1
+rescue ex : SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed | Caramel::ColdBrew::ConfigurationError
   STDERR.puts(ex.message)
   status = 1
 ensure

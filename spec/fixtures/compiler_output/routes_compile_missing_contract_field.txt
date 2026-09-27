@@ -1,0 +1,26 @@
+Showing last frame. Use --error-trace for full trace.
+
+There was a problem expanding macro 'draw'
+
+Code in spec/fixtures/routes/compile_missing_contract_field.cr:17:3
+
+ 17 | Caramel::Router.draw do
+      ^
+Called macro defined in src/caramel/http/router.cr:189:5
+
+ 189 | macro draw(&block)
+
+Which expanded to:
+
+   34 |         
+   35 |       
+ > 36 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_missing_contract_field.cr:18:5"]) do
+              ^--------------------
+Error: 
+
+❌ ROUTE CONTRACT MISMATCH
+Route: '/teams/:team_id' defines parameter ':team_id'
+Action: 'TeamShow::Contract' is missing 'field team_id : Type'
+  --> @@ROOT@@/spec/fixtures/routes/compile_missing_contract_field.cr:18:5
+Contract: @@ROOT@@/spec/fixtures/routes/compile_missing_contract_field.cr:5:5
+Remediation: add `field team_id : Int64` to the contract block of TeamShow.

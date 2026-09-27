@@ -1,0 +1,11 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_param_not_field.cr:3:7
+
+ 3 | class Team::RenameChangeset < SugarORM::Changeset(Team)
+           ^
+Error: param 'nickname' is not a field of Team.
+
+Fields: id, name, seats, archived, billing_email, created_at, updated_at, owner_id
+Remediation: rename the param to one of these fields, or add `field nickname : Type` to Team's schema block.
+  --> @@ROOT@@/spec/fixtures/sugar_orm/compile_param_not_field.cr:4:9

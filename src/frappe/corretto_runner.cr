@@ -11,28 +11,9 @@ module Caramel::Frappe
   # one Latte test-worker database per worker from it, deals the spec files
   # round-robin to N parallel spec processes and drops the workers.
   class CorrettoRunner
-    MAX_CONCURRENCY = Latte::Postgres::MAX_TEST_WORKERS
-    MOCKING         = /(?<![\w.:@$])(?:allow|receive|double|instance_double|mock)\(|\.stub\(/
+    MOCKING = /(?<![\w.:@$])(?:allow|receive|double|instance_double|mock)\(|\.stub\(/
 
     record Violation, path : String, line : Int32, call : String
-
-    # The spec paths (default `spec`) and concurrency, or nil for malformed arguments.
-    def self.arguments(args : Array(String)) : {Array(String), Int32}?
-      concurrency = nil
-      paths = [] of String
-      args.each do |arg|
-        if arg.starts_with?("--concurrency=")
-          value = arg.lchop("--concurrency=").to_i?
-          return nil if concurrency || value.nil? || !(1..MAX_CONCURRENCY).includes?(value)
-          concurrency = value
-        elsif arg.starts_with?('-') || arg.empty?
-          return nil
-        else
-          paths << arg
-        end
-      end
-      {paths.empty? ? ["spec"] : paths, concurrency || 1}
-    end
 
     # Every spec file the paths name (directories contribute their `*_spec.cr`
     # files), relative to the project root and sorted.

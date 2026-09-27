@@ -1,0 +1,5 @@
+In spec/fixtures/diagnostics/compile_syntax_error.cr:10:5
+
+ 10 | end
+      ^
+Error: expecting token ')', not 'end'

@@ -1,0 +1,10 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/contracts/compile_unsupported_type.cr:4:10
+
+ 4 | struct TeamIndex < Caramel::Action
+            ^
+Error: unsupported Caramel::RequestContract field type: Array(String)
+
+  --> @@ROOT@@/spec/fixtures/contracts/compile_unsupported_type.cr:6:13
+      field tags : Array(String)

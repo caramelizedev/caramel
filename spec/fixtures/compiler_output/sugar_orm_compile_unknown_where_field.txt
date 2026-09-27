@@ -1,0 +1,11 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_unknown_where_field.cr:3:12
+
+ 3 | Team.query.where(title: "Acme").to_a
+                ^----
+Error: no parameter named 'title'
+
+Overloads are:
+ - Team::QueryOf(P)#where(*, id : ::Int64 | Array(::Int64) | Range(::Int64, ::Int64) | Range(::Int64, ::Nil) | Range(::Nil, ::Int64) | ::SugarORM::Unset = ::SugarORM::UNSET, name : ::String | Array(::String) | ::SugarORM::Unset = ::SugarORM::UNSET, seats : ::Int32 | Array(::Int32) | Range(::Int32, ::Int32) | Range(::Int32, ::Nil) | Range(::Nil, ::Int32) | ::SugarORM::Unset = ::SugarORM::UNSET, archived : ::Bool | Array(::Bool) | ::SugarORM::Unset = ::SugarORM::UNSET, billing_email : ::String | Array(::String) | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET, created_at : ::Time | Array(::Time) | Range(::Time, ::Time) | Range(::Time, ::Nil) | Range(::Nil, ::Time) | ::SugarORM::Unset = ::SugarORM::UNSET, updated_at : ::Time | Array(::Time) | Range(::Time, ::Time) | Range(::Time, ::Nil) | Range(::Nil, ::Time) | ::SugarORM::Unset = ::SugarORM::UNSET, owner_id : ::Int64 | Array(::Int64) | Range(::Int64, ::Int64) | Range(::Int64, ::Nil) | Range(::Nil, ::Int64) | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET)
+ - SugarORM::Query(T, P)#where(fragment : String, *args)

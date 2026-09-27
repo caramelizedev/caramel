@@ -17,11 +17,15 @@ module Caramel::Frappe
     NAME    = /\A[a-z][a-z0-9_]{0,62}\z/
     VERSION = "%Y%m%d%H%M%S"
 
+    @agent = false
+
     def initialize(@project : Project, @tools : Tools, @client : LatteClient, @output : IO = STDOUT, @error : IO = STDERR)
     end
 
-    # Returns the written migration files relative to the project root.
-    def run(name : String, dev_override : Bool) : Array(String)
+    # Returns the written migration files relative to the project root. With
+    # `agent`, halts and lint refusals raise as MRDP (RFC-0005 §2.3).
+    def run(name : String, dev_override : Bool, agent : Bool = false) : Array(String)
+      @agent = agent
       raise Error.new("Migration name must be lowercase snake_case starting with a letter, such as create_books") unless name.matches?(NAME)
       site = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
       binary = @tools.compile(@project)
@@ -44,7 +48,7 @@ module Caramel::Frappe
         begin
           SugarORM::Linter.enforce(SugarORM::Linter.lint(migrations), dev_override, "development", @error)
         rescue ex : SugarORM::Linter::Refused
-          raise Error.new("#{ex.message}\nNo migration was written.")
+          raise Error.new(agent ? ex.to_mrdp(@project.root).rstrip : "#{ex.message}\nNo migration was written.")
         end
         migrations.each do |migration|
           path = "db/migrations/#{migration.version}_#{migration.name}.cr"
@@ -84,6 +88,7 @@ module Caramel::Frappe
     private def migrate(binary : String, branch : JSON::Any, dev_override : Bool) : Nil
       url = branch["migration_url"].as_s
       values = {"CARAMEL_ENV" => "development", "MIGRATION_DATABASE_URL" => url, "DATABASE_URL" => branch["runtime_url"].as_s, "CARAMEL_EXPECTED_DATABASE_URL" => url}
+      values["CARAMEL_DIAGNOSTICS"] = "mrdp" if @agent
       diagnostics = IO::Memory.new
       status, output = @tools.capture(binary, dev_override ? ["migrate", "--dev-override"] : ["migrate"], @project.root, values, diagnostics)
       return if status.success?
@@ -101,6 +106,7 @@ module Caramel::Frappe
     end
 
     private def halted(plan : SugarORM::Differ::Plan) : String
+      return String.build { |io| plan.halts.each(&.to_mrdp(io)) }.rstrip if @agent
       message = "frappe db diff halted; no migration was written.\n\n#{plan.halts.join("\n\n")}"
       plan.halts.any?(&.overridable) ? "#{message}\n\nIn development, frappe db diff --dev-override derives overridable changes anyway." : message
     end
@@ -115,7 +121,7 @@ module Caramel::Frappe
       now = Time.utc
       parts.map do |label, statements|
         latest = next_version(now, latest)
-        SugarORM::Migration.new(latest, label, statements)
+        SugarORM::Migration.new(latest, label, statements, File.join(@project.root, "db/migrations/#{latest}_#{label}.cr"))
       end
     end
 

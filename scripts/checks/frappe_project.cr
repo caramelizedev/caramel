@@ -1,4 +1,5 @@
 require "./support/latte_fixture"
+require "../../src/frappe/commands"
 require "uri"
 require "http/params"
 
@@ -36,6 +37,7 @@ module Caramel::Checks
         print routes
         assert!(routes.lines.any? { |line| line.split == %w(GET /books/:id App::Books::Show id:Int64(min=1)) }, routes)
         assert!(routes.lines.any? { |line| line.split == %w(PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?) }, routes)
+        agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
         # The generated create_* migrations must be exactly what the differ
@@ -128,6 +130,158 @@ module Caramel::Checks
         finish(failed)
       end
     end
+
+    # RFC-0005 agent tooling on the generated project: the stateless manifest,
+    # strict usage errors, the routes filter, Tier-1 `frappe check` with MRDP
+    # whose PATCH lines are applied mechanically until the check passes, the
+    # human typography, `frappe expand` and database branches.
+    def agent_tooling : Nil
+      absent = environment({"CARAMEL_HOME" => File.join(@root, "absent-latte")})
+      manifest = command([@frappe, "agent-manifest"], chdir: "/", environment: absent, echo: false).stdout.lines
+      assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
+      Caramel::Frappe::Commands::TABLE.each do |entry|
+        assert!(manifest.includes?("frappe #{entry.syntax}  # #{entry.description}"), "manifest lacks frappe #{entry.syntax}")
+      end
+      ["check [--agent|--human]", "routes [FILTER]", "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]", "expand FILE:LINE:COL"].each do |syntax|
+        assert!(manifest.any?(&.starts_with?("frappe #{syntax}")), "manifest lacks frappe #{syntax}")
+      end
+      assert!(manifest.any?(&.starts_with?(%(PATCH: INSERT "<text>" AT <line>:<col>))), manifest.join("\n"))
+      unknown = attempt([@frappe, "routes", "--verbose"], chdir: @project)
+      assert!(unknown.status.exit_code == 1 && unknown.stderr == "ERR USAGE at frappe routes\nMSG: unknown option --verbose\nSYNTAX: frappe routes [FILTER]\n", unknown.stderr)
+      typo = attempt([@frappe, "chek", "--human"], chdir: @project)
+      assert!(typo.status.exit_code == 1 && typo.stderr.includes?("Usage: frappe check [--agent|--human]\nDid you mean check?"), typo.stderr)
+      puts "PASS: frappe agent-manifest lists every command without Latte, and unknown input exits 1 with the exact syntax and a suggestion"
+
+      people = command([@frappe, "routes", "people"], chdir: @project, echo: false).stdout.lines
+      assert!(people.size == 7 && people.all? { |line| line.split[1].starts_with?("/people") && line.split[2].starts_with?("App::People::") }, people.join("\n"))
+      patches = command([@frappe, "routes", "patch"], chdir: @project, echo: false).stdout.lines
+      assert!(patches.map { |line| line.split[0, 2] } == [%w(PATCH /books/:id), %w(PATCH /people/:id)], patches.join("\n"))
+      assert!(command([@frappe, "routes", "no-such-route"], chdir: @project, echo: false).stdout.empty?)
+      puts "PASS: frappe routes FILTER keeps routes whose method, path or action contains it, ignoring case"
+
+      clean = command([@frappe, "check"], chdir: @project, echo: false)
+      assert!(clean.stdout.matches?(/\AOK check \d+ files\n\z/), clean.stdout)
+      assert!(command([@frappe, "check", "--human"], chdir: @project, echo: false).stdout == "✓ Type check passed\n")
+
+      action = File.join(@project, "app/actions/shelves/show.cr")
+      Dir.mkdir_p(File.dirname(action))
+      File.write(action, SHELF_ACTION)
+      routes = File.join(@project, "config/routes.cr")
+      original_routes = File.read(routes)
+      File.write(routes, original_routes.sub("    # Frappé resource routes", %(    get "/shelves/:id", App::Shelves::Show\n    # Frappé resource routes)))
+      mismatch = attempt([@frappe, "check"], chdir: @project)
+      assert!(mismatch.status.exit_code == 1 && mismatch.stdout == <<-MRDP, mismatch.stdout + mismatch.stderr)
+        ERR CONTRACT_MISMATCH:422 at app/actions/shelves/show.cr:3:5
+        NODE: RequestContract
+        MISSING: id:Int64
+        PATCH: INSERT "field id : Int64" AT 4:7\n
+        MRDP
+      apply(mismatch.stdout)
+      repaired = command([@frappe, "check"], chdir: @project, echo: false)
+      assert!(repaired.stdout.starts_with?("OK check "), repaired.stdout)
+      puts "PASS: a planted route-contract mismatch yields MRDP with a PATCH, and applying the PATCH line mechanically makes frappe check pass"
+
+      model = File.join(@project, "app/models/shelf.cr")
+      File.write(model, SHELF_MODELS)
+      File.write(action, File.read(action).sub(%(page "Shelf", "Shelf \#{contract.id}"), %(titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)\n      page "Shelf", titles.join(", "))))
+      n_plus_one = attempt([@frappe, "check", "--agent"], chdir: @project)
+      assert!(n_plus_one.status.exit_code == 1 && n_plus_one.stdout == <<-MRDP, n_plus_one.stdout + n_plus_one.stderr)
+        ERR N_PLUS_ONE at app/actions/shelves/show.cr:9:52
+        MSG: Association 'volumes' of App::Shelf was not preloaded.
+        PATCH: INSERT ".preload(:volumes)" AFTER 9:31\n
+        MRDP
+      human = attempt([@frappe, "check", "--human"], chdir: @project)
+      assert!(human.status.exit_code == 1 && !human.stdout.includes?("\e["), human.stdout)
+      ["  ╭─[ app/actions/shelves/show.cr:9 ]\n", "  │  9 │       titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)\n",
+       "  │    │ #{" " * 51}^^^^^^^ Association 'volumes' of App::Shelf was not preloaded.\n",
+       "  ╰─ Accessing un-preloaded relationships triggers runtime N+1 queries.\n",
+       "     Remediation:\n     Add .preload(:volumes) to the query that loaded this App::Shelf",
+      ].each { |text| assert!(human.stdout.includes?(text), "missing #{text.inspect} in:\n#{human.stdout}") }
+      apply(n_plus_one.stdout)
+      assert!(File.read(action).includes?("App::Shelf.query.preload(:volumes).find!(contract.id)"), File.read(action))
+      assert!(command([@frappe, "check"], chdir: @project, echo: false).stdout.starts_with?("OK check "))
+      puts "PASS: a planted un-preloaded association yields N_PLUS_ONE with a PATCH that makes frappe check pass, and --human shows the box, source line, caret and remediation"
+
+      expanded = command([@frappe, "expand", "config/routes.cr:2:3"], chdir: @project, echo: false).stdout
+      assert!(expanded.includes?("__caramel_router_draw") && expanded.includes?("App::Shelves::Show"), expanded)
+      contract = command([@frappe, "expand", "app/actions/shelves/show.cr:3:5"], chdir: @project, echo: false).stdout
+      assert!(contract.includes?("~> struct Contract < ::Caramel::RequestContract") && contract.includes?(%(CARAMEL_CONTRACT_LOCATION = "#{@project}/app/actions/shelves/show.cr:3:5")), contract)
+      nothing = attempt([@frappe, "expand", "app/actions/shelves/show.cr:6:1"], chdir: @project)
+      assert!(nothing.status.exit_code == 1 && nothing.stdout.starts_with?("no expansion found"), nothing.stdout + nothing.stderr)
+      File.delete(model)
+      File.delete(action)
+      Dir.delete(File.dirname(action))
+      File.write(routes, original_routes)
+      puts "PASS: frappe expand prints the Crystal that Caramel::Router.draw and an action's contract block expand to, and exits 1 where no macro is called"
+
+      id = site("bookshelf")["id"].as_s
+      created = command([@frappe, "db", "branch", "create", "agent_probe"], chdir: @project, echo: false)
+      url = created.stdout.chomp
+      assert!(created.stdout.lines.size == 1 && url.starts_with?("postgresql://") && url.includes?("@/caramel_branch_#{id}_agent_probe?"), created.stdout)
+      assert!(sql(url, "SELECT current_database()") == "caramel_branch_#{id}_agent_probe")
+      assert!(command([@frappe, "db", "branch", "list"], chdir: @project, echo: false).stdout == "agent_probe\n")
+      missing = attempt([@frappe, "dev", "--no-open", "--branch", "absent_probe"], chdir: @project, timeout: 60.seconds)
+      assert!(missing.status.exit_code == 1 && missing.stderr.includes?("bookshelf has no database branch absent_probe"), missing.stderr)
+      deleted = command([@frappe, "db", "branch", "delete", "agent_probe"], chdir: @project, echo: false)
+      assert!(deleted.stdout == "Deleted database branch agent_probe.\n", deleted.stdout)
+      listed = command([@frappe, "db", "branch", "list"], chdir: @project, echo: false)
+      assert!(listed.stdout.empty? && listed.stderr.includes?("bookshelf has no database branches."), listed.stdout + listed.stderr)
+      puts "PASS: frappe db branch create prints a connectable branch URL; list and delete manage it, and frappe dev --branch refuses an absent branch"
+    end
+
+    # Applies every `PATCH:` line of MRDP to the file its ERR line names, as a
+    # coding agent would.
+    def apply(mrdp : String) : Nil
+      file = nil
+      mrdp.each_line do |line|
+        if match = line.match(/\AERR \S+ at ([^:]+):\d+:\d+\z/)
+          file = File.join(@project, match[1])
+        elsif (match = line.match(/\APATCH: INSERT "(.*)" (AT|AFTER) (\d+):(\d+)\z/)) && file
+          lines = File.read_lines(file)
+          row, column = match[3].to_i - 1, match[4].to_i
+          if match[2] == "AT"
+            lines.insert(row, " " * (column - 1) + match[1])
+          else
+            lines[row] = lines[row].insert(column, match[1])
+          end
+          File.write(file, lines.join('\n') + "\n")
+        end
+      end
+      assert!(!file.nil?, "no ERR line in #{mrdp}")
+    end
+
+    SHELF_ACTION = <<-CRYSTAL
+      module App::Shelves
+        struct Show < App::ApplicationAction
+          contract do
+          end
+
+          # One shelf's volume titles.
+          def handle(contract : Contract)
+            page "Shelf", "Shelf \#{contract.id}"
+          end
+        end
+      end
+      CRYSTAL
+
+    SHELF_MODELS = <<-CRYSTAL
+      module App
+        struct Shelf < SugarORM::Schema
+          schema "shelves" do
+            field id : Int64, primary: true
+            has_many volumes : Volume
+          end
+        end
+
+        struct Volume < SugarORM::Schema
+          schema "volumes" do
+            field id : Int64, primary: true
+            field title : String
+            belongs_to shelf : Shelf
+          end
+        end
+      end
+      CRYSTAL
 
     # Generated specs and probes run in two Latte test workers: a savepoint
     # hides one example's rows from the next, catalog and leaked DDL reset the

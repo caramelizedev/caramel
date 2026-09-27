@@ -38,13 +38,14 @@ module Caramel::Checks
       added.map { |file| File.read(File.join(@project, "db/migrations", file)).tap { |source| assert!(file.matches?(/\A\d{14}_#{name}(_concurrently)?\.cr\z/), file); assert!(source.includes?("SugarORM::Migration.new"), source) } }
     end
 
-    def refused(args : Array(String), expected : Array(String)) : Nil
+    def refused(args : Array(String), expected : Array(String)) : String
       before = migrations
       result = attempt([@frappe] + args, chdir: @project, timeout: COMPILE)
       output = result.stdout + result.stderr
-      assert!(!result.success?, "#{args.join(" ")} must fail:\n#{output}")
+      assert!(result.status.exit_code == 1, "#{args.join(" ")} must exit 1:\n#{output}")
       expected.each { |text| assert!(output.includes?(text), "missing #{text.inspect} in:\n#{output}") }
       assert!(migrations == before, "a refused command left migration files: #{migrations - before}")
+      output
     end
 
     def branches(id : String) : Array(JSON::Any)
@@ -104,10 +105,13 @@ module Caramel::Checks
           timestamps
           index :pages
           CRYSTAL
-        refused(%w(db diff --name add_isbn), ["HALT books.isbn: NOT NULL column without a default", "Remediation: give the field a default", "--dev-override"])
+        # Piped output is agent mode: halts and lint refusals print as MRDP.
+        refused(%w(db diff --name add_isbn), ["ERR DIFF_HALT at books.isbn\nMSG: NOT NULL column without a default", "\nFIX: give the field a default"])
         overridden = diff("add_isbn", ["--dev-override"])
         assert!(overridden.size == 1 && overridden[0].includes?(%(ALTER TABLE "books" ADD COLUMN "isbn" text NOT NULL\n)), overridden.inspect)
-        refused(%w(migrate), ["LINT not-null-default: ADD COLUMN isbn NOT NULL without a DEFAULT", "--dev-override downgrades"])
+        lint = refused(%w(migrate), ["\nMSG: ADD COLUMN isbn NOT NULL without a DEFAULT", "\nFIX: give the column a DEFAULT"])
+        assert!(lint.matches?(/^ERR LINT_NOT_NULL_DEFAULT at db\/migrations\/\d{14}_add_isbn\.cr$/m), lint)
+        refused(%w(migrate --human), ["LINT not-null-default: ADD COLUMN isbn NOT NULL without a DEFAULT", "--dev-override downgrades"])
         app = File.join(@project, ".caramel/application")
         app_env = environment(values.merge({"CARAMEL_ENV" => "development", "CARAMEL_EXPECTED_DATABASE_URL" => runtime_url}))
         linted = attempt([app, "lint"], chdir: @project, environment: app_env)
@@ -116,7 +120,7 @@ module Caramel::Checks
         assert!(linted.stdout.includes?("Pending migrations pass the zero-lock linter.") && linted.stderr.includes?("WARN (--dev-override) LINT not-null-default"), linted.stdout + linted.stderr)
         applied = command([@frappe, "migrate", "--dev-override"], chdir: @project, timeout: COMPILE)
         assert!(applied.stdout.includes?("Applied 1 migrations.") && applied.stderr.includes?("WARN (--dev-override) LINT not-null-default"), applied.stdout + applied.stderr)
-        puts "PASS: a NOT NULL field without a default halts the diff; --dev-override derives it, and lint and frappe migrate accept it only with --dev-override"
+        puts "PASS: a NOT NULL field without a default halts the diff (MRDP ERR DIFF_HALT when piped); --dev-override derives it, and lint and frappe migrate (MRDP ERR LINT_NOT_NULL_DEFAULT at its migration file, human text with --human) accept it only with --dev-override"
 
         schema(<<-CRYSTAL)
           field id : Int64, primary: true
@@ -124,7 +128,7 @@ module Caramel::Checks
           field isbn : String
           timestamps
           CRYSTAL
-        refused(%w(db diff --name drop_pages), ["HALT books.pages: column exists in the database but no field declares it", "drop_column :pages"])
+        refused(%w(db diff --name drop_pages --human), ["HALT books.pages: column exists in the database but no field declares it", "drop_column :pages"])
         schema(<<-CRYSTAL)
           field id : Int64, primary: true
           field name : String, renamed_from: :title

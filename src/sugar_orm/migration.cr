@@ -10,8 +10,17 @@ module SugarORM
     getter version : Int64
     getter name : String
     getter statements : Array(String)
+    # The source file that declared the migration, for diagnostics.
+    getter file : String
 
-    def initialize(@version, @name, @statements)
+    # A default of `__FILE__` expands where the caller wrote `Migration.new`
+    # only on an explicit class method, not on `initialize`.
+    def self.new(version : Int64, name : String, statements : Array(String), file : String = __FILE__) : self
+      new(version, name, statements, declared_in: file)
+    end
+
+    private def initialize(@version, @name, @statements, *, declared_in : String)
+      @file = declared_in
       raise ArgumentError.new("migration version must be positive") unless @version > 0
       raise ArgumentError.new("migration needs a name and SQL") if @name.strip.empty? || @statements.empty? || @statements.any?(&.strip.empty?)
     end

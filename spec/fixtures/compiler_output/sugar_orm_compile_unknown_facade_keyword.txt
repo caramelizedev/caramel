@@ -1,0 +1,11 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_unknown_facade_keyword.cr:3:21
+
+ 3 | Team.query.find!(1).update(name: "Renamed")
+                         ^-----
+Error: no overload matches 'Team#update', name: String
+
+Overloads are:
+ - Team#update(db : ::SugarORM::Handle, *, seats : ::Int32 | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET, billing_email : ::Nil | ::String | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET)
+ - Team#update(*, seats : ::Int32 | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET, billing_email : ::Nil | ::String | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET)

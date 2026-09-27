@@ -22,8 +22,14 @@ module Caramel
     def initialize(@context : RequestContext)
     end
 
+    # CARAMEL_CONTRACT_LOCATION records where `contract do` was written, so the
+    # router's mismatch errors can point tools at the block to patch.
     macro contract(&block)
       struct Contract < ::Caramel::RequestContract
+        {% call = @caller ? @caller.first : nil %}
+        {% if call && call.filename %}
+          CARAMEL_CONTRACT_LOCATION = {{"#{call.filename.id}:#{call.line_number}:#{call.column_number}"}}
+        {% end %}
         {{block.body}}
       end
     end

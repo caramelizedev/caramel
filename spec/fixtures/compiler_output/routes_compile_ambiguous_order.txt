@@ -1,0 +1,10 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/routes/compile_ambiguous_order.cr:33:5
+
+ 33 | get "/teams/new", TeamNew
+      ^--
+Error: 
+
+❌ AMBIGUOUS ROUTE ORDER
+'GET /teams/new' must be declared before 'GET /teams/:team_id'

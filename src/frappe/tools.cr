@@ -51,8 +51,13 @@ module Caramel::Frappe
     end
 
     def run(command : String, args : Array(String), directory : String, values : Hash(String, String) = {} of String => String) : Nil
-      status = Process.run(command, args, chdir: directory, env: environment(values), clear_env: true, output: @output, error: @error, input: Process::Redirect::Inherit)
+      status = execute(command, args, directory, values)
       raise Error.new("Command failed (exit #{status.exit_code}); see the diagnostic above") unless status.success?
+    end
+
+    # Runs a command on the terminal's streams and returns its status.
+    def execute(command : String, args : Array(String), directory : String, values : Hash(String, String) = {} of String => String) : Process::Status
+      Process.run(command, args, chdir: directory, env: environment(values), clear_env: true, output: @output, error: @error, input: Process::Redirect::Inherit)
     end
 
     # Runs a command, returning its status and standard output; standard

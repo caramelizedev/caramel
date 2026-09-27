@@ -1,0 +1,22 @@
+Showing last frame. Use --error-trace for full trace.
+
+There was a problem expanding macro 'draw'
+
+Code in spec/fixtures/routes/compile_missing_contract.cr:14:3
+
+ 14 | Caramel::Router.draw do
+      ^
+Called macro defined in src/caramel/http/router.cr:189:5
+
+ 189 | macro draw(&block)
+
+Which expanded to:
+
+   27 |         
+   28 |       
+ > 29 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_missing_contract.cr:15:5"]) do
+              ^--------------------
+Error: Compile Error: 'TeamIndex' must define an explicit `contract do ... end` block.
+
+  --> @@ROOT@@/spec/fixtures/routes/compile_missing_contract.cr:15:5
+Remediation: add `contract do ... end` inside TeamIndex; it may be empty.

@@ -86,4 +86,13 @@ describe Caramel::Frappe::LatteClient do
       FileUtils.rm_rf(root)
     end
   end
+
+  it "derives a branch URL exactly as Latte builds one for the same role" do
+    socket = "/private/tmp/latte state/run"
+    password = "0f" * 32
+    development = Caramel::Latte::Postgres.connection_url("caramel_dev_0123456789abcdef", password, "caramel_dev_0123456789abcdef", socket)
+    branch = Caramel::Latte::Postgres.branch_database("0123456789abcdef", "feature_x")
+    expected = Caramel::Latte::Postgres.connection_url("caramel_dev_0123456789abcdef", password, branch, socket)
+    Caramel::Frappe::LatteClient.branch_url(development, branch).should eq(expected)
+  end
 end

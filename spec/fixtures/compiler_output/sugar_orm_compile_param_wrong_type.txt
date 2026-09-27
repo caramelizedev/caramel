@@ -1,0 +1,10 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_param_wrong_type.cr:3:7
+
+ 3 | class Team::SeatsChangeset < SugarORM::Changeset(Team)
+           ^
+Error: param 'seats : String' does not match Team field 'seats : Int32'.
+
+Remediation: declare `param seats : Int32`.
+  --> @@ROOT@@/spec/fixtures/sugar_orm/compile_param_wrong_type.cr:4:9

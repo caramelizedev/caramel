@@ -1,0 +1,11 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_non_literal_default.cr:3:8
+
+ 3 | struct Season < SugarORM::Schema
+            ^
+Error: Default `Time.utc.year` for field 'year : Int32' is not a compile-time Int32 literal.
+
+Defaults become SQL column defaults, so they must be literals (`5`, `"x"`, `true`, `2.5`); Time fields take none.
+Remediation: write a literal default, or drop it and set the value in a changeset.
+  --> @@ROOT@@/spec/fixtures/sugar_orm/compile_non_literal_default.cr:6:11

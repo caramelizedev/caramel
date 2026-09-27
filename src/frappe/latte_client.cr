@@ -95,6 +95,15 @@ module Caramel::Frappe
       nil
     end
 
+    # A branch admits the same development runtime role as the database it
+    # was cloned from, so its URL is the development URL with the branch's
+    # database name; listings deliberately carry no credentials.
+    def self.branch_url(database_url : String, database : String) : String
+      uri = URI.parse(database_url)
+      uri.path = "/#{database}"
+      uri.to_s
+    end
+
     # Creates Corretto test worker `index`, or resets it to a fresh clone of the
     # migrated spec database. The document holds `database`, `migration_url`
     # and `runtime_url`.

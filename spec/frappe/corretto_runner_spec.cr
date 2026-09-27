@@ -64,12 +64,4 @@ describe Caramel::Frappe::CorrettoRunner do
       expect_raises(Caramel::Frappe::Error, "No *_spec.cr files") { Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/support"]) }
     end
   end
-
-  it "accepts spec paths and one --concurrency within the Latte worker limit" do
-    Caramel::Frappe::CorrettoRunner.arguments([] of String).should eq({["spec"], 1})
-    Caramel::Frappe::CorrettoRunner.arguments(["spec/models", "--concurrency=8"]).should eq({["spec/models"], 8})
-    [["--concurrency=0"], ["--concurrency=9"], ["--concurrency=two"], ["--concurrency=2", "--concurrency=3"], ["--tag", "fast"], [""]].each do |args|
-      Caramel::Frappe::CorrettoRunner.arguments(args).should be_nil
-    end
-  end
 end

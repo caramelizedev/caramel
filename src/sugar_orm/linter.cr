@@ -18,12 +18,20 @@ module SugarORM
     DROP_COLUMN   = /\ADROP\s+(?!CONSTRAINT\b)(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(#{IDENTIFIER})/i
     RENAME_COLUMN = /\ARENAME\s+(?!(?:TO|CONSTRAINT)\b)(?:COLUMN\s+)?(#{IDENTIFIER})\s+TO\s/i
 
-    record Violation, rule : String, message : String, remediation : String, migration : String, statement : String do
+    record Violation, rule : String, message : String, remediation : String, migration : String, statement : String, file : String do
       def to_s(io : IO) : Nil
         io << "LINT " << rule << ": " << message << '\n'
         io << "  in " << migration << ":\n"
         statement.strip.each_line { |line| io << "  │ " << line << '\n' }
         io << "  Remediation: " << remediation
+      end
+
+      # RFC-0005 MRDP, with the migration file relative to `root`.
+      def to_mrdp(io : IO, root : String = Dir.current) : Nil
+        at = file.starts_with?(root + "/") ? file[(root.size + 1)..] : file
+        io << "ERR LINT_" << rule.upcase.tr("-", "_") << " at " << at << '\n'
+        io << "MSG: " << message << '\n'
+        io << "FIX: " << remediation << '\n'
       end
     end
 
@@ -37,6 +45,10 @@ module SugarORM
                  "Migration refused. In development only, --dev-override downgrades these violations to warnings."
                end
         super((@violations.map(&.to_s) << note).join("\n\n"))
+      end
+
+      def to_mrdp(root : String = Dir.current) : String
+        String.build { |io| @violations.each(&.to_mrdp(io, root)) }
       end
     end
 
@@ -59,21 +71,21 @@ module SugarORM
           created << identifier(match[1])
         elsif (match = code.match(CREATE_INDEX)) && match[1]?.nil? && !created.includes?(table = identifier(match[3]))
           violations << Violation.new("concurrent-index", "CREATE INDEX on existing table #{table} blocks its writes while the index builds.",
-            "use CREATE INDEX CONCURRENTLY in a migration of its own; frappe db diff emits it that way.", label, statement)
+            "use CREATE INDEX CONCURRENTLY in a migration of its own; frappe db diff emits it that way.", label, statement, migration.file)
         elsif match = code.match(ALTER_TABLE)
           table = identifier(match[1])
           actions(match[2]).each do |action|
             if (column = action.match(ADD_COLUMN)) && !created.includes?(table) && action.matches?(/\bNOT\s+NULL\b/i) && !action.matches?(/\b(?:DEFAULT|GENERATED)\b/i)
               violations << Violation.new("not-null-default", "ADD COLUMN #{identifier(column[1])} NOT NULL without a DEFAULT fails on a populated #{table} table.",
-                "give the column a DEFAULT, or add it nullable, backfill it, and tighten it later.", label, statement)
+                "give the column a DEFAULT, or add it nullable, backfill it, and tighten it later.", label, statement, migration.file)
             elsif (column = action.match(DROP_COLUMN)) && !allowed.includes?({"drop", table, identifier(column[1])})
               name = identifier(column[1])
               violations << Violation.new("destructive-column", "DROP COLUMN #{name} destroys the data in #{table}.#{name}.",
-                "declare drop_column :#{name} in the schema and diff again; hand-written SQL needs the line -- caramel:allow-drop #{table}.#{name}", label, statement)
+                "declare drop_column :#{name} in the schema and diff again; hand-written SQL needs the line -- caramel:allow-drop #{table}.#{name}", label, statement, migration.file)
             elsif (column = action.match(RENAME_COLUMN)) && !allowed.includes?({"rename", table, identifier(column[1])})
               name = identifier(column[1])
               violations << Violation.new("destructive-column", "RENAME COLUMN #{name} breaks code that still reads #{table}.#{name}.",
-                "declare renamed_from: :#{name} on the new field and diff again; hand-written SQL needs the line -- caramel:allow-rename #{table}.#{name}", label, statement)
+                "declare renamed_from: :#{name} on the new field and diff again; hand-written SQL needs the line -- caramel:allow-rename #{table}.#{name}", label, statement, migration.file)
             end
           end
         end
@@ -81,7 +93,7 @@ module SugarORM
       if concurrent = migration.statements.find { |statement| concurrent?(statement) }
         unless migration.statements.all? { |statement| online?(statement) }
           violations << Violation.new("mixed-concurrency", "CONCURRENTLY statements cannot run inside the transaction this migration's other statements need.",
-            "move the CONCURRENTLY statements into a migration of their own; frappe db diff splits them for you.", label, concurrent)
+            "move the CONCURRENTLY statements into a migration of their own; frappe db diff splits them for you.", label, concurrent, migration.file)
         end
       end
       violations

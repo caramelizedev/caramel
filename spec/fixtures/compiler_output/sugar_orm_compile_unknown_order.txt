@@ -1,0 +1,12 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_unknown_order.cr:3:44
+
+ 3 | Team.query.order_by(:name, :desc).order_by(:popularity, :asc).to_a
+                                                ^
+Error: expected argument #1 to 'Team::QueryOf(NamedTuple())#order_by' to match a member of enum Team::Field.
+
+Options are: :id, :name, :seats, :archived, :billing_email, :created_at, :updated_at and :owner_id
+
+Overloads are:
+ - SugarORM::Query(T, P)#order_by(field : T::Field, direction : Symbol = :asc)

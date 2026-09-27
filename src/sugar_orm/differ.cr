@@ -29,6 +29,13 @@ module SugarORM
       def to_s(io : IO) : Nil
         io << "HALT " << subject << ": " << message << "\n  Remediation: " << remediation
       end
+
+      # RFC-0005 MRDP; `subject` is `table.column` or an index name.
+      def to_mrdp(io : IO) : Nil
+        io << "ERR DIFF_HALT at " << subject << '\n'
+        io << "MSG: " << message << '\n'
+        io << "FIX: " << remediation << '\n'
+      end
     end
 
     class Plan

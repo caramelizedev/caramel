@@ -1,0 +1,10 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/routes/compile_duplicate_route.cr:34:5
+
+ 34 | get "/teams/:id", TeamOther
+      ^--
+Error: 
+
+❌ DUPLICATE ROUTE
+'GET /teams/:team_id' and 'GET /teams/:id' match the same requests

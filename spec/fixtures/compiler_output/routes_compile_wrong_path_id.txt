@@ -1,0 +1,10 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/routes/compile_wrong_path_id.cr:8:17
+
+ 8 | Paths.book_path("42")
+                     ^
+Error: expected argument #1 to 'Paths.book_path' to be Int64, not String
+
+Overloads are:
+ - Paths#book_path(id : Int64)
