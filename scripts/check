@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+usage() {
+  printf 'usage: scripts/check NAME [ARGS...]\nchecks:' >&2
+  for source in "$ROOT"/scripts/checks/*.cr; do printf ' %s' "$(basename "$source" .cr | tr _ -)" >&2; done
+  printf '\n' >&2
+  exit 2
+}
+[ $# -ge 1 ] || usage
+NAME=$1; shift
+case $NAME in ''|*[!a-z0-9-]*) usage ;; esac
+FILE=$(printf '%s' "$NAME" | tr - _)
+SOURCE="$ROOT/scripts/checks/$FILE.cr"
+[ -f "$SOURCE" ] || usage
+mkdir -p "$ROOT/bin/checks"
+"$ROOT/scripts/crystal" build "$SOURCE" -o "$ROOT/bin/checks/$FILE"
+exec "$ROOT/bin/checks/$FILE" "$@"

@@ -14,4 +14,4 @@ The compiler adapter now generates private OpenSSL package metadata with a short
 
 The fresh-prefix build then compiled and executed successfully. `otool -L` showed managed OpenSSL through `@rpath/libssl.3.dylib` and `@rpath/libcrypto.3.dylib`, plus macOS system zlib, iconv and libSystem. This is a native dynamically linked macOS development build, not the separate Linux static release artifact.
 
-`scripts/check-toolchain-paths` also verifies an executable build and recorded rpath when the adapter-visible prefix includes spaces, a quote and a dollar sign. That regression reuses installed tools through links; it does not claim to relocate conda packages or to repeat fresh installation. The fresh install above establishes the separately observed package-prefix behavior.
+`scripts/check toolchain-paths` also verifies an executable build and recorded rpath when the adapter-visible prefix includes spaces, a quote and a dollar sign. That regression reuses installed tools through links; it does not claim to relocate conda packages or to repeat fresh installation. The fresh install above establishes the separately observed package-prefix behavior.

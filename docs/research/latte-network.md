@@ -6,7 +6,7 @@ Date: 2026-09-19. Supported host: Apple Silicon macOS.
 
 `scripts/install-latte-tools` installs CoreDNS 1.14.7 into the isolated toolchain. The official archive and extracted executable are independently SHA256-pinned in `tools/latte-darwin-arm64.json`. Four offline tests cover repeat installation, a modified existing executable, failed integrity leaving no partial destination, and invalid archive paths/symlink destinations. The real pinned archive installs and reports its expected version. This supplements the existing mise experiment; it is not yet a complete consumer installer.
 
-`scripts/check-latte-network` creates fresh private state, compiles the actual configuration fixture, starts two owned Unix-socket application fixtures, and launches pinned CoreDNS and Caddy. It checks:
+`scripts/check latte-network` creates fresh private state, compiles the actual configuration fixture, starts two owned Unix-socket application fixtures, and launches pinned CoreDNS and Caddy. It checks:
 
 - Exact registered IPv4 answers over UDP and TCP; known IPv4-only names return AAAA NODATA, absent project names NXDOMAIN, and unrelated names REFUSED without forwarding.
 - Two different project hostnames serve the correct application through certificate-verified HTTPS, using an explicit test CA and curl resolution override.

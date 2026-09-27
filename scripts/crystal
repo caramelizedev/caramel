@@ -1,91 +1,96 @@
-#!/usr/bin/env python3
-"""Contributor compiler entry point; consumer installation is owned by Latte."""
-import os
-from pathlib import Path
-import shutil
-import shlex
-import hashlib
-import stat
-import sys
+#!/bin/sh
+set -eu
 
-env = os.environ.copy()
-root = env.get("CARAMEL_TOOLCHAIN_ROOT")
-args = sys.argv[1:]
+unavailable() {
+    echo 'Crystal is unavailable. Run scripts/install-toolchain --root <dir> and set CARAMEL_TOOLCHAIN_ROOT to that directory.' >&2
+    exit 1
+}
 
+if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
+    COMPILER=$(command -v crystal || true)
+    [ -n "$COMPILER" ] && [ -f "$COMPILER" ] || unavailable
+    [ "$(/bin/realpath -- "$COMPILER")" != "$(/bin/realpath -- "$0")" ] || unavailable
+    exec "$COMPILER" "$@"
+fi
 
-def openssl_package_metadata(base, openssl):
-    # Crystal 1.21's OpenSSL bindings embed pkg-config output in unquoted shell
-    # substitutions. Quoting the output itself cannot fix shell word splitting.
-    # Give only compilation a short, owner-private alias; built executables use
-    # the real durable prefix in their rpath and do not depend on this alias.
-    key = hashlib.sha256(str(base).encode()).hexdigest()[:16]
-    runtime = Path('/private/tmp') / f'caramel-compiler-{os.getuid()}-{key}'
-    try:
-        runtime.mkdir(mode=0o700)
-    except FileExistsError:
-        pass
-    info = runtime.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        sys.exit('Compiler metadata directory must be owned and private')
-    alias = runtime / 'openssl'
-    try:
-        alias.symlink_to(openssl, target_is_directory=True)
-    except FileExistsError:
-        if not alias.is_symlink() or alias.lstat().st_uid != os.getuid() or os.readlink(alias) != str(openssl):
-            sys.exit('Compiler OpenSSL alias conflicts with existing state')
-    for name in ('libssl.pc', 'libcrypto.pc', 'openssl.pc'):
-        source = (openssl / 'lib/pkgconfig' / name).read_text()
-        lines = source.splitlines()
-        if sum(line.startswith('prefix=') for line in lines) != 1:
-            sys.exit('Managed OpenSSL package metadata has no unique prefix')
-        content = '\n'.join('prefix=' + str(alias) if line.startswith('prefix=') else line for line in lines) + '\n'
-        target = runtime / name
-        if target.exists() or target.is_symlink():
-            info = target.lstat()
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-                sys.exit('Compiler package metadata must be an owned private file')
-            if target.read_text() == content:
-                continue
-        # Concurrent builds publish identical metadata through atomic rename.
-        import tempfile
-        fd, temporary = tempfile.mkstemp(prefix='.pkg-', dir=runtime)
-        try:
-            with os.fdopen(fd, 'w') as output:
-                output.write(content)
-            os.replace(temporary, target)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-    return runtime
+BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
+COMPILER=$CRYSTAL_ROOT/embedded/bin/crystal
+OPENSSL=$BASE/data/installs/conda-openssl/3.6.4
 
+# Crystal 1.21 pastes pkg-config output into a shell command without quoting.
+# Keep the metadata in a short private alias; link the durable path into binaries.
+KEY=$(printf '%s' "$BASE" | /usr/bin/openssl dgst -sha256 -r | cut -c1-16)
+RUNTIME=/private/tmp/caramel-compiler-$(id -u)-$KEY
+mkdir -m 700 "$RUNTIME" 2>/dev/null || true
+if [ ! -d "$RUNTIME" ] || [ -L "$RUNTIME" ] ||
+    [ "$(stat -f %u "$RUNTIME")" != "$(id -u)" ] ||
+    [ $(( 0$(stat -f %Lp "$RUNTIME") & 077 )) -ne 0 ]; then
+    echo 'Compiler metadata directory must be owned and private' >&2
+    exit 1
+fi
 
-if root:
-    base = Path(root).resolve()
-    installs = base / "data/installs"
-    crystal_root = installs / "github-crystal-lang-crystal/1.21.0"
-    # Use the native compiler directly. macOS strips loader variables when
-    # passing through the distribution's system-shell wrapper.
-    compiler = crystal_root / "embedded/bin/crystal"
-    env.setdefault("CRYSTAL_PATH", "lib:" + str(crystal_root / "src"))
-    env["CRYSTAL_LIBRARY_PATH"] = ":".join(filter(None, (env.get("CRYSTAL_LIBRARY_PATH"), str(crystal_root / "embedded/lib"))))
-    openssl = installs / "conda-openssl/3.6.4"
-    env["PATH"] = str(base / "bin") + ":" + env.get("PATH", "")
-    env.pop("PKG_CONFIG_PATH", None)
-    env["PKG_CONFIG_LIBDIR"] = str(openssl_package_metadata(base, openssl))
-    env["CRYSTAL_CACHE_DIR"] = str(base / "crystal-cache")
-    if args and args[0] == "eval":
-        # eval has no linker-options flag and immediately executes its output.
-        # Scope the loader path to this child process, without global changes.
-        env["DYLD_LIBRARY_PATH"] = ":".join(filter(None, (str(openssl / "lib"), env.get("DYLD_LIBRARY_PATH"))))
-    if args and args[0] in ("build", "run", "spec"):
-        # Crystal embeds this value into the linker's shell command. Preserve
-        # spaces (the default Application Support prefix) and literal shell
-        # characters in paths, and pass the rpath as its own linker argument.
-        flag = "--link-flags=-Xlinker -rpath -Xlinker " + shlex.quote(str(openssl / "lib"))
-        # These commands support link flags; eval does not accept that option.
-        args.insert(1, flag)
-else:
-    compiler = shutil.which("crystal")
-if not compiler or not Path(compiler).is_file() or Path(compiler).resolve() == Path(__file__).resolve():
-    sys.exit("Crystal is unavailable. Run scripts/install-toolchain --root <dir> and set CARAMEL_TOOLCHAIN_ROOT to that directory.")
-os.execve(str(compiler), [str(compiler), *args], env)
+ALIAS=$RUNTIME/openssl
+if [ ! -e "$ALIAS" ] && [ ! -L "$ALIAS" ]; then
+    ln -s "$OPENSSL" "$ALIAS" 2>/dev/null || true
+fi
+if [ ! -L "$ALIAS" ] || [ "$(stat -f %u "$ALIAS")" != "$(id -u)" ] ||
+    [ "$(readlink "$ALIAS")" != "$OPENSSL" ]; then
+    echo 'Compiler OpenSSL alias conflicts with existing state' >&2
+    exit 1
+fi
+
+TEMP=
+trap '[ -z "$TEMP" ] || rm -f -- "$TEMP"' 0
+for NAME in libssl.pc libcrypto.pc openssl.pc; do
+    SOURCE=$OPENSSL/lib/pkgconfig/$NAME
+    COUNT=$(grep -c '^prefix=' "$SOURCE" || true)
+    if [ "$COUNT" != 1 ]; then
+        echo 'Managed OpenSSL package metadata has no unique prefix' >&2
+        exit 1
+    fi
+    TEMP=$(/usr/bin/mktemp "$RUNTIME/.pkg-XXXXXX")
+    sed "s|^prefix=.*|prefix=$RUNTIME/openssl|" "$SOURCE" > "$TEMP"
+    TARGET=$RUNTIME/$NAME
+    if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+        if [ ! -f "$TARGET" ] || [ -L "$TARGET" ] ||
+            [ "$(stat -f %u "$TARGET")" != "$(id -u)" ] ||
+            [ $(( 0$(stat -f %Lp "$TARGET") & 077 )) -ne 0 ]; then
+            rm -f -- "$TEMP"
+            TEMP=
+            echo 'Compiler package metadata must be an owned private file' >&2
+            exit 1
+        fi
+        if cmp -s "$TEMP" "$TARGET"; then
+            rm -f -- "$TEMP"
+            TEMP=
+            continue
+        fi
+    fi
+    mv -f "$TEMP" "$TARGET"
+    TEMP=
+done
+
+CRYSTAL_PATH=${CRYSTAL_PATH-lib:$CRYSTAL_ROOT/src}
+CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$CRYSTAL_ROOT/embedded/lib
+PATH=$BASE/bin:${PATH-}
+unset PKG_CONFIG_PATH
+PKG_CONFIG_LIBDIR=$RUNTIME
+CRYSTAL_CACHE_DIR=$BASE/crystal-cache
+export CRYSTAL_PATH CRYSTAL_LIBRARY_PATH PATH PKG_CONFIG_LIBDIR CRYSTAL_CACHE_DIR
+
+if [ "${1:-}" = eval ]; then
+    DYLD_LIBRARY_PATH=$OPENSSL/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
+    export DYLD_LIBRARY_PATH
+fi
+case ${1:-} in
+    build|run|spec)
+        SUBCOMMAND=$1
+        shift
+        QUOTED=$(printf '%s' "$OPENSSL/lib" | sed "s/'/'\\\\''/g")
+        set -- "$SUBCOMMAND" "--link-flags=-Xlinker -rpath -Xlinker '$QUOTED'" "$@"
+        ;;
+esac
+
+[ -f "$COMPILER" ] || unavailable
+exec "$COMPILER" "$@"

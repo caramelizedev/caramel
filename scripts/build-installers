@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+CACHE_ROOT=${CARAMEL_LATTE_SWIFT_CACHE:-/private/tmp/caramel-latte-swift-module-cache}
+case $#:$* in
+    0:) FLAGS=-O; OUT="$ROOT/bin" ;;
+    1:--test) FLAGS='-Onone -D CARAMEL_INSTALLER_TESTING'; OUT="$ROOT/bin/test" ;;
+    *) echo 'usage: scripts/build-installers [--test]' >&2; exit 2 ;;
+esac
+mkdir -p "$CACHE_ROOT" "$OUT"
+for NAME in install-toolchain install-latte-tools install-local-integration; do
+    SOURCE=$(printf '%s' "$NAME" | tr - _)
+    # FLAGS is a fixed pair of compiler options, never user-supplied text.
+    /usr/bin/swiftc -parse-as-library $FLAGS -target arm64-apple-macosx11.0 \
+        -module-cache-path "$CACHE_ROOT" \
+        "$ROOT/tools/installer/support.swift" "$ROOT/tools/installer/$SOURCE.swift" \
+        -o "$OUT/$NAME"
+    chmod 755 "$OUT/$NAME"
+done
+printf 'Built installers in %s\n' "$OUT"

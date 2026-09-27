@@ -5,7 +5,7 @@ The measurement entry point is:
 ```sh
 CARAMEL_TOOLCHAIN_ROOT=/path/to/verified/toolchain \
 CARAMEL_BENCHMARK_OUTPUT=/private/tmp/caramel-performance.json \
-scripts/check-frappe-project --benchmark
+scripts/check frappe-project --benchmark
 ```
 
 The output file must not already exist. The command creates disposable PostgreSQL, DNS and HTTPS services and generated projects, runs the existing project setup checks, then measures the development workflow. It stops its processes afterward. The JSON report survives fixture cleanup and preserves completed groups if a later measurement fails. It does not change system DNS, certificate trust or launchd configuration.
@@ -47,13 +47,13 @@ First development readiness took 4.14 seconds for Bookshelf and 5.96 seconds for
 
 The generated spec suites pass 3 and 23 examples respectively. During the brief CSS groups, the development process tree's largest observed summed RSS was 47.5 MiB and 50.1 MiB. During Crystal rebuilds, including the compiler, it reached 1,236 MiB and 2,541 MiB. Managed services reached approximately 120 MiB summed RSS. These sums can double-count shared pages; the compiler measurements are not application-server memory claims, and 500 ms sampling can miss peaks.
 
-Both scenarios and fixture cleanup completed successfully. [Raw timing report](evidence/development-performance-2026-09-19/report.json) and [resource observations](evidence/development-performance-2026-09-19/resource-samples.jsonl) retain the underlying evidence, including the benchmark script checksum. The original JSON report's checksum is also recorded; its resource rows are stored separately here for readable diffs.
+Both scenarios and fixture cleanup completed successfully.
 
 The baseline session awaited old-process retirement after making the replacement ready, so rapid subsequent edits could wait behind that cleanup. The next implementation moves retirement into a tracked queue while preserving shutdown waiting and debug artifacts for retiring processes. Separate native and generated-app tests cover termination, cleanup failures, parent death and superseded compilation. A repeated edit benchmark is required to quantify the improvement.
 
 ## Compiler phase investigation
 
-`scripts/profile-development-compiler` generates the same two resource counts without starting application services. Each scenario receives a new, empty compiler-cache directory, backed by the already installed tool binaries and native dependencies. It retains its generated source and compiler `--stats` logs in a printed temporary directory. This is cold **compiler-cache** evidence; operating-system file caches, the toolchain installation and dependency caches are already warm.
+`scripts/check compiler-profile` generates the same two resource counts without starting application services. Each scenario receives a new, empty compiler-cache directory, backed by the already installed tool binaries and native dependencies. It retains its generated source and compiler `--stats` logs in a printed temporary directory. This is cold **compiler-cache** evidence; operating-system file caches, the toolchain installation and dependency caches are already warm.
 
 | Compiler-only operation, one observation | Bookshelf | Larger |
 | --- | ---: | ---: |
@@ -62,10 +62,10 @@ The baseline session awaited old-process retirement after making the replacement
 | Template edit, warm cache | 2.51 s | 5.69 s |
 | Controller edit, warm cache | 2.43 s | 5.72 s |
 
-These are individual diagnostic observations, not percentile estimates. [The compiler report and phase logs](evidence/compiler-profile-2026-09-19/report.json) retain the raw measurements. In the larger controller-edit case, main semantic analysis takes 3.05 seconds and Crystal code generation 0.89 seconds. The compiler reuses 1,210 of 1,211 object files; warm edits are not rebuilding every object. Improving the process handoff alone cannot meet the proposed three-second larger-app target.
+These are individual diagnostic observations, not percentile estimates. In the larger controller-edit case, main semantic analysis takes 3.05 seconds and Crystal code generation 0.89 seconds. The compiler reuses 1,210 of 1,211 object files; warm edits are not rebuilding every object. Improving the process handoff alone cannot meet the proposed three-second larger-app target.
 
 ## Acceptance still required
 
-Retain the raw report alongside the results discussion. Compare subsequent distributions against the same fixtures and keep failing proposed targets visible.
+For future measurements, retain the raw report alongside the results discussion. Compare subsequent distributions against the same fixtures and keep failing proposed targets visible.
 
 Cold installation/network behavior, repeated isolated compiler-cache builds, separate service and database initialization costs, full compiler resource accounting, actual browser refresh latency and larger application-specific workloads need additional measurements. These investigations do not close those gates.

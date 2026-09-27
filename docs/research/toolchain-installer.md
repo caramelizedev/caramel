@@ -6,7 +6,7 @@ This is one component of the consumer installer, not the finished Caramel instal
 
 ## Use
 
-On Apple Silicon macOS with Apple's Command Line Tools, Python 3, clang and a usable macOS SDK:
+On Apple Silicon macOS with Apple's Command Line Tools (clang, Swift and a usable macOS SDK):
 
 ```sh
 scripts/install-toolchain --root '/path/to/a/private/final/toolchain'
@@ -36,7 +36,7 @@ Native verification runs eleven commands, including the compiled HTTP/TLS smoke 
 
 ## Observed checks
 
-- Twelve installer unit tests cover directory preservation, resumable state, altered configuration, binary corruption, receipt inventory, symlinked state, concurrent installation, offline reuse, relocation, failed-provider retry and native version/library diagnostics. Four CoreDNS provider checks and five earlier isolation/lifecycle harness checks also pass.
+- `scripts/check native` passes 39 black-box examples: seven menu-client cases, four relay cases, 13 toolchain-installer cases, four CoreDNS-installer cases and 11 local-integration cases. They cover directory preservation, resumable state, altered configuration, binary corruption, receipt inventory, symlinked state, concurrent installation, offline reuse, relocation, failed-provider retry and native version/library diagnostics.
 - A fresh prefix containing spaces completed the pinned downloads and compiled/executed the smoke app. All eleven native commands passed version and library provenance checks there.
 - Eight real managed-PostgreSQL integration checks passed using that fresh installation, including lifecycle and project credential behavior; their private test cluster was stopped and cleaned up.
 - Offline reuse of that prefix passed.

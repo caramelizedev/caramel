@@ -1,20 +1,23 @@
-#!/usr/bin/env python3
-"""Use Shards shipped with the selected contributor Crystal toolchain."""
-import os
-from pathlib import Path
-import shutil
-import sys
+#!/bin/sh
+set -eu
 
-env = os.environ.copy()
-root = env.get("CARAMEL_TOOLCHAIN_ROOT")
-if root:
-    base = Path(root).resolve()
-    compiler = base / "data/installs/github-crystal-lang-crystal/1.21.0"
-    binary = compiler / "embedded/bin/shards"
-    env["PATH"] = str(compiler / "bin") + ":" + env.get("PATH", "")
-    env["SHARDS_CACHE_PATH"] = str(base / "shards-cache")
-else:
-    binary = shutil.which("shards")
-if not binary or not Path(binary).is_file() or Path(binary).resolve() == Path(__file__).resolve():
-    sys.exit("Shards is unavailable. Set CARAMEL_TOOLCHAIN_ROOT to the verified installation.")
-os.execve(str(binary), [str(binary), *sys.argv[1:]], env)
+unavailable() {
+    echo 'Shards is unavailable. Set CARAMEL_TOOLCHAIN_ROOT to the verified installation.' >&2
+    exit 1
+}
+
+if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
+    BINARY=$(command -v shards || true)
+    [ -n "$BINARY" ] && [ -f "$BINARY" ] || unavailable
+    [ "$(/bin/realpath -- "$BINARY")" != "$(/bin/realpath -- "$0")" ] || unavailable
+else
+    BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
+    CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
+    BINARY=$CRYSTAL_ROOT/embedded/bin/shards
+    PATH=$CRYSTAL_ROOT/bin:${PATH-}
+    SHARDS_CACHE_PATH=$BASE/shards-cache
+    export PATH SHARDS_CACHE_PATH
+fi
+
+[ -f "$BINARY" ] || unavailable
+exec "$BINARY" "$@"

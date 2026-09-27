@@ -6,7 +6,7 @@ The intended workflow combines PostgreSQL, server-rendered HTML with bundled htm
 
 ## Current state
 
-The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped compiled views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check-frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
+The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped compiled views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
 
 Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configuration, a shared service daemon and a native macOS menu client. Disposable integration checks cover service startup, crash recovery, two-site HTTPS and database retention. Its fixed macOS resolver/port installer passed review; applying that system installation awaits explicit authorization. System-resolved, browser-trusted HTTPS remains an acceptance gate.
 
@@ -20,6 +20,7 @@ The application workflow branch adds a narrow typed model API, Caramel Core (com
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
 - [Resumable toolchain installer component](docs/research/toolchain-installer.md)
+- [Optional Crystal editor tools (Zed)](docs/editor-tools.md)
 
 ## Contributor checks
 
@@ -28,13 +29,13 @@ Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) 
 ```sh
 scripts/shards install --frozen
 scripts/crystal spec spec/caramel
-scripts/check-views
-scripts/check-compiler
-scripts/check-model-compilation
-scripts/check-route-compilation
-scripts/check-contract-compilation
-scripts/check-toolchain-paths
-scripts/integration
+scripts/check views
+scripts/check compiler
+scripts/check model-compilation
+scripts/check route-compilation
+scripts/check contract-compilation
+scripts/check toolchain-paths
+scripts/check integration
 ```
 
 The integration command creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS/certificate trust. Ordinary system-installed Crystal and Shards can also be used for unit tests when `CARAMEL_TOOLCHAIN_ROOT` is absent; the integration harness requires the pinned managed tools.
@@ -44,15 +45,18 @@ Latte contributor checks additionally require the pinned CoreDNS artifact and th
 ```sh
 scripts/install-latte-tools --help
 scripts/build-latte
-scripts/check-latte-postgres
-scripts/check-latte-network
-scripts/check-latte-daemon
+scripts/check latte-postgres
+scripts/check latte-network
+scripts/check latte-daemon
+scripts/check native
 scripts/build-frappe
-scripts/check-frappe-project
-scripts/check-frappe-project --dev
-scripts/check-dev-child
-scripts/check-dev-retirement
-scripts/check-runtime-diagnostics
+scripts/check frappe-project
+scripts/check frappe-project --dev
+scripts/check dev-child
+scripts/check dev-retirement
+scripts/check runtime-diagnostics
 ```
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
+
+Optional language servers for Zed and other editors: `scripts/build-frappe`, `bin/frappe lsp install`, then `scripts/check editor-tools`; see [docs/editor-tools.md](docs/editor-tools.md).

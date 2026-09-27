@@ -6,7 +6,7 @@ require "socket"
 require "../../src/caramel/database"
 require "../../src/latte/postgres"
 
-root = ENV["CARAMEL_LATTE_ROOT"]? || raise "CARAMEL_LATTE_ROOT is required; run scripts/check-latte-postgres"
+root = ENV["CARAMEL_LATTE_ROOT"]? || raise "CARAMEL_LATTE_ROOT is required; run scripts/check latte-postgres"
 project = ENV["CARAMEL_LATTE_PROJECT"]? || raise "CARAMEL_LATTE_PROJECT is required"
 paths = Caramel::Latte::Paths.new(root)
 toolchain = Caramel::Latte::Toolchain.new

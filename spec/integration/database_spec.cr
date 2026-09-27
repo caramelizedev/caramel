@@ -2,9 +2,9 @@ require "spec"
 require "../../src/caramel/database"
 require "../../src/caramel/migration"
 
-# Only scripts/integration supplies these URLs for its newly owned cluster.
+# Only scripts/check integration supplies these URLs for its newly owned cluster.
 # Never accept DATABASE_URL: integration checks must not target application data.
-url = ENV["CARAMEL_OWNED_SPEC_URL"]? || raise "Run scripts/integration; no owned test database provided"
+url = ENV["CARAMEL_OWNED_SPEC_URL"]? || raise "Run scripts/check integration; no owned test database provided"
 
 describe "PostgreSQL integration" do
   it "binds SQL-looking input and uses a distinct non-superuser spec database" do

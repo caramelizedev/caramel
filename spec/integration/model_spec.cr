@@ -3,7 +3,7 @@ require "../../src/caramel/database"
 require "../fixtures/models/application_record"
 require "../fixtures/models/identity_record"
 
-url = ENV["CARAMEL_OWNED_SPEC_URL"]? || raise "Run scripts/integration; no owned test database provided"
+url = ENV["CARAMEL_OWNED_SPEC_URL"]? || raise "Run scripts/check integration; no owned test database provided"
 
 describe "Typed models with PostgreSQL" do
   it "saves models without timestamps, including an identity-only record" do

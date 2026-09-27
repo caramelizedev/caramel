@@ -1,9 +1,0 @@
-mise by @jdx – installing 5 tools
-mise ⇢ github:crystal-lang/crystal@1.21.0  2ms · already installed
-mise ⇢ aqua:caddyserver/caddy@2.11.4       0ms · already installed
-mise ⇢ conda:postgresql@18.6               0ms · already installed
-mise ⇢ conda:openssl@3.6.4                 0ms · already installed
-mise ⇢ conda:pkgconf@3.0.7                 0ms · already installed
-mise ████████████████ 5/5 · installed 0 tools · 5 already installed in 3ms
-mise all tools are installed
-{"args": ["install", "--locked"], "seconds": 0.036, "exit": 0}

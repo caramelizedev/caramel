@@ -14,7 +14,7 @@ Frappé remains the application developer's interface. Shards owns Crystal appli
 
 ## Evidence
 
-See [artifact inventory](../research/toolchain-artifacts.md) and [installation evidence](../research/toolchain-installation.md).
+See [artifact inventory](../research/toolchain-artifacts.md).
 
 | Check | Observed result |
 | --- | --- |

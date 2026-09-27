@@ -1,6 +1,6 @@
 # Native menu integration review
 
-The Swift client builds, and `scripts/check-latte-ipc` passes against the real Crystal Unix-socket server with kernel peer-UID checks, mode-0600 socket, JSON status/site responses, and a service command. That fixture's service controller has no database/proxy side effects. The separate daemon check also exercises native client status against the real supervisor and its services. Interactive menu acceptance remains pending.
+The Swift client builds, and `scripts/check latte-ipc` passes against the real Crystal Unix-socket server with kernel peer-UID checks, mode-0600 socket, JSON status/site responses, and a service command. That fixture's service controller has no database/proxy side effects. The separate daemon check also exercises native client status against the real supervisor and its services. Interactive menu acceptance remains pending.
 
 ## Resolved compliance findings
 

@@ -7,7 +7,7 @@ end
 
 directory = ARGV[0]
 environment = {"PATH" => "/usr/bin:/bin"}
-child = Caramel::Frappe::DevCommand.new(["/usr/bin/python3", File.join(directory, "resistant.py")], environment, directory)
+child = Caramel::Frappe::DevCommand.new(["/bin/sh", "-c", "trap \"\" TERM; printf '%s' \"$$\" > ready; while :; do /bin/sleep 1; done"], environment, directory)
 retirement = Caramel::Frappe::DevRetirement.new
 begin
   deadline = Time.instant + 5.seconds

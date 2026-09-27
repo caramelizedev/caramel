@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "ameba-ls": {
+    "version": "0.2.0",
+    "url": "https://github.com/crystal-ameba/ameba-ls/releases/download/v0.2.0/ameba-ls-0.2.0-darwin-aarch64.tar.gz",
+    "archive_sha256": "6aed16bbb797ab0df5123668ae8af3d84f4365cc1ae0278345ba4f0ec5302d0a",
+    "binary_sha256": "bb49721559fcb986751d1d56f1677fa24323b632a4a3cd3ad836158c78f1cb3e",
+    "license": "MIT",
+    "license_url": "https://raw.githubusercontent.com/crystal-ameba/ameba-ls/v0.2.0/LICENSE"
+  },
+  "crystalline": {
+    "version": "0.20.0",
+    "git": "https://github.com/elbywan/crystalline.git",
+    "commit": "a5f6f1bb9d55decf507138da7b2c47628ee15328",
+    "reported_version": "0.20.0+a5f6f1b",
+    "crystal": "1.21.0",
+    "license": "MIT",
+    "license_url": "https://raw.githubusercontent.com/elbywan/crystalline/v0.20.0/LICENSE"
+  },
+  "llvmdev": {
+    "version": "15.0.7",
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/llvmdev-15.0.7-h4429f82_5.conda",
+    "sha256": "f3d4009d64a5dd2755a90437162fb447879181f1b80fac42982c5827ef94fa3e",
+    "license": "Apache-2.0 WITH LLVM-exception"
+  }
+}

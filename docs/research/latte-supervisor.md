@@ -6,9 +6,9 @@ The shared Crystal supervisor now starts PostgreSQL, CoreDNS and Caddy asynchron
 
 `spec/latte_integration/supervisor_spec.cr` exercises a new disposable cluster, actual DNS/proxy startup, project registration/provisioning, local CA creation, exact CA fingerprint generation, refusal to overwrite a different recorded authority, and explicit service shutdown retaining PG_VERSION. It does not install trust.
 
-`scripts/check-latte-daemon` exercises the compiled daemon and native Swift client. It verifies single-instance exclusion, kills the daemon, starts a replacement, verifies adoption of the same Caddy PID and retained registry, then explicitly stops shared services. All fixtures use fresh private temporary state and remove it after confirming PostgreSQL stopped.
+`scripts/check latte-daemon` exercises the compiled daemon and native Swift client. It verifies single-instance exclusion, kills the daemon, starts a replacement, verifies adoption of the same Caddy PID and retained registry, then explicitly stops shared services. All fixtures use fresh private temporary state and remove it after confirming PostgreSQL stopped.
 
-The combined runtime/Latte suite passes 67 examples, including deadline, retention and failed-start cleanup. The rebuilt daemon crash/adoption check passed. Native menu protocol tests include a continuous 50 ms trickle to verify its aggregate response deadline, and pass seven cases, including failed-service diagnostics and protocol-version validation. The complete Python installer/menu/relay/provider suite passes 26 tests.
+The combined runtime/Latte suite passes 67 examples, including deadline, retention and failed-start cleanup. The rebuilt daemon crash/adoption check passed. Native menu protocol tests include a continuous 50 ms trickle to verify its aggregate response deadline, and pass seven cases, including failed-service diagnostics and protocol-version validation. `scripts/check native` covers the native menu client, port relay and all three installers.
 
 The root-only system installer has only been prepared and unit-tested. No `/etc/resolver/caramel`, LaunchDaemon or user keychain change has been applied by this milestone. System-resolved/browser-trusted HTTPS and actual launchd socket activation remain acceptance gates.
 

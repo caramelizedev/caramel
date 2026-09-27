@@ -49,11 +49,11 @@ Generation preflights every destination and requires a unique insertion marker i
 
 ## Verification
 
-`scripts/check-frappe-project` executes the real CLI in disposable state. It creates Book and mixed-scalar Person resources, compiles the app, applies migrations and runs generated request specs against separately provisioned PostgreSQL databases. Those specs exercise persisted create/update/delete, rendering, escaping, CSRF rejection, invalid-input responses and native/enhanced response contracts. The harness also checks clone setup with fresh credentials, retained edits, failed dependency installation followed by setup recovery, and development data retention when running specs. Pointing the spec URL at development is refused before migration or test execution.
+`scripts/check frappe-project` executes the real CLI in disposable state. It creates Book and mixed-scalar Person resources, compiles the app, applies migrations and runs generated request specs against separately provisioned PostgreSQL databases. Those specs exercise persisted create/update/delete, rendering, escaping, CSRF rejection, invalid-input responses and native/enhanced response contracts. The harness also checks clone setup with fresh credentials, retained edits, failed dependency installation followed by setup recovery, and development data retention when running specs. Pointing the spec URL at development is refused before migration or test execution.
 
 The final HTTP check serves the generated application through Caddy on a private test port with a named Host and explicitly supplied fixture CA. It establishes native app/proxy/TLS behavior; it does not establish system DNS, browser certificate trust, public port 443, or real htmx interaction.
 
-Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check-route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation.
+Unit specs cover configuration, literal environment parsing, secret preservation, private IPC, generation conflicts, route binding, redirects and CLI grammar. `scripts/check route-compilation` verifies that undefined actions, missing contracts, route/contract mismatches, duplicate or ambiguous routes and wrong path-helper types fail compilation.
 
 ## Remaining gates
 

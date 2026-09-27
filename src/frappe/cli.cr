@@ -3,12 +3,13 @@ require "./latte_client"
 require "./tools"
 require "./resource_generator"
 require "./dev_session"
+require "./editor_tools"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    COMMANDS = %w(new setup dev make migrate seed routes test services sites doctor open)
+    COMMANDS = %w(new setup dev make migrate seed routes test services sites doctor open lsp)
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
     end
@@ -34,7 +35,7 @@ module Caramel::Frappe
         @output.puts(usage(command))
         return 0
       end
-      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "services"}.includes?(command) && !args.empty?)
+      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "services", "lsp"}.includes?(command) && !args.empty?)
         @error.puts(usage(command))
         return 2
       end
@@ -118,6 +119,8 @@ module Caramel::Frappe
         end
       when "doctor"
         return doctor
+      when "lsp"
+        return lsp(args)
       when "open"
         project = Project.load
         verify_origin(project)
@@ -195,6 +198,23 @@ module Caramel::Frappe
       tools.specs(project, args, values)
     end
 
+    private def lsp(args : Array(String)) : Int32
+      action = args.shift?
+      if action == "install" && args.empty?
+        tools = Tools.new(@framework_root, @output, @error)
+        EditorTools.new(@framework_root, @output, @error).install(tools)
+      elsif action && EditorTools::SERVERS.includes?(action)
+        directory = File.realpath(Dir.current)
+        # Outside the framework checkout, the project must match this installation.
+        Project.load unless directory == File.realpath(@framework_root)
+        EditorTools.new(@framework_root, @output, @error).exec(action, args, directory)
+      else
+        @error.puts(usage("lsp"))
+        return 2
+      end
+      0
+    end
+
     private def services(args : Array(String)) : Int32
       client = LatteClient.new
       case args
@@ -260,6 +280,7 @@ module Caramel::Frappe
       when "new"      then "frappe new NAME"
       when "test"     then "frappe test [SPEC_OPTIONS]"
       when "services" then "frappe services [status|start|stop]"
+      when "lsp"      then "frappe lsp crystalline|ameba-ls [SERVER_ARGS] | frappe lsp install"
       else                 "frappe #{command}"
       end
     end

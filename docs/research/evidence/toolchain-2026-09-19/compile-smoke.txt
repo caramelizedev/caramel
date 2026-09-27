@@ -1,3 +1,0 @@
-Fresh-cache smoke command: ["/Library/Developer/CommandLineTools/usr/bin/python3", "<EVAL>/run-mise.py", "exec", "--", "env", "PKG_CONFIG_LIBDIR=<EVAL>/data/installs/conda-openssl/3.6.4/lib/pkgconfig", "CRYSTAL_CACHE_DIR=<EVAL>/crystal-cold-2", "crystal", "build", "smoke.cr", "-o", "<EVAL>/project/smoke", "--link-flags=-Wl,-rpath,<EVAL>/data/installs/conda-openssl/3.6.4/lib"]
-{"args": ["exec", "--", "env", "PKG_CONFIG_LIBDIR=<EVAL>/data/installs/conda-openssl/3.6.4/lib/pkgconfig", "CRYSTAL_CACHE_DIR=<EVAL>/crystal-cold-2", "crystal", "build", "smoke.cr", "-o", "<EVAL>/project/smoke", "--link-flags=-Wl,-rpath,<EVAL>/data/installs/conda-openssl/3.6.4/lib"], "seconds": 1.626, "exit": 0}
-{"message":"Caramel","regex":"0"}

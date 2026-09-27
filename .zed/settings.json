@@ -1,0 +1,15 @@
+{
+  "languages": {
+    "Crystal": {
+      "language_servers": ["crystalline", "ameba-ls"]
+    }
+  },
+  "lsp": {
+    "crystalline": {
+      "binary": { "path": "bin/frappe", "arguments": ["lsp", "crystalline"] }
+    },
+    "ameba-ls": {
+      "binary": { "path": "bin/frappe", "arguments": ["lsp", "ameba-ls"] }
+    }
+  }
+}

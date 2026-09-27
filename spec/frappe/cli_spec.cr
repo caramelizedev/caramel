@@ -1,4 +1,5 @@
 require "spec"
+require "file_utils"
 require "../../src/frappe/cli"
 
 describe Caramel::Frappe::CLI do
@@ -23,5 +24,27 @@ describe Caramel::Frappe::CLI do
     cli.run(["new"]).should eq(2)
     errors.to_s.should contain("frappe new NAME")
     cli.run(["make", "resource"]).should eq(2)
+  end
+
+  it "routes frappe lsp to a known server only after the project version check" do
+    output, errors = IO::Memory.new, IO::Memory.new
+    cli = Caramel::Frappe::CLI.new(File.expand_path("../..", __DIR__), output, errors)
+    cli.run(["--help"]).should eq(0)
+    output.to_s.should contain("frappe lsp crystalline|ameba-ls")
+    cli.run(["lsp"]).should eq(2)
+    errors.to_s.should contain("frappe lsp crystalline|ameba-ls")
+    errors.clear
+    cli.run(["lsp", "liger"]).should eq(2)
+    errors.to_s.should contain("frappe lsp crystalline|ameba-ls")
+    errors.clear
+    project = File.tempname("caramel-lsp-project-")
+    Dir.mkdir(project)
+    begin
+      File.write(File.join(project, ".caramel-version"), "0.0.0\n")
+      Dir.cd(project) { cli.run(["lsp", "ameba-ls"]) }.should eq(1)
+      errors.to_s.should contain("Project framework version differs from Frappé #{Caramel::VERSION}; use its matching Caramel installation")
+    ensure
+      FileUtils.rm_rf(project)
+    end
   end
 end

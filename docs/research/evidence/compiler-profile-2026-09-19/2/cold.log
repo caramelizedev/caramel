@@ -1,22 +1,0 @@
-Parse:                            Parse:                             00:00:00.000160125 (   1.17MB)
-Semantic (top level):             Semantic (top level):              00:00:00.403377166 ( 146.97MB)
-Semantic (new):                   Semantic (new):                    00:00:00.001512125 ( 146.97MB)
-Semantic (type declarations):     Semantic (type declarations):      00:00:00.021306709 ( 162.97MB)
-Semantic (abstract def check):    Semantic (abstract def check):     00:00:00.009549250 ( 162.97MB)
-Semantic (restrictions augmenter):Semantic (restrictions augmenter): 00:00:00.006137125 ( 162.97MB)
-Semantic (ivars initializers):    Semantic (ivars initializers):     00:00:00.011697000 ( 178.97MB)
-Semantic (cvars initializers):    Semantic (cvars initializers):     00:00:00.117267209 ( 211.02MB)
-Semantic (main):                  Semantic (main):                   00:00:19.376873292 ( 676.89MB)
-Semantic (cleanup):               Semantic (cleanup):                00:00:00.000610333 ( 676.89MB)
-Semantic (recursive struct check):Semantic (recursive struct check): 00:00:00.000903709 ( 676.89MB)
-Codegen (crystal):                Codegen (crystal):                 00:00:00.539251542 ( 692.89MB)
-Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                 Codegen (bc+obj):                  00:00:00.962259292 ( 692.89MB)
-Codegen (linking):                Codegen (linking):                 00:00:00.211626500 ( 692.89MB)
-dsymutil:                         dsymutil:                          00:00:00.186618334 ( 692.89MB)
-
-Macro runs:
- - /private/tmp/caramel-compiler-profile-hj6a42pb/2/bookshelf/lib/caramel/src/caramel/view/compiler.cr: 00:00:08.616219000
- - /private/tmp/caramel-compiler-profile-hj6a42pb/2/toolchain/data/installs/github-crystal-lang-crystal/1.21.0/src/ecr/process.cr: 00:00:08.594211667
-
-Codegen (bc+obj):
- - no previous .o files were reused

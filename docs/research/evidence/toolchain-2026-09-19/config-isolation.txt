@@ -1,5 +1,0 @@
-Ancestor .miserc.toml sentinel excluded by ceiling; MISE_ENV explicitly empty.
-<EVAL>/system-config/empty.toml   (none)
-<EVAL>/config/empty.toml          (none)
-<EVAL>/project/caramel-eval.toml  github:crystal-lang/crystal, aqua:caddyserver/caddy, conda:postgresql, conda:openssl, conda:pkgconf
-{"args": ["config", "ls"], "seconds": 0.015, "exit": 0}

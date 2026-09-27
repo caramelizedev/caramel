@@ -1,7 +1,0 @@
-mise by @jdx – installing 1 tool
-mise ✓ conda:openssl@3.6.4  455ms
-mise ████████████████ 1/1 · installed 1 tool in 459ms
-mise WARN  conda:openssl installed but not activated — it is not in any config file.
-To install and activate, run:
-  mise use conda:openssl
-{"args": ["install", "conda:openssl@3.6.4"], "seconds": 0.589, "exit": 0}
