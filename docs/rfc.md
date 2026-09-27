@@ -608,7 +608,7 @@ Latte manages the local substrate using direct POSIX host process signals ([ADR 
   * Explicit `.localhost` names resolve natively ([ADR 0006](decisions/0006-browser-acceptance-and-localhost-sites.md)).
   * The owner-run system installer adds the `/etc/resolver/caramel` entry and the launchd relay for ports 80/443. `latte trust install` adds the CA to the user's keychain. Latte never installs trust implicitly.
 * **Kernel File Watching:** Latte watches source directories using `kqueue` on macOS, the platform Latte supports (`EVFILT_VNODE` on every watched file and directory).
-  * Changes trigger an instant semantic AST rebuild (`crystal build --no-codegen`) before any code generation.
+  * Each change triggers a semantic type check (`crystal build --no-codegen`) before any code generation.
   * A type error appears on the site's error page and in the terminal without building native code.
   * The feedback-time target of under 200ms is a deferred performance goal.
 
@@ -701,14 +701,14 @@ frappe expand FILE:LINE:COL  # Print the plain Crystal that the macro call at FI
 
 `frappe check` parses real compiler output. It classifies each diagnostic as `CONTRACT_MISMATCH`, `N_PLUS_ONE`, `UNDEFINED_METHOD`, `UNDEFINED_CONSTANT`, `NO_OVERLOAD`, `SYNTAX` or `COMPILE`, and prints it in one of two modes:
 
-* **Mode A: Human Interactive (TTY Output, or `--human`):** Full-color ANSI formatting in RFC-0008 §2.6's layout, showing:
+* **Mode A: Human Interactive (TTY Output, or `--human`):** RFC-0008 §2.6's layout, in ANSI colour when stdout is a TTY, showing:
   * the exact file and line in a box;
   * the source line, with a caret pointing to the violation;
   * formatted remediation advice.
 * **Mode B: Agent Execution (`--agent` or Non-TTY Piped Stream):** Strips all ANSI codes and formatting boilerplate. The output is a **Dense Diagnostic Text (MRDP)** payload whose token savings are a deferred measurement:
 
 ```text
-ERR CONTRACT_MISMATCH:422 at src/app/actions/teams/create.cr:14:5
+ERR CONTRACT_MISMATCH:422 at app/actions/teams/create.cr:14:5
 NODE: RequestContract
 MISSING: tenant_id:String
 PATCH: INSERT "field tenant_id : String" AT 15:7
