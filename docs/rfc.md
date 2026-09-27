@@ -415,7 +415,7 @@ ranked = SugarORM.sql(<<-SQL, 30.days.ago, as: {team_id: Int64, total: Int64, ra
 
 # RFC-0003: Caramel Cold Brew (Concurrency, Queues, & Real-Time PubSub)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0009](decisions/0009-cold-brew-queue-pubsub-cache.md))
 
 **Classification:** Concurrency & Real-Time Engine
 
@@ -431,11 +431,11 @@ Caramel Cold Brew collapses this entire infrastructure footprint into PostgreSQL
 
 #### 2.1. The Atomic Queue Substrate (`SKIP LOCKED`)
 
-All background jobs are written to the `caramel_jobs` table inside the *same database transaction* as application business logic.
+All background jobs are written to the `caramel_jobs` table inside the *same database transaction* as application business logic. `T.enqueue` writes through `SugarORM::Repo`'s current connection, so inside `SugarORM::Repo.transaction` a job commits or rolls back with the business write. The table is a framework migration (`Caramel::ColdBrew::MIGRATIONS`) that every generated application applies first ([ADR 0009](decisions/0009-cold-brew-queue-pubsub-cache.md)):
 
 ```sql
 CREATE TABLE caramel_jobs (
-  id BIGSERIAL PRIMARY KEY,
+  id BIGINT GENERATED ALWAYS AS IDENTITY,
   queue TEXT NOT NULL DEFAULT 'default',
   class_name TEXT NOT NULL,
   payload JSONB NOT NULL,
@@ -445,21 +445,47 @@ CREATE TABLE caramel_jobs (
   locked_at TIMESTAMPTZ,
   locked_by TEXT,
   failed_at TIMESTAMPTZ,
-  last_error TEXT
-);
+  last_error TEXT,
+  enqueued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ,
+  PRIMARY KEY (id, enqueued_at)
+) PARTITION BY RANGE (enqueued_at);
 
-CREATE INDEX idx_caramel_jobs_fetch 
-ON caramel_jobs (queue, run_at, priority DESC) 
-WHERE locked_at IS NULL AND failed_at IS NULL;
+CREATE INDEX caramel_jobs_fetch
+ON caramel_jobs (queue, run_at, priority DESC)
+WHERE locked_at IS NULL AND failed_at IS NULL AND finished_at IS NULL;
 
 ```
 
-#### 2.2. Worker Fiber Loop
-
-Cold Brew spawns a configurable pool of green execution fibers within the single host binary:
+Jobs are typed values with retry policies (RFC-0008 §2.3):
 
 ```crystal
-# src/caramel/cold_brew/worker.cr
+# app/jobs/send_invitation.cr
+struct SendInvitation < Caramel::ColdBrew::Job
+  queue "mailers"
+  retry_on Stripe::RateLimitError, attempts: 5, backoff: :exponential, base: 2.seconds
+  param invite_id : Int64
+
+  def perform
+    # …
+  end
+end
+
+SugarORM::Repo.transaction do
+  invite = Invite.create!(email: "elena@acme.com")
+  SendInvitation.enqueue(invite_id: invite.id)   # same transaction: no dual write
+end
+```
+
+* **Enqueue:** `enqueue` takes `run_at:` and `priority:`. Unknown keywords are compile errors.
+* **Retry rules:** `Caramel::ColdBrew::Job.retry_on` adds global rules. A job's own rules win, then its parents', then the global rules, then the default of 3 exponential attempts from 1 s.
+
+#### 2.2. Worker Fiber Loop
+
+Cold Brew spawns a configurable pool of green execution fibers within the single host binary. The generated application's `serve` starts it, unless `CARAMEL_ENV=test`, with `Caramel::ColdBrew.start(database_url)`. The queues and per-queue concurrency come from `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`. It uses its own connection pool and stops gracefully on SIGTERM:
+
+```crystal
+# src/caramel/cold_brew/worker.cr (simplified)
 module Caramel::ColdBrew
   class Worker
     def initialize(@queue = "default", @concurrency = 16)
@@ -468,41 +494,47 @@ module Caramel::ColdBrew
     def start
       @concurrency.times do
         spawn do
-          loop do
-            job = poll_next_job(@queue)
-            if job
-              process(job)
-            else
+          until @stopping
+            if job = claim(@queue)            # the query below, on this fiber's bound connection
+              run(job)                        # perform + finished_at = now() in one transaction;
+            else                              # a failure reschedules with backoff or sets failed_at
               sleep 50.milliseconds
             end
           end
         end
       end
     end
-
-    private def poll_next_job(queue : String) : Job?
-      query = <<-SQL
-        WITH selected AS (
-          SELECT id FROM caramel_jobs
-          WHERE queue = $1 AND run_at <= NOW() AND locked_at IS NULL AND failed_at IS NULL
-          ORDER BY priority DESC, id ASC
-          LIMIT 1
-          FOR UPDATE SKIP LOCKED
-        )
-        UPDATE caramel_jobs
-        SET locked_at = NOW(), locked_by = pg_backend_pid()::text, attempts = attempts + 1
-        WHERE id = (SELECT id FROM selected)
-        RETURNING id, class_name, payload, attempts;
-      SQL
-    end
   end
 end
 
 ```
 
+```sql
+WITH selected AS (
+  SELECT id, enqueued_at FROM caramel_jobs
+  WHERE queue = $1 AND run_at <= NOW() AND locked_at IS NULL AND failed_at IS NULL AND finished_at IS NULL
+  ORDER BY priority DESC, id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE caramel_jobs AS jobs
+SET locked_at = NOW(), locked_by = pg_backend_pid()::text, attempts = attempts + 1
+FROM selected
+WHERE jobs.id = selected.id AND jobs.enqueued_at = selected.enqueued_at
+RETURNING jobs.id, jobs.class_name, jobs.payload, jobs.attempts;
+```
+
+* **Scheduler:** `Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }` is the charter's in-process scheduler. Each tick takes a database lease (`pg_try_advisory_xact_lock` plus a `caramel_schedules` row), so exactly one process runs each period.
+* **Maintenance fiber:** It releases stale locks whose backend is gone.
+
 #### 2.3. Real-Time PubSub via SSE
 
-Cold Brew eliminates WebSockets for hypermedia updates. It dedicates a pool of listener fibers to PostgreSQL's `LISTEN / NOTIFY` stream, bridging database events directly into Server-Sent Events (SSE) connections running over HTTP/1.1 or HTTP/2.
+Cold Brew eliminates WebSockets for hypermedia updates. It dedicates one listener connection per process to PostgreSQL's `LISTEN / NOTIFY` stream. That connection reconnects with backoff and re-`LISTEN`s. The broker bridges database events directly into Server-Sent Events (SSE) connections running over HTTP/1.1 or HTTP/2.
+
+* **Publish:** `Caramel::ColdBrew.publish(channel, payload)` runs `pg_notify` on the current Repo connection, so it is delivered only if its transaction commits.
+* **Delivery:** Each subscriber has an ordered mailbox, and delivery never blocks the broker.
+* **Lifetime:** A subscription ends when its owning fiber dies, so the action below does not leak. `subscribe(channel) { |events| … }` unsubscribes explicitly.
+* **Framing:** `Caramel::SSE.write(io, data, event: "BoardUpdated")` frames multi-line data.
 
 ```crystal
 struct Boards::Live < Caramel::Action
@@ -527,12 +559,16 @@ end
 
 #### 2.4. Cache Subsystem via `UNLOGGED` Tables
 
-The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table that bypasses WAL writes entirely. Reads and writes execute in microseconds over UNIX domain sockets, supporting TTL expirations through an automatic background vacuum fiber.
+The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table (`caramel_cache`) that bypasses WAL writes entirely. Reads and writes go over UNIX domain sockets on the current Repo connection:
+
+* **API:** `write(key, value, expires_in:)`, `read`, `fetch(key, expires_in:) { … }`, `delete` and `clear`.
+* **Expiry:** TTL expirations are handled by the automatic background maintenance fiber, which vacuums expired rows every 60 s. Expired entries read as `nil` before that.
 
 ### 3. Failure Modes & Mitigations
 
 * **PostgreSQL WAL Bloat Under High Job Volume:** Rapidly inserting, updating, and deleting hundreds of thousands of jobs can saturate write-ahead logs and lead to table bloat.  
-  *Mitigation:* Cold Brew uses time-partitioned tables (`caramel_jobs_pYYYY_MM_DD`) allowing completed jobs to be dropped via partition truncation rather than individual row `DELETE` queries, preventing VACUUM saturation.
+  *Mitigation:* Cold Brew uses time-partitioned tables (`caramel_jobs_pYYYY_MM_DD`). Finished jobs are marked, not deleted. Once every row in a partition past the retention window (7 days by default) is finished or failed, the maintenance fiber drops the whole partition, so completed jobs never need individual row `DELETE` queries and VACUUM is not saturated.
+  * Partition DDL runs through two `SECURITY DEFINER` functions owned by the migration role. The least-privileged runtime role can therefore create tomorrow's partitions and drop old ones.
 
 ---
 
@@ -655,7 +691,7 @@ PATCH: INSERT "field tenant_id : String" AT 14:5
 
 # RFC-0006: Caramel Corretto (Zero-Mock Integration Testing)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0010](decisions/0010-corretto-harness.md))
 
 **Classification:** Quality Assurance & Verification
 
@@ -671,7 +707,12 @@ Caramel Corretto enforces an **integration-first, zero-mock testing harness** th
 
 #### 2.1. The Subcutaneous Testing Boundary
 
-Corretto asserts exclusively against **observable ingress, database state, and hypermedia egress**. Mocking internal Crystal classes or methods is strictly forbidden.
+Corretto asserts exclusively against **observable ingress, database state, and hypermedia egress**. Mocking internal Crystal classes or methods is strictly forbidden, and this is enforced in two places:
+
+* Loading a mocking library is a compile error.
+* `frappe corretto` refuses spec files that call mocking APIs, naming the file and line.
+
+Generated applications `require "caramel/corretto"` in `spec/spec_helper.cr` ([ADR 0010](decisions/0010-corretto-harness.md)).
 
 ```crystal
 # spec/actions/teams/create_spec.cr
@@ -708,23 +749,32 @@ end
 
 ```
 
+* **The client** drives `Caramel::Application#handle` in-process on the example's own connection. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and offers `get`, `post`, `put`, `patch`, `delete` and `follow_redirect`.
+* **`sign_in(user)`** writes `user_id` into the signed `Caramel::Session` cookie. Actions read it through `session`.
+* **Matchers:** `have_status`, `render_partial(target, swap:)`, `redirect_to`, `have_header`, `render_page` and `have_row(Schema, **conditions)`.
+
 #### 2.2. Three-Tier Isolation Lifecycle
 
-1. **Tier 1 (Worker Suite Boot):** Spins up one isolated database branch per parallel test worker thread using Latte (`CREATE DATABASE worker_1 TEMPLATE caramel_test_template`).
-2. **Tier 2 (Per-Test Savepoints):** Every `it` block runs inside a PostgreSQL `SAVEPOINT`. Upon test completion, `ROLLBACK TO SAVEPOINT` executes in **<1ms**, eliminating catalog cloning overhead between individual tests.
-3. **Tier 3 (Catalog Reset):** The branch is torn down and recreated only if un-rollbackable DDL operations are executed.
+1. **Tier 1 (Worker Suite Boot):** `frappe corretto` migrates the spec database once. It then spins up one isolated database per parallel test worker through Latte, cloned behind the connection guard (`CREATE DATABASE caramel_spec_<site>_w1 TEMPLATE caramel_spec_<site>`). Each worker is a separately compiled spec binary with its own database URL.
+2. **Tier 2 (Per-Test Savepoints):** Every `it` block runs inside a PostgreSQL `SAVEPOINT` on the worker's single connection, which is bound to the example's fiber with `SugarORM::Repo.bind`. The example's in-process requests and drained jobs share that transaction. Upon test completion, `ROLLBACK TO SAVEPOINT` undoes everything, eliminating catalog cloning overhead between individual tests.
+3. **Tier 3 (Catalog Reset):** Corretto fingerprints the public catalog at boot and checks it after every example. The worker database is torn down and recreated from the migrated template only if un-rollbackable DDL changed the catalog. Corretto names the example that did it. Examples tagged `catalog` run outside the savepoint, on a migration-role connection, and always reset.
 
 #### 2.3. Synchronous Queue Drain Mode
 
 In an integration test, background asynchronous polling is a liability. Corretto forces Cold Brew into **Synchronous Queue Drain Mode**:
 
-* Fibers do not poll in the background during tests.
+* Fibers do not poll in the background during tests: `serve` starts no workers under `CARAMEL_ENV=test`.
 * The test harness explicitly executes all enqueued jobs on demand via `Caramel::ColdBrew.drain_queue!(db, "queue_name")`.
+  * The drain repeats until the queue is empty, including jobs that jobs enqueue.
+  * It raises `Caramel::ColdBrew::DrainFailure`, listing every failed job.
+  * Jobs scheduled in the future are skipped unless `include_scheduled: true` is passed.
 * Tests never write `sleep()` statements.
 
 #### 2.4. Wire-Level External Fakes
 
-External third parties (Stripe, Twilio, AWS) are never mocked by monkey-patching language methods. Corretto runs a lightweight, local socket-level HTTP proxy that matches incoming outbound requests and returns static, recorded responses:
+External third parties (Stripe, Twilio, AWS) are never mocked by monkey-patching language methods.
+
+Applications call them through `Caramel::Outbound`. It connects directly in production. In specs it sends real absolute-form HTTP/1.1 requests to a lightweight local socket-level proxy started by Corretto, which matches them by method and URL and returns static, recorded responses from `spec/fixtures/wire/`:
 
 ```crystal
 Corretto.stub_wire("https://api.stripe.com/v1/customers")
@@ -732,10 +782,16 @@ Corretto.stub_wire("https://api.stripe.com/v1/customers")
 
 ```
 
+* **Unmatched requests:** They receive `502 Unstubbed outbound request: METHOD URL`, so no spec can reach the network.
+* **Recording:** `Corretto.wire_requests` records what was sent.
+* **Reset:** Stubs reset after each example.
+
 ### 3. Failure Modes & Mitigations
 
 * **Test Suite Execution Creep:** As integration suites grow to thousands of tests, savepoint rollbacks and database queries accumulate run time.  
-  *Mitigation:* Corretto supports multi-core parallel worker splits (`caramel corretto --concurrency=8`), pairing each worker thread with an independent, pre-seeded Latte database branch.
+  *Mitigation:* Corretto supports multi-core parallel worker splits (`frappe corretto --concurrency=8`, 1 to 8 workers).
+  * Each worker is paired with an independent Latte database cloned from the migrated spec template.
+  * Spec files are split round-robin, and output is prefixed per worker. The exit status fails if any worker fails.
 * **Flaky Asynchronous Assertions:** Background jobs executing on polling loops cause timing races and force flaky `sleep()` calls.  
   *Mitigation:* Queues run in **Synchronous Drain Mode** during tests. Background polling is disabled, and jobs are executed deterministically on demand via `Caramel::ColdBrew.drain_queue!`.
 
