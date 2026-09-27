@@ -196,7 +196,7 @@ Section 5 of `docs/rfc.md` now shows the repository as built ([ADR 0014](../deci
 |---|---|
 | `ARCHITECTURE.md` | `docs/rfc.md`, with ADRs in `docs/decisions/` and this matrix |
 | `bin/caramel`, `bin/latte`, `bin/roast` | `bin/` is git-ignored build output from `scripts/build-*`: `frappe`, `latte`, `latte-port-relay` and `Latte.app`. `roast` is RFC-0007 and out of scope. |
-| `src/core/**` | `src/caramel/`: `http/router.cr`, `http/request_context.cr`, `http/request_input.cr`, `http/paths.cr`, `action.cr`, `contracts/request_contract.cr`, `hypermedia.cr`, `islands.cr`, `islands.js`, `view.cr`, `session.cr` |
+| `src/core/**` | `src/caramel/http/router.cr`, `src/caramel/http/request_context.cr`, `src/caramel/http/request_input.cr`, `src/caramel/http/paths.cr`, `src/caramel/action.cr`, `src/caramel/contracts/request_contract.cr`, `src/caramel/hypermedia.cr`, `src/caramel/islands.cr`, `src/caramel/islands.js`, `src/caramel/view.cr`, `src/caramel/session.cr` |
 | `src/core/prose/**` | Absent (RFC-0008 semantic units) |
 | `src/orm/**` | `src/sugar_orm.cr` and `src/sugar_orm/`: `schema.cr`, `changeset.cr`, `query.cr`, `associations.cr`, `repo.cr`, `sql.cr`, `catalog.cr`, `introspection.cr`, `differ.cr`, `ddl.cr`, `linter.cr`, `migration.cr` |
 | `src/concurrency/**` | `src/caramel/cold_brew.cr` and `src/caramel/cold_brew/` (`job.cr`, `queue.cr`, `worker.cr`, `drain.cr`, `broker.cr`, `maintenance.cr`, `scheduler.cr`, `migrations.cr`), `src/caramel/cache.cr`, `src/caramel/sse.cr` |

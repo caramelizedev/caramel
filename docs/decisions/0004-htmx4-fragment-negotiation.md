@@ -36,5 +36,5 @@ Principles followed:
 ## Verification
 
 - `spec/caramel/action_spec.cr` covers fragments versus full pages, JSON negotiation and `HX-Location` redirects.
-- The generated `spec/requests/home_spec.cr` and resource request specs cover full and partial responses (`scripts/check frappe-project`).
+- The generated application's request specs (`templates/application/spec/requests/home_spec.cr` and `templates/resource/spec/requests/@@PLURAL@@_spec.cr`) cover full and partial responses (`scripts/check frappe-project`).
 - `scripts/check browser` shows in Safari that htmx-issued swaps receive fragments and never nest a second layout.

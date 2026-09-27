@@ -31,7 +31,7 @@
                      [ Edge Proxy: Caddy / Cloudflare ]
                                     │
                                     │ Streamlined HTTP/1.1 over UNIX Socket
-                                    │ Path: /tmp/caramel_app.sock
+                                    │ Path: <private runtime dir>/app.sock
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                 CARAMEL HOST PROCESS (SINGLE STATIC BINARY)                 │
@@ -55,7 +55,7 @@
 │              │                                             │                │
 └──────────────┼─────────────────────────────────────────────┼────────────────┘
                │                                             │
-               │ UNIX Domain Socket: /tmp/.s.PGSQL.5432      │
+               │ UNIX Socket: <private dir>/.s.PGSQL.5432    │
                ▼                                             ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     POSTGRESQL (UNIVERSAL SUBSTRATE)                        │
