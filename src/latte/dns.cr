@@ -25,10 +25,11 @@ module Caramel::Latte
 
     def write(sites : Array(Site)) : String
       ConfigFile.directory(@paths.dns_dir)
-      # Both zones are local-only. The .test system resolver is installed only
+      # Every zone is local-only. The .test system resolver is installed only
       # when explicitly chosen, never as a side effect of ordinary registration.
+      # Readiness queries every registered name, so each suffix needs a zone.
       config = String.build do |io|
-        %w(caramel test).each do |suffix|
+        Site::SUFFIXES.each do |suffix|
           zone = File.join(@paths.dns_dir, "#{suffix}.zone")
           ConfigFile.write(zone, "$ORIGIN #{suffix}.\n$TTL 1\n@ IN SOA localhost. hostmaster.#{suffix}. (1 60 60 60 1)\n  IN NS localhost.\n")
           io << "#{suffix}:#{@port} {\n    bind 127.0.0.1\n"

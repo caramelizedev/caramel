@@ -5,8 +5,12 @@ require "./paths"
 module Caramel
   module Latte
     struct Site
-      DEFAULT_SUFFIX = "caramel"
-      TEST_SUFFIX    = "test"
+      DEFAULT_SUFFIX   = "caramel"
+      TEST_SUFFIX      = "test"
+      # RFC 6761 reserves .localhost for loopback; macOS and browsers resolve
+      # its names without a system resolver entry.
+      LOCALHOST_SUFFIX = "localhost"
+      SUFFIXES         = {DEFAULT_SUFFIX, TEST_SUFFIX, LOCALHOST_SUFFIX}
 
       getter id : String
       getter name : String
@@ -83,8 +87,8 @@ module Caramel
       def self.normalize_suffix(suffix : String) : String
         StateSecurity.reject_controls!(suffix, "site suffix")
         suffix = suffix.lchop('.')
-        unless suffix == DEFAULT_SUFFIX || suffix == TEST_SUFFIX
-          raise ArgumentError.new("site suffix must be caramel or test")
+        unless SUFFIXES.includes?(suffix)
+          raise ArgumentError.new("site suffix must be caramel, test or localhost")
         end
         suffix
       end

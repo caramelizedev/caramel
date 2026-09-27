@@ -23,12 +23,18 @@ describe "Latte network configuration" do
       corefile = File.read(dns.config_file)
       corefile.should contain("bind 127.0.0.1")
       corefile.should contain("rcode REFUSED")
+      # Readiness resolves every registered name, including .localhost sites.
+      corefile.should contain("localhost:#{dns.port} {")
       corefile.should_not contain("forward")
 
       proxy = Caramel::Latte::Proxy.new(registry, https_port: 18443, http_port: 18080)
       config = JSON.parse(proxy.configuration)
       config["admin"]["listen"].as_s.should eq("unix/#{proxy.admin_socket}|0600")
-      config["apps"]["pki"]["certificate_authorities"]["caramel"]["install_trust"].as_bool.should be_false
+      # Caddy provisions its default `local` CA for automated *.localhost
+      # names; no CA it can use may install itself into trust stores.
+      authorities = config["apps"]["pki"]["certificate_authorities"].as_h
+      authorities.keys.sort.should eq(["caramel", "local"])
+      authorities.values.map { |authority| authority["install_trust"]? }.should eq([false, false])
       server = config["apps"]["http"]["servers"]["https"]
       server["listen"].as_a.map(&.as_s).should eq(["127.0.0.1:18443"])
       server["strict_sni_host"].as_bool.should be_true

@@ -70,7 +70,12 @@ module Caramel::Latte
         admin:   {listen: "unix/#{admin_socket}|0600", config: {persist: false}},
         storage: {module: "file_system", root: storage_dir},
         apps:    {
-          pki:  {certificate_authorities: {caramel: {name: "Caramel Local Authority", install_trust: false}}},
+          # Automating a name that cannot get a public certificate, such as
+          # *.localhost, makes Caddy provision its default `local` CA for a
+          # hidden internal policy; undeclared, that CA installs its root into
+          # the system, Java and NSS trust stores. Every CA stays untrusted.
+          pki: {certificate_authorities: {caramel: {name: "Caramel Local Authority", install_trust: false},
+                                          local: {install_trust: false}}},
           tls:  {certificates: {automate: domains}, automation: {policies: [{subjects: domains, issuers: [{module: "internal", ca: "caramel"}]}]}},
           http: {http_port: @http_port, https_port: @https_port, servers: {
             https: {listen: ["127.0.0.1:#{@https_port}"], strict_sni_host: true,

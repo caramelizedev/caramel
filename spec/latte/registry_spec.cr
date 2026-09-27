@@ -122,14 +122,18 @@ describe Caramel::Latte::Site do
     end
   end
 
-  it "allows the explicit test suffix and rejects other suffixes" do
+  it "allows the explicit test and localhost suffixes and rejects other suffixes" do
     root = latte_temp_root
     begin
       site = Caramel::Latte::Site.new("bookshelf", root, suffix: ".test")
       site.suffix.should eq("test")
       site.domain.should eq("bookshelf.test")
       site.origin.should eq("https://bookshelf.test")
+      local = Caramel::Latte::Site.new("bookshelf", root, suffix: "localhost")
+      local.domain.should eq("bookshelf.localhost")
+      local.id.should_not eq(site.id)
       expect_raises(ArgumentError) { Caramel::Latte::Site.new("bookshelf", root, suffix: "example") }
+      expect_raises(ArgumentError) { Caramel::Latte::Site.new("bookshelf", root, suffix: "local") }
     ensure
       remove_latte_root(root)
     end
