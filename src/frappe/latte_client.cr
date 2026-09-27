@@ -8,6 +8,7 @@ module Caramel::Frappe
   class LatteClient
     MAX_RESPONSE = 1024 * 1024
     getter socket_path : String
+    getter root : String
 
     def initialize(root : String? = nil)
       selected = root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT
@@ -53,6 +54,12 @@ module Caramel::Frappe
       request("POST", "/v1/sites", {name: project.name, directory: project.root, suffix: project.metadata.domain_suffix}.to_json)["site"]
     end
 
+    def unregister(id : String) : Nil
+      validate_id(id)
+      request("DELETE", "/v1/sites/#{id}")
+      nil
+    end
+
     def environment(id : String, directory : String) : Hash(String, String)
       validate_id(id)
       request("POST", "/v1/sites/#{id}/environment", {directory: directory}.to_json)["environment"].as_h.transform_values(&.as_s)
@@ -73,6 +80,37 @@ module Caramel::Frappe
       Latte::StateSecurity.validate_owned_directory(@runtime)
       sites = Latte::StateSecurity.ensure_owned_directory(File.join(@runtime, "sites"))
       Latte::StateSecurity.ensure_owned_directory(File.join(sites, id))
+    end
+
+    def site_log_directory(id : String, *, create : Bool) : String?
+      validate_id(id)
+      path = File.join(@root, "logs", "sites", id)
+      if create
+        Latte::StateSecurity.ensure_owned_directory(path)
+      elsif File.info?(path, follow_symlinks: false)
+        Latte::StateSecurity.validate_owned_directory(path)
+        path
+      end
+    rescue ArgumentError
+      raise Error.new("Site logs must be a private owned directory: #{path}")
+    end
+
+    def with_site_lock(id : String, name : String, & : -> T) : T forall T
+      directory = site_directory(id)
+      lock_path = File.join(directory, "dev.lock")
+      if info = File.info?(lock_path, follow_symlinks: false)
+        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+          raise Error.new("Development lock must be an owned private file")
+        end
+      end
+      File.open(lock_path, "a+", perm: 0o600) do |lock|
+        begin
+          lock.flock_exclusive(blocking: false)
+        rescue IO::Error
+          raise Error.new("A development session is already running for #{name}")
+        end
+        yield
+      end
     end
 
     private def validate_id(id : String) : Nil

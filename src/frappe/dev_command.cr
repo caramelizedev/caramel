@@ -5,7 +5,7 @@ module Caramel::Frappe
     class Output < IO
       getter contents = ""
 
-      def initialize(@forward : IO? = nil)
+      def initialize(@forward : IO? = nil, @log : IO? = nil)
       end
 
       def read(slice : Bytes)
@@ -15,6 +15,7 @@ module Caramel::Frappe
       def write(slice : Bytes) : Nil
         @forward.try(&.write(slice))
         @forward.try(&.flush)
+        @log.try(&.write(slice))
         combined = @contents + String.new(slice).scrub
         if combined.bytesize > 32_768
           tail = combined.byte_slice(combined.bytesize - 32_768).scrub
@@ -32,8 +33,8 @@ module Caramel::Frappe
     getter pid : Int64
     @process : Process
 
-    def initialize(command : Array(String), environment : Hash(String, String), directory : String, forward : IO? = nil)
-      @output = Output.new(forward)
+    def initialize(command : Array(String), environment : Hash(String, String), directory : String, forward : IO? = nil, log : IO? = nil)
+      @output = Output.new(forward, log)
       launcher = Process.executable_path || raise Error.new("Cannot locate Frappé")
       @process = Process.new(launcher, ["__caramel_dev_child", *command], env: environment, clear_env: true,
         chdir: directory, input: Process::Redirect::Pipe, output: @output, error: @output)

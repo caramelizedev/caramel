@@ -26,6 +26,25 @@ describe Caramel::Frappe::CLI do
     cli.run(["make", "resource"]).should eq(2)
   end
 
+  it "describes the database, logs, sites and installation commands and rejects malformed arguments" do
+    output, errors = IO::Memory.new, IO::Memory.new
+    cli = Caramel::Frappe::CLI.new("/missing-framework", output, errors)
+    cli.run(["--help"]).should eq(0)
+    usages = [
+      "frappe db dump | frappe db restore FILE",
+      "frappe logs [app|compiler] [--follow]",
+      "frappe sites [remove NAME]",
+      "frappe installations [list|register|remove VERSION]",
+    ]
+    usages.each { |usage| output.to_s.should contain(usage) }
+    {["db"] => usages[0], ["db", "restore"] => usages[0], ["logs", "bogus"] => usages[1],
+     ["sites", "remove"] => usages[2], ["installations", "remove"] => usages[3]}.each do |arguments, usage|
+      errors.clear
+      cli.run(arguments).should eq(2)
+      errors.to_s.should contain(usage)
+    end
+  end
+
   it "routes frappe lsp to a known server only after the project version check" do
     output, errors = IO::Memory.new, IO::Memory.new
     cli = Caramel::Frappe::CLI.new(File.expand_path("../..", __DIR__), output, errors)

@@ -97,9 +97,15 @@ module Caramel::Checks
         assert!(current["state"].as_s == "build-error" && current["owner"].as_s == "terminal")
         listed = p.command([File.join(p.repo, "bin/frappe"), "sites"], echo: false).stdout
         assert!(listed.lines.any? { |line| line.includes?("bookshelf ") && line.includes?("build-error (terminal)") }, listed)
+        compiler_log = p.command([File.join(p.repo, "bin/frappe"), "logs", "compiler"], chdir: project, echo: false).stdout
+        assert!(compiler_log.includes?("app/actions/home/show.cr") && compiler_log.includes?("build bookshelf"), compiler_log)
+        application_log = p.command([File.join(p.repo, "bin/frappe"), "logs"], chdir: project, echo: false).stdout
+        assert!(application_log.includes?("start bookshelf"), application_log)
         p.command([File.join(p.repo, "scripts/build-latte-menu")])
         menu = p.command([File.join(p.repo, "bin/Latte.app/Contents/MacOS/Latte"), "--check"], echo: false).stdout
         assert!(menu.includes?("[Build error] · Terminal session"), menu)
+        assert!(menu.includes?("/logs/sites/#{site("bookshelf")["id"].as_s}"), menu)
+        puts "PASS: persistent per-site compiler and application logs through frappe logs and the menu"
         assert!(request("bookshelf-clone")[0] == 200)
         File.write(controller, original)
         wait_for("bookshelf") { |code, content| code == 200 && content.includes?("A little less setup.") }

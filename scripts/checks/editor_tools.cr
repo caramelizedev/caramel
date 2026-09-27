@@ -117,8 +117,8 @@ module EditorCheck
         client.close
       end
       File.write(File.join(project, ".caramel-version"), "0.0.0\n")
-      refused = Caramel::Checks.run([FRAPPE, "lsp", "ameba-ls"], chdir: project, env: env, clear_env: true, timeout: 30.seconds)
-      raise "Frappé accepted a mismatched version: #{refused.stderr}" unless refused.status.exit_code == 1 && refused.stderr.includes?("use its matching Caramel installation")
+      refused = Caramel::Checks.run([FRAPPE, "lsp", "ameba-ls"], chdir: project, env: env.merge({"CARAMEL_HOME" => parent}), clear_env: true, timeout: 30.seconds)
+      raise "Frappé accepted a mismatched version: #{refused.stderr}" unless refused.status.exit_code == 1 && refused.stderr.includes?("no Caramel installation is registered for it")
       puts "PASS: frappe lsp refuses a project pinned to another Caramel version"
     ensure
       FileUtils.rm_rf(parent)

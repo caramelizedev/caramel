@@ -4,12 +4,15 @@ require "./dev_gateway"
 require "./dev_files"
 require "./tools"
 require "./latte_client"
+require "./site_log"
 require "../latte/project_status"
 
 module Caramel::Frappe
   class DevSession
     @compiler : DevCommand? = nil
     @application : DevCommand? = nil
+    @app_log : SiteLog? = nil
+    @compiler_log : SiteLog? = nil
     @application_socket : String? = nil
     @application_binary : String? = nil
     @retirement = DevRetirement.new
@@ -37,22 +40,16 @@ module Caramel::Frappe
     def run(*, open_browser : Bool = true) : Nil
       @open_browser = open_browser
       @directory = @client.site_directory(@id)
-      lock_path = File.join(@directory, "dev.lock")
-      if info = File.info?(lock_path, follow_symlinks: false)
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
-          raise Error.new("Development lock must be an owned private file")
-        end
-      end
-      File.open(lock_path, "a+", perm: 0o600) do |lock|
-        begin
-          lock.flock_exclusive(blocking: false)
-        rescue IO::Error
-          raise Error.new("A development session is already running for #{@project.name}")
-        end
+      @client.with_site_lock(@id, @project.name) do
+        open_logs
         begin
           run_owned
         ensure
-          shutdown
+          begin
+            shutdown
+          ensure
+            close_logs
+          end
         end
       end
     end
@@ -168,7 +165,8 @@ module Caramel::Frappe
         begin
           @output.puts("Building #{@project.name}…")
           @output.flush
-          command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", temporary], @tools.environment, @project.root, @error)
+          @compiler_log.try(&.mark("build #{@project.name}"))
+          command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", temporary], @tools.environment, @project.root, @error, log: @compiler_log)
           @compiler = command
           deadline = Time.instant + 180.seconds
           while command.running? && !@stopping && Time.instant < deadline
@@ -210,7 +208,8 @@ module Caramel::Frappe
       # Request serving receives only the runtime role, never migration/spec credentials.
       values = @values.reject { |key, _| key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL" }
       values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "CARAMEL_EXPECTED_DATABASE_URL" => @values["DATABASE_URL"]})
-      candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, @output)
+      @app_log.try(&.mark("start #{@project.name}"))
+      candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, @output, log: @app_log)
       accepted = false
       begin
         deadline = Time.instant + 20.seconds
@@ -345,6 +344,17 @@ module Caramel::Frappe
           sleep 100.milliseconds
         end
       end
+    end
+
+    private def open_logs : Nil
+      directory = @client.site_log_directory(@id, create: true).not_nil!
+      @app_log = SiteLog.new(File.join(directory, "app.log"), @error)
+      @compiler_log = SiteLog.new(File.join(directory, "compiler.log"), @error)
+    end
+
+    private def close_logs : Nil
+      @app_log.try(&.close)
+      @compiler_log.try(&.close)
     end
 
     private def shutdown : Nil

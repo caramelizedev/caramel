@@ -180,6 +180,26 @@ module Caramel::Checks
         File.write(resume_readme, File.read(resume_readme) + "\nPreserve this edit during setup.\n")
         command([@frappe, "setup"], chdir: resumed)
         assert!(File.read(resume_readme).ends_with?("Preserve this edit during setup.\n"))
+        dump = command([@frappe, "db", "dump"], chdir: @project, echo: false)
+        backup = dump.stdout.lines.last.strip.split(": ", 2).last
+        assert!(backup.starts_with?(File.join(@state, "backups") + "/") && File.info(backup).permissions.value == 0o600, dump.stdout)
+        sql(values["MIGRATION_DATABASE_URL"], "DELETE FROM dev_sentinel")
+        restored = command([@frappe, "db", "restore", backup], chdir: @project, echo: false)
+        assert!(restored.stdout.includes?("Saved the current development database to"), restored.stdout)
+        assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
+        missing_log = attempt([@frappe, "logs"], chdir: @project)
+        assert!(missing_log.status.exit_code == 1 && missing_log.stderr.includes?("No app log for bookshelf yet"), missing_log.stderr)
+
+        resumed_id = site("resumed")["id"].as_s
+        resumed_url = local_values(resumed)["DATABASE_URL"]
+        removed = command([@frappe, "sites", "remove", "resumed"], echo: false)
+        assert!(removed.stdout.includes?("Removed resumed"), removed.stdout)
+        assert!(rpc("GET", "/v1/sites")["sites"].as_a.none? { |entry| entry["name"].as_s == "resumed" })
+        assert!(File.exists?(File.join(@state, "secrets", "site-#{resumed_id}.json")))
+        command([@frappe, "setup"], chdir: resumed, echo: false)
+        assert!(site("resumed")["id"].as_s == resumed_id && local_values(resumed)["DATABASE_URL"] == resumed_url)
+        puts "PASS: frappe db dump/restore with safety dump, missing-log guidance, and site removal with retained data and re-registration"
+
         Dev.new(self, clone).check if args.includes?("--dev")
         Benchmark.new(self, edit_only: args.includes?("--edit-benchmark")).check if args.includes?("--benchmark") || args.includes?("--edit-benchmark")
 

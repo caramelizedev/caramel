@@ -197,6 +197,8 @@ module Caramel::Latte
   # record is deliberately small and private; a later supervisor can adopt a
   # child only after checking both the PID owner and its command line.
   class ManagedChild
+    PROCESS_LISTING_LIMIT = 1024 * 1024
+
     struct Identity
       include JSON::Serializable
 
@@ -427,8 +429,9 @@ module Caramel::Latte
       # Keep the listing bounded by selecting only the executable name. Full
       # argv is fetched for the small candidate set below and compared exactly
       # before a process can be adopted.
-      result = ProcessRunner.run([ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="], timeout: 2.seconds, output_limit: 64 * 1024)
+      result = ProcessRunner.run([ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="], timeout: 2.seconds, output_limit: PROCESS_LISTING_LIMIT)
       return nil unless result.success?
+      raise OwnershipError.new("process listing exceeded 1 MiB; refusing to guess managed child ownership") if result.stdout.bytesize >= PROCESS_LISTING_LIMIT
       candidates = [] of Int64
       result.stdout.each_line do |line|
         fields = line.strip.split(/\s+/, 3)

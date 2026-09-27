@@ -17,6 +17,7 @@ The application workflow branch adds a narrow typed model API, Caramel Core (com
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
 - [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
 - [Development performance measurements and limits](docs/research/development-performance.md)
+- [Laravel Herd comparison and deferred local-development features](docs/research/herd-comparison.md)
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
 - [Resumable toolchain installer component](docs/research/toolchain-installer.md)

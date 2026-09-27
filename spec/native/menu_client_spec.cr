@@ -116,6 +116,7 @@ describe "native Latte menu client" do
       result.stdout.should contain("https://bookshelf.caramel")
       result.stdout.should contain("Build error")
       result.stdout.should contain("Terminal session")
+      result.stdout.should contain("logs: #{File.join(fixture.home, "logs/sites/0123456789abcdef")}")
     end
   end
 
@@ -125,6 +126,15 @@ describe "native Latte menu client" do
       result = fixture.check
       result.success?.should be_false
       (result.stdout + result.stderr).downcase.should contain("origin")
+    end
+  end
+
+  it "rejects site identifiers that cannot name a log folder" do
+    with_menu_fixture do |fixture|
+      fixture.serve(sites: %([{"id":"0123456789ABCDEF","name":"bookshelf","directory":#{File.join(fixture.home, "bookshelf").to_json},"suffix":"caramel","domain":"bookshelf.caramel","origin":"https://bookshelf.caramel","upstream":null}]))
+      result = fixture.check
+      result.success?.should be_false
+      (result.stdout + result.stderr).should contain("site identifier")
     end
   end
 

@@ -183,6 +183,16 @@ private struct LatteRuntime {
         self.uid = currentUID
     }
 
+    func logDirectory(for site: Site) throws -> URL {
+        let id = site.id.utf8
+        guard id.count == 16,
+              id.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }) else {
+            throw LatteError.invalidResponse("site identifier cannot name a log folder")
+        }
+        return logs.appendingPathComponent("sites", isDirectory: true)
+            .appendingPathComponent(site.id, isDirectory: true)
+    }
+
     private static func canonicalPath(_ path: String) -> String {
         var existing = URL(fileURLWithPath: path).standardizedFileURL
         var missingComponents: [String] = []
@@ -623,6 +633,7 @@ private enum LatteDiagnostics {
             print("sites: \(snapshot.sites.count)")
             for site in snapshot.sites.sorted(by: { $0.name < $1.name }) {
                 print("- \(site.name) \(site.origin) [\(site.stateLabel)]\(site.ownerLabel.map { " · " + $0 } ?? "")")
+                print("  logs: \(try client.runtime.logDirectory(for: site).path)")
             }
             return 0
         } catch {
@@ -818,6 +829,8 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
             menu.addItem(stop)
         }
 
+        menu.addItem(actionItem("Open service logs", action: #selector(openServiceLogs(_:)), id: nil))
+
         menu.addItem(.separator())
         let refresh = actionItem(requestInFlight ? "Refreshing…" : "Refresh", action: #selector(refreshAction(_:)), id: nil)
         refresh.isEnabled = !requestInFlight
@@ -860,9 +873,23 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     }
 
     @objc private func openLogs(_ sender: NSMenuItem) {
-        guard let client else { return }
-        let url = client.runtime.logs
+        guard let client, let site = site(for: sender),
+              let url = try? client.runtime.logDirectory(for: site) else {
+            lastError = "The daemon returned an invalid site identifier"
+            renderMenu()
+            return
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            lastError = "No logs for \(site.name) yet. Run frappe dev in its folder."
+            renderMenu()
+            return
+        }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openServiceLogs(_ sender: NSMenuItem) {
+        guard let client else { return }
+        NSWorkspace.shared.open(client.runtime.logs)
     }
 
     @objc private func startServices(_ sender: Any?) {

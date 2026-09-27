@@ -7,10 +7,14 @@ describe Caramel::Frappe::LatteClient do
   it "uses private HTTP IPC and rejects incompatible, malformed and oversized responses" do
     root = "/private/tmp/caramel-client-live-#{Random::Secure.hex(8)}"
     paths = Caramel::Latte::Paths.new(root)
+    removed = Channel(String).new(1)
     server = HTTP::Server.new do |context|
       context.response.headers["Content-Type"] = "application/json"
       context.response.headers["Connection"] = "close"
       case context.request.path
+      when "/v1/sites/0123456789abcdef"
+        removed.send("#{context.request.method} #{context.request.path}")
+        context.response.print(%({"version":1}))
       when "/v1/status"
         context.response.print(%({"version":1,"services":{"postgres":{"state":"running"},"dns":{"state":"running"},"proxy":{"state":"running"}}}))
       when "/old"
@@ -35,6 +39,8 @@ describe Caramel::Frappe::LatteClient do
       expect_raises(Caramel::Frappe::Error, "1 MiB") { client.request("GET", "/large") }
       expect_raises(Caramel::Frappe::Error, "invalid response") { client.request("GET", "/invalid") }
       expect_raises(Caramel::Frappe::Error, "already registered") { client.request("POST", "/conflict", "{}") }
+      client.unregister("0123456789abcdef")
+      removed.receive.should eq("DELETE /v1/sites/0123456789abcdef")
     ensure
       server.close
       FileUtils.rm_rf(paths.run_dir)
@@ -57,6 +63,24 @@ describe Caramel::Frappe::LatteClient do
       client = Caramel::Frappe::LatteClient.new(root)
       expect_raises(Caramel::Frappe::Error, "socket") { client.status }
       File.read(paths.control_socket).should eq("not a socket")
+    ensure
+      FileUtils.rm_rf(paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "locks one site against a second development session and does not create absent logs" do
+    root = "/private/tmp/caramel-client-lock-#{Random::Secure.hex(8)}"
+    paths = Caramel::Latte::Paths.new(root)
+    client = Caramel::Frappe::LatteClient.new(root)
+    id = "0123456789abcdef"
+    begin
+      client.site_log_directory(id, create: false).should be_nil
+      client.with_site_lock(id, "bookshelf") do
+        expect_raises(Caramel::Frappe::Error, "A development session is already running for bookshelf") do
+          client.with_site_lock(id, "bookshelf") { }
+        end
+      end
     ensure
       FileUtils.rm_rf(paths.run_dir)
       FileUtils.rm_rf(root)

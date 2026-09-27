@@ -1,15 +1,17 @@
 require "./new_project"
 require "./latte_client"
+require "./installations"
 require "./tools"
 require "./resource_generator"
 require "./dev_session"
+require "./site_log"
 require "./editor_tools"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    COMMANDS = %w(new setup dev make migrate seed routes test services sites doctor open lsp)
+    COMMANDS = %w(new setup dev make migrate seed routes test db logs services sites installations doctor open lsp)
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
     end
@@ -35,7 +37,7 @@ module Caramel::Frappe
         @output.puts(usage(command))
         return 0
       end
-      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "services", "lsp"}.includes?(command) && !args.empty?)
+      if (command == "new" && args.size != 1) || (command == "dev" && args != [] of String && args != ["--no-open"]) || (!{"new", "dev", "make", "test", "db", "logs", "services", "sites", "installations", "lsp"}.includes?(command) && !args.empty?)
         @error.puts(usage(command))
         return 2
       end
@@ -108,15 +110,16 @@ module Caramel::Frappe
         Tools.new(@framework_root, @output, @error).app_command(project, [command], values)
       when "test"
         test(Project.load, args)
+      when "db"
+        return db(args)
       when "services"
         return services(args)
       when "sites"
-        LatteClient.new.sites.each do |site|
-          state = site["state"]?.try(&.as_s?) || "unknown"
-          state = "unknown" unless %w(running building build-error stopped unavailable unknown).includes?(state)
-          owner = site["owner"]?.try(&.as_s?) == "terminal" ? " (terminal)" : ""
-          @output.puts("#{site["name"].as_s.ljust(24)} #{(state + owner).ljust(24)} #{site["origin"].as_s}  #{site["directory"].as_s}")
-        end
+        return sites(args)
+      when "installations"
+        return installations(args)
+      when "logs"
+        return logs(args)
       when "doctor"
         return doctor
       when "lsp"
@@ -267,6 +270,117 @@ module Caramel::Frappe
       end
     end
 
+    private def sites(args : Array(String)) : Int32
+      if args.empty?
+        LatteClient.new.sites.each do |site|
+          state = site["state"]?.try(&.as_s?) || "unknown"
+          state = "unknown" unless %w(running building build-error stopped unavailable unknown).includes?(state)
+          owner = site["owner"]?.try(&.as_s?) == "terminal" ? " (terminal)" : ""
+          @output.puts("#{site["name"].as_s.ljust(24)} #{(state + owner).ljust(24)} #{site["origin"].as_s}  #{site["directory"].as_s}")
+        end
+      elsif args.size == 2 && args[0] == "remove"
+        name = args[1]
+        client = LatteClient.new
+        client.ready!
+        entry = client.sites.find { |site| site["name"].as_s == name }
+        raise Error.new("No registered site is named #{name}") unless entry
+        id = entry["id"].as_s
+        client.with_site_lock(id, name) { client.unregister(id) }
+        @output.puts("Removed #{name} (#{entry["origin"].as_s}) from Latte. Its project folder, databases, credentials, logs and backups were kept. Run frappe setup in #{entry["directory"].as_s} to register it again.")
+      else
+        @error.puts(usage("sites"))
+        return 2
+      end
+      0
+    end
+
+    private def db(args : Array(String)) : Int32
+      unless args == ["dump"] || (args.size == 2 && args[0] == "restore")
+        @error.puts(usage("db"))
+        return 2
+      end
+      project = Project.load
+      client = LatteClient.new
+      client.ready!
+      site = Latte::Site.new(project.name, project.root, project.metadata.domain_suffix)
+      paths = Latte::Paths.new(client.root)
+      postgres = Latte::Postgres.new(paths, Tools.new(@framework_root, @output, @error).toolchain)
+      backups = Latte::StateSecurity.ensure_owned_directory(File.join(paths.root, "backups", site.id))
+      dump_to = ->(prefix : String) {
+        postgres.backup(site, File.join(backups, "#{Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")}-#{prefix}.dump"))
+      }
+      if args[0] == "dump"
+        @output.puts("Saved #{project.name} development database: #{dump_to.call("development")}")
+      else
+        file = File.expand_path(args[1])
+        client.with_site_lock(site.id, project.name) do
+          safety = dump_to.call("pre-restore")
+          postgres.restore(site, file)
+          @output.puts("Saved the current development database to #{safety}")
+          @output.puts("Restored #{project.name} development database from #{file}")
+        end
+      end
+      0
+    rescue ex : Latte::Postgres::SecretMissing
+      raise Error.new("frappe db: #{project.not_nil!.name} has no provisioned database; run frappe setup first")
+    rescue ex : Latte::Postgres::Error | Latte::OwnershipError | ArgumentError
+      raise Error.new("frappe db: #{ex.message}")
+    end
+
+    private def logs(args : Array(String)) : Int32
+      follow = !!args.delete("--follow")
+      kind = args.shift? || "app"
+      unless %w(app compiler).includes?(kind) && args.empty?
+        @error.puts(usage("logs"))
+        return 2
+      end
+      project = Project.load
+      id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
+      directory = LatteClient.new.site_log_directory(id, create: false)
+      path = directory ? File.join(directory, "#{kind}.log") : nil
+      unless path && File.info?(path, follow_symlinks: false)
+        raise Error.new("No #{kind} log for #{project.name} yet. Run frappe dev.")
+      end
+      SiteLog.validate_file(path)
+      Process.run("/usr/bin/tail", ["-n", "200", *(follow ? ["-F"] : [] of String), path], output: @output, error: @error).exit_code
+    end
+
+    private def installations(args : Array(String)) : Int32
+      registry = Installations.new
+      case args
+      when [] of String, ["list"]
+        entries = registry.list
+        if entries.empty?
+          @output.puts("No Caramel installations are registered. Run frappe installations register from a Caramel checkout.")
+        else
+          current = File.realpath(@framework_root)
+          entries.keys.sort.each do |release|
+            root = entries[release]
+            @output.puts("#{release.ljust(12)} #{root}#{root == current ? "  (this installation)" : ""}")
+          end
+        end
+      when ["register"]
+        root = File.realpath(@framework_root)
+        binary = File.join(root, "bin/frappe")
+        info = File.info?(binary, follow_symlinks: false)
+        unless info && info.file? && File::Info.executable?(binary)
+          raise Error.new("#{binary} is missing; run scripts/build-frappe first")
+        end
+        previous = registry.register(Caramel::VERSION, root)
+        @output.puts("Registered Caramel #{Caramel::VERSION}: #{root}#{previous && previous != root ? " (replaced #{previous})" : ""}")
+      else
+        if args.size == 2 && args[0] == "remove"
+          release = args[1]
+          raise Error.new("Caramel #{release} is not registered") unless registry.remove(release)
+          @output.puts("Removed Caramel #{release} from the installation registry.")
+        else
+          @error.puts(usage("installations"))
+          return 2
+        end
+      end
+      0
+    end
+
     private def help : Nil
       @output.puts("Frappé — Caramel's application CLI\n")
       COMMANDS.each { |command| @output.puts("  #{usage(command)}") }
@@ -279,6 +393,10 @@ module Caramel::Frappe
       when "make"     then "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"
       when "new"      then "frappe new NAME"
       when "test"     then "frappe test [SPEC_OPTIONS]"
+      when "db"       then "frappe db dump | frappe db restore FILE"
+      when "sites"    then "frappe sites [remove NAME]"
+      when "installations" then "frappe installations [list|register|remove VERSION]"
+      when "logs"     then "frappe logs [app|compiler] [--follow]"
       when "services" then "frappe services [status|start|stop]"
       when "lsp"      then "frappe lsp crystalline|ameba-ls [SERVER_ARGS] | frappe lsp install"
       else                 "frappe #{command}"
