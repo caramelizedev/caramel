@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 
-Status: implemented in the application workflow branch with compilation and PostgreSQL integration checks; independent review and generated-app acceptance remain pending.
+Status: **superseded** on 2026-09-27 by [ADR 0007](0007-sugarorm-schemas-changesets-preload.md) (SugarORM schemas, changesets and preloads) and [ADR 0008](0008-branch-and-diff-migrations.md) (derived, linted migrations). `Caramel::Model` and hand-written SQL migrations were removed. This record is kept for history only.
 
 Caramel will implement the small declared model API needed by generated CRUD over its existing `DB::Database` pool and migrations. It will continue to reuse `crystal-db` and `crystal-pg`; this is not a new database driver or a commitment to a complete ORM.
 

@@ -21,7 +21,7 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 | RFC | Overall | State |
 |---|---|---|
 | 0001 Caramel Core | Implemented | Compile-time routes and contracts, allocation-free matching, multi-target partials, islands and dual egress all work. `scripts/check browser` verifies morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE through Caddy in Safari. The RFC text is amended by ADRs [0003](../decisions/0003-core-routing-and-contracts.md), [0004](../decisions/0004-htmx4-fragment-negotiation.md) and [0005](../decisions/0005-island-props-helper.md). |
-| 0002 SugarORM | Diverged (narrowed) | By [decision 0002](../decisions/0002-typed-persistence.md), `Caramel::Model` provides scalar CRUD and explicit SQL migrations. Associations, changesets, schema diffs and migration lints are absent. |
+| 0002 SugarORM | Implemented | Immutable schemas, class changesets, the fluent facade, type-tracked preloads with compile-time N+1 errors, typed SQL, branch-and-diff migrations, zero-lock lints and `--dev-override` all work. The generator emits SugarORM resources with derived migrations. The RFC text is amended by ADRs [0007](../decisions/0007-sugarorm-schemas-changesets-preload.md) and [0008](../decisions/0008-branch-and-diff-migrations.md); decision 0002 is superseded. |
 | 0003 Cold Brew | Absent | Only the generic streaming response `Action#stream` exists. |
 | 0004 Latte | Partial | Native PostgreSQL, CoreDNS and Caddy supervision and per-site databases work. Database branching is absent. System DNS, standard ports and CA trust are prepared but not applied. |
 | 0005 Frappé | Partial | The `frappe` CLI covers the project workflow. The agent command surface, `check` and machine-output mode are absent. |
@@ -32,7 +32,7 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 ## Ranked gaps and divergences
 
 1. **No production path (RFC-0007).** There is no static Linux artifact, embedded assets, deployment command, cutover or rollback, so Caramel cannot ship an application it builds. The Linux/musl artifact is an open gate in `docs/research/frappe-workflow.md` and `docs/decisions/0001-managed-toolchain-provider.md`.
-2. **Data-layer guarantees are missing (RFC-0002, RFC-0008).** Caramel lacks associations and preload safety, changesets, schema diffs and migration lints. The migrator runs each batch in one transaction, so `CREATE INDEX CONCURRENTLY` cannot run. Most applications need relations early; decision 0002 names that need as the trigger to reconsider an upstream ORM.
+2. **Data-layer guarantees (RFC-0002) are in place.** SugarORM provides preload safety, changesets, schema diffs on a scratch branch, migration lints and online `CONCURRENTLY` migrations. What remains is RFC-0008's domain-verb facade, `team.invite`, which needs Cold Brew jobs.
 3. **No background work or PubSub (RFC-0003).** Jobs, scheduling, `LISTEN`/`NOTIFY` and caching are absent. RFC-0006 queue draining and RFC-0008 `invite`-style operations depend on them, and dual-write safety has no mechanism.
 4. **The real user path is partly proven.** `scripts/check browser` drives Safari through Latte's Caddy proxy to a live generated application on a `.localhost` site. That covers morph focus and scroll, `hx-partial` ingestion, the island lifecycle and SSE. Still unapplied: the `.caramel` system resolver, ports 80/443 and CA trust. Safari accepts the check's untrusted local CA only through WebDriver's `acceptInsecureCerts`.
 5. **Test isolation (RFC-0006).** Examples share one spec database and clean up with `ensure` blocks. Without savepoint rollback or per-worker databases, suites will slow down and leak state as applications grow.
@@ -68,14 +68,14 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 
 | Requirement | Status | Evidence | Coverage | Notes |
 |---|---|---|---|---|
-| §2.1 pure, immutable schema structs | Diverged | `Caramel::Model` (`src/caramel/model.cr`): `table`, `field`, mutable properties, `save` and `delete`, no callbacks | `spec/caramel/model_spec.cr`, `spec/integration/model_spec.cr`, `scripts/check model-compilation` | Chosen by `docs/decisions/0002-typed-persistence.md`. The `SugarORM` namespace does not exist. |
-| §2.1–2.2 associations typed as `NotLoaded \| Array(T)`; preload compile errors | Absent | `Model::Query` supports only `where`, `order`, `limit` and `to_a`, plus `find` | none | Excluded by decision 0002. |
-| §2.3 fluent `update` expanding to a changeset | Diverged | Generated update actions assign fields, then call `save` (`templates/resource/app/actions/@@PLURAL@@/update.cr`) | generated resource request specs via `scripts/check frappe-project` | |
-| §2.4 explicit typed changesets and rich validation | Absent | Only presence validation exists | `spec/caramel/model_spec.cr` | |
-| §2.5 branch-and-diff migrations (catalog snapshot, introspection, AST diff, derived DDL) | Absent | `Caramel::Migrator` (`src/caramel/migration.cr`) applies hand-written SQL with a checksummed journal, advisory lock and one transaction per batch. The resource generator emits `CREATE TABLE`. | `spec/caramel/migration_spec.cr`, `spec/integration/database_spec.cr`, `scripts/check frappe-project` | `db/schema.cr` is a placeholder. |
-| §2.6 migration lints (concurrent indexes, non-null additions, `renamed_from:`) | Absent | No DDL analysis | none | The per-batch transaction also prevents `CREATE INDEX CONCURRENTLY`. |
-| §3 typed `SugarORM.sql` block | Absent | Only bound crystal-db SQL exists | `spec/integration/database_spec.cr` | Excluded by decision 0002. |
-| §3 `--dev-override`; strict staging lint | Absent | — | none | Depends on the missing lints. |
+| §2.1 pure, immutable schema structs | Implemented | `SugarORM::Schema` (`src/sugar_orm/schema.cr`) provides the `schema`, `field`, `timestamps`, `belongs_to`, `has_many`, `has_one`, `index`, `drop_column` and `scope` macros. Records have getters and `with(**)` only; they hold no connection and have no callbacks. | `spec/sugar_orm/schema_spec.cr`, `spec/integration/sugar_orm_spec.cr`, `scripts/check orm-compilation`, `scripts/check frappe-project` | `Caramel::Model` was removed ([ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md) supersedes decision 0002). Generated resources emit SugarORM schemas. |
+| §2.1–2.2 associations typed as `NotLoaded \| Array(T)`; preload compile errors | Implemented | `preload(:name)` overloads accumulate loaders in `Team::QueryOf(P)`. The terminals return `SugarORM::Loaded(T, L)`. A plain record's accessor returns `Team::<Name>NotLoaded(Remediation)` (`src/sugar_orm/associations.cr`, `src/sugar_orm/query.cr`). | `scripts/check orm-compilation` (`compile_n_plus_one`, `compile_unknown_preload`), `spec/integration/sugar_orm_spec.cr` (one query per preloaded association) | RFC-0002 §2.1–2.2 now describes query-decided association types and the caller-line compile error that carries the `.preload(:name)` remedy ([ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md)). |
+| §2.3 fluent `update` expanding to a changeset | Implemented | `record.update(**)` and `T.create(**)` build `UpdateChangeset`/`CreateChangeset` or `DefaultChangeset` and run through `SugarORM::Repo`. The bang forms raise `SugarORM::Invalid`. There are explicit-handle overloads. | `spec/integration/sugar_orm_spec.cr`, `scripts/check orm-compilation` (`compile_unknown_facade_keyword`), generated resource request specs through `scripts/check frappe-project` | Generated create, update and destroy actions use the facade. |
+| §2.4 explicit typed changesets and rich validation | Implemented | `SugarORM::Changeset(T)` (`src/sugar_orm/changeset.cr`): `param`, `def validate(cs)`, required, presence, comparison, length, format and inclusion validators, and `unique_constraint` | `spec/sugar_orm/changeset_spec.cr`, `spec/integration/sugar_orm_spec.cr`, `scripts/check orm-compilation` (`compile_param_not_field`, `compile_param_wrong_type`, `compile_unknown_changeset_keyword`) | RFC-0002 §2.4 is amended: a changeset is a `class` ([ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md)). |
+| §2.5 branch-and-diff migrations (catalog snapshot, introspection, AST diff, derived DDL) | Implemented | `frappe db diff --name NAME` (`src/frappe/schema_diff.cr`) reads the app's `schema` command and clones a Latte scratch branch behind the connection guard (`Latte::Postgres#create_branch`). It then introspects the branch (`src/sugar_orm/introspection.cr`), diffs (`differ.cr`), writes DDL (`ddl.cr`), verifies by re-diffing, and drops the branch. `frappe make resource` derives `CREATE TABLE` through the same renderer. | `spec/sugar_orm/differ_spec.cr`, `spec/sugar_orm/ddl_spec.cr`, `spec/integration/migrations_spec.cr`, `scripts/check schema-diff`, `scripts/check latte-postgres`, `scripts/check frappe-project` (the drift probe derives nothing) | RFC-0002 §2.5 now names the headless `schema` command and the verification step ([ADR 0008](../decisions/0008-branch-and-diff-migrations.md)). |
+| §2.6 migration lints (concurrent indexes, non-null additions, `renamed_from:`) | Implemented | `SugarORM::Linter` runs over pending migrations before any statement. Online migrations run outside transactions. The migrator refuses to journal INVALID indexes. `renamed_from:` and `drop_column` produce annotated SQL. | `spec/sugar_orm/linter_spec.cr`, `spec/integration/migrations_spec.cr` (real `CREATE INDEX CONCURRENTLY`), `scripts/check schema-diff` | RFC-0002 §2.6 is amended: tables created in the same migration are exempt from Rules 1–2, and drops need `drop_column` ([ADR 0008](../decisions/0008-branch-and-diff-migrations.md)). |
+| §3 typed `SugarORM.sql` block | Implemented | `SugarORM.sql(query, *args, as: {…})` returns `Array(NamedTuple)` after checking the result shape (`ShapeError`), and `SugarORM.sql_exec` (`src/sugar_orm/sql.cr`) runs statements without results | `spec/integration/sugar_orm_spec.cr` (CTE, window function, `UPDATE … RETURNING`, shape mismatch) | |
+| §3 `--dev-override`; strict staging lint | Implemented | `frappe db diff --dev-override` and `frappe migrate --dev-override` downgrade violations only when `CARAMEL_ENV=development`. The test and production environments, which include staging, always enforce. | `spec/sugar_orm/linter_spec.cr`, `spec/integration/migrations_spec.cr`, `scripts/check schema-diff` | |
 
 ## RFC-0003 Cold Brew
 
@@ -146,7 +146,7 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 | Requirement | Status | Evidence | Coverage | Notes |
 |---|---|---|---|---|
 | §2.1 subject-verb-object domain macros (`team.invite`) | Absent | — | none | Requires changesets and jobs (RFC-0002, RFC-0003). |
-| §2.2 sentence scopes with `preload` | Diverged | `Model.where(...).order(...).limit(...)` and `Model.find` | `spec/caramel/model_spec.cr`, `scripts/check model-compilation` | There are no named scopes or `preload`. |
+| §2.2 sentence scopes with `preload` | Implemented | `scope name(args) { … }` on SugarORM schemas; `Team.query.larger_than(3).preload(:users).order_by(:name, :asc)` (`src/sugar_orm/schema.cr`, `src/sugar_orm/query.cr`) | `spec/sugar_orm/query_spec.cr`, `spec/integration/sugar_orm_spec.cr` | `order_by(:field, :dir)` follows the RFC. `past_due(by: 30.days)`-style scopes are ordinary scope arguments. |
 | §2.3 semantic and temporal units; `retry_on` | Absent | Only Crystal's built-in `Time::Span` literals exist | none | |
 | §2.4 Slang templates | Diverged | Compiled, escaping ECR (`src/caramel/view.cr`, `src/caramel/view/compiler.cr`) | `spec/caramel/view_spec.cr`, `scripts/check views` | Rationale: `docs/research/escaped-view-notes.md`. |
 | §2.5 contract, handle and response actions | Implemented | `abstract struct Caramel::Action` with `contract`, `handle`, `page`, `morph`, `partials`, `json` and `stream`; contracts support nilable `Time`, bounds and defaults | `spec/caramel/action_spec.cr`, `spec/caramel/request_contract_spec.cr`, generated resource request specs | Adopted in commit `528c162`; the RFC's `Subscriptions::Pause` domain example is not shipped. |
@@ -161,18 +161,18 @@ The charter names eight products. Three exist as code:
 - Latte in `src/latte` and `latte/macos`;
 - Frappé in `src/frappe`.
 
-SugarORM is replaced by the narrower `Caramel::Model`, and Corretto by ordinary Crystal specs. Cold Brew, Roast and Prose are absent. Scale and cost claims such as 100 million requests a day on a $40 server are unverifiable.
+SugarORM is implemented in `src/sugar_orm`. Corretto relies on ordinary Crystal specs. Cold Brew, Roast and Prose are absent. Scale and cost claims such as 100 million requests a day on a $40 server are unverifiable.
 
 | Invariant (RFC Section 4) | Status | Notes |
 |---|---|---|
 | Core: no parameter-to-action contract drift via `Router.draw` | Implemented | Compile-time checks in `src/caramel/http/router.cr`. |
-| SugarORM: zero N+1 queries via `NotLoaded \| Array(T)` | Absent | No associations exist. |
+| SugarORM: zero N+1 queries via `NotLoaded \| Array(T)` | Implemented | Un-preloaded association access fails to compile at the caller's line (`scripts/check orm-compilation`), and each preload costs exactly one query (`spec/integration/sugar_orm_spec.cr`). |
 | Cold Brew: no dual-write loss via in-transaction enqueue | Absent | No queue exists. |
 | Latte: instant iteration via Unix sockets and kqueue/inotify | Partial | Unix sockets are used, but watching is polled and compiled edits take seconds. |
 | Frappé: low token overhead via stateless MRDP tools | Partial | MRDP covers only HTTP 422 errors; most commands call the daemon. |
 | Corretto: no false confidence via real PostgreSQL branches | Diverged | Tests use a real per-site spec database, not branches. |
 | Roast: one static binary of about 25 MB RSS, deployed over SSH | Absent | |
-| Prose: fluent facades expand to pure changesets | Absent | |
+| Prose: fluent facades expand to pure changesets | Partial | SugarORM's `create` and `update` facade expands to explicit changesets with no callbacks ([ADR 0007](../decisions/0007-sugarorm-schemas-changesets-preload.md)). RFC-0008 domain verbs such as `team.invite` are absent. |
 
 ## Repository blueprint (RFC Section 5)
 
@@ -182,7 +182,7 @@ SugarORM is replaced by the narrower `Caramel::Model`, and Corretto by ordinary 
 | `bin/caramel`, `bin/latte`, `bin/roast` | `bin/` is ignored build output from `scripts/build-frappe` and `scripts/build-latte`. It contains `frappe`, `latte`, `Latte.app` and `latte-port-relay`; there is no `roast`. |
 | `src/core/**` | `src/caramel/`: `http/router.cr`, `http/request_context.cr`, `action.cr`, `contracts/request_contract.cr`, `hypermedia.cr`, `islands.cr` |
 | `src/core/prose/**` | Absent |
-| `src/orm/**` | `src/caramel/model.cr`, `src/caramel/migration.cr`; catalog, differ, linter, changeset, association and SQL modules are absent |
+| `src/orm/**` | `src/sugar_orm.cr` and `src/sugar_orm/`: `schema.cr`, `changeset.cr`, `query.cr`, `associations.cr`, `repo.cr`, `sql.cr`, `catalog.cr`, `introspection.cr`, `differ.cr`, `ddl.cr`, `linter.cr`, `migration.cr` |
 | `src/concurrency/**` | Streaming responses only (`src/caramel/response.cr`); the queue, worker and cache are absent |
 | `src/dx/**` | `src/latte/`; the database brancher is absent |
 | `src/agent/**` | `src/frappe/`; the manifest and Tier-1 checker are absent, and MRDP exists only in `RequestContract#to_mrdp` |

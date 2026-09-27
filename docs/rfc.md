@@ -253,7 +253,7 @@ Responses carry `Vary: Accept, HX-Request, HX-Request-Type`.
 
 # RFC-0002: SugarORM (Data Layer, Pure Schemas, & Evolution)
 
-**Status:** Approved
+**Status:** Approved · Implemented (amended by [ADR 0007](decisions/0007-sugarorm-schemas-changesets-preload.md) and [ADR 0008](decisions/0008-branch-and-diff-migrations.md))
 
 **Classification:** Core Data Architecture
 
@@ -269,61 +269,93 @@ SugarORM is an Ecto- and Drizzle-inspired data layer for Crystal featuring a **F
 
 #### 2.1. Pure Schemas & Compile-Time Association Safety
 
-Schemas are immutable structs representing rows in PostgreSQL. They contain zero connection handles and zero hidden lifecycle hooks. Relationships are typed as compile-time unions containing an explicit `NotLoaded` sentinel:
+Schemas are immutable structs representing rows in PostgreSQL. They contain zero connection handles and zero hidden lifecycle hooks. Every instance is a stored row. Instances have getters only; `record.with(seats: 6)` returns a changed copy and never persists anything. A relationship's type is decided at compile time by the query that loaded the record ([ADR 0007](decisions/0007-sugarorm-schemas-changesets-preload.md)):
 
-$$\text{Association}(T) = \text{SugarORM::NotLoaded} \mid \text{Array}(T)$$
+$$\text{Association}(T) = \begin{cases} \text{NotLoaded} & \text{without } \texttt{.preload} \\ \text{Array}(T) & \text{with } \texttt{.preload} \end{cases}$$
 
 ```crystal
-# src/app/models/team.cr
+# app/models/team.cr
 struct Team < SugarORM::Schema
   schema "teams" do
     field id : Int64, primary: true
     field name : String
     field seats : Int32 = 5
     field billing_email : String?
-    
-    # Typed relation union prevents compile if un-preloaded
+    timestamps
+
+    # Typed relation: un-preloaded access fails to compile
     has_many users : User
+    belongs_to owner : User?
+    index :name, unique: true
   end
+
+  scope larger_than(seats : Int32) { where("seats > ?", seats) }
 end
 
 ```
+
+`field` accepts `primary:`, a literal default and `renamed_from:`. The other declarations are:
+
+* `timestamps`: adds system-managed `created_at` and `updated_at`.
+* `belongs_to`: adds the `<name>_id` column, a foreign key and an index.
+* `has_many` and `has_one`: default to the key `<owner>_id`; `foreign_key:` overrides it.
+* `index`: declares an index; `unique:` makes it unique.
+* `drop_column`: states the intent to remove a column (§2.6).
+
+An unsupported type, a non-literal default or a missing primary key fails compilation at the declaration.
 
 #### 2.2. Idiomatic Association Helpers
 
-To preserve compile-time safety without burdening human developers with verbose `case/when` syntax, SugarORM synthesizes unwrapping helpers directly on associations:
+`preload(:users)` changes the static type of what the query returns. It resolves through a generated overload per association, so an unknown association is a compile error that lists the valid ones. Each preloaded association costs exactly one extra query:
 
 ```crystal
-# Idiomatic helper unwraps the loaded state cleanly:
-team.users.each do |user|
-  # If .preload(:users) was omitted on the query, this raises a deterministic
-  # Compile Error at build time, preventing silent production N+1 queries.
+team = Team.query.preload(:users).find!(team_id)
+team.users.each do |user|   # Array(User)
   puts user.email
 end
 
+Team.query.find!(team_id).users.each { |user| puts user.email }
+# Compile error at this line: undefined method 'each' for Team::UsersNotLoaded(…
+#   Association 'users' of Team was not preloaded … Remediation: add .preload(:users)
+#   to the query that loaded this Team, e.g. Team.query.preload(:users).find(id))
+
 ```
+
+Queries are immutable, so each clause returns a new query.
+
+* `where` keywords are generated per schema and typed. A keyword takes a value, `nil`, an `Array` or a `Range`; `where("seats > ?", 3)` is the raw fragment.
+* `order_by(:name, :asc)` checks the field name at compile time.
+* Scopes, `limit` and `offset` chain like any clause.
+* The terminals are `to_a`, `each`, `first`, `first!`, `find`, `find!`, `count`, `exists?` and `delete_all`.
 
 #### 2.3. The Fluent Facade: Ergonomics on Surface, Purity Underneath
 
-Developers can write expressive, single-line updates without instantiating verbose Changeset objects manually. The macro engine synthesizes an explicit Changeset and executes it through the Repo behind the scenes:
+Developers can write expressive, single-line updates without instantiating verbose Changeset objects manually. The generated facade builds the schema's explicit changeset and executes it through the Repo:
 
 ```crystal
 # 1. Developer-Facing Fluent Ergonomics (Rails/Laravel Happiness)
-team.update(seats: 10, billing_email: "billing@acme.com")
+change = team.update(seats: 10, billing_email: "billing@acme.com")
+return render_form(change.errors) unless change.saved?
 
-# 2. What the Macro Expands to Under the Hood:
+# 2. What the Facade Does Under the Hood:
 changeset = Team::UpdateChangeset.new(team, seats: 10, billing_email: "billing@acme.com")
-SugarORM::Repo.update(changeset)
+SugarORM::Repo.update(changeset)   # => the same changeset: saved?, record, errors
 
 ```
 
+* **Changeset choice:** `Team.create(**)` and `team.update(**)` use `Team::CreateChangeset` and `Team::UpdateChangeset` when the application defines them. Otherwise they use a generated `Team::DefaultChangeset` that permits every non-system field.
+* **Keyword checks:** Unknown keywords, and values of the wrong type, fail compilation at the caller.
+* **Bang forms:** `create!` and `update!` return the stored record or raise `SugarORM::Invalid`.
+* **Explicit handles:** Every facade method and query terminal also accepts an explicit database handle first (`User.create!(db, email: …)`, `Team::Query.where(name: "Acme").first!(db)`), which RFC-0006 uses.
+* **Repo:** `SugarORM::Repo.transaction { … }` nests as savepoints. `SugarORM::Repo.bind(connection) { … }` makes one connection the current fiber's for tests and jobs.
+
 #### 2.4. Explicit Mutation Changesets (Advanced Operations)
 
-When complex validations, casting, or conditional checks are required, developers or agents author explicit Changesets:
+When complex validations, casting, or conditional checks are required, developers or agents author explicit Changesets. A changeset is the mutable boundary that accumulates errors and its outcome, so it is a class. Schemas stay immutable values:
 
 ```crystal
-# src/app/changesets/team_changeset.cr
-struct Team::UpdateChangeset < SugarORM::Changeset(Team)
+# app/changesets/team.cr
+class Team::UpdateChangeset < SugarORM::Changeset(Team)
   param seats : Int32
   param billing_email : String?
 
@@ -335,29 +367,49 @@ end
 
 ```
 
+* **Params:** A `param` must name a schema field of a compatible type. Constructor keywords must be declared params. Both are checked at compile time.
+* **Validators:** `validate_required`, `validate_presence`, `validate_greater_than`, `validate_less_than`, `validate_length`, `validate_format` and `validate_inclusion`.
+* **Unique constraints:** `unique_constraint` maps a PostgreSQL unique violation to a field error.
+* **Writes:** Updates write only the changed columns.
+
 #### 2.5. The Branch-and-Diff Migration Engine
 
-Developers and agents never manually write SQL migrations. They modify the `schema` block in Crystal, and the engine derives the delta:
+Developers and agents never manually write SQL migrations. They modify the `schema` block in Crystal and run `frappe db diff --name NAME`. The engine derives the delta ([ADR 0008](decisions/0008-branch-and-diff-migrations.md)):
 
-1. **Catalog Snapshot:** Spawns an ephemeral PostgreSQL branch via Latte (`CREATE DATABASE diff_scratch TEMPLATE dev_db`).
-2. **Schema Introspection:** Queries the branch’s `pg_catalog` (tables, columns, indexes, foreign keys).
-3. **AST Comparison:** SugarORM compiles a headless binary that dumps the target AST schema definition.
-4. **DDL Derivation:** Computes the structural diff and outputs an immutable, timestamped migration file.
+1. **Catalog Snapshot:** Latte spawns an ephemeral PostgreSQL branch of the development database behind the RFC-0004 connection guard (`CREATE DATABASE <scratch> TEMPLATE <dev_db> STRATEGY FILE_COPY`). Frappé applies any pending migrations to it.
+2. **Schema Introspection:** Frappé queries the branch's `pg_catalog`: tables, columns, defaults, identity, indexes and foreign keys.
+3. **AST Comparison:** Frappé builds the application and runs its headless `schema` command, which prints the compiled schema declarations (`SugarORM::Catalog.declared`).
+4. **DDL Derivation:** Frappé computes the structural diff and writes an immutable, timestamped migration file, `db/migrations/<UTC timestamp>_<name>.cr`. Online changes go into a separate `…_concurrently.cr` migration.
+5. **Verification:** Frappé rebuilds the application, applies the new migrations to the branch and re-diffs to empty. The branch is always dropped, and a failure removes the written files.
+
+`frappe make resource` derives its `CREATE TABLE` migration with the same DDL renderer. After migrating, `frappe migrate` reports any drift between the declarations and the database.
 
 #### 2.6. Production Zero-Lock Migration Linters
 
-The migration compiler enforces three non-negotiable rules:
+The migrator lints every pending migration before executing any statement and enforces three non-negotiable rules:
 
-* **Rule 1 (Concurrent Indexing):** All `ADD INDEX` operations must be emitted as `CREATE INDEX CONCURRENTLY`. Standard blocking index DDL fails the lint check.
-* **Rule 2 (Non-Null Additions):** Adding a column with `null: false` without a default value is rejected by the linter, preventing table rewrites on populated tables.
-* **Rule 3 (Rename Safety):** Renaming a field requires an explicit `renamed_from: :old_col` AST directive. If missing, the diff engine refuses to emit a destructive `DROP COLUMN` and halts with a diagnostic.
+* **Rule 1 (Concurrent Indexing):** All `ADD INDEX` operations on existing tables must be emitted as `CREATE INDEX CONCURRENTLY`. Standard blocking index DDL fails the lint check.
+  * Indexes on a table created in the same migration are exempt, because it has no rows or readers.
+  * A migration made only of online statements (`CONCURRENTLY`, `VALIDATE CONSTRAINT`) runs outside a transaction.
+  * Mixing online and transactional statements is rejected.
+  * The migrator never journals an index that PostgreSQL left `INVALID`.
+* **Rule 2 (Non-Null Additions):** Adding a `NOT NULL` column without a default value to an existing table is rejected by the linter, preventing table rewrites on populated tables.
+* **Rule 3 (Rename Safety):** Renaming a field requires an explicit `renamed_from: :old_col` AST directive. Removing one requires `drop_column :old_col`. Derived SQL carries a `-- caramel:allow-rename` or `-- caramel:allow-drop` annotation. Without an explicit origin, the diff engine refuses to emit a destructive `DROP COLUMN` and halts with a diagnostic and a `Remediation:` line.
 
 ### 3. Failure Modes & Mitigations
 
 * **Complex SQL Beyond Basic ORM Scope:** Analytical queries requiring window functions, CTEs, or complex aggregations can tempt developers to drop into raw, untyped strings.  
-  *Mitigation:* SugarORM exposes a type-checked `SugarORM.sql` block supporting CTEs, Window Functions, and `RETURNING` clauses with statically typed `NamedTuple` results.
+  *Mitigation:* SugarORM exposes a type-checked `SugarORM.sql` block supporting CTEs, Window Functions, and `RETURNING` clauses with statically typed `NamedTuple` results. The declared shape is checked against the result's columns, and a mismatch raises `SugarORM::ShapeError`:
+
+```crystal
+ranked = SugarORM.sql(<<-SQL, 30.days.ago, as: {team_id: Int64, total: Int64, rank: Int32})
+  WITH totals AS (SELECT team_id, count(*) AS total FROM users WHERE created_at > $1 GROUP BY team_id)
+  SELECT team_id, total, rank() OVER (ORDER BY total DESC)::int4 AS rank FROM totals
+  SQL
+```
+
 * **Prototyping Friction from Strict Linters:** Zero-lock migration linters (e.g., forcing `CONCURRENTLY`) can slow down early exploratory prototyping on empty local databases.  
-  *Mitigation:* Linters provide an explicit `--dev-override` flag during local development, while strictly enforcing safety checks on staging and production branches.
+  *Mitigation:* `frappe db diff --dev-override` and `frappe migrate --dev-override` turn violations and overridable halts into warnings only when `CARAMEL_ENV=development`. The test and production environments, which include staging, always enforce the rules.
 
 ---
 
