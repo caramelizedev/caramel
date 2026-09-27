@@ -106,6 +106,11 @@ describe SugarORM::Differ do
     halted = Differ.diff([books], [actual])
     halted.empty?.should be_true
     halted.halts.first.to_s.should eq("HALT books.legacy: column exists in the database but no field declares it; SugarORM never drops a column it was not told to.\n  Remediation: declare the field again, mark its replacement renamed_from: :legacy, or record the intent with drop_column :legacy.")
+    String.build { |io| halted.halts.first.to_mrdp(io) }.should eq(<<-MRDP)
+      ERR DIFF_HALT at books.legacy
+      MSG: column exists in the database but no field declares it; SugarORM never drops a column it was not told to.
+      FIX: declare the field again, mark its replacement renamed_from: :legacy, or record the intent with drop_column :legacy.\n
+      MRDP
 
     overridden = Differ.diff([books], [actual], dev_override: true)
     sql(overridden.transactional).should eq([%(ALTER TABLE "books" DROP COLUMN "legacy")])

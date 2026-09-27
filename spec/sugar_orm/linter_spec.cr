@@ -75,6 +75,16 @@ describe SugarORM::Linter do
     end
     SugarORM::Linter.enforce([] of SugarORM::Linter::Violation, dev_override: false, environment: "production")
   end
+
+  it "reports a violation as MRDP at the file that declared its migration" do
+    violation = lint(%(ALTER TABLE books ADD COLUMN isbn text NOT NULL)).first
+    violation.file.should eq(__FILE__)
+    String.build { |io| violation.to_mrdp(io, File.dirname(__DIR__)) }.should eq(<<-MRDP)
+      ERR LINT_NOT_NULL_DEFAULT at sugar_orm/linter_spec.cr
+      MSG: ADD COLUMN isbn NOT NULL without a DEFAULT fails on a populated books table.
+      FIX: give the column a DEFAULT, or add it nullable, backfill it, and tighten it later.\n
+      MRDP
+  end
 end
 
 describe SugarORM::Migration do
