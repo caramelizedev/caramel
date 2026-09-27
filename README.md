@@ -13,6 +13,7 @@ Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configur
 The application workflow branch adds a narrow typed model API, Caramel Core (compile-time checked routes, typed request contracts, actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI. It creates and restores projects, generates typed resources, applies explicit migrations, and runs specs against separately provisioned PostgreSQL databases. Resource generation produces editable models, actions with request contracts, views, route helpers, migrations and request specs. The watched development loop now rebuilds safely, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes. Smaller individual generators, custom commands, dependency editing, optional authentication, and production deployment remain unfinished. Consumer installation and the complete browser experience still need acceptance testing. Mise provides the pinned private toolchain.
 
 - [Caramel RFCs](docs/rfc.md)
+- [RFC implementation status and ranked gaps](docs/research/rfc-implementation-status.md)
 - [Typed model and request contract APIs, verification and limits](docs/research/typed-application-apis.md)
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
 - [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
