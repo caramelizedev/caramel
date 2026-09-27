@@ -77,6 +77,8 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 | §3 typed `SugarORM.sql` block | Implemented | `SugarORM.sql(query, *args, as: {…})` returns `Array(NamedTuple)` after checking the result shape (`ShapeError`), and `SugarORM.sql_exec` (`src/sugar_orm/sql.cr`) runs statements without results | `spec/integration/sugar_orm_spec.cr` (CTE, window function, `UPDATE … RETURNING`, shape mismatch) | |
 | §3 `--dev-override`; strict staging lint | Implemented | `frappe db diff --dev-override` and `frappe migrate --dev-override` downgrade violations only when `CARAMEL_ENV=development`. The test and production environments, which include staging, always enforce. | `spec/sugar_orm/linter_spec.cr`, `spec/integration/migrations_spec.cr`, `scripts/check schema-diff` | |
 
+The RFC-0002 code samples are compiled verbatim by `scripts/check orm-compilation` (`compile_rfc_examples`). The same check shows that the RFC's N+1 line fails to compile at its own line with the message the RFC quotes (`compile_rfc_n_plus_one`).
+
 ## RFC-0003 Cold Brew
 
 | Requirement | Status | Evidence | Coverage | Notes |
@@ -86,6 +88,8 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 | §2.3 PubSub over SSE | Implemented | `Caramel::ColdBrew.publish` uses transactional `pg_notify`. `subscribe` and `unsubscribe` go through one reconnecting `LISTEN` broker per process with ordered per-subscriber mailboxes. `Caramel::SSE.write` handles framing (`src/caramel/cold_brew/broker.cr`, `src/caramel/sse.cr`). | `spec/integration/cold_brew_spec.cr` (delivered on commit, not on rollback; reconnect and re-`LISTEN`; ordered bursts; stuck subscribers; the RFC §2.3 action in-process), `spec/cold_brew/sse_spec.cr`, `scripts/check browser` (a job's publish reaches Safari's `EventSource` on the RFC §2.3 action through Caddy) | RFC-0003 §2.3 is amended: mailboxes, and subscriptions ending with their fiber ([ADR 0009](../decisions/0009-cold-brew-queue-pubsub-cache.md)). |
 | §2.4 `UNLOGGED` cache | Implemented | `Caramel::Cache` (`src/caramel/cache.cr`) writes to the `UNLOGGED caramel_cache` table. The maintenance fiber vacuums expired rows (`src/caramel/cold_brew/maintenance.cr`). | `spec/integration/cold_brew_spec.cr` (TTL and vacuum), `spec/cold_brew/configuration_spec.cr` | |
 | §3 time-partitioned job tables | Implemented | Daily `caramel_jobs_pYYYY_MM_DD` partitions plus a default partition. `SECURITY DEFINER` functions let the runtime role create partitions and drop finished ones after the retention window. | `spec/integration/cold_brew_spec.cr` (partition creation and dropping, the default-partition sweep) | Finished jobs are marked and removed with their partition, never with row `DELETE` ([ADR 0009](../decisions/0009-cold-brew-queue-pubsub-cache.md)). |
+
+The RFC-0003 code samples (`SendInvitation`, the transactional enqueue, `every` and `Boards::Live`) are compiled verbatim by `scripts/check cold-brew-compilation`. The `Boards::Live` action also runs under `scripts/check browser`.
 
 ## RFC-0004 Latte
 
@@ -129,6 +133,8 @@ All eight RFCs are marked Approved; none is complete. Work so far has concentrat
 | §2.4 wire-level fakes (`Corretto.stub_wire`) | Implemented | `Caramel::Outbound` sends absolute-form requests to the Corretto proxy (`src/caramel/outbound.cr`, `src/caramel/corretto/wire.cr`). Unmatched requests get 502. | `spec/corretto/wire_spec.cr`, `spec/integration/corretto_spec.cr`, `scripts/check frappe-project` | Applications must use `Caramel::Outbound` for third-party HTTP ([ADR 0010](../decisions/0010-corretto-harness.md)). |
 | §3 `--concurrency`, one database per worker | Implemented | `frappe corretto --concurrency=1..8` gives each worker its own Latte database, prefixes output and aggregates exit statuses | `spec/frappe/corretto_runner_spec.cr`, `scripts/check frappe-project` | |
 | §2.2 isolation under 1 ms | Deferred (performance) | Isolation behaviour is Implemented in the Tier 2 row. Rollback time has not been measured. | Tier 2 row | Performance is deferred. |
+
+`scripts/check frappe-project` extracts the RFC-0006 §2.1 example spec from `docs/rfc.md` byte for byte, runs it green under `frappe corretto` in a generated application, and confirms that the file was not modified.
 
 ## RFC-0007 Roast
 
