@@ -130,6 +130,21 @@ describe Caramel::Router do
     route("POST", "/teams/7", "_method=PATCH&name=Owls").body.should eq("update:7:Owls")
   end
 
+  it "matches routes, including backtracking and method masks, without heap allocation" do
+    tree = RouterSpecApp::AppRouter::TREE
+    paths = {"/teams/new", "/teams/7", "/teams/new/members", "/files/a%20b", "/missing", "/"}
+    match = ->(path : String) do
+      segments = Caramel::Router::Segments.parse(path).not_nil!
+      tree.match(path, segments, "GET")
+      tree.match(path, segments, "POST")
+    end
+    paths.each { |path| match.call(path) }
+    before = GC.stats.total_bytes
+    100.times { paths.each { |path| match.call(path) } }
+    (GC.stats.total_bytes - before).should eq(0)
+    tree.match("/teams/new/members", Caramel::Router::Segments.parse("/teams/new/members").not_nil!, "GET")[0].should eq(3)
+  end
+
   it "lists routes with their contract summaries" do
     RouterSpecApp::AppRouter.routes.should eq([
       Caramel::Router::Entry.new("GET", "/teams/new", "TeamNew", ""),

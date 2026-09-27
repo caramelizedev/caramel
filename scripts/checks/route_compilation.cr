@@ -8,6 +8,7 @@ cases = {
   ], [] of String},
   "compile_wrong_param_type" => {["ROUTE CONTRACT TYPE MISMATCH", "compile_wrong_param_type.cr:", "Remediation: declare `field team_id : Int64`"], [] of String},
   "compile_nilable_param" => {["ROUTE CONTRACT TYPE MISMATCH", "team_id : Int64?", "Remediation:"], [] of String},
+  "compile_defaulted_param" => {["ROUTE CONTRACT TYPE MISMATCH", "without defaults", "Remediation:"], [] of String},
   "compile_undefined_action" => {["Action 'Missing::Show' is undefined", "compile_undefined_action.cr:"], [] of String},
   "compile_not_action" => {["must inherit from Caramel::Action", "Remediation:"], [] of String},
   "compile_missing_contract" => {["must define an explicit `contract do ... end` block", "Remediation:"], [] of String},
