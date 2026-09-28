@@ -4,8 +4,18 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-28
+
+### Upgrade notes
+
 - `redirect_external` now refuses URLs with credentials (`https://user:pass@host/`) or whitespace, and `Caramel::Outbound` now refuses backslashes: both follow `Caramel::ExternalURL`, which `cs.validate_url(:field)` also applies when saving.
 - A frappe older than 0.3.0 installs releases without their linter. If one installed this release, run the same `frappe installations install` command again to build it; `frappe doctor` names that command.
+
+### Features
+
+- **frappe:** build releases with their own script and finish installs that lack a linter (9e876d9)
+- **frappe:** declare unique resource fields with :unique (fb7403f)
+- **core:** share one external URL rule with cs.validate_url (951087f)
 
 ## 0.3.0 - 2026-09-28
 
