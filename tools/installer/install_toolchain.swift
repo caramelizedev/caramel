@@ -212,14 +212,6 @@ private final class ToolchainInstallation {
         return authored
     }
 
-    // A short name for this release, used for the default installation
-    // directory: a changed release installs beside the previous one instead
-    // of being refused by its receipt.
-    static func releaseIdentifier(fixture: InstallerFixture?) throws -> String {
-        let selection = try releasePayloads(fixture: fixture).mapValues { sha256(data: $0) }
-        return String(sha256(data: try canonicalJSON(selection)).prefix(12))
-    }
-
     func claim() throws {
         if let st = info(root) {
             if (st.st_mode & mode_t(S_IFMT)) != mode_t(S_IFDIR) || st.st_uid != getuid() {
@@ -462,26 +454,43 @@ private func caramelHome() -> String {
     return path(NSHomeDirectory(), "Library/Application Support/Caramel")
 }
 
-// Records the toolchain in the checkout's .caramel-toolchain, which every
-// Caramel command in the checkout reads.
-private func record(_ installation: ToolchainInstallation) throws {
+// The checkout's .caramel-toolchain, which every Caramel command in the
+// checkout reads. A test installation uses its fixture's pointer, if any.
+private func pointerPath(_ fixture: InstallerFixture?) throws -> String? {
     #if CARAMEL_INSTALLER_TESTING
-    guard let pointer = installation.fixture?.pointer else { return }
+    return fixture?.pointer
     #else
-    let pointer = path(try installerRepositoryRoot(), ".caramel-toolchain")
+    return path(try installerRepositoryRoot(), ".caramel-toolchain")
     #endif
+}
+
+private func record(_ installation: ToolchainInstallation) throws {
+    guard let pointer = try pointerPath(installation.fixture) else { return }
     try atomicWrite(Data((installation.root + "\n").utf8), to: pointer, mode: 0o644, prefix: ".caramel-toolchain-")
     print("Recorded in " + pointer + "; Caramel commands in this checkout use this toolchain.")
 }
 
+// Without --root: the toolchain the checkout already records, when its
+// receipt is for this release (so a rerun verifies or resumes it), otherwise
+// a new directory named for this release in Caramel's toolchains directory.
+private func defaultRoot() throws -> String {
+    let fixture = try InstallerFixture.load()
+    let selection = try ToolchainInstallation.releasePayloads(fixture: fixture).mapValues { sha256(data: $0) }
+    if let pointer = try pointerPath(fixture),
+       let text = try? String(contentsOfFile: pointer, encoding: .utf8),
+       let recorded = text.split(separator: "\n").first.map({ String($0).trimmingCharacters(in: .whitespaces) }),
+       recorded.hasPrefix("/"),
+       let receipt = try? Data(contentsOf: URL(fileURLWithPath: path(recorded, receiptName))),
+       let state = try? JSONSerialization.jsonObject(with: receipt) as? [String: Any],
+       state["selection"] as? [String: String] == selection {
+        return recorded
+    }
+    return path(caramelHome(), "toolchains/" + String(sha256(data: try canonicalJSON(selection)).prefix(12)))
+}
+
 private func install(root supplied: String?, offline: Bool, miseBinary: String?) throws {
     try preflight()
-    let root: String
-    if let supplied {
-        root = supplied
-    } else {
-        root = path(caramelHome(), "toolchains/" + (try ToolchainInstallation.releaseIdentifier(fixture: try InstallerFixture.load())))
-    }
+    let root = try supplied ?? defaultRoot()
     let expanded = (root as NSString).expandingTildeInPath
     if offline && !FileManager.default.fileExists(atPath: path(expanded, receiptName)) {
         throw InstallerError(message: "offline use requires a completed verified installation")
@@ -510,7 +519,7 @@ struct ToolchainInstaller {
             program: "install-toolchain",
             usage: "install-toolchain [-h] [--root ROOT] [--offline] [--mise-binary MISE_BINARY]",
             description: "Install Caramel's pinned Apple Silicon tools into one private, durable prefix and record it in this checkout's .caramel-toolchain.\n\nThis component installs no system services, DNS, certificates, or databases.\nIt requires Apple's Command Line Tools (clang, Swift and a macOS SDK).",
-            options: [("-h, --help", "show this help message and exit"), ("--root ROOT", "installation directory (default: Caramel's toolchains directory, named for this release)"), ("--offline", "verify and reuse a completed installation without downloads"), ("--mise-binary MISE_BINARY", "reuse a local mise binary after verifying the pinned SHA-256")]
+            options: [("-h, --help", "show this help message and exit"), ("--root ROOT", "installation directory (default: the toolchain this checkout records, if it is this release; otherwise a directory named for this release in Caramel's toolchains directory)"), ("--offline", "verify and reuse a completed installation without downloads"), ("--mise-binary MISE_BINARY", "reuse a local mise binary after verifying the pinned SHA-256")]
         )
         let args = Array(CommandLine.arguments.dropFirst())
         #if CARAMEL_INSTALLER_TESTING

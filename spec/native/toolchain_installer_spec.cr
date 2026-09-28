@@ -21,9 +21,9 @@ private class NativeToolchainFixture
     configure("create-critical")
   end
 
-  def configure(provider : String) : Nil
+  def configure(provider : String, lock : String = "version = 1\n") : Nil
     File.write(@config, {
-      "payloads" => {"project/caramel-toolchain.toml" => "[tools]\n", "project/mise.lock" => "version = 1\n"},
+      "payloads" => {"project/caramel-toolchain.toml" => "[tools]\n", "project/mise.lock" => lock},
       "critical" => @critical,
       "aliases" => {} of String => String,
       "provider" => provider,
@@ -155,6 +155,34 @@ describe "Swift toolchain installer" do
       again = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "--offline"],
         env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
       again.stdout.should contain("Verified installed Caramel toolchain: #{root}")
+    end
+  end
+
+  it "reuses the toolchain the checkout records when no root is given" do
+    with_toolchain_fixture do |fixture|
+      fixture.complete
+      fixture.configure("fail")
+      home = File.join(fixture.base, "Caramel Home")
+      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
+        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result.success?.should be_true
+      result.stdout.should contain("Verified installed Caramel toolchain: #{fixture.root}")
+      File.exists?(home).should be_false
+    end
+  end
+
+  it "installs a changed release beside the recorded toolchain when no root is given" do
+    with_toolchain_fixture do |fixture|
+      fixture.complete
+      fixture.configure("create-critical", "version = 2\n")
+      home = File.join(fixture.base, "Caramel Home")
+      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
+        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result.success?.should be_true
+      root = File.read(fixture.pointer).chomp
+      File.dirname(root).should eq(File.join(home, "toolchains"))
+      result.stdout.should contain("Installed and verified Caramel toolchain: #{root}")
+      fixture.receipt["status"].as_s.should eq("complete")
     end
   end
 
