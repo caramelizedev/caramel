@@ -7,7 +7,7 @@ module App::@@COLLECTION@@
     end
 
     def handle(contract : Contract)
-      changes = App::@@MODEL@@.create(@@ATTRIBUTES@@)
+      changes = App::@@MODEL@@.create(@@CREATE_ATTRIBUTES@@)
       return render_form(contract.values, changes.errors, nil, 422) unless changes.saved?
       self.status = 201
       {record: changes.record}

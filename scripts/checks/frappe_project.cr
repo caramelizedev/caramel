@@ -34,10 +34,12 @@ module Caramel::Checks
         assert!(urls.uniq.size == 4)
         command([@frappe, "make", "resource", "Book", "title:string", "author:string"], chdir: @project)
         command([@frappe, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], chdir: @project)
+        command([@frappe, "make", "resource", "Link", "title:string?", "original_url:string", "short_code:string:server", "click_count:int64:server"], chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
         print routes
         assert!(routes.lines.any? { |line| line.split == %w[GET /books/:id App::Books::Show id:Int64(min=1)] }, routes)
         assert!(routes.lines.any? { |line| line.split == %w[PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?] }, routes)
+        assert!(routes.lines.any? { |line| line.split == %w[POST /links App::Links::Create title:String? original_url:String] }, routes)
         agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
@@ -174,7 +176,7 @@ module Caramel::Checks
       people = command([@frappe, "routes", "people"], chdir: @project, echo: false).stdout.lines
       assert!(people.size == 7 && people.all? { |line| line.split[1].starts_with?("/people") && line.split[2].starts_with?("App::People::") }, people.join("\n"))
       patches = command([@frappe, "routes", "patch"], chdir: @project, echo: false).stdout.lines
-      assert!(patches.map { |line| line.split[0, 2] } == [%w[PATCH /books/:id], %w[PATCH /people/:id]], patches.join("\n"))
+      assert!(patches.map { |line| line.split[0, 2] } == [%w[PATCH /books/:id], %w[PATCH /people/:id], %w[PATCH /links/:id]], patches.join("\n"))
       assert!(command([@frappe, "routes", "no-such-route"], chdir: @project, echo: false).stdout.empty?)
       puts "PASS: frappe routes FILTER keeps routes whose method, path or action contains it, ignoring case"
 
@@ -344,7 +346,7 @@ module Caramel::Checks
       File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/probe/jobs", App::Probe::Enqueue\n    # Frappé resource routes)))
       result = command([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
-      assert!(result.stdout.includes?("Corretto: 5 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
+      assert!(result.stdout.includes?("Corretto: 6 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
       %w[[w1] [w2]].each do |prefix|
         assert!(result.stdout.lines.any? { |line| line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors") }, output)
       end

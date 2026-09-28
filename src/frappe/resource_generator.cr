@@ -27,10 +27,15 @@ module Caramel::Frappe
     getter name : String
     getter kind : String
     getter? nullable : Bool
+    # Set by the server, not a form: kept out of contracts, forms and request-spec inputs.
+    getter? server : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
-      raise Error.new("Use field:type, such as title:string or rating:float64?") unless pieces.size == 2
+      unless pieces.size == 2 || (pieces.size == 3 && pieces[2] == "server")
+        raise Error.new("Use field:type or field:type:server, such as title:string, rating:float64? or short_code:string:server")
+      end
+      @server = pieces.size == 3
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
@@ -82,6 +87,19 @@ module Caramel::Frappe
       else                                 "Time.parse_rfc3339(#{value.to_json})"
       end
     end
+
+    # The value a generated create action gives a required :server field; the
+    # developer replaces it with the real one.
+    def starting_value : String
+      case @kind
+      when "string"  then "Random::Secure.urlsafe_base64(8)"
+      when "int32"   then "0"
+      when "int64"   then "0_i64"
+      when "bool"    then "false"
+      when "float64" then "0.0"
+      else                "Time.utc"
+      end
+    end
   end
 
   class ResourceGenerator
@@ -100,6 +118,8 @@ module Caramel::Frappe
       end
       fields = declarations.map { |item| ResourceField.new(item) }
       raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
+      inputs = fields.reject(&.server?)
+      raise Error.new("Leave at least one field without :server; the form needs one") if inputs.empty?
       used_versions = Dir.glob(File.join(project.root, "db/migrations/*.cr")).compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
       migration_version = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
       raise Error.new("Migration version must be positive and unused") if migration_version <= 0 || (version && used_versions.includes?(migration_version))
@@ -107,26 +127,28 @@ module Caramel::Frappe
         migration_version += 1
       end
       required_text = fields.select { |field| field.kind == "string" && !field.nullable? }
+      required_inputs = required_text.reject(&.server?)
       tokens = {
         "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
         "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
         "@@COLLECTION_LABEL@@" => collection.tr("_", " ").capitalize,
         "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
-        "@@CONTRACT_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
+        "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
         "@@VALIDATIONS@@" => required_text.map { |field| "      cs.validate_presence(:#{field.name})" }.join('\n'),
-        "@@ATTRIBUTES@@" => fields.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
-        "@@VALUES@@" => fields.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
-        "@@FORM_FIELDS@@" => fields.map { |field| form_field(field) }.join('\n'),
+        "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
+        "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
+        "@@VALUES@@" => inputs.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
+        "@@FORM_FIELDS@@" => inputs.map { |field| form_field(field) }.join('\n'),
         "@@TABLE_HEADERS@@" => fields.map { |field| "              th(scope: \"col\") { #{field.label.to_json} }" }.join('\n'),
         "@@TABLE_CELLS@@" => fields.map { |field| "                td { record.#{field.name} }" }.join('\n'),
         "@@SHOW_FIELDS@@" => fields.map { |field| "          dt { #{field.label.to_json} }\n          dd { @record.#{field.name} }" }.join('\n'),
-        "@@SAMPLE_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", "),
-        "@@SAMPLE_CONDITIONS@@" => fields.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
-        "@@UPDATED_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
-        "@@ASSERT_FIELDS@@" => fields.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_PRESENCE@@" => assert_presence(name, required_text),
-        "@@ASSERT_ESCAPING@@" => fields.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
+        "@@SAMPLE_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", "),
+        "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
+        "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
+        "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
+        "@@ASSERT_PRESENCE@@" => assert_presence(name, required_inputs),
+        "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")

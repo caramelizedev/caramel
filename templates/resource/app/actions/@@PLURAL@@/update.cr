@@ -10,7 +10,7 @@ module App::@@COLLECTION@@
     def handle(contract : Contract)
       record = App::@@MODEL@@.query.find(contract.id)
       return not_found("@@MODEL@@ not found") unless record
-      changes = record.update(@@ATTRIBUTES@@)
+      changes = record.update(@@UPDATE_ATTRIBUTES@@)
       return render_form(contract.values, changes.errors, contract.id, 422) unless changes.saved?
       {record: changes.record}
     end

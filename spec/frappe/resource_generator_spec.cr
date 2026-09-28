@@ -47,7 +47,7 @@ describe Caramel::Frappe::ResourceGenerator do
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
       end
       reserved = %w[id created_at query with create update delete changes record errors values schema field timestamps if to_s]
-      ([["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"]] + reserved.map { |field| ["#{field}:string"] }).each do |fields|
+      ([["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"], ["code:string:server"], ["title:string:readonly"]] + reserved.map { |field| ["#{field}:string"] }).each do |fields|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
@@ -55,6 +55,23 @@ describe Caramel::Frappe::ResourceGenerator do
       %w[app/models app/changesets db/migrations].each do |directory|
         Dir.children(File.join(project.root, directory)).should eq([".keep"])
       end
+    end
+  end
+
+  it "keeps :server fields out of contracts, forms and request inputs, and gives them starting values on create" do
+    resource_project do |project, package|
+      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Link", ["title:string?", "original_url:string", "short_code:string:server", "click_count:int64:server"], version: 20260919000004_i64)
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+      read.call("app/models/link.cr").should contain("field short_code : String")
+      create = read.call("app/actions/links/create.cr")
+      create.should_not contain("field short_code")
+      create.should contain("App::Link.create(title: contract.title, original_url: contract.original_url, short_code: Random::Secure.urlsafe_base64(8), click_count: 0_i64)")
+      read.call("app/actions/links/update.cr").should contain("record.update(title: contract.title, original_url: contract.original_url)\n")
+      form = read.call("app/views/links/form.cr")
+      form.should contain(%(labelled "original_url"))
+      form.should_not contain(%(labelled "short_code"))
+      read.call("app/views/links/show.cr").should contain("dd { @record.short_code }")
+      read.call("spec/requests/links_spec.cr").should_not contain(%("short_code" =>))
     end
   end
 
