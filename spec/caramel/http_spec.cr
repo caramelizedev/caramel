@@ -33,7 +33,7 @@ describe Caramel::Response do
     expect_raises(ArgumentError) { Caramel::Response.navigate(enhanced, "//other.caramel") }
   end
 
-  it "redirects to other sites only for absolute http and https URLs" do
+  it "redirects to other sites only for absolute http and https URLs without credentials" do
     native = HTTP::Request.new("GET", "/go")
     away = Caramel::Response.redirect_external(native, "https://example.com/a?b=1")
     away.status.should eq(302)
@@ -43,7 +43,8 @@ describe Caramel::Response do
     swapped.status.should eq(200)
     swapped.headers["HX-Redirect"].should eq("https://example.com/a")
     swapped.headers.has_key?("Location").should be_false
-    ["/local", "//example.com", "javascript:alert(1)", "ftp://example.com/x", "https://", "https://example.com/\r\nX: y"].each do |url|
+    ["/local", "//example.com", "javascript:alert(1)", "ftp://example.com/x", "https://", "https://example.com/\r\nX: y",
+     "https://user:pass@example.com/", "https://trusted.example@evil.example/", "https://example.com/a b", "https:\\\\example.com"].each do |url|
       expect_raises(ArgumentError) { Caramel::Response.redirect_external(native, url) }
     end
     expect_raises(ArgumentError) { Caramel::Response.redirect_external(native, "https://example.com", 200) }

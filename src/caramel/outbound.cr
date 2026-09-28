@@ -1,6 +1,7 @@
 require "http/client"
 require "socket"
 require "uri"
+require "./external_url"
 
 module Caramel
   # The framework's outbound HTTP client for third-party APIs. It connects
@@ -14,10 +15,10 @@ module Caramel
     class_property proxy : String? = nil
 
     def self.request(method : String, url : String, headers : HTTP::Headers = HTTP::Headers.new, body : String? = nil) : HTTP::Client::Response
-      uri = URI.parse(url)
-      unless uri.scheme.in?("http", "https") && uri.host.presence && uri.user.nil? && url.each_char.none? { |char| char.ascii_whitespace? || char.ord < 32 || char.ord == 127 }
+      unless ExternalURL.valid?(url)
         raise ArgumentError.new("Outbound requests need an absolute http(s) URL without credentials or whitespace: #{url.inspect}")
       end
+      uri = URI.parse(url)
       raise ArgumentError.new("Unsupported HTTP method: #{method.inspect}") unless method.matches?(/\A[A-Z]{1,16}\z/)
       if proxy = @@proxy
         through(proxy, method, url, uri, headers, body)
