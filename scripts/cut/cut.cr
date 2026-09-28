@@ -144,7 +144,9 @@ module Caramel::Cut
         Dir.mkdir(tree)
         archive = File.join(work, "tree.tar")
         git(repository, "archive", "--output", archive, tag)
-        Latte::ProcessRunner.run(["/usr/bin/tar", "-xf", archive, "-C", tree], timeout: 120.seconds)
+        # A tree that failed to extract would look like one without migrations.
+        extracted = Latte::ProcessRunner.run(["/usr/bin/tar", "-xf", archive, "-C", tree], timeout: 120.seconds)
+        raise Refused.new("could not extract #{tag} to read its framework migrations: #{extracted.diagnostic}") unless extracted.success?
       end
       source = File.join(tree, "src/caramel/cold_brew/migrations.cr")
       return {} of Int64 => {String, String} unless File.exists?(source)
