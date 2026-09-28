@@ -66,18 +66,15 @@ module SugarORM
       document = JSON.parse(text)
       raise ArgumentError.new("unsupported schema document version") unless document["version"].as_i == 1
       document["tables"].as_a.map do |table|
-        Table.new(
-          table["name"].as_s,
-          table["columns"].as_a.map { |column|
-            Column.new(column["name"].as_s, column["sql_type"].as_s, column["nullable"].as_bool, column["default"].as_s?,
-              column["primary"].as_bool, column["identity"].as_bool, column["renamed_from"].as_s?)
-          },
-          table["indexes"].as_a.map { |index| Index.new(index["name"].as_s, index["columns"].as_a.map(&.as_s), index["unique"].as_bool) },
-          table["foreign_keys"].as_a.map { |key|
-            ForeignKey.new(key["name"].as_s, key["column"].as_s, key["references_table"].as_s, key["references_column"].as_s, key["on_delete"].as_s)
-          },
-          table["drops"].as_a.map(&.as_s),
-        )
+        columns = table["columns"].as_a.map do |column|
+          Column.new(column["name"].as_s, column["sql_type"].as_s, column["nullable"].as_bool, column["default"].as_s?,
+            column["primary"].as_bool, column["identity"].as_bool, column["renamed_from"].as_s?)
+        end
+        indexes = table["indexes"].as_a.map { |index| Index.new(index["name"].as_s, index["columns"].as_a.map(&.as_s), index["unique"].as_bool) }
+        foreign_keys = table["foreign_keys"].as_a.map do |key|
+          ForeignKey.new(key["name"].as_s, key["column"].as_s, key["references_table"].as_s, key["references_column"].as_s, key["on_delete"].as_s)
+        end
+        Table.new(table["name"].as_s, columns, indexes, foreign_keys, table["drops"].as_a.map(&.as_s))
       end
     rescue ex : JSON::ParseException | KeyError | TypeCastError
       raise ArgumentError.new("invalid schema document: #{ex.message}")
@@ -179,7 +176,7 @@ module SugarORM
     # '-3'::integer in a bigint column); declared defaults are bare SQL
     # literals ('x', -5, 2.5, true).
     def self.normalize_default(expression : String?, sql_type : String) : String?
-      return nil unless expression
+      return unless expression
       return "CURRENT_TIMESTAMP" if expression == "now()"
       if match = expression.match(/\A'((?:[^']|'')*)'::(.+)\z/)
         literal, type = match[1], match[2]

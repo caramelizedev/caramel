@@ -21,7 +21,7 @@ module Caramel::Checks
       {result.stdout[(index + 1)..].strip.to_i? || 0, result.stdout[0...index]}
     end
 
-    private def wait_for(name : String, timeout : Time::Span = 100.seconds, headers : Array(String) = [] of String, &predicate : Int32, String -> Bool) : String
+    private def wait_for(name : String, timeout : Time::Span = 100.seconds, headers : Array(String) = [] of String, & : Int32, String -> Bool) : String
       deadline = Time.instant + timeout
       status = 0
       body = ""

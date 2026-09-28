@@ -2,13 +2,13 @@ require "caramel"
 require "yaml"
 
 module App
-  MIGRATIONS = Caramel::ColdBrew::MIGRATIONS.dup
+  MIGRATIONS        = Caramel::ColdBrew::MIGRATIONS.dup
   DATABASE_SETTINGS = YAML.parse({{ read_file("#{__DIR__}/database.yml") }})
-  TITLE = "@@TITLE@@"
+  TITLE             = "@@TITLE@@"
 
   def self.database_url(migration = false) : String
     environment = ENV["CARAMEL_ENV"]? || "production"
-    raise "CARAMEL_ENV must be development, test or production" unless %w(development test production).includes?(environment)
+    raise "CARAMEL_ENV must be development, test or production" unless %w[development test production].includes?(environment)
     key = DATABASE_SETTINGS[environment][migration ? "migration_url_env" : "url_env"].as_s
     ENV[key]? || raise "Missing database configuration: #{key}"
   end

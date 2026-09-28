@@ -17,15 +17,15 @@ begin
       {false, true}.each do |partial|
         env = {
           "CARAMEL_PROJECT_ROOT" => fixture,
-          "APP_SECRET" => "s" * 64,
-          "DATABASE_URL" => "postgresql://user:database-secret@private-host/app",
-          "CARAMEL_ENV" => environment,
+          "APP_SECRET"           => "s" * 64,
+          "DATABASE_URL"         => "postgresql://user:database-secret@private-host/app",
+          "CARAMEL_ENV"          => environment,
         } of String => String?
         result = Caramel::Checks.run([binary] + (partial ? ["partial"] : [] of String), env: env, timeout: 1.hour)
         Caramel::Checks.fail(result.stdout + result.stderr) unless result.success?
         response = JSON.parse(result.stdout)
         body = response["body"].as_s
-        Caramel::Checks.fail("unexpected runtime response") unless response["status"].as_i == 500 && !!(response["headers"]["X-Request-ID"][0].as_s =~ /\A[0-9a-f-]{36}\z/)
+        Caramel::Checks.fail("unexpected runtime response") if response["status"].as_i != 500 || !(response["headers"]["X-Request-ID"][0].as_s =~ /\A[0-9a-f-]{36}\z/)
         {"s" * 64, "private-password", "database-secret"}.each do |secret|
           Caramel::Checks.fail("secret was reflected in diagnostics") if body.includes?(secret)
         end

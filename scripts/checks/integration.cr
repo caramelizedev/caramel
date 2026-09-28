@@ -7,7 +7,7 @@ module Caramel::Checks::Integration
 
   private def required(argv : Array(String), env : Hash(String, String?), input : String? = nil) : Caramel::Latte::ProcessResult
     result = Checks.run(argv, env: env, input: input, timeout: 120.seconds)
-    raise "Integration harness failed: TimeoutExpired" if result.timed_out
+    raise "Integration harness failed: TimeoutExpired" if result.timed_out?
     raise "Integration harness failed: CalledProcessError" unless result.success?
     result
   end
@@ -37,6 +37,7 @@ module Caramel::Checks::Integration
     end
     env["LC_ALL"] = "C"
     started = false
+    # ameba:disable Lint/UselessAssign
     failed = false
     begin
       required([File.join(pg, "initdb"), "-D", data, "--username=caramel_admin", "--encoding=UTF8", "--locale=C", "--auth-local=trust", "--auth-host=scram-sha-256"], env)

@@ -6,7 +6,7 @@ module Caramel::Frappe
 
     def self.validate_file(path : String) : Nil
       info = File.info?(path, follow_symlinks: false)
-      if info && !(info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600)
+      if info && !Latte::StateSecurity.private_file?(info)
         raise Caramel::Frappe::Error.new("Site log must be an owned private file: #{path}")
       end
     end

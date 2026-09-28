@@ -30,6 +30,5 @@ end
 registry = Caramel::Latte::Registry.new(ARGV[0])
 registry.register("bookshelf", ARGV[0])
 server = Caramel::Latte::Server.new(registry, FixtureServices.new(registry))
-Signal::TERM.trap { server.close }
-Signal::INT.trap { server.close }
+Process.on_terminate { server.close }
 server.listen

@@ -7,7 +7,7 @@ private UNREACHABLE = "postgresql://nobody@/nowhere?host=/nonexistent-caramel-so
 
 describe "Caramel::ColdBrew PubSub validation" do
   it "accepts channel names of 1-63 characters from [a-z0-9_.:-] only" do
-    %w(board_1 a.b:c-d x).each { |name| Caramel::ColdBrew.validate_channel!(name) }
+    %w[board_1 a.b:c-d x].each { |name| Caramel::ColdBrew.validate_channel!(name) }
     ["", "Board_1", "board 1", %(board"1), "board;1", "x" * 64].each do |name|
       expect_raises(ArgumentError, "PubSub channel names") { Caramel::ColdBrew.validate_channel!(name) }
     end

@@ -10,7 +10,7 @@ module Caramel::Checks
     PROBE = File.join(REPO, "spec/fixtures/browser")
     NAME  = "browser"
 
-    DIAGNOSTICS = <<-'JS'
+    DIAGNOSTICS = <<-JS
       const region = document.querySelector(arguments[0]);
       const active = document.activeElement;
       return JSON.stringify({
@@ -21,7 +21,7 @@ module Caramel::Checks
       }, null, 2);
       JS
 
-    SEARCH_STATE = <<-'JS'
+    SEARCH_STATE = <<-JS
       const input = document.getElementById(`search-${arguments[0]}-q`);
       const list = document.getElementById(`search-${arguments[0]}-results`);
       const active = document.activeElement;
@@ -42,7 +42,7 @@ module Caramel::Checks
       };
       JS
 
-    ISLAND_STATE = <<-'JS'
+    ISLAND_STATE = <<-JS
       const island = document.querySelector('caramel-island[component="ProbeCounter"]');
       const late = document.querySelector('caramel-island[component="LateProbe"]');
       const refs = window.__refs || {};
@@ -64,6 +64,15 @@ module Caramel::Checks
 
     @driver : WebDriver?
 
+    # Safari delivers WebDriver clicks through the window server, which
+    # drops them while the screen is locked. Typing still works, so the
+    # check would otherwise time out at its first click.
+    def self.require_unlocked_screen : Nil
+      if Checks.run(["/usr/sbin/ioreg", "-r", "-k", "IOConsoleUsers", "-d1"], timeout: 10.seconds).stdout.includes?(%("CGSSessionScreenIsLocked"=Yes))
+        raise "The screen is locked, so Safari cannot deliver clicks. Unlock it and run scripts/check browser again."
+      end
+    end
+
     def initialize
       toolchain = Checks.toolchain_root
       @psql = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin/psql")
@@ -77,6 +86,7 @@ module Caramel::Checks
       started = Time.instant
       fixture = @fixture
       puts "Browser fixture: #{fixture.root}"
+      # ameba:disable Lint/UselessAssign
       failed = true
       begin
         fixture.start
@@ -129,10 +139,10 @@ module Caramel::Checks
     end
 
     private def install_probe : Nil
-      %w(app/actions/probe app/views/probe).each do |relative|
+      %w[app/actions/probe app/views/probe].each do |relative|
         FileUtils.cp_r(File.join(PROBE, relative), File.join(@project, relative))
       end
-      %w(app/jobs/probe_delivery.cr db/migrations/20260927130000_create_probe_deliveries.cr).each do |relative|
+      %w[app/jobs/probe_delivery.cr db/migrations/20260927130000_create_probe_deliveries.cr].each do |relative|
         File.copy(File.join(PROBE, relative), File.join(@project, relative))
       end
       routes = File.join(@project, "config/routes.cr")
@@ -178,7 +188,7 @@ module Caramel::Checks
     private def check_partials : Nil
       group("hx-partial multi-target POST", "#content") do
         visit("/probe/roster")
-        baseline = js(<<-'JS').as_i
+        baseline = js(<<-JS).as_i
           const note = document.getElementById('roster-note');
           note.probeMarker = 'untouched';
           window.__refs = { note, content: document.getElementById('content'), form: document.getElementById('enroll') };
@@ -189,7 +199,7 @@ module Caramel::Checks
         wait_for("the roster count to reach 3") do
           js("return window.__probe.inflight === 0 && document.getElementById('roster-count').textContent === '3'").as_bool
         end
-        state = js(<<-'JS', baseline)
+        state = js(<<-JS, baseline)
           const note = document.getElementById('roster-note');
           return {
             requests: window.__probe.requests.slice(arguments[0]),
@@ -398,6 +408,7 @@ module Caramel::Checks
 end
 
 begin
+  Caramel::Checks::BrowserCheck.require_unlocked_screen
   Caramel::Checks::BrowserCheck.new.execute
 rescue ex
   STDERR.puts ex.message

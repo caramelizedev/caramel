@@ -8,7 +8,7 @@ module Caramel::ColdBrew
   # maintenance fiber must.
   MIGRATIONS = [
     SugarORM::Migration.new(20260927000001_i64, "create_caramel_jobs", [
-      <<-'SQL',
+      <<-SQL,
         CREATE TABLE caramel_jobs (
           id bigint GENERATED ALWAYS AS IDENTITY,
           queue text NOT NULL DEFAULT 'default',
@@ -27,13 +27,13 @@ module Caramel::ColdBrew
         ) PARTITION BY RANGE (enqueued_at)
         SQL
       "CREATE TABLE caramel_jobs_default PARTITION OF caramel_jobs DEFAULT",
-      <<-'SQL',
+      <<-SQL,
         CREATE INDEX caramel_jobs_fetch ON caramel_jobs (queue, run_at, priority DESC)
         WHERE locked_at IS NULL AND failed_at IS NULL AND finished_at IS NULL
         SQL
       # Creates the UTC daily partitions first_day .. first_day + days. A day
       # whose rows already sit in the default partition is skipped.
-      <<-'SQL',
+      <<-SQL,
         CREATE FUNCTION caramel_jobs_create_partitions(first_day date, days integer) RETURNS integer
         LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT SET lock_timeout = '2s' AS $$
         DECLARE
@@ -62,7 +62,7 @@ module Caramel::ColdBrew
         SQL
       # Drops daily partitions that ended before now() - retention and hold
       # only finished or failed jobs; deletes such rows from the default partition.
-      <<-'SQL',
+      <<-SQL,
         CREATE FUNCTION caramel_jobs_drop_partitions(retention interval) RETURNS integer
         LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT SET lock_timeout = '2s' AS $$
         DECLARE
@@ -94,7 +94,7 @@ module Caramel::ColdBrew
       "SELECT caramel_jobs_create_partitions((now() AT TIME ZONE 'UTC')::date, 7)",
     ]),
     SugarORM::Migration.new(20260927000002_i64, "create_caramel_cache", [
-      <<-'SQL',
+      <<-SQL,
         CREATE UNLOGGED TABLE caramel_cache (
           key text PRIMARY KEY,
           value text NOT NULL,
@@ -104,7 +104,7 @@ module Caramel::ColdBrew
       "CREATE INDEX caramel_cache_expires_at ON caramel_cache (expires_at) WHERE expires_at IS NOT NULL",
     ]),
     SugarORM::Migration.new(20260927000003_i64, "create_caramel_schedules", [
-      <<-'SQL',
+      <<-SQL,
         CREATE TABLE caramel_schedules (
           name text PRIMARY KEY,
           last_run_at timestamptz NOT NULL

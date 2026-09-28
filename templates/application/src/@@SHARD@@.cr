@@ -60,7 +60,7 @@ begin
     secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
     socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
     parent = File.info?(File.dirname(socket_path), follow_symlinks: false)
-    unless parent && parent.directory? && !parent.symlink? && parent.owner_id == LibC.getuid.to_s && (parent.permissions.value & 0o077) == 0
+    if parent.nil? || !parent.directory? || parent.owner_id != LibC.getuid.to_s || (parent.permissions.value & 0o077) != 0
       abort("CARAMEL_SOCKET must be in a private owned directory")
     end
     abort("Application socket is already occupied") if File.info?(socket_path, follow_symlinks: false)
@@ -69,8 +69,7 @@ begin
     File.chmod(socket_path, 0o600)
     # Workers, maintenance, schedules and PubSub. Specs drain queues instead.
     cold_brew = Caramel::ColdBrew.start(database_url) unless ENV["CARAMEL_ENV"]? == "test"
-    Signal::INT.trap { server.close }
-    Signal::TERM.trap { server.close }
+    Process.on_terminate { server.close }
     puts "@@TITLE@@ is ready at #{origin}"
     begin
       server.listen

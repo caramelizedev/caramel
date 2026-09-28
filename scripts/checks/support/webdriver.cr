@@ -36,7 +36,7 @@ module Caramel::Checks
       process = Process.new(@executable, ["--port", @port.to_s], output: @log, error: @log)
       @process = process
       ready = Checks.wait_until(15.seconds, 100.milliseconds) { process.terminated? || ready? }
-      raise Error.new("safaridriver did not become ready on port #{@port}; run safaridriver --enable once") unless ready && !process.terminated?
+      raise Error.new("safaridriver did not become ready on port #{@port}; run safaridriver --enable once") if !ready || process.terminated?
     end
 
     def create_session(capabilities) : String

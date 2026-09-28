@@ -51,29 +51,30 @@ module Caramel
       @bounds = StaticArray(Int32, 64).new(0)
       getter size = 0
 
+      # ameba:disable Metrics/CyclomaticComplexity -- a single-pass path scanner
       def self.parse(path : String) : Segments?
         bytes = path.to_slice
-        return nil if bytes.empty? || bytes[0] != '/'.ord
+        return if bytes.empty? || bytes[0] != '/'.ord
         index = 0
         while index < bytes.size
           byte = bytes[index]
           if byte == '%'.ord
-            return nil unless index + 2 < bytes.size
+            return unless index + 2 < bytes.size
             high = hex(bytes[index + 1])
             low = hex(bytes[index + 2])
-            return nil unless high && low
+            return unless high && low
             decoded = high * 16 + low
-            return nil if decoded < 0x20 || decoded == 0x7F || decoded == '/'.ord || decoded == '\\'.ord
+            return if decoded < 0x20 || decoded == 0x7F || decoded == '/'.ord || decoded == '\\'.ord
             index += 3
           else
-            return nil if byte < 0x20 || byte == 0x7F || byte == '\\'.ord
+            return if byte < 0x20 || byte == 0x7F || byte == '\\'.ord
             index += 1
           end
         end
         segments = new
         return segments if bytes.size == 1
         start = 1
-        while true
+        loop do
           stop = start
           while stop < bytes.size && bytes[stop] != '/'.ord
             stop += 1
@@ -262,8 +263,8 @@ module Caramel
         {% routes << {method, path, segments} %}
         {% locations << (stmt.filename ? "#{stmt.filename.id}:#{stmt.line_number}:#{stmt.column_number}" : "") %}
       {% end %}
-      __caramel_router_draw({{locations}}) do
-        {{block.body}}
+      __caramel_router_draw({{ locations }}) do
+        {{ block.body }}
       end
     end
   end
@@ -333,7 +334,7 @@ macro __caramel_router_draw(locations, &block)
 
     TREE = ::Caramel::Router::Tree.new([
       {% for route in routes %}
-        ::Caramel::Router::Entry.new({{route[0]}}, {{route[1]}}, {{route[6]}}, {{route[5]}}),
+        ::Caramel::Router::Entry.new({{ route[0] }}, {{ route[1] }}, {{ route[6] }}, {{ route[5] }}),
       {% end %}
     ] of ::Caramel::Router::Entry)
 
@@ -356,7 +357,7 @@ macro __caramel_router_draw(locations, &block)
       {% else %}
         response = case index
         {% for route, index in routes %}
-          when {{index}} then __caramel_route_{{index}}(context, path, segments)
+          when {{ index }} then __caramel_route_{{ index }}(context, path, segments)
         {% end %}
         else
           ::Caramel::Response.new(404, "Not found")
@@ -366,17 +367,17 @@ macro __caramel_router_draw(locations, &block)
     end
 
     {% for route, index in routes %}
-      private def __caramel_route_{{index}}(context : ::Caramel::RequestContext, path : String, segments : ::Caramel::Router::Segments) : ::Caramel::Response
+      private def __caramel_route_{{ index }}(context : ::Caramel::RequestContext, path : String, segments : ::Caramel::Router::Segments) : ::Caramel::Response
         {% if route[4].empty? %}
           context.input.route_params = {} of String => String
         {% else %}
-          context.input.route_params = { {% for param in route[4] %}{{param[0]}} => segments.decode(path, {{param[1]}}), {% end %} }
+          context.input.route_params = { {% for param in route[4] %}{{ param[0] }} => segments.decode(path, {{ param[1] }}), {% end %} }
         {% end %}
-        contract = ::{{route[2]}}::Contract.parse(context.input)
+        contract = ::{{ route[2] }}::Contract.parse(context.input)
         {% unless route[4].empty? %}
-          return ::Caramel::Response.new(404, "Not found") if contract.route_error?([{% for param in route[4] %}{{param[0]}}, {% end %}])
+          return ::Caramel::Response.new(404, "Not found") if contract.route_error?([{% for param in route[4] %}{{ param[0] }}, {% end %}])
         {% end %}
-        action = ::{{route[2]}}.new(context)
+        action = ::{{ route[2] }}.new(context)
         contract.valid? ? action.respond(action.handle(contract)) : action.render_contract_failure(contract)
       end
     {% end %}

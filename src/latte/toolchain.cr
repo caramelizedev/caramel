@@ -53,10 +53,10 @@ module Caramel::Latte
       if (value = env["CARAMEL_TOOLCHAIN_ROOT"]?) && !value.empty?
         return {value, "CARAMEL_TOOLCHAIN_ROOT"}
       end
-      return nil unless checkout
+      return unless checkout
       pointer = File.join(checkout, POINTER)
       info = File.info?(pointer, follow_symlinks: false)
-      return nil unless info
+      return unless info
       # Whoever can rewrite the pointer chooses the compiler this user runs.
       unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64 && (info.permissions.value & 0o022) == 0
         raise Unavailable.new("#{pointer} must be a regular file you own that no one else can write")
@@ -82,7 +82,7 @@ module Caramel::Latte
         raise Unavailable.new("toolchain root has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
         raise Unavailable.new("toolchain root must be private") if (info.permissions.value & 0o077) != 0
         @root = File.realpath(root)
-      rescue ex : File::Error
+      rescue File::Error
         raise Unavailable.new("managed toolchain root is unavailable: #{root}")
       end
     end
@@ -152,18 +152,16 @@ module Caramel::Latte
     def postgres_version : String
       result = ProcessRunner.run([postgres, "--version"], env: environment, timeout: 5.seconds, output_limit: 4 * 1024)
       actual = parse_version("#{result.stdout}\n#{result.stderr}") rescue nil
-      raise VersionMismatch.new(POSTGRES_MAJOR, nil, POSTGRES_VERSION, nil) unless result.success? && actual
-      actual.not_nil!
+      return actual if result.success? && actual
+      raise VersionMismatch.new(POSTGRES_MAJOR, nil, POSTGRES_VERSION, nil)
     end
 
     def verify_postgres_version!(expected : String = POSTGRES_VERSION) : String
       result = ProcessRunner.run([postgres, "--version"], env: environment, timeout: 5.seconds, output_limit: 4 * 1024)
       actual = parse_version("#{result.stdout}\n#{result.stderr}") rescue nil
-      unless result.success? && actual == expected
-        actual_major = actual.try { |value| major_of_version(value) }
-        raise VersionMismatch.new(POSTGRES_MAJOR, actual_major, expected, actual)
-      end
-      actual.not_nil!
+      return actual if result.success? && actual && actual == expected
+      actual_major = actual.try { |value| major_of_version(value) }
+      raise VersionMismatch.new(POSTGRES_MAJOR, actual_major, expected, actual)
     end
 
     def verify_postgres_major!(expected : Int32 = POSTGRES_MAJOR) : Int32
@@ -180,7 +178,7 @@ module Caramel::Latte
       values["PATH"] = "#{File.join(@root, "bin")}:/usr/bin:/bin"
       values["CARAMEL_TOOLCHAIN_ROOT"] = @root
       values["LC_ALL"] = "C"
-      %w(PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE PGSERVICE PGOPTIONS PGPASSFILE).each do |key|
+      %w[PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE PGSERVICE PGOPTIONS PGPASSFILE].each do |key|
         values[key] = nil
       end
       if extra
@@ -233,7 +231,7 @@ module Caramel::Latte
         # binary. The private-root check is performed during initialization.
         root_info = File.info(@root, follow_symlinks: false)
         raise Unavailable.new("toolchain root must remain private") if root_info.owner_id.to_i64? != LibC.getuid.to_i64 || (root_info.permissions.value & 0o077) != 0
-      rescue ex : File::Error
+      rescue File::Error
         raise Unavailable.new("managed executable is unavailable: #{relative}")
       end
       path

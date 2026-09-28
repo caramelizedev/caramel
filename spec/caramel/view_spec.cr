@@ -13,9 +13,13 @@ end
 
 describe Caramel::View do
   it "renders typed locals with escaped expressions and unchanged literals" do
+    # ameba:disable Lint/UselessAssign
     title = %q(<Hello & goodbye>)
+    # ameba:disable Lint/UselessAssign
     slug = %q(a"b'c)
+    # ameba:disable Lint/UselessAssign
     items = ["one", %q(<two>)]
+    # ameba:disable Lint/UselessAssign
     trusted = Caramel::HTML::Safe.new("<em>trusted once</em>")
 
     rendered = Caramel::View.render("spec/fixtures/views/example.html.ecr")
@@ -32,9 +36,13 @@ describe Caramel::View do
   end
 
   it "renders an empty collection without changing surrounding literals" do
+    # ameba:disable Lint/UselessAssign
     title = "Nothing"
+    # ameba:disable Lint/UselessAssign
     slug = "nothing"
+    # ameba:disable Lint/UselessAssign
     items = [] of String
+    # ameba:disable Lint/UselessAssign
     trusted = Caramel::HTML::Safe.new("<span>ready</span>")
 
     Caramel::View.render("spec/fixtures/views/example.html.ecr").should eq(
@@ -47,6 +55,7 @@ describe Caramel::View do
   end
 
   it "honors ECR leading and trailing whitespace suppression" do
+    # ameba:disable Lint/UselessAssign
     visible = true
 
     Caramel::View.render("spec/fixtures/views/whitespace.html.ecr").should eq("before\n  shown\nafter\n")
@@ -59,6 +68,7 @@ describe Caramel::View do
   end
 
   it "keeps nested buffers separate when nested output is explicitly safe" do
+    # ameba:disable Lint/UselessAssign
     inner_value = %q(<inner>)
 
     Caramel::View.render("spec/fixtures/views/nested_outer.html.ecr").should eq("<div><span>&lt;inner&gt;</span>\n</div>\n")

@@ -173,9 +173,9 @@ module SugarORM
       exec(sql, [record.__sugar_primary_value] of Value).rows_affected == 1
     end
 
-    {% for name in %w(insert update delete) %}
-      def self.{{name.id}}(db : Handle, target)
-        using(db) { {{name.id}}(target) }
+    {% for name in %w[insert update delete] %}
+      def self.{{ name.id }}(db : Handle, target)
+        using(db) { {{ name.id }}(target) }
       end
     {% end %}
 

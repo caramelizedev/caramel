@@ -30,17 +30,18 @@ module Caramel
       sslcert : String?,
       sslkey : String?,
       pool_options : DB::Pool::Options do
-      SUPPORTED_QUERY_PARAMS = %w(host port sslmode sslrootcert sslcert sslkey)
+      SUPPORTED_QUERY_PARAMS = %w[host port sslmode sslrootcert sslcert sslkey]
       DEFAULT_POOL_SIZE      =  4
       MAX_POOL_SIZE          = 32
 
+      # ameba:disable Metrics/CyclomaticComplexity -- one branch per supported URL parameter
       def self.parse(url : String, pool_size : Int = DEFAULT_POOL_SIZE) : self
         unless (1..MAX_POOL_SIZE).includes?(pool_size)
           raise ArgumentError.new("pool_size must be between 1 and #{MAX_POOL_SIZE}")
         end
 
         uri = URI.parse(url)
-        unless uri.scheme.in?(%w(postgres postgresql))
+        unless uri.scheme.in?(%w[postgres postgresql])
           raise ArgumentError.new("database URL must use postgres:// or postgresql://")
         end
         if uri.fragment
@@ -227,15 +228,9 @@ module Caramel
     def self.open(url : String, pool_size : Int = Config::DEFAULT_POOL_SIZE) : DB::Database
       config = Config.parse(url, pool_size)
       connection_options = config.connection_options
-      database : DB::Database? = nil
-
-      database = DB::Database.new(connection_options, config.pool_options) do
+      DB::Database.new(connection_options, config.pool_options) do
         build_connection(config, connection_options)
       end
-      database
-    rescue ex
-      database.try(&.close)
-      raise ex
     end
 
     # One connection outside any pool under the same transport policy, for a
@@ -294,14 +289,12 @@ module Caramel
     # session setup here keeps the connection and transport in one cleanup
     # scope for both initial and lazily-created pool resources.
     private def self.close_failed_connection(connection : PG::Connection?, socket : UNIXSocket | OpenSSL::SSL::Socket::Client) : Nil
+      connection.try(&.close)
+    rescue
+    ensure
       begin
-        connection.try(&.close)
+        socket.close
       rescue
-      ensure
-        begin
-          socket.close
-        rescue
-        end
       end
     end
 
@@ -320,9 +313,9 @@ module Caramel
 
         context = OpenSSL::SSL::Context::Client.new
         context.verify_mode = OpenSSL::SSL::VerifyMode::PEER
-        context.ca_certificates = config.sslrootcert.not_nil! if config.sslrootcert
-        context.certificate_chain = config.sslcert.not_nil! if config.sslcert
-        context.private_key = config.sslkey.not_nil! if config.sslkey
+        config.sslrootcert.try { |path| context.ca_certificates = path }
+        config.sslcert.try { |path| context.certificate_chain = path }
+        config.sslkey.try { |path| context.private_key = path }
 
         tls_socket = OpenSSL::SSL::Socket::Client.new(
           socket,

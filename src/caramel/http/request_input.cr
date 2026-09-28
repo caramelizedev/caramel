@@ -30,7 +30,7 @@ module Caramel
     getter csrf_token : String? = nil
     getter method_override : String? = nil
     property route_params = {} of String => String
-    getter lenient_query : Bool
+    getter? lenient_query : Bool
     @submitted_override : String? = nil
 
     def self.read(request : HTTP::Request, max_form_bytes : Int32 = MAX_FORM_BYTES, max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
@@ -170,12 +170,12 @@ module Caramel
           @body[name] = value unless control?(name, value, true)
         end
       end
-    rescue error : HTTP::FormData::Error | MIME::Multipart::Error
+    rescue HTTP::FormData::Error | MIME::Multipart::Error
       raise InvalidEncoding.new("Malformed multipart form")
     end
 
     private def check_text(text : String) : Nil
-      raise InvalidEncoding.new("Malformed form encoding") unless text.valid_encoding? && !text.includes?('\0')
+      raise InvalidEncoding.new("Malformed form encoding") if !text.valid_encoding? || text.includes?('\0')
     end
 
     # `_csrf` and `_method` are transport controls, never contract fields.

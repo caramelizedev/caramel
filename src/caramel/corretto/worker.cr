@@ -16,8 +16,8 @@ module Corretto
   # `catalog` examples run unwrapped on a migration-role connection, so they
   # may run DDL, and always reset afterwards.
   class Worker
-    FINGERPRINT_SQL = <<-SQL
-      SELECT md5(coalesce(string_agg(entry, E'\\n' ORDER BY entry), '')) FROM (
+    FINGERPRINT_SQL = <<-'SQL'
+      SELECT md5(coalesce(string_agg(entry, E'\n' ORDER BY entry), '')) FROM (
         SELECT concat_ws(' ', 'class', c.relname, c.relkind::text, c.relpersistence::text) AS entry
           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
         UNION ALL

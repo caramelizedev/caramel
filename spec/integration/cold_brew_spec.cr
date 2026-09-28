@@ -266,7 +266,7 @@ describe "Caramel::ColdBrew system tables" do
       .should end_with("(queue, run_at, priority DESC) WHERE ((locked_at IS NULL) AND (failed_at IS NULL) AND (finished_at IS NULL))")
     plan = SugarORM::Differ.diff([] of SugarORM::Catalog::Table, SugarORM::Introspection.read(ColdBrewSpec.owner))
     plan.clean?.should be_true
-    %w(caramel_jobs caramel_jobs_default caramel_cache caramel_schedules).each do |table|
+    %w[caramel_jobs caramel_jobs_default caramel_cache caramel_schedules].each do |table|
       plan.notes.should contain("ignored table #{table} (owned by Caramel)")
     end
     plan.notes.should contain("ignored table #{ColdBrewSpec.day(7)} (owned by Caramel)")
@@ -326,7 +326,7 @@ describe Caramel::ColdBrew::Worker do
     end
     runs = SugarORM.sql(ColdBrewSpec.owner, "SELECT label, count(*) AS runs FROM cold_brew_runs GROUP BY label", as: {label: String, runs: Int64})
     runs.size.should eq(60)
-    runs.map(&.[:runs]).uniq.should eq([1])
+    runs.map(&.[:runs]).uniq!.should eq([1])
     ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_jobs WHERE attempts <> 1", as: Int64).should eq(0)
     ColdBrewSpec.scalar(<<-SQL, as: Int64).should eq(60)
       SELECT count(*) AS value FROM caramel_jobs j JOIN cold_brew_runs r ON r.label = j.payload->>'label' AND r.backend::text = j.locked_by
@@ -705,7 +705,7 @@ describe "Caramel::ColdBrew PubSub" do
       pid = broker.pid.not_nil!
       admin = Caramel::Database.open(COLD_BREW_ADMIN_URL, 1)
       begin
-        admin.scalar("SELECT pg_terminate_backend($1)", pid).should eq(true)
+        admin.scalar("SELECT pg_terminate_backend($1)", pid).should be_true
       ensure
         admin.close
       end

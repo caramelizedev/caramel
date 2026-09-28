@@ -16,18 +16,18 @@ module Corretto
 
     def initialize(@application : Caramel::Application)
       @origin = @application.csrf.origin
-      @host = URI.parse(@origin).authority.not_nil!
+      @host = URI.parse(@origin).authority || raise ArgumentError.new("Corretto needs an application origin with a host, not #{@origin}")
     end
 
-    {% for verb in %w(get post put patch delete) %}
+    {% for verb in %w[get post put patch delete] %}
       # Params are encoded in the query for GET and as a URL-encoded form otherwise.
-      def {{verb.id}}(path : String, *, headers : Hash(String, String) = {} of String => String, params : Hash(String, _) = {} of String => String) : Caramel::Response
-        request({{verb.upcase}}, path, headers, params)
+      def {{ verb.id }}(path : String, *, headers : Hash(String, String) = {} of String => String, params : Hash(String, _) = {} of String => String) : Caramel::Response
+        request({{ verb.upcase }}, path, headers, params)
       end
     {% end %}
 
     def request(method : String, path : String, headers : Hash(String, String) = {} of String => String, params : Hash(String, _) = {} of String => String) : Caramel::Response
-      raise ArgumentError.new("Corretto requests take a local path such as /books, not #{path.inspect}") unless path.starts_with?('/') && !path.starts_with?("//")
+      raise ArgumentError.new("Corretto requests take a local path such as /books, not #{path.inspect}") if !path.starts_with?('/') || path.starts_with?("//")
       form = URI::Params.build { |builder| params.each { |key, value| builder.add(key, value.to_s) } }
       sent = HTTP::Headers{"Host" => @host}
       body = nil

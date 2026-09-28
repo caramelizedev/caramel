@@ -70,7 +70,7 @@ module Caramel::Latte
       paths = @registry.paths
       lock_path = File.join(paths.run_dir, "daemon.lock")
       if info = File.info?(lock_path, follow_symlinks: false)
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless StateSecurity.private_file?(info)
           raise ArgumentError.new("Latte daemon lock is not a private owned file")
         end
       end
@@ -82,8 +82,7 @@ module Caramel::Latte
         end
         remove_stale_socket(paths.control_socket)
         server = Server.new(@registry, @supervisor)
-        Signal::TERM.trap { server.close }
-        Signal::INT.trap { server.close }
+        Process.on_terminate { server.close }
         begin
           @supervisor.start_services
           @supervisor.monitor

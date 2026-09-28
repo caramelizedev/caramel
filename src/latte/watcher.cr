@@ -3,15 +3,15 @@ require "c/sys/event"
 require "c/sys/resource"
 
 lib LibC
-  O_EVTONLY    = 0x00008000
-  EVFILT_VNODE =      -4_i16
+  O_EVTONLY    =     0x00008000
+  EVFILT_VNODE =         -4_i16
   NOTE_DELETE  = 0x00000001_u32
   NOTE_WRITE   = 0x00000002_u32
   NOTE_EXTEND  = 0x00000004_u32
   NOTE_ATTRIB  = 0x00000008_u32
   NOTE_RENAME  = 0x00000020_u32
   NOTE_REVOKE  = 0x00000040_u32
-  OPEN_MAX     =        10240
+  OPEN_MAX     =          10240
 
   fun setrlimit(Int, Rlimit*) : Int
 end
@@ -55,7 +55,7 @@ module Caramel::Latte
     # files directly. Paths may be missing; they are watched once created.
     def initialize(root : String, relative_paths : Array(String))
       @root = Path[root].expand.normalize.to_s
-      @targets = relative_paths.map { |relative| Path[@root, relative].normalize.to_s }.uniq
+      @targets = relative_paths.map { |relative| Path[@root, relative].normalize.to_s }.uniq!
       @targets.each do |target|
         parent = File.dirname(target)
         while parent.starts_with?(@root) && !@targets.includes?(parent)
@@ -147,6 +147,7 @@ module Caramel::Latte
 
     # Opens *path* before listing a directory's entries, so an entry created
     # meanwhile is either listed or reported by the new watch.
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per kqueue registration outcome
     private def watch(path : String, anchor : Bool) : Nil
       existing = @paths[path]?.try { |id| @watches[id] }
       status = uninitialized LibC::Stat
@@ -191,7 +192,9 @@ module Caramel::Latte
       prefix = watch.path + "/"
       [watch.path].concat(@paths.keys.select(&.starts_with?(prefix))).each do |path|
         next unless id = @paths.delete(path)
-        LibC.close(@watches.delete(id).not_nil!.fd)
+        if removed = @watches.delete(id)
+          LibC.close(removed.fd)
+        end
       end
     end
 

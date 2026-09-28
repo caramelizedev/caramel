@@ -7,21 +7,22 @@ puts "Compiler profile: #{root}"
 generator = File.join(root, "generate.cr")
 new_project = Path[repo, "src/frappe/new_project"].relative_to(root).to_s
 resource_generator = Path[repo, "src/frappe/resource_generator"].relative_to(root).to_s
-File.write(generator, "require #{new_project.to_json}\nrequire #{resource_generator.to_json}\n\n" + <<-CR)
-project = Caramel::Frappe::NewProject.new(ARGV[0]).create("bookshelf", ARGV[1])
-generator = Caramel::Frappe::ResourceGenerator.new(ARGV[0])
-generator.generate(project, "Book", ["title:string", "author:string"])
-generator.generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people")
-if ARGV[2] == "22"
-  ('A'..'T').each { |letter| generator.generate(project, "Benchmark\#{letter}", ["title:string", "description:string"]) }
-end
-CR
+File.write(generator, "require #{new_project.to_json}\nrequire #{resource_generator.to_json}\n\n" + <<-'CR')
+  project = Caramel::Frappe::NewProject.new(ARGV[0]).create("bookshelf", ARGV[1])
+  generator = Caramel::Frappe::ResourceGenerator.new(ARGV[0])
+  generator.generate(project, "Book", ["title:string", "author:string"])
+  generator.generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people")
+  if ARGV[2] == "22"
+    ('A'..'T').each { |letter| generator.generate(project, "Benchmark#{letter}", ["title:string", "description:string"]) }
+  end
+  CR
 build = Caramel::Checks.crystal(["build", generator, "-o", File.join(root, "generate")], timeout: 1.hour)
 print build.stdout
 STDERR.print build.stderr
 raise "generator build failed" unless build.success?
 
 scenarios = {} of String => Hash(String, NamedTuple(elapsed_ms: Float64, exit_code: Int32, log: String))
+# ameba:disable Lint/UselessAssign
 complete = false
 begin
   {2, 22}.each do |count|

@@ -49,14 +49,14 @@ describe Caramel::Frappe::CorrettoRunner do
 
   it "finds spec files inside the project and deals them round-robin" do
     corretto_project do |root|
-      %w(a b c d e).each { |name| File.write(File.join(root, "spec/requests/#{name}_spec.cr"), "") }
+      %w[a b c d e].each { |name| File.write(File.join(root, "spec/requests/#{name}_spec.cr"), "") }
       File.write(File.join(root, "spec/spec_helper.cr"), "")
       files = Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec"])
-      files.should eq(%w(a b c d e).map { |name| "spec/requests/#{name}_spec.cr" })
+      files.should eq(%w[a b c d e].map { |name| "spec/requests/#{name}_spec.cr" })
       Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/requests/c_spec.cr", "spec/requests"]).size.should eq(5)
       Caramel::Frappe::CorrettoRunner.split(files, 2).should eq([
-        %w(spec/requests/a_spec.cr spec/requests/c_spec.cr spec/requests/e_spec.cr),
-        %w(spec/requests/b_spec.cr spec/requests/d_spec.cr),
+        %w[spec/requests/a_spec.cr spec/requests/c_spec.cr spec/requests/e_spec.cr],
+        %w[spec/requests/b_spec.cr spec/requests/d_spec.cr],
       ])
       Caramel::Frappe::CorrettoRunner.split(files[0, 2], 8).size.should eq(2)
       expect_raises(Caramel::Frappe::Error, "inside the project") { Caramel::Frappe::CorrettoRunner.spec_files(root, ["../"]) }

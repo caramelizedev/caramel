@@ -109,7 +109,7 @@ module Caramel::Frappe
     private def verified_template(client : LatteClient, id : String) : Hash(String, String)
       authoritative = client.environment(id, @project.root)
       local = @project.local_environment
-      %w(SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL).each do |key|
+      %w[SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL].each do |key|
         raise Error.new("#{key} differs from this project's Latte credentials; specs refused") unless local[key]? == authoritative[key]?
       end
       config = Caramel::Database::Config.parse(authoritative["SPEC_DATABASE_URL"])

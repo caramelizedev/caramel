@@ -40,6 +40,7 @@ module Caramel::Latte
       true
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- validates each status source separately
     def self.read(paths : Paths, site : Site)
       path = site.upstream
       return result("stopped") unless path && File.info?(path, follow_symlinks: false)
@@ -93,7 +94,7 @@ module Caramel::Latte
 
     private def self.validate_file(path : String) : Nil
       info = File.info(path, follow_symlinks: false)
-      unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600 && info.size <= 4096
+      unless StateSecurity.private_file?(info) && info.size <= 4096
         raise ArgumentError.new("Development session metadata must be an owned private file")
       end
     end

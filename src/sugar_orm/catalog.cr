@@ -12,7 +12,7 @@ module SugarORM::Catalog
     tables = [] of Table
     {% for schema in ::SugarORM::Schema.all_subclasses %}
       {% unless schema.abstract? %}
-        tables << {{schema}}.__sugar_table
+        tables << {{ schema }}.__sugar_table
       {% end %}
     {% end %}
     tables.sort_by!(&.name)

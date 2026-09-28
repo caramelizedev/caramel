@@ -47,7 +47,8 @@ module Caramel
       socket.read_timeout = READ_TIMEOUT
       begin
         sent = headers.dup
-        sent["Host"] = uri.port ? "#{uri.host}:#{uri.port}" : uri.host.not_nil!
+        target = uri.host || raise ArgumentError.new("Outbound requests need an absolute URL: #{url}")
+        sent["Host"] = uri.port ? "#{target}:#{uri.port}" : target
         sent["Connection"] = "close"
         sent["Content-Length"] = body.bytesize.to_s if body
         socket << method << ' ' << url << " HTTP/1.1\r\n"

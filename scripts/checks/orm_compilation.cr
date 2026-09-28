@@ -23,7 +23,7 @@ cases = {
 cases.each do |name, required|
   result = Caramel::Checks.crystal(["build", "spec/fixtures/sugar_orm/#{name}.cr", "--no-codegen"], timeout: 90.seconds)
   output = "#{name}\n#{result.stdout}#{result.stderr}"
-  Caramel::Checks.fail("#{name}\ncompiler timed out") if result.timed_out
+  Caramel::Checks.fail("#{name}\ncompiler timed out") if result.timed_out?
   if required
     Caramel::Checks.fail(output) if result.success?
     required.each { |text| Caramel::Checks.fail("missing #{text.inspect} in #{output}") unless result.stderr.includes?(text) }

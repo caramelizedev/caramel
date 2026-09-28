@@ -20,10 +20,10 @@ module Caramel::Checks::LatteDaemon
     loop do
       begin
         result = request(socket, "GET", "/v1/status")
-        states = result["services"].as_h.values.map { |entry| entry["state"].as_s }
+        states = result["services"].as_h.values.map(&.["state"].as_s)
         return if states == [state, state, state]
         raise result.to_json if states.includes?("failed")
-      rescue ex : Socket::Error | IO::Error
+      rescue Socket::Error | IO::Error
       end
       raise "Services did not become #{state}" if Time.instant >= deadline
       sleep 100.milliseconds
@@ -196,13 +196,11 @@ module Caramel::Checks::LatteDaemon
           # that operation instead of leaving services behind.
           stop_deadline = Time.instant + 60.seconds
           loop do
-            begin
-              request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
-              break
-            rescue busy
-              raise busy if Time.instant >= stop_deadline
-              sleep 250.milliseconds
-            end
+            request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
+            break
+          rescue ex
+            raise ex if Time.instant >= stop_deadline
+            sleep 250.milliseconds
           end
           wait_state(socket, "stopped")
         rescue ex

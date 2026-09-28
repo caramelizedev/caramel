@@ -22,7 +22,7 @@ module Caramel
           # Crystal renders paths relative to the process's initial directory.
           # Normalize for classification without opening arbitrary source files.
           path = File.expand_path(location[1], Process::INITIAL_PWD || Dir.current)
-          %w(app config src db).any? { |directory| path.starts_with?("#{root}/#{directory}/") }
+          %w[app config src db].any? { |directory| path.starts_with?("#{root}/#{directory}/") }
         else
           false
         end

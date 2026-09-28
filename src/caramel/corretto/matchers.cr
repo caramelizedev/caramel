@@ -172,7 +172,7 @@ module Corretto
     # macro, so an unknown or mistyped field fails compilation at the caller.
     macro have_row(schema, **conditions)
       %conditions = {{ conditions.empty? ? "NamedTuple.new".id : conditions }}
-      ::Corretto::Expectations::HaveRow.new({{schema}}, {{schema}}.query.where(**%conditions), %conditions)
+      ::Corretto::Expectations::HaveRow.new({{ schema }}, {{ schema }}.query.where(**%conditions), %conditions)
     end
   end
 end

@@ -144,7 +144,7 @@ module Caramel::ColdBrew
           begin
             @pq.send_query_message(sql)
           rescue error
-            abort
+            drop_connection
             raise error
           end
         end
@@ -152,13 +152,13 @@ module Caramel::ColdBrew
         when error = ack.receive
           raise error if error
         when timeout(ACK_TIMEOUT)
-          abort
+          drop_connection
           raise IO::TimeoutError.new("PostgreSQL did not acknowledge #{sql} within #{ACK_TIMEOUT.total_seconds.to_i} s")
         end
       end
 
       # Closes the socket under the reader, which then reports the loss.
-      private def abort : Nil
+      private def drop_connection : Nil
         @pq.soc.close rescue nil
       end
     end
@@ -243,17 +243,15 @@ module Caramel::ColdBrew
     private def reconnect : Nil
       delay = 100.milliseconds
       loop do
-        begin
-          @lock.synchronize do
-            return if @closed || @subscribers.empty?
-            connect
-          end
-          return
-        rescue error
-          Log.warn { "LISTEN reconnect failed error_type=#{error.class}; retrying in #{delay.total_milliseconds.to_i} ms" }
-          sleep delay
-          delay = {delay * 2, MAX_RECONNECT_DELAY}.min
+        @lock.synchronize do
+          return if @closed || @subscribers.empty?
+          connect
         end
+        return
+      rescue error
+        Log.warn { "LISTEN reconnect failed error_type=#{error.class}; retrying in #{delay.total_milliseconds.to_i} ms" }
+        sleep delay
+        delay = {delay * 2, MAX_RECONNECT_DELAY}.min
       end
     end
 

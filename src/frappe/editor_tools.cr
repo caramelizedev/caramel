@@ -14,11 +14,11 @@ module Caramel::Frappe
   # launcher: it selects the verified binaries and the pinned compiler
   # explicitly, so an editor never reaches a different Crystal.
   class EditorTools
-    SERVERS      = %w(crystalline ameba-ls)
-    BUILD_RECIPE = 3 # bump whenever the crystalline build flags or steps change
-    LLVM_VERSION = "15.0.7"
-    MAX_BINARY   = 128 * 1024 * 1024
-    DYLD_LINE    = /^dyld\[\d+\]: <[0-9A-Fa-f-]+> (\/.+)$/
+    SERVERS                 = %w[crystalline ameba-ls]
+    BUILD_RECIPE            = 3 # bump whenever the crystalline build flags or steps change
+    LLVM_VERSION            = "15.0.7"
+    MAX_BINARY              = 128 * 1024 * 1024
+    DYLD_LINE               = /^dyld\[\d+\]: <[0-9A-Fa-f-]+> (\/.+)$/
     SYSTEM_LIBRARY_PREFIXES = {"/usr/lib/", "/System/Library/", "/Library/Apple/System/Library/"}
 
     struct AmebaPin
@@ -80,14 +80,12 @@ module Caramel::Frappe
     # editors started without CARAMEL_TOOLCHAIN_ROOT find it through the
     # checkout's .caramel-toolchain.
     def toolchain_root(env : ENV.class | Hash(String, String) = ENV) : {String, String}
-      begin
-        located = Latte::Toolchain.locate(@framework_root, env)
-        raise Error.new("frappe lsp: no Caramel toolchain is configured. Run scripts/install-toolchain.") unless located
-        value, source = located
-        {Latte::Toolchain.new(value).root, source}
-      rescue ex : Latte::Toolchain::Unavailable
-        raise Error.new("frappe lsp: #{ex.message}")
-      end
+      located = Latte::Toolchain.locate(@framework_root, env)
+      raise Error.new("frappe lsp: no Caramel toolchain is configured. Run scripts/install-toolchain.") unless located
+      value, source = located
+      {Latte::Toolchain.new(value).root, source}
+    rescue ex : Latte::Toolchain::Unavailable
+      raise Error.new("frappe lsp: #{ex.message}")
     end
 
     def server(name : String, env : ENV.class | Hash(String, String) = ENV) : Server
@@ -116,7 +114,7 @@ module Caramel::Frappe
 
     def environment(server : Server) : Hash(String, String?)
       values = {} of String => String?
-      %w(CRYSTAL_LIBRARY_PATH CRYSTAL_OPTS CRYSTAL_CACHE_DIR CRYSTAL_CONFIG_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR).each do |key|
+      %w[CRYSTAL_LIBRARY_PATH CRYSTAL_OPTS CRYSTAL_CACHE_DIR CRYSTAL_CONFIG_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR].each do |key|
         values[key] = nil
       end
       values["CRYSTAL_PATH"] = "lib:#{server.crystal}/src"
@@ -152,7 +150,7 @@ module Caramel::Frappe
       owned_directory(File.join(editor, "crystalline"))
       lock_path = File.join(editor, ".install.lock")
       if info = File.info?(lock_path, follow_symlinks: false)
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless Latte::StateSecurity.private_file?(info)
           raise Error.new("frappe lsp: editor tools installation lock must be an owned private file")
         end
       end
@@ -185,7 +183,7 @@ module Caramel::Frappe
         archive = File.join(stage, "archive.tar.gz")
         download(pin.url, archive, pin.archive_sha256)
         listing = run!(["/usr/bin/tar", "-tzf", archive], "could not list #{pin.url}")
-        unless listing.stdout.lines.map(&.strip).reject(&.empty?).sort == ["ameba-ls", "ameba-ls.dwarf"]
+        unless listing.stdout.lines.map(&.strip).reject(&.empty?).sort! == ["ameba-ls", "ameba-ls.dwarf"]
           raise Error.new("frappe lsp: unexpected contents in #{pin.url}; nothing was installed")
         end
         payload = File.join(stage, "payload")
@@ -245,11 +243,11 @@ module Caramel::Frappe
         enable_save_notifications(source)
         Dir.mkdir(File.join(source, "bin"), 0o700)
         extras = {
-          "CRYSTAL_PATH"  => "lib:#{build}/crystal-src",
-          "LLVM_CONFIG"   => llvm,
-          "LLVM_VERSION"  => LLVM_VERSION,
-          "LLVM_TARGETS"  => targets,
-          "LLVM_LDFLAGS"  => Process.quote_posix(libfiles + system_libs),
+          "CRYSTAL_PATH" => "lib:#{build}/crystal-src",
+          "LLVM_CONFIG"  => llvm,
+          "LLVM_VERSION" => LLVM_VERSION,
+          "LLVM_TARGETS" => targets,
+          "LLVM_LDFLAGS" => Process.quote_posix(libfiles + system_libs),
         }
         tools.run(File.join(@framework_root, "scripts/crystal"), ["build", "src/crystalline.cr", "-o", "bin/crystalline", "--release", "--no-debug"], source, extras)
         publish_crystalline(root, File.join(source, "bin/crystalline"), target)
@@ -414,7 +412,7 @@ module Caramel::Frappe
         libraries << path
       end
       raise Error.new("frappe lsp: #{command[0]} produced no library evidence") if libraries.empty?
-      libraries.uniq.sort
+      libraries.uniq.sort!
     end
 
     private def require_complete(root : String) : Nil
@@ -453,7 +451,7 @@ module Caramel::Frappe
 
     private def owned?(path : String, *, directory : Bool) : Bool
       info = File.info?(path, follow_symlinks: false)
-      return false unless info && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64
+      return false unless info && info.owner_id.to_i64? == Latte::StateSecurity.current_uid
       directory ? info.directory? : info.file?
     end
 

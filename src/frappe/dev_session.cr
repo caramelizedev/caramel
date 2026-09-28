@@ -61,6 +61,7 @@ module Caramel::Frappe
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- the watch loop, one branch per event
     private def run_owned : Nil
       remove_stale_sockets
       @socket = File.join(@directory, "dev-#{Random::Secure.hex(4)}.sock")
@@ -74,8 +75,7 @@ module Caramel::Frappe
         @error.puts("Development listener stopped (#{ex.class})") unless @stopping
         @stopping = true
       end
-      Signal::INT.trap { @stopping = true }
-      Signal::TERM.trap { @stopping = true }
+      Process.on_terminate { @stopping = true }
       Latte::ProjectStatus.write_session(@directory, @socket, @gateway.owner_token)
       # A response can fail after Latte persisted the route. Cleanup uses the
       # exact socket comparison even when registration's outcome is uncertain.
@@ -142,29 +142,25 @@ module Caramel::Frappe
     private def launch_build(source : String) : Nil
       @busy = true
       spawn do
-        begin
-          build(source)
-        rescue ex
-          @gateway.failed("Development build failed: #{ex.message}") unless @stopping
-        ensure
-          @busy = false
-        end
+        build(source)
+      rescue ex
+        @gateway.failed("Development build failed: #{ex.message}") unless @stopping
+      ensure
+        @busy = false
       end
     end
 
     private def launch_boot(binary : String) : Nil
       @busy = true
       spawn do
-        begin
-          if boot(binary, quiet: true)
-            @output.puts("Application ready · #{@project.origin}")
-            @output.flush
-          end
-        rescue ex
-          @gateway.failed("Application startup failed: #{ex.message}") unless @stopping
-        ensure
-          @busy = false
+        if boot(binary, quiet: true)
+          @output.puts("Application ready · #{@project.origin}")
+          @output.flush
         end
+      rescue ex
+        @gateway.failed("Application startup failed: #{ex.message}") unless @stopping
+      ensure
+        @busy = false
       end
     end
 
@@ -244,6 +240,7 @@ module Caramel::Frappe
     # A quiet boot retries a start that stopped on pending migrations. It does
     # not print or log that refusal again, and forwards the application's
     # output once it serves.
+    # ameba:disable Metrics/CyclomaticComplexity -- readiness, handover and failure paths of one start
     private def boot(binary : String, quiet : Bool = false) : Bool
       return false if @stopping
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
@@ -267,6 +264,7 @@ module Caramel::Frappe
             @application, @application_socket = candidate, socket
             @application_binary = binary
             @gateway.ready(socket)
+            # ameba:disable Lint/UselessAssign -- read by the ensure below
             accepted = true
             if previous
               @retirement.retire(previous) do
@@ -325,7 +323,8 @@ module Caramel::Frappe
       socket.connect(Socket::UNIXAddress.new(path), timeout: 200.milliseconds)
       socket.read_timeout = 500.milliseconds
       client = HTTP::Client.new(socket, @project.name + "." + @project.metadata.domain_suffix)
-      response = client.get("/health", HTTP::Headers{"Host" => URI.parse(@project.origin).authority.not_nil!, "Connection" => "close"})
+      authority = URI.parse(@project.origin).authority || raise Error.new("#{@project.name} has no HTTPS origin")
+      response = client.get("/health", HTTP::Headers{"Host" => authority, "Connection" => "close"})
       response.status_code == 200 && response.body == "ok"
     rescue IO::Error
       false
@@ -373,7 +372,7 @@ module Caramel::Frappe
 
     private def reject_symlink(path : String) : Nil
       if info = File.info?(path, follow_symlinks: false)
-        raise Error.new("Development artifacts must be owned regular files") unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64
+        raise Error.new("Development artifacts must be owned regular files") unless Latte::StateSecurity.owned_file?(info)
       end
     end
 
@@ -401,7 +400,7 @@ module Caramel::Frappe
     end
 
     private def open_logs : Nil
-      directory = @client.site_log_directory(@id, create: true).not_nil!
+      directory = @client.site_log_directory(@id, create: true) || raise Error.new("Site logs are unavailable for #{@project.name}")
       @app_log = SiteLog.new(File.join(directory, "app.log"), @error)
       @compiler_log = SiteLog.new(File.join(directory, "compiler.log"), @error)
     end
@@ -431,9 +430,10 @@ module Caramel::Frappe
       @server.try { |server| server.close unless server.closed? }
       Latte::ProjectStatus.remove_session(@directory, @socket) unless @socket.empty?
       File.delete?(@socket) unless @socket.empty?
-      File.delete?(@application_socket.not_nil!) if @application_socket
+      @application_socket.try { |socket| File.delete?(socket) }
       Signal::INT.reset
       Signal::TERM.reset
+      Signal::HUP.reset
     end
   end
 end

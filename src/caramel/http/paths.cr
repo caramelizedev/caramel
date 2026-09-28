@@ -7,21 +7,21 @@ module Caramel
     {% unless plural_name =~ /^[a-z][a-z0-9_]*$/ && singular_name =~ /^[a-z][a-z0-9_]*$/ %}
       {% raise "resource path names must be lowercase identifiers" %}
     {% end %}
-    def {{plural.id}}_path : String
-      {{"/#{plural.id}"}}
+    def {{ plural.id }}_path : String
+      {{ "/#{plural.id}" }}
     end
 
-    def {{singular.id}}_path(id : Int64) : String
+    def {{ singular.id }}_path(id : Int64) : String
       raise ArgumentError.new("record ID must be positive") unless id > 0
-      {{"/#{plural.id}/"}} + id.to_s
+      {{ "/#{plural.id}/" }} + id.to_s
     end
 
-    def new_{{singular.id}}_path : String
-      {{"/#{plural.id}/new"}}
+    def new_{{ singular.id }}_path : String
+      {{ "/#{plural.id}/new" }}
     end
 
-    def edit_{{singular.id}}_path(id : Int64) : String
-      {{singular.id}}_path(id) + "/edit"
+    def edit_{{ singular.id }}_path(id : Int64) : String
+      {{ singular.id }}_path(id) + "/edit"
     end
   end
 end

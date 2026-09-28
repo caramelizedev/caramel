@@ -92,6 +92,8 @@ module Caramel::Frappe
       Command.new("setup", "Install locked dependencies and register this project with Latte, preserving existing files."),
       Command.new("dev [--no-open] [--branch NAME]", "Build, serve and reload the app at its HTTPS origin; --branch runs it against database branch NAME."),
       Command.new("check #{MODE}", "Run the Tier-1 type check (crystal build --no-codegen) and report diagnostics; MRDP unless stdout is a TTY."),
+      Command.new("lint #{MODE}", "Check the application against Caramel's RFC-0008 rule set in .ameba.yml; MRDP unless stdout is a TTY."),
+      Command.new("format", "Format the application's Crystal files with the pinned compiler's formatter."),
       Command.new("routes [FILTER]", "List routes with their contracts; FILTER keeps routes whose method, path or action contains it (any case)."),
       Command.new("expand FILE:LINE:COL", "Print the plain Crystal that the macro call at FILE:LINE:COL expands to."),
       Command.new("make resource NAME FIELD:TYPE... [--plural=NAME]", "Generate a SugarORM schema, migration, actions, views, routes and specs."),
@@ -121,7 +123,7 @@ module Caramel::Frappe
       first = args.first? || raise Usage.new("missing command", "frappe", [TABLE.first])
       family = TABLE.select { |command| command.words.first == first }
       if family.empty?
-        suggestion = nearest(first, TABLE.map(&.words.first).uniq)
+        suggestion = nearest(first, TABLE.map(&.words.first).uniq!)
         raise Usage.new("unknown command #{first}", "frappe #{first}", suggestion ? TABLE.select(&.words.first.==(suggestion)) : [] of Command, suggestion)
       end
       depth = family.max_of { |command| shared(command.words, args) }
@@ -139,7 +141,7 @@ module Caramel::Frappe
         end
       end
       if word = args[depth]?
-        raise Usage.new("unknown #{subject.lchop("frappe ")} subcommand #{word}", subject, group, nearest(word, group.compact_map(&.words[depth]?).uniq))
+        raise Usage.new("unknown #{subject.lchop("frappe ")} subcommand #{word}", subject, group, nearest(word, group.compact_map(&.words[depth]?).uniq!))
       end
       raise Usage.new("#{subject} needs a subcommand", subject, group)
     end
@@ -211,6 +213,7 @@ module Caramel::Frappe
       count
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
     private def self.bind(command : Command, args : Array(String)) : Invocation
       values = {} of String => String
       lists = {} of String => Array(String)
@@ -267,11 +270,11 @@ module Caramel::Frappe
           end
         end
       end
-      command.positionals.each do |slot|
-        raise fail.call("missing #{slot.name}", nil) unless slot.optional || values.has_key?(slot.name) || lists.has_key?(slot.name)
+      command.positionals.each do |positional|
+        raise fail.call("missing #{positional.name}", nil) unless positional.optional || values.has_key?(positional.name) || lists.has_key?(positional.name)
       end
-      command.flags.each do |flag|
-        raise fail.call("missing #{flag.names.first} #{flag.value}", nil) unless flag.optional || flag.names.any? { |name| given.includes?(name) }
+      command.flags.each do |option|
+        raise fail.call("missing #{option.names.first} #{option.value}", nil) unless option.optional || option.names.any? { |spelling| given.includes?(spelling) }
       end
       Invocation.new(command, values, lists, given)
     end

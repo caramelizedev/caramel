@@ -40,22 +40,22 @@ describe Caramel::Frappe::Commands do
 
   it "refuses malformed arguments with the intended command's exact syntax" do
     {
-      ["new"]                                   => {"missing NAME", "frappe new NAME"},
-      ["check", "--agent", "--human"]           => {"--agent and --human exclude each other", "frappe check [--agent|--human]"},
+      ["new"]                                         => {"missing NAME", "frappe new NAME"},
+      ["check", "--agent", "--human"]                 => {"--agent and --human exclude each other", "frappe check [--agent|--human]"},
       ["migrate", "--dev-override", "--dev-override"] => {"--dev-override is given more than once", "frappe migrate [--dev-override] [--agent|--human]"},
-      ["corretto", "--concurrency=9"]           => {"--concurrency must be a whole number from 1 to 8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
-      ["corretto", "--concurrency=+2"]          => {"--concurrency must be a whole number from 1 to 8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
-      ["corretto", "--concurrency"]             => {"--concurrency needs a value: --concurrency=1..8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
-      ["corretto", ""]                          => {"empty argument for SPEC_PATHS", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
-      ["dev", "--branch"]                       => {"--branch needs a value: --branch NAME", "frappe dev [--no-open] [--branch NAME]"},
-      ["dev", "--branch=x"]                     => {"--branch needs a value: --branch NAME", "frappe dev [--no-open] [--branch NAME]"},
-      ["dev", "--no-open=yes"]                  => {"--no-open takes no value", "frappe dev [--no-open] [--branch NAME]"},
-      ["db", "diff", "--name"]                  => {"--name needs a value: --name NAME", "frappe db diff --name NAME [--dev-override] [--agent|--human]"},
-      ["db", "diff"]                            => {"missing --name NAME", "frappe db diff --name NAME [--dev-override] [--agent|--human]"},
-      ["db", "restore"]                         => {"missing FILE", "frappe db restore FILE"},
-      ["routes", "a", "b"]                      => {"unexpected argument \"b\"", "frappe routes [FILTER]"},
-      ["expand"]                                => {"missing FILE:LINE:COL", "frappe expand FILE:LINE:COL"},
-      ["make", "resource", "Book"]              => {"missing FIELD:TYPE", "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"},
+      ["corretto", "--concurrency=9"]                 => {"--concurrency must be a whole number from 1 to 8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
+      ["corretto", "--concurrency=+2"]                => {"--concurrency must be a whole number from 1 to 8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
+      ["corretto", "--concurrency"]                   => {"--concurrency needs a value: --concurrency=1..8", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
+      ["corretto", ""]                                => {"empty argument for SPEC_PATHS", "frappe corretto [SPEC_PATHS...] [--concurrency=1..8]"},
+      ["dev", "--branch"]                             => {"--branch needs a value: --branch NAME", "frappe dev [--no-open] [--branch NAME]"},
+      ["dev", "--branch=x"]                           => {"--branch needs a value: --branch NAME", "frappe dev [--no-open] [--branch NAME]"},
+      ["dev", "--no-open=yes"]                        => {"--no-open takes no value", "frappe dev [--no-open] [--branch NAME]"},
+      ["db", "diff", "--name"]                        => {"--name needs a value: --name NAME", "frappe db diff --name NAME [--dev-override] [--agent|--human]"},
+      ["db", "diff"]                                  => {"missing --name NAME", "frappe db diff --name NAME [--dev-override] [--agent|--human]"},
+      ["db", "restore"]                               => {"missing FILE", "frappe db restore FILE"},
+      ["routes", "a", "b"]                            => {"unexpected argument \"b\"", "frappe routes [FILTER]"},
+      ["expand"]                                      => {"missing FILE:LINE:COL", "frappe expand FILE:LINE:COL"},
+      ["make", "resource", "Book"]                    => {"missing FIELD:TYPE", "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"},
     }.each do |arguments, (message, syntax)|
       error = expect_raises(Caramel::Frappe::Commands::Usage) { Caramel::Frappe::Commands.parse(arguments) }
       {error.message, error.syntax}.should eq({message, syntax})

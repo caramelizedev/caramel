@@ -28,9 +28,9 @@ module Caramel
       struct Contract < ::Caramel::RequestContract
         {% call = @caller ? @caller.first : nil %}
         {% if call && call.filename %}
-          CARAMEL_CONTRACT_LOCATION = {{"#{call.filename.id}:#{call.line_number}:#{call.column_number}"}}
+          CARAMEL_CONTRACT_LOCATION = {{ "#{call.filename.id}:#{call.line_number}:#{call.column_number}" }}
         {% end %}
-        {{block.body}}
+        {{ block.body }}
       end
     end
 

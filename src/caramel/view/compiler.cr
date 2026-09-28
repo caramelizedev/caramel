@@ -69,7 +69,7 @@ module Caramel
         if (token.type.output? || token.type.control?) && token.suppress_leading?
           char_index = string.rindex('\n')
           char_index = char_index ? char_index + 1 : 0
-          byte_index = string.char_index_to_byte_index(char_index).not_nil!
+          byte_index = string.char_index_to_byte_index(char_index) || string.bytesize
           reader = Char::Reader.new(string)
           reader.pos = byte_index
           while reader.current_char.ascii_whitespace? && reader.has_next?

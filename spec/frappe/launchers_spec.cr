@@ -9,7 +9,7 @@ private def with_launcher_directory(& : String, String ->) : Nil
     # A checkout path with a space and a quote, as a real one may have.
     root = File.join(base, "Bob's Caramel")
     Dir.mkdir_p(File.join(root, "bin"))
-    %w(frappe latte).each do |name|
+    %w[frappe latte].each do |name|
       binary = File.join(root, "bin", name)
       File.write(binary, "#!/bin/sh\nprintf '%s|' #{name} \"$@\"\n")
       File.chmod(binary, 0o755)

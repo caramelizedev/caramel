@@ -15,8 +15,7 @@ module Caramel::Frappe
       group = CaramelDevNative.setsid
       raise "Could not isolate development child" unless group == Process.pid
       events = Channel(Process::Status?).new(3)
-      Signal::INT.trap { events.send(nil) }
-      Signal::TERM.trap { events.send(nil) }
+      Process.on_terminate { events.send(nil) }
       child = Process.new(args.first, args[1..], input: Process::Redirect::Close,
         output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
       spawn { events.send(child.wait) }

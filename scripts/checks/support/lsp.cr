@@ -55,18 +55,18 @@ module Caramel::Checks
         root = File.realpath(cwd)
         root_uri = LSPClient.uri(root)
         initialized = request("initialize", {
-          "processId" => Process.pid,
-          "rootUri" => root_uri,
-          "rootPath" => root,
+          "processId"        => Process.pid,
+          "rootUri"          => root_uri,
+          "rootPath"         => root,
           "workspaceFolders" => [{"uri" => root_uri, "name" => File.basename(root)}],
-          "capabilities" => {
-            "workspace" => {"configuration" => true},
+          "capabilities"     => {
+            "workspace"    => {"configuration" => true},
             "textDocument" => {
-              "synchronization" => {"didSave" => true},
+              "synchronization"    => {"didSave" => true},
               "publishDiagnostics" => {} of String => String,
-              "hover" => {"contentFormat" => ["markdown", "plaintext"]},
-              "definition" => {} of String => String,
-              "completion" => {"completionItem" => {"snippetSupport" => false}},
+              "hover"              => {"contentFormat" => ["markdown", "plaintext"]},
+              "definition"         => {} of String => String,
+              "completion"         => {"completionItem" => {"snippetSupport" => false}},
             },
           },
         }, 60.seconds)
@@ -105,8 +105,6 @@ module Caramel::Checks
           if identifier = message["id"]?
             response = if method.as_s == "workspace/configuration"
                          Array.new(message["params"]["items"].as_a.size) { {} of String => String }
-                       else
-                         nil
                        end
             send_message({"jsonrpc" => "2.0", "id" => identifier, "result" => response})
             next
@@ -135,7 +133,7 @@ module Caramel::Checks
 
     private def next_message(deadline : Time::Instant) : JSON::Any?
       remaining = deadline - Time.instant
-      return nil if remaining <= Time::Span.zero
+      return if remaining <= Time::Span.zero
       event = select
       when message = @messages.receive
         {true, message}
@@ -159,16 +157,16 @@ module Caramel::Checks
       while Time.instant < deadline
         message = next_message(deadline)
         if message && message["id"]?.try(&.as_i?) == identifier && !message["method"]?
-          return nil if message["error"]?
+          return if message["error"]?
           result = message["result"]?
-          return nil if result.nil? || result.raw.nil?
+          return if result.nil? || result.raw.nil?
           return result
         end
       end
       fail("#{method} timed out")
     end
 
-    def wait_diagnostics(path : String, timeout : Time::Span, &predicate : JSON::Any -> Bool) : Bool
+    def wait_diagnostics(path : String, timeout : Time::Span, & : JSON::Any -> Bool) : Bool
       key = File.realpath(path)
       deadline = Time.instant + timeout
       loop do
@@ -191,7 +189,7 @@ module Caramel::Checks
       request(method, {"textDocument" => {"uri" => LSPClient.uri(path)}, "position" => position}, timeout)
     end
 
-    def definition_until(path : String, position : Hash(String, Int32), timeout : Time::Span, &accept : String -> Bool) : Array(String)
+    def definition_until(path : String, position : Hash(String, Int32), timeout : Time::Span, & : String -> Bool) : Array(String)
       deadline = Time.instant + timeout
       found = [] of String
       while Time.instant < deadline
@@ -219,22 +217,20 @@ module Caramel::Checks
     end
 
     def close : Nil
-      begin
-        unless @process.terminated?
-          request("shutdown", nil, 10.seconds)
-          notify("exit", nil)
-          Caramel::Checks.wait_until(10.seconds, 50.milliseconds) { @process.terminated? }
-        end
-      rescue
-      ensure
-        if @process.terminated?
-          @process.wait
-        else
-          Caramel::Checks.stop(@process)
-        end
-        @stderr.close
-        File.delete(@stderr.path) if File.exists?(@stderr.path)
+      unless @process.terminated?
+        request("shutdown", nil, 10.seconds)
+        notify("exit", nil)
+        Caramel::Checks.wait_until(10.seconds, 50.milliseconds) { @process.terminated? }
       end
+    rescue
+    ensure
+      if @process.terminated?
+        @process.wait
+      else
+        Caramel::Checks.stop(@process)
+      end
+      @stderr.close
+      File.delete(@stderr.path) if File.exists?(@stderr.path)
     end
   end
 end

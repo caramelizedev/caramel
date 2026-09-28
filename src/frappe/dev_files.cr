@@ -5,10 +5,10 @@ require "./project"
 module Caramel::Frappe
   class DevFiles
     record Snapshot, source : String, assets : String
-    SOURCE_TREES = %w(src config db app vendor/caramel/src)
-    SOURCE_FILES = %w(shard.yml shard.lock .caramel-version .env)
+    SOURCE_TREES = %w[src config db app vendor/caramel/src]
+    SOURCE_FILES = %w[shard.yml shard.lock .caramel-version .env]
     # Every path whose change can alter a snapshot (app/assets is inside app).
-    WATCHED = SOURCE_TREES + SOURCE_FILES + %w(public)
+    WATCHED = SOURCE_TREES + SOURCE_FILES + %w[public]
 
     def initialize(@root : String)
     end
@@ -36,7 +36,7 @@ module Caramel::Frappe
       sources = {} of String => String
       tree("app/assets").each do |relative, hash|
         parts = relative.split('/')[2..]
-        parts.shift if %w(stylesheets javascript vendor).includes?(parts.first?)
+        parts.shift if %w[stylesheets javascript vendor].includes?(parts.first?)
         path = "public/assets/" + parts.join('/')
         raise Error.new("Asset output conflict: #{path}") if desired.has_key?(path)
         desired[path] = hash

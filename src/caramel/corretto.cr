@@ -28,6 +28,7 @@ module Corretto
 
   # Verifies that this process runs under `frappe corretto` against its own
   # worker database, then installs the per-example isolation and the wire proxy.
+  # ameba:disable Metrics/CyclomaticComplexity -- checks each worker precondition before specs run
   def self.configure(& : Config ->) : Nil
     raise Error.new("Corretto.configure runs once, in spec/spec_helper.cr") if @@worker
     index = ENV["CORRETTO_WORKER"]?
@@ -52,16 +53,14 @@ module Corretto
     @@build = build
     wire
     Spec.around_each do |example|
-      begin
-        item = example.example
-        application(worker) # rebinds SugarORM::Repo.database after a reset
-        leaked = worker.run(item.all_tags.includes?("catalog")) { example.run }
-        if leaked
-          STDERR.puts "\nCorretto: #{item.file}:#{item.line} changed the database catalog outside its transaction; worker #{index} was reset from the migrated template. Tag the example `catalog` when it must run DDL."
-        end
-      ensure
-        wire.reset
+      item = example.example
+      application(worker) # rebinds SugarORM::Repo.database after a reset
+      leaked = worker.run(item.all_tags.includes?("catalog")) { example.run }
+      if leaked
+        STDERR.puts "\nCorretto: #{item.file}:#{item.line} changed the database catalog outside its transaction; worker #{index} was reset from the migrated template. Tag the example `catalog` when it must run DDL."
       end
+    ensure
+      wire.reset
     end
     Spec.after_suite do
       worker.close
@@ -98,7 +97,7 @@ module Corretto
   private def self.application(worker : Worker) : Caramel::Application
     current = @@application
     return current[1] if current && current[0].same?(worker.database)
-    build = @@build.not_nil!
+    build = @@build || raise Error.new("Corretto has no application; call Corretto.configure in spec/spec_helper.cr")
     application = build.call(worker.database)
     @@application = {worker.database, application}
     application
@@ -122,7 +121,7 @@ module Corretto
 
   # Mocking is forbidden (RFC-0006 §2.1): refuse to compile a suite that loads a mocking library.
   macro finished
-    {% for name in %w(Mocks Mock Double) %}
+    {% for name in %w[Mocks Mock Double] %}
       {% if @top_level.has_constant?(name) %}
         {% raise "Corretto forbids mocking, but `#{name.id}` from a mocking library is loaded.\nRemediation: remove the mocking shard and its requires; assert on observable ingress, database rows and rendered hypermedia, and fake third parties at the wire with Corretto.stub_wire." %}
       {% end %}

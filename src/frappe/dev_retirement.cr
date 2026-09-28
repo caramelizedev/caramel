@@ -17,14 +17,12 @@ module Caramel::Frappe
       @pending.add(command)
       command.request_stop
       spawn do
-        begin
-          command.stop
-          cleanup.call
-        rescue ex
-          @failures << ex
-        ensure
-          @pending.delete(command) unless command.running?
-        end
+        command.stop
+        cleanup.call
+      rescue ex
+        @failures << ex
+      ensure
+        @pending.delete(command) unless command.running?
       end
     end
 

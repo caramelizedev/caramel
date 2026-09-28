@@ -24,7 +24,7 @@ module Caramel
     end
 
     def self.redirect(path : String, status = 303) : self
-      unless path.starts_with?("/") && !path.starts_with?("//") && !path.includes?('\\') && !path.each_char.any? { |char| char.ord < 32 || char.ord == 127 }
+      if !path.starts_with?("/") || path.starts_with?("//") || path.includes?('\\') || path.each_char.any? { |char| char.ord < 32 || char.ord == 127 }
         raise ArgumentError.new("redirect requires a local absolute path")
       end
       new(status, "", HTTP::Headers{"Location" => path})

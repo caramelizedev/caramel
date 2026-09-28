@@ -9,15 +9,13 @@ module Caramel::Checks::LatteNetwork
     result.stdout
   end
 
-  private def eventually(label : String, duration : Time::Span = 12.seconds, &block : -> String) : String
+  private def eventually(label : String, duration : Time::Span = 12.seconds, & : -> String) : String
     deadline = Time.instant + duration
     loop do
-      begin
-        return yield
-      rescue ex
-        raise "#{label} did not become ready: #{ex.message}" if Time.instant >= deadline
-        sleep 100.milliseconds
-      end
+      return yield
+    rescue ex
+      raise "#{label} did not become ready: #{ex.message}" if Time.instant >= deadline
+      sleep 100.milliseconds
     end
   end
 
@@ -30,19 +28,17 @@ module Caramel::Checks::LatteNetwork
         break
       end
       spawn do
-        begin
-          if peer.gets
-            while line = peer.gets
-              break if line.strip.empty?
-            end
-            body = "<h1>#{name}</h1>"
-            peer << "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
-            peer.flush
+        if peer.gets
+          while line = peer.gets
+            break if line.strip.empty?
           end
-        rescue IO::Error
-        ensure
-          peer.close
+          body = "<h1>#{name}</h1>"
+          peer << "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+          peer.flush
         end
+      rescue IO::Error
+      ensure
+        peer.close
       end
     end
   rescue IO::Error

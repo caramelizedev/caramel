@@ -83,33 +83,32 @@ describe "Caramel database session setup" do
     server_status = Channel(String).new(1)
 
     spawn do
+      first_peer = server.accept
       begin
-        first_peer = server.accept
-        begin
-          first_peer.read_timeout = 2.seconds
-          fake_startup(first_peer)
-          fake_setup_success(first_peer)
-        ensure
-          first_peer.close unless first_peer.closed?
-        end
+        first_peer.read_timeout = 2.seconds
+        fake_startup(first_peer)
+        fake_setup_success(first_peer)
+      ensure
+        first_peer.close unless first_peer.closed?
+      end
 
-        second_peer = server.accept
-        begin
-          second_peer.read_timeout = 2.seconds
-          fake_startup(second_peer)
-          fake_setup_failure(second_peer)
-          server_status.send(wait_for_client_close(second_peer) ? "closed" : "timeout")
-        rescue ex
-          server_status.send("error: #{ex.class}: #{ex.message}")
-        ensure
-          second_peer.close unless second_peer.closed?
-        end
+      second_peer = server.accept
+      begin
+        second_peer.read_timeout = 2.seconds
+        fake_startup(second_peer)
+        fake_setup_failure(second_peer)
+        server_status.send(wait_for_client_close(second_peer) ? "closed" : "timeout")
       rescue ex
         server_status.send("error: #{ex.class}: #{ex.message}")
+      ensure
+        second_peer.close unless second_peer.closed?
       end
+    rescue ex
+      server_status.send("error: #{ex.class}: #{ex.message}")
     end
 
     database = nil
+    # ameba:disable Lint/UselessAssign
     first_connection = nil
     begin
       url = "postgresql://caramel:@/books?host=#{URI.encode_path(directory)}&port=#{SETUP_PORT}"

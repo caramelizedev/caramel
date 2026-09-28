@@ -142,7 +142,8 @@ module Caramel::Frappe
         io << "# Derived from the declared schema. Once applied, a migration is immutable: change the schema and run frappe db diff again.\n"
         io << "App::MIGRATIONS << SugarORM::Migration.new(" << migration.version << "_i64, " << migration.name.inspect << ", [\n"
         migration.statements.each do |statement|
-          io << "  <<-'SQL',\n"
+          # Quoted only when interpolation or escapes must stay literal.
+          io << (statement.matches?(/#\{|\\/) ? "  <<-'SQL',\n" : "  <<-SQL,\n")
           statement.each_line { |line| io << "    " << line << '\n' }
           io << "    SQL\n"
         end

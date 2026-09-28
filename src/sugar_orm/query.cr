@@ -104,12 +104,12 @@ module SugarORM
         records
       {% else %}
         {% for key in P.keys %}
-          %loaded{key} = @preloads[{{key.symbolize}}].load(records)
+          %loaded{key} = @preloads[{{ key.symbolize }}].load(records)
         {% end %}
         records.map_with_index do |record, index|
           ::SugarORM::Loaded.new(record, {
             {% for key in P.keys %}
-              {{key}}: %loaded{key}[index],
+              {{ key }}: %loaded{key}[index],
             {% end %}
           })
         end
@@ -172,9 +172,9 @@ module SugarORM
       ::SugarORM::Repo.using(db) { each { |record| yield record } }
     end
 
-    {% for name in %w(first first! count exists? delete_all) %}
-      def {{name.id}}(db : ::SugarORM::Handle)
-        ::SugarORM::Repo.using(db) { {{name.id}} }
+    {% for name in %w[first first! count exists? delete_all] %}
+      def {{ name.id }}(db : ::SugarORM::Handle)
+        ::SugarORM::Repo.using(db) { {{ name.id }} }
       end
     {% end %}
 
@@ -203,13 +203,13 @@ module SugarORM
       new.offset(count)
     end
 
-    {% for name in %w(to_a first first! count exists? delete_all) %}
-      def self.{{name.id}}
-        new.{{name.id}}
+    {% for name in %w[to_a first first! count exists? delete_all] %}
+      def self.{{ name.id }}
+        new.{{ name.id }}
       end
 
-      def self.{{name.id}}(db : ::SugarORM::Handle)
-        new.{{name.id}}(db)
+      def self.{{ name.id }}(db : ::SugarORM::Handle)
+        new.{{ name.id }}(db)
       end
     {% end %}
 

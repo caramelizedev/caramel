@@ -5,8 +5,8 @@ require "./paths"
 module Caramel
   module Latte
     struct Site
-      DEFAULT_SUFFIX   = "caramel"
-      TEST_SUFFIX      = "test"
+      DEFAULT_SUFFIX = "caramel"
+      TEST_SUFFIX    = "test"
       # RFC 6761 reserves .localhost for loopback; macOS and browsers resolve
       # its names without a system resolver entry.
       LOCALHOST_SUFFIX = "localhost"
@@ -78,7 +78,7 @@ module Caramel
 
       def self.validate_name(name : String) : String
         StateSecurity.reject_controls!(name, "site name")
-        unless (1..63).includes?(name.bytesize) && name =~ /\A[a-z][a-z0-9-]*\z/ && !name.ends_with?('-')
+        if !(1..63).includes?(name.bytesize) || name !~ /\A[a-z][a-z0-9-]*\z/ || name.ends_with?('-')
           raise ArgumentError.new("site name must be lowercase ASCII, start with a letter, and end with a letter or digit")
         end
         name
@@ -98,7 +98,7 @@ module Caramel
         candidate = Path[directory].expand(home: Path.home).normalize.to_s
         begin
           canonical = File.realpath(candidate)
-        rescue ex : File::Error
+        rescue File::Error
           raise ArgumentError.new("project directory must exist")
         end
         info = File.info?(canonical, follow_symlinks: false)
@@ -121,7 +121,7 @@ module Caramel
           raise ArgumentError.new("registry project directory is not a directory") unless info.directory?
           begin
             canonical = File.realpath(candidate)
-          rescue ex : File::Error
+          rescue File::Error
             raise ArgumentError.new("registry project directory is invalid")
           end
           raise ArgumentError.new("registry project directory is not canonical") unless canonical == candidate

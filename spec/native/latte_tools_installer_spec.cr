@@ -40,10 +40,10 @@ private def with_coredns_fixture(member : String = "coredns", binary_digest : St
   payload = "verified executable"
   write_coredns_archive(archive, member, payload)
   File.write(manifest, {"coredns" => {
-    "version" => "1.14.7",
-    "url" => "https://example.invalid/coredns.tgz",
+    "version"        => "1.14.7",
+    "url"            => "https://example.invalid/coredns.tgz",
     "archive_sha256" => Digest::SHA256.new.file(archive).hexfinal,
-    "binary_sha256" => binary_digest || Digest::SHA256.hexdigest(payload),
+    "binary_sha256"  => binary_digest || Digest::SHA256.hexdigest(payload),
   }}.to_json)
   begin
     yield root, archive, manifest
@@ -54,7 +54,7 @@ end
 
 private def run_coredns(root : String, archive : String, manifest : String)
   Caramel::Checks.run([COREDNS_TEST_BINARY, "--archive", archive], env: {
-    "CARAMEL_TOOLCHAIN_ROOT" => root,
+    "CARAMEL_TOOLCHAIN_ROOT"    => root,
     "CARAMEL_INSTALLER_FIXTURE" => manifest,
   })
 end

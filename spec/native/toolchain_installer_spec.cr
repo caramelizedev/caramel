@@ -1,7 +1,7 @@
 require "spec"
 require "../../scripts/checks/support/harness"
 
-TOOLCHAIN_INSTALLER = File.join(Caramel::Checks::REPO, "bin/install-toolchain")
+TOOLCHAIN_INSTALLER      = File.join(Caramel::Checks::REPO, "bin/install-toolchain")
 TOOLCHAIN_TEST_INSTALLER = File.join(Caramel::Checks::REPO, "bin/test/install-toolchain")
 raise "Run scripts/check native" unless File.file?(TOOLCHAIN_INSTALLER) && File.file?(TOOLCHAIN_TEST_INSTALLER)
 
@@ -25,9 +25,9 @@ private class NativeToolchainFixture
     File.write(@config, {
       "payloads" => {"project/caramel-toolchain.toml" => "[tools]\n", "project/mise.lock" => lock},
       "critical" => @critical,
-      "aliases" => {} of String => String,
+      "aliases"  => {} of String => String,
       "provider" => provider,
-      "pointer" => @pointer,
+      "pointer"  => @pointer,
     }.to_json)
   end
 
@@ -51,7 +51,7 @@ private class NativeToolchainFixture
   end
 end
 
-private def with_toolchain_fixture(&block : NativeToolchainFixture ->) : Nil
+private def with_toolchain_fixture(& : NativeToolchainFixture ->) : Nil
   fixture = NativeToolchainFixture.new
   begin
     yield fixture
@@ -72,7 +72,7 @@ private def toolchain_probe(fixture : NativeToolchainFixture, stdout : String, s
   File.write(output, stdout)
   File.write(errors, stderr)
   Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "test-probe", "--root", fixture.root,
-    "--expected", expected, "--stdout", output, "--stderr", errors], timeout: 20.seconds)
+                       "--expected", expected, "--stdout", output, "--stderr", errors], timeout: 20.seconds)
 end
 
 describe "Swift toolchain installer" do

@@ -263,7 +263,7 @@ describe "native Latte port relay" do
   it "round trips clear and TLS-like opaque bytes with half-closes" do
     with_relay_fixture do |fixture|
       { {fixture.http_port, "http-ready", "GET /opaque HTTP/1.1\r\n\x16\x03\x01", "http-eof"},
-        {fixture.https_port, "tls-ready", "\x16\x03\x03clienthello\x00", "tls-eof"} }.each do |port, ready, payload, eof_reply|
+       {fixture.https_port, "tls-ready", "\x16\x03\x03clienthello\x00", "tls-eof"} }.each do |port, ready, payload, eof_reply|
         client = fixture.connect(port)
         begin
           client.read_timeout = 2.seconds

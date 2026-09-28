@@ -3,7 +3,7 @@ module Caramel::Frappe
   # lines with no ANSI. Each diagnostic is an `ERR` line followed by one
   # `KEY: value` field per line.
   module MRDP
-    CODES = %w(CONTRACT_MISMATCH N_PLUS_ONE UNDEFINED_METHOD UNDEFINED_CONSTANT NO_OVERLOAD SYNTAX COMPILE USAGE LINT_<RULE> DIFF_HALT)
+    CODES = %w[CONTRACT_MISMATCH N_PLUS_ONE UNDEFINED_METHOD UNDEFINED_CONSTANT NO_OVERLOAD SYNTAX COMPILE USAGE LINT_<RULE> DIFF_HALT]
 
     GRAMMAR = <<-TEXT
       MRDP (with --agent, or whenever stdout is not a TTY)

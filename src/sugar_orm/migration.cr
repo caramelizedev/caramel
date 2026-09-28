@@ -26,7 +26,7 @@ module SugarORM
     end
 
     def checksum : String
-      Digest::SHA256.hexdigest(([name] + statements).map { |s| "#{s.bytesize}:#{s}" }.join)
+      Digest::SHA256.hexdigest(([name] + statements).map { |statement| "#{statement.bytesize}:#{statement}" }.join)
     end
 
     # A migration made only of online statements (CONCURRENTLY index builds
@@ -61,7 +61,7 @@ module SugarORM
 
     def initialize(@db : DB::Database, migrations : Array(Migration), @warnings : IO = STDERR)
       @migrations = migrations.sort_by(&.version)
-      if @migrations.map(&.version).uniq.size != @migrations.size
+      if @migrations.map(&.version).uniq!.size != @migrations.size
         raise ArgumentError.new("duplicate migration versions")
       end
     end

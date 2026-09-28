@@ -11,7 +11,6 @@ STDOUT.print result.stdout
 STDERR.print result.stderr
 exit result.status.exit_code unless result.success?
 
-
 result = Caramel::Checks.crystal(["spec", "spec/native", "--error-trace"], timeout: 300.seconds)
 STDOUT.print result.stdout
 STDERR.print result.stderr

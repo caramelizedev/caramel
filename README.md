@@ -24,6 +24,8 @@ Still unfinished: smaller individual generators, custom commands, dependency edi
 
 Frappé's agent surface (RFC-0005) is one command table: `frappe --help`, `frappe COMMAND --help`, argument validation and the stateless `frappe agent-manifest` all read it, and unknown commands or malformed arguments exit 1 with the intended command's exact syntax and a "Did you mean" suggestion. `frappe check` runs the Tier-1 `crystal build --no-codegen` type check and reports compiler errors either in the RFC-0008 terminal typography (a TTY, or `--human`) or as token-dense MRDP (`--agent`, or piped output), including `CONTRACT_MISMATCH` and `N_PLUS_ONE` diagnostics whose `PATCH:` lines can be applied mechanically. `frappe routes FILTER`, `frappe db branch create|list|delete`, `frappe dev --branch NAME` and `frappe expand FILE:LINE:COL` complete it; usage errors, `frappe migrate` lint refusals and `frappe db diff` halts print as MRDP in agent mode too.
 
+`frappe lint` checks an application against Caramel's RFC-0008 rule set, Ameba 1.7.0 plus Caramel's service-noun rule, printing Ameba's report on a terminal or MRDP `ERR LINT_<RULE>` lines for agents; `frappe format` runs the pinned formatter ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)). The framework follows the same rule set.
+
 Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`.
 
 - [Caramel RFCs](docs/rfc.md)
@@ -69,6 +71,7 @@ Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) 
 ```sh
 scripts/shards install --frozen
 scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm spec/corretto spec/cold_brew
+scripts/check lint
 scripts/check views
 scripts/check compiler
 scripts/check orm-compilation
@@ -102,6 +105,8 @@ scripts/check browser
 ```
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
+
+`scripts/check all` builds everything, then runs the spec suite and every check in sequence and reports each one; a release requires all of them. `scripts/check all --except latte-daemon` skips a check, for example while your own Latte holds its ports.
 
 `scripts/check latte-daemon` runs the real `bin/latte daemon`, which listens on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443. If you use Latte yourself, stop it first: run `frappe services stop`, then `latte stop`.
 

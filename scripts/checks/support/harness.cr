@@ -64,7 +64,7 @@ module Caramel::Checks
     socket.try &.close
   end
 
-  def self.wait_until(timeout : Time::Span, interval : Time::Span, &block : -> Bool) : Bool
+  def self.wait_until(timeout : Time::Span, interval : Time::Span, & : -> Bool) : Bool
     deadline = Time.instant + timeout
     loop do
       return true if yield

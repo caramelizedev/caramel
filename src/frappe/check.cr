@@ -38,7 +38,7 @@ module Caramel::Frappe
 
     # The application's own Crystal sources and views that the main target compiles.
     private def files : Int32
-      %w(app config db src).sum { |directory| Dir.glob(File.join(@project.root, directory, "**", "*.{cr,ecr}")).size }
+      %w[app config db src].sum { |directory| Dir.glob(File.join(@project.root, directory, "**", "*.{cr,ecr}")).size }
     end
   end
 end

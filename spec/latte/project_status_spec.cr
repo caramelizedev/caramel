@@ -9,6 +9,7 @@ describe Caramel::Latte::ProjectStatus do
     root = "/private/tmp/caramel-status-#{Random::Secure.hex(6)}"
     Dir.mkdir(root, 0o700)
     paths = Caramel::Latte::Paths.new(root)
+    # ameba:disable Lint/UselessAssign
     server : HTTP::Server? = nil
     begin
       registry = Caramel::Latte::Registry.new(paths)

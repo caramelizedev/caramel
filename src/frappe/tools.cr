@@ -16,7 +16,7 @@ module Caramel::Frappe
 
     def environment(extra : Hash(String, String) = {} of String => String) : Hash(String, String)
       values = {"PATH" => "#{@toolchain.root}/bin:/usr/bin:/bin:/usr/sbin:/sbin", "CARAMEL_TOOLCHAIN_ROOT" => @toolchain.root, "LANG" => "en_US.UTF-8"}
-      %w(HOME USER LOGNAME TMPDIR).each { |key| values[key] = ENV[key] if ENV.has_key?(key) }
+      %w[HOME USER LOGNAME TMPDIR].each { |key| values[key] = ENV[key] if ENV.has_key?(key) }
       values.merge!(extra)
       values
     end

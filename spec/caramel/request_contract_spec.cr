@@ -25,7 +25,7 @@ end
 
 private def input(body : String, method = "POST", path = "/teams", route = {} of String => String) : Caramel::RequestInput
   headers = HTTP::Headers{"Content-Type" => "application/x-www-form-urlencoded"}
-  Caramel::RequestInput.read(HTTP::Request.new(method, path, headers, body)).tap { |value| value.route_params = route }
+  Caramel::RequestInput.read(HTTP::Request.new(method, path, headers, body)).tap(&.route_params=(route))
 end
 
 describe Caramel::RequestContract do

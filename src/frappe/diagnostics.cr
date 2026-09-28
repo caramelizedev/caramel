@@ -76,7 +76,7 @@ module Caramel::Frappe
       @details.each { |detail| io << "     " << detail << '\n' }
       if remediation = @remediation
         io << "\n     " << paint.call("Remediation:", "1;32") << '\n'
-        remediation.each_line { |text| io << "     " << text.sub(/\A[a-z]/) { |first| first.upcase } << '\n' }
+        remediation.each_line { |advice| io << "     " << advice.sub(/\A[a-z]/, &.upcase) << '\n' }
       end
     end
   end
@@ -94,6 +94,7 @@ module Caramel::Frappe
 
     # `root` is the compiler's working directory; paths under it are shown
     # relative to it. `entrypoint` locates errors that name no file.
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per compiler output form
     def self.parse(output : String, root : String, entrypoint : String) : Array(Diagnostic)
       lines = output.gsub(/\e\[[0-9;]*m/, "").lines
       error = lines.rindex(&.starts_with?("Error: "))
@@ -103,7 +104,7 @@ module Caramel::Frappe
       end
       file, line, column, width = entrypoint, 0, 0, 1
       if frame = (0...error).reverse_each.find { |index| lines[index].matches?(FRAME) }
-        match = lines[frame].match(FRAME).not_nil!
+        match = lines[frame].match!(FRAME)
         file, line, column = relative(match[1], root), match[2].to_i, match[3].to_i
         caret = lines[(frame + 1)...error].find(&.matches?(/\A\s*\^[-~]*\s*\z/))
         width = caret.strip.size if caret
@@ -156,8 +157,8 @@ module Caramel::Frappe
         message = "#{message.capitalize}: #{explanation}"
       end
       code = case message
-             when /\Aundefined constant /                                                                          then "UNDEFINED_CONSTANT"
-             when /\Aundefined (?:local variable or )?method /                                                     then "UNDEFINED_METHOD"
+             when /\Aundefined constant /                                                                         then "UNDEFINED_CONSTANT"
+             when /\Aundefined (?:local variable or )?method /                                                    then "UNDEFINED_METHOD"
              when /\A(?:no overload matches|expected argument #\d+|no parameter named|wrong number of arguments)/ then "NO_OVERLOAD"
              when /\A(?:expecting |unexpected |unterminated |invalid )/
                # Parser errors are the only ones printed without the frame notice.
@@ -169,6 +170,7 @@ module Caramel::Frappe
 
     # The router's message names the route, its location (`-->`) and the
     # contract block (`Contract:`), which is where the fix goes.
+    # ameba:disable Metrics/CyclomaticComplexity -- both router mismatch forms
     private def self.contract_mismatch(block : Array(String), root : String, file : String, line : Int32, column : Int32) : Diagnostic
       route = first(block, /\ARoute: '([^']+)'/).try(&.[1]) || "?"
       remediation = first(block, /\ARemediation: (.+)\z/).try(&.[1])
@@ -232,9 +234,9 @@ module Caramel::Frappe
     end
 
     private def self.source(root : String, file : String, line : Int32) : String?
-      return nil unless line > 0
+      return unless line > 0
       path = File.expand_path(file, root)
-      return nil unless File.file?(path)
+      return unless File.file?(path)
       number = 0
       File.each_line(path) do |text|
         number += 1

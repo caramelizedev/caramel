@@ -20,10 +20,10 @@ begin
     sleep 100.milliseconds
     completed = true
   end
-  raise "Retirement blocked the next build" unless child.running? && !completed
+  raise "Retirement blocked the next build" if !child.running? || completed
   raise "Retiring child was not tracked" if retirement.empty?
   retirement.drain
-  raise "Retirement returned before cleanup" unless completed && !child.running? && retirement.empty?
+  raise "Retirement returned before cleanup" if !completed || child.running? || !retirement.empty?
 
   failed_cleanup = Caramel::Frappe::DevCommand.new(["/bin/sleep", "30"], environment, directory)
   retirement.retire(failed_cleanup) { raise "cleanup-failure-proof" }

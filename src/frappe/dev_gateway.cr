@@ -24,7 +24,7 @@ module Caramel::Frappe
     def initialize(@origin : String, @secrets : Array(String) = [] of String)
       uri = URI.parse(@origin)
       raise Error.new("Development requires an HTTPS origin") unless uri.scheme == "https" && uri.host && uri.path.empty?
-      @authority = uri.authority.not_nil!
+      @authority = uri.authority || raise Error.new("Development requires an HTTPS origin")
     end
 
     def building : Nil
@@ -77,6 +77,7 @@ module Caramel::Frappe
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per development endpoint
     private def endpoint(request : HTTP::Request) : Caramel::Response
       return secure(Caramel::Response.new(405, "Method not allowed")) unless request.method == "GET"
       case request.path
@@ -124,7 +125,9 @@ module Caramel::Frappe
     # or the browser disconnected) or 30 seconds after handoff if the
     # response is never consumed. Open streams are not tied to the refresh
     # generation: they stay on the process that accepted them.
+    # ameba:disable Metrics/CyclomaticComplexity -- the proxy's streaming and failure paths
     private def forward(request : HTTP::Request, path : String, generation : Int64) : Caramel::Response
+      # ameba:disable Lint/UselessAssign -- read by the ensure below when forwarding fails early
       spawned = false
       socket = Socket.unix
       socket.connect(Socket::UNIXAddress.new(path), timeout: 1.second)
@@ -140,56 +143,52 @@ module Caramel::Frappe
       released = Channel(Nil).new(1)
       spawned = true
       spawn do
-        begin
-          client.exec(request.method, request.resource, headers, request.body) do |upstream|
-            returned = upstream.headers.dup
-            remove_hop_headers(returned)
-            returned.delete("Content-Length")
-            returned["Cache-Control"] = "no-store"
-            if request.method != "HEAD" && returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
-              socket.read_timeout = nil
-              body_io = upstream.body_io
-              response = Caramel::Response.stream(upstream.status_code, returned) do |io|
-                begin
-                  started.send(nil)
-                  buffer = Bytes.new(4096)
-                  while (count = body_io.read(buffer)) > 0
-                    io.write(buffer[0, count])
-                    io.flush
-                  end
-                ensure
-                  released.send(nil)
-                end
+        client.exec(request.method, request.resource, headers, request.body) do |upstream|
+          returned = upstream.headers.dup
+          remove_hop_headers(returned)
+          returned.delete("Content-Length")
+          returned["Cache-Control"] = "no-store"
+          if request.method != "HEAD" && returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
+            socket.read_timeout = nil
+            body_io = upstream.body_io
+            response = Caramel::Response.stream(upstream.status_code, returned) do |io|
+              started.send(nil)
+              buffer = Bytes.new(4096)
+              while (count = body_io.read(buffer)) > 0
+                io.write(buffer[0, count])
+                io.flush
               end
-              add_cookie(response)
-              outcome.send(response)
-              select
-              when started.receive
-                released.receive
-              when timeout(30.seconds)
-              end
-              # An unfinished event stream never ends; closing stops the
-              # client from draining it after this block.
-              socket.close
-            else
-              body = upstream.body_io.gets_to_end
-              if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
-                body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
-                returned.delete("ETag")
-                returned["Cache-Control"] = "no-store"
-              end
-              response = Caramel::Response.new(upstream.status_code, body, returned)
-              add_cookie(response)
-              outcome.send(response)
+            ensure
+              released.send(nil)
             end
+            add_cookie(response)
+            outcome.send(response)
+            select
+            when started.receive
+              released.receive
+            when timeout(30.seconds)
+            end
+            # An unfinished event stream never ends; closing stops the
+            # client from draining it after this block.
+            socket.close
+          else
+            body = upstream.body_io.gets_to_end
+            if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
+              body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
+              returned.delete("ETag")
+              returned["Cache-Control"] = "no-store"
+            end
+            response = Caramel::Response.new(upstream.status_code, body, returned)
+            add_cookie(response)
+            outcome.send(response)
           end
-        rescue error
-          # Buffered: after a stream was handed off nobody receives this.
-          outcome.send(error)
-        ensure
-          client.close
-          socket.close
         end
+      rescue error
+        # Buffered: after a stream was handed off nobody receives this.
+        outcome.send(error)
+      ensure
+        client.close
+        socket.close
       end
       result = outcome.receive
       raise result if result.is_a?(Exception)
@@ -223,14 +222,14 @@ module Caramel::Frappe
 
     private def redact(message : String) : String
       result = message.scrub
-      @secrets.reject(&.empty?).sort_by(&.bytesize).reverse_each { |secret| result = result.gsub(secret, "[redacted]") }
+      @secrets.reject(&.empty?).sort_by!(&.bytesize).reverse_each { |secret| result = result.gsub(secret, "[redacted]") }
       result = result.gsub(/postgres(?:ql)?:\/\/[^\s"'<>]+/, "[database URL redacted]")
       result.byte_slice(0, Math.min(result.bytesize, 32_768)).scrub
     end
 
     private def remove_hop_headers(headers : HTTP::Headers) : Nil
       headers["Connection"]?.try(&.split(',').each { |name| headers.delete(name.strip) })
-      %w(Connection Keep-Alive Proxy-Authenticate Proxy-Authorization TE Trailer Transfer-Encoding Upgrade).each { |name| headers.delete(name) }
+      %w[Connection Keep-Alive Proxy-Authenticate Proxy-Authorization TE Trailer Transfer-Encoding Upgrade].each { |name| headers.delete(name) }
     end
   end
 end

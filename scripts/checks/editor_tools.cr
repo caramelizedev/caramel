@@ -1,14 +1,14 @@
 require "./support/lsp"
 
 module EditorCheck
-  REPO = Caramel::Checks::REPO
-  FRAPPE = File.join(REPO, "bin/frappe")
-  POINTER = File.join(REPO, ".caramel-toolchain")
+  REPO     = Caramel::Checks::REPO
+  FRAPPE   = File.join(REPO, "bin/frappe")
+  POINTER  = File.join(REPO, ".caramel-toolchain")
   Caramel::Checks.fail("run scripts/install-toolchain, scripts/build-frappe and bin/frappe lsp install first") unless File.file?(FRAPPE) && File.file?(POINTER)
   ROOT = File.read(POINTER).lines.first.strip
   CRYSTAL = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.21.0")
   MANIFEST = JSON.parse(File.read(File.join(REPO, "tools/editor-darwin-arm64.json")))
-  VERSIONS = {"ameba-ls" => MANIFEST["ameba-ls"]["version"].as_s,
+  VERSIONS = {"ameba-ls"    => MANIFEST["ameba-ls"]["version"].as_s,
               "crystalline" => MANIFEST["crystalline"]["reported_version"].as_s}
   HOME = ENV["HOME"]
 
@@ -17,9 +17,9 @@ module EditorCheck
     compiler_path = "PATH=#{CRYSTAL}/embedded/bin:#{ROOT}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     binary_path = File.join(ROOT, "editor", client.name) + "/"
     return if Caramel::Checks.wait_until(10.seconds, 100.milliseconds) do
-      text = client.stderr_text
-      [marker, "(from #{source})", compiler_path, binary_path].all? { |part| text.includes?(part) }
-    end
+                text = client.stderr_text
+                [marker, "(from #{source})", compiler_path, binary_path].all? { |part| text.includes?(part) }
+              end
     client.fail("startup line missing #{marker.inspect}, (from #{source}), or pinned binary/compiler paths")
   end
 

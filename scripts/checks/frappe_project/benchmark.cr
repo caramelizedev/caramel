@@ -18,18 +18,16 @@ module Caramel::Checks
 
       def start : Nil
         spawn do
-          begin
-            loop do
-              select
-              when @stop.receive
-                break
-              when timeout(500.milliseconds)
-                collect
-              end
+          loop do
+            select
+            when @stop.receive
+              break
+            when timeout(500.milliseconds)
+              collect
             end
-          ensure
-            @done.send(nil)
           end
+        ensure
+          @done.send(nil)
         end
       end
 
@@ -91,7 +89,7 @@ module Caramel::Checks
       JSON.parse(value.to_json)
     end
 
-    private def elapsed(&operation : ->) : Float64
+    private def elapsed(& : ->) : Float64
       started = Time.monotonic
       yield
       (Time.monotonic - started).total_milliseconds
@@ -161,11 +159,12 @@ module Caramel::Checks
       arch = p.attempt(["/usr/bin/uname", "-m"]).stdout.strip
       platform = "macOS-#{release}-#{arch}-#{arch == "arm64" ? "arm-64bit" : "64bit"}"
       report = json({complete: false, mode: @edit_only ? "edit-only" : "full", scenarios: {} of String => JSON::Any, hardware: {} of String => JSON::Any, resource_samples: @sampler.rows,
-        limitations: ["HTTP-visible changes, not browser paint or browser refresh execution", "50 ms polling plus a new curl process per observation", "Managed compiler cache and dependencies warmed by fixture setup", "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average", "Resource sampling every 500 ms can miss short-lived processes", "Private HTTPS ports and explicitly supplied fixture CA; no system DNS/trust acceptance"],
-        versions_manifest: version, platform: platform, sample_count_per_edit_kind: 20})
+                     limitations: ["HTTP-visible changes, not browser paint or browser refresh execution", "50 ms polling plus a new curl process per observation", "Managed compiler cache and dependencies warmed by fixture setup", "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average", "Resource sampling every 500 ms can miss short-lived processes", "Private HTTPS ports and explicitly supplied fixture CA; no system DNS/trust acceptance"],
+                     versions_manifest: version, platform: platform, sample_count_per_edit_kind: 20})
+      # ameba:disable Lint/UselessAssign
       sampler_started = false
       begin
-        %w(hw.model hw.memsize hw.ncpu machdep.cpu.brand_string).each do |key|
+        %w[hw.model hw.memsize hw.ncpu machdep.cpu.brand_string].each do |key|
           result = p.attempt(["/usr/sbin/sysctl", "-n", key])
           report["hardware"].as_h[key] = json(result.success? ? result.stdout.strip : "unavailable")
         end

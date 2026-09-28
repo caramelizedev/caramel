@@ -9,7 +9,7 @@ private def with_tree(&)
   File.write(File.join(root, "src/models/book.cr"), "class Book; end\n")
   File.write(File.join(root, "shard.yml"), "name: probe\n")
   Dir.mkdir(File.join(root, ".caramel"))
-  watcher = Caramel::Latte::Watcher.new(root, %w(src shard.yml vendor/caramel/src))
+  watcher = Caramel::Latte::Watcher.new(root, %w[src shard.yml vendor/caramel/src])
   begin
     quiet!(watcher)
     yield root, watcher

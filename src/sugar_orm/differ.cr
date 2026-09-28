@@ -113,6 +113,7 @@ module SugarORM
       plan.transactional.concat(deferred)
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
     private def self.alter(declared : Catalog::Table, current : Catalog::Table, plan : Plan, dev_override : Bool) : Nil
       table = declared.name
       columns = current.columns.index_by(&.name)

@@ -92,10 +92,10 @@ module Caramel::ColdBrew
       {% if @type.has_constant?(:COLD_BREW_QUEUE) %}
         {% name.raise "#{@type} declares its queue twice.\nRemediation: keep one `queue` line.\n  --> #{name.filename.id}:#{name.line_number}:#{name.column_number}" %}
       {% end %}
-      COLD_BREW_QUEUE = {{name}}
+      COLD_BREW_QUEUE = {{ name }}
 
       def self.queue_name : String
-        {{name}}
+        {{ name }}
       end
     end
 
@@ -106,7 +106,7 @@ module Caramel::ColdBrew
         {% declaration.raise "param expects `param name : Type`, optionally with `= default`.\nRemediation: write it like `param invite_id : Int64`.\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
       {% end %}
       {% name = declaration.var.id %}
-      {% if %w(run_at priority).includes?(name.stringify) %}
+      {% if %w[run_at priority].includes?(name.stringify) %}
         {% declaration.raise "param '#{name}' collides with enqueue's own `#{name}:` keyword.\nRemediation: rename the param, for example `param #{name}_value : #{declaration.type}`.\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
       {% end %}
       {% constant = "COLD_BREW_PARAM_#{name.stringify.upcase.id}".id %}
@@ -114,9 +114,9 @@ module Caramel::ColdBrew
         {% declaration.raise "param '#{name}' is declared twice in #{@type}.\nRemediation: remove the duplicate `param #{name}`.\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
       {% end %}
       # {name, type, default source or nil}
-      {{constant}} = { {{name.stringify}}, {{declaration.type.stringify}}, {{declaration.value.is_a?(Nop) ? nil : declaration.value.stringify}} }
+      {{ constant }} = { {{ name.stringify }}, {{ declaration.type.stringify }}, {{ declaration.value.is_a?(Nop) ? nil : declaration.value.stringify }} }
 
-      getter {{name}} : {{declaration.type}}
+      getter {{ name }} : {{ declaration.type }}
     end
 
     # Retries matching errors; per job in its body, or for every job as
@@ -135,8 +135,8 @@ module Caramel::ColdBrew
       {% if base.is_a?(NumberLiteral) %}
         {% error.raise "retry_on base: expects a Time::Span.\nRemediation: write `base: #{base}.seconds`." + at %}
       {% end %}
-      ::Caramel::ColdBrew::Retry.register({{@type.name.stringify}}, ::Caramel::ColdBrew::RetryRule.new(
-        ->(error : ::Exception) { error.is_a?({{error}}) }, {{attempts}}, ::Caramel::ColdBrew::Backoff::{{backoff.id.capitalize}}, {{base}}))
+      ::Caramel::ColdBrew::Retry.register({{ @type.name.stringify }}, ::Caramel::ColdBrew::RetryRule.new(
+        ->(error : ::Exception) { error.is_a?({{ error }}) }, {{ attempts }}, ::Caramel::ColdBrew::Backoff::{{ backoff.id.capitalize }}, {{ base }}))
     end
 
     macro inherited
@@ -172,7 +172,7 @@ module Caramel::ColdBrew
       {% begin %}
         case class_name
         {% for job in @type.all_subclasses.reject(&.abstract?) %}
-          when {{job.name.stringify}} then {{job}}.from_json(payload).perform
+          when {{ job.name.stringify }} then {{ job }}.from_json(payload).perform
         {% end %}
         else
           raise UnknownJob.new(class_name)
@@ -187,7 +187,7 @@ module Caramel::ColdBrew
       {% begin %}
         case class_name
         {% for job in @type.all_subclasses.reject(&.abstract?) %}
-          when {{job.name.stringify}} then {{([job] + job.ancestors.select { |ancestor| ancestor < @type }).map(&.name.stringify)}}
+          when {{ job.name.stringify }} then {{ ([job] + job.ancestors.select { |ancestor| ancestor < @type }).map(&.name.stringify) }}
         {% end %}
         else
           [] of String

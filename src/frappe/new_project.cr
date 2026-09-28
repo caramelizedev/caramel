@@ -54,7 +54,7 @@ module Caramel::Frappe
       framework.merge!(tree(File.join(@framework_root, "src/sugar_orm"), "src/sugar_orm"))
       framework["src/caramel.cr"] = File.read(File.join(@framework_root, "src/caramel.cr"))
       framework["src/sugar_orm.cr"] = File.read(File.join(@framework_root, "src/sugar_orm.cr"))
-      %w(shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md).each do |file|
+      %w[shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md].each do |file|
         framework[file] = File.read(File.join(@framework_root, file))
       end
       manifest = {version: Caramel::VERSION, files: framework.transform_values { |content| Digest::SHA256.hexdigest(content) }}.to_json
@@ -76,7 +76,7 @@ module Caramel::Frappe
       files = manifest["files"].as_h
       actual = tree(root)
       actual.delete("snapshot.json")
-      raise Error.new("Framework snapshot file inventory differs") unless actual.keys.sort == files.keys.sort
+      raise Error.new("Framework snapshot file inventory differs") unless actual.keys.sort! == files.keys.sort!
       files.each do |path, expected|
         raise Error.new("Framework snapshot changed: #{path}") unless Digest::SHA256.hexdigest(actual[path]) == expected.as_s
       end
@@ -86,7 +86,7 @@ module Caramel::Frappe
 
     private def preflight_destination(path : String) : Nil
       if info = File.info?(path, follow_symlinks: false)
-        unless info.directory? && !info.symlink? && Dir.children(path).empty?
+        unless info.directory? && Dir.children(path).empty?
           raise Error.new("Project destination must be an empty directory; existing files were preserved")
         end
       end
@@ -94,7 +94,7 @@ module Caramel::Frappe
 
     private def tree(root : String, prefix : String = "") : Hash(String, String)
       info = File.info(root, follow_symlinks: false)
-      raise Error.new("Framework snapshot/template directory must be regular") unless info.directory? && !info.symlink?
+      raise Error.new("Framework snapshot/template directory must be regular") unless info.directory?
       result = {} of String => String
       Dir.children(root).sort.each do |name|
         path = File.join(root, name)

@@ -51,7 +51,7 @@ module Caramel::Checks::LatteIPC
         slow.close
       end
       sites = run!(["/usr/bin/curl", "--silent", "--show-error", "--fail", "--max-time", "3", "--unix-socket", socket, "http://localhost/v1/sites"], 30.seconds)
-      names = JSON.parse(sites.stdout)["sites"].as_a.map { |site| site["name"].as_s }
+      names = JSON.parse(sites.stdout)["sites"].as_a.map(&.["name"].as_s)
       raise sites.stdout unless names == ["bookshelf"]
       puts "Native Swift client + real owner-only Crystal IPC + service command + expired trickled request: passed"
       0

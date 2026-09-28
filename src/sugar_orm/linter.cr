@@ -4,7 +4,7 @@ module SugarORM
   # Zero-lock rules (RFC-0002 §2.6) over migration SQL. The migrator runs them
   # over every pending migration before it executes any statement.
   module Linter
-    IDENTIFIER = %q{(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)}
+    IDENTIFIER = %q((?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*))
     NAME       = "(?:#{IDENTIFIER}\\.)?(#{IDENTIFIER})"
     ANNOTATION = /^\s*--\s*caramel:allow-(drop|rename)\s+([^\s.]+)\.(\S+)\s*$/
 
@@ -60,6 +60,7 @@ module SugarORM
       migrations.flat_map { |migration| lint(migration) }
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per DDL statement kind
     def self.lint(migration : Migration) : Array(Violation)
       label = "migration #{migration.version} (#{migration.name})"
       allowed = migration.statements.flat_map { |statement| annotations(statement) }.to_set
@@ -69,7 +70,8 @@ module SugarORM
         code = code(statement)
         if match = code.match(CREATE_TABLE)
           created << identifier(match[1])
-        elsif (match = code.match(CREATE_INDEX)) && match[1]?.nil? && !created.includes?(table = identifier(match[3]))
+        elsif (match = code.match(CREATE_INDEX)) && match[1]?.nil? && !created.includes?(identifier(match[3]))
+          table = identifier(match[3])
           violations << Violation.new("concurrent-index", "CREATE INDEX on existing table #{table} blocks its writes while the index builds.",
             "use CREATE INDEX CONCURRENTLY in a migration of its own; frappe db diff emits it that way.", label, statement, migration.file)
         elsif match = code.match(ALTER_TABLE)
@@ -140,6 +142,7 @@ module SugarORM
 
     # Statement text without comments and with collapsed whitespace; quoted
     # literals and identifiers are kept intact.
+    # ameba:disable Metrics/CyclomaticComplexity -- a single-pass SQL tokenizer
     private def self.code(statement : String) : String
       chars = statement.chars
       text = String.build do |io|

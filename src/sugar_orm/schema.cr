@@ -29,8 +29,8 @@ module SugarORM
 
     {% for name in %w(field timestamps belongs_to has_many has_one index drop_column) %}
       # :nodoc:
-      macro {{name.id}}(*arguments, **options)
-        \{% raise "`{{name.id}}` belongs inside the schema block.\nRemediation: move it into `schema \"table\" do ... end` of #{@type}." %}
+      macro {{ name.id }}(*arguments, **options)
+        \{% raise "`{{ name.id }}` belongs inside the schema block.\nRemediation: move it into `schema \"table\" do ... end` of #{@type}." %}
       end
     {% end %}
 
@@ -249,80 +249,80 @@ module SugarORM
       {% end %}
       {% primary_key = primary[0] %}
 
-      SUGAR_TABLE = {{table}}
+      SUGAR_TABLE = {{ table }}
 
       # Column metadata read at compile time by changeset params.
       SUGAR_FIELDS = {
         {% for column in columns %}
-          {{column[:name].id}}: {type: {{column[:type]}}, declared: {{column[:declared]}}, nullable: {{column[:nullable]}}, system: {{column[:system]}}},
+          {{ column[:name].id }}: {type: {{ column[:type] }}, declared: {{ column[:declared] }}, nullable: {{ column[:nullable] }}, system: {{ column[:system] }}},
         {% end %}
       }
 
       enum Field
         {% for column in columns %}
-          {{column[:name].camelcase.id}}
+          {{ column[:name].camelcase.id }}
         {% end %}
       end
 
       {% for column in columns %}
-        getter {{column[:name].id}} : {{column[:type].id}}
+        getter {{ column[:name].id }} : {{ column[:type].id }}
       {% end %}
 
-      def initialize(*, {{columns.map { |column| "@#{column[:name].id} : #{column[:type].id}#{!column[:literal].is_a?(NilLiteral) ? " = #{column[:literal].stringify.id}".id : (column[:nullable] ? " = nil".id : "".id)}" }.join(", ").id}})
+      def initialize(*, {{ columns.map { |column| "@#{column[:name].id} : #{column[:type].id}#{!column[:literal].is_a?(NilLiteral) ? " = #{column[:literal].stringify.id}".id : (column[:nullable] ? " = nil".id : "".id)}" }.join(", ").id }})
       end
 
       # A copy with the given fields replaced; never persists.
-      def with(*, {{columns.map { |column| "#{column[:name].id} : #{column[:type].id} = @#{column[:name].id}" }.join(", ").id}}) : self
-        self.class.new({{columns.map { |column| "#{column[:name].id}: #{column[:name].id}" }.join(", ").id}})
+      def with(*, {{ columns.map { |column| "#{column[:name].id} : #{column[:type].id} = @#{column[:name].id}" }.join(", ").id }}) : self
+        self.class.new({{ columns.map { |column| "#{column[:name].id}: #{column[:name].id}" }.join(", ").id }})
       end
 
       # Reads one row selected with `__sugar_select_list`, in declaration order.
       def self.from_row(rows : ::DB::ResultSet) : self
-        new({{columns.map { |column| "#{column[:name].id}: rows.read(#{column[:type].id})" }.join(", ").id}})
+        new({{ columns.map { |column| "#{column[:name].id}: rows.read(#{column[:type].id})" }.join(", ").id }})
       end
 
       # Declared columns in declaration order; associations are not serialized.
       def to_json(json : ::JSON::Builder) : Nil
         json.object do
           {% for column in columns %}
-            json.field {{column[:name]}}, @{{column[:name].id}}
+            json.field {{ column[:name] }}, @{{ column[:name].id }}
           {% end %}
         end
       end
 
       def self.__sugar_table_name : String
-        {{table}}
+        {{ table }}
       end
 
       def self.__sugar_quoted_table : String
-        {{"\"#{table.id}\""}}
+        {{ "\"#{table.id}\"" }}
       end
 
       def self.__sugar_primary_key : String
-        {{primary_key}}
+        {{ primary_key }}
       end
 
       def self.__sugar_select_list : String
-        {{columns.map { |column| "\"#{column[:name].id}\"" }.join(", ")}}
+        {{ columns.map { |column| "\"#{column[:name].id}\"" }.join(", ") }}
       end
 
       def self.__sugar_timestamps? : Bool
-        {{!timestamps.empty?}}
+        {{ !timestamps.empty? }}
       end
 
       def self.__sugar_not_null_columns : Array(String)
-        {{columns.reject { |column| column[:nullable] || column[:system] }.map(&.[:name])}} of String
+        {{ columns.reject { |column| column[:nullable] || column[:system] }.map(&.[:name]) }} of String
       end
 
       # NOT NULL columns without a default: an insert must supply them.
       def self.__sugar_required_columns : Array(String)
-        {{columns.reject { |column| column[:nullable] || column[:system] || column[:default] }.map(&.[:name])}} of String
+        {{ columns.reject { |column| column[:nullable] || column[:system] || column[:default] }.map(&.[:name]) }} of String
       end
 
       def self.__sugar_column(field : Field) : String
         case field
         {% for column in columns %}
-        in Field::{{column[:name].camelcase.id}} then {{column[:name]}}
+        in Field::{{ column[:name].camelcase.id }} then {{ column[:name] }}
         {% end %}
         end
       end
@@ -330,35 +330,35 @@ module SugarORM
       def __sugar_get(column : String) : ::SugarORM::Value
         case column
         {% for column in columns %}
-        when {{column[:name]}} then @{{column[:name].id}}
+        when {{ column[:name] }} then @{{ column[:name].id }}
         {% end %}
         else raise ArgumentError.new("#{self.class} has no column '#{column}'")
         end
       end
 
       def __sugar_primary_value : Int64
-        @{{primary_key.id}}
+        @{{ primary_key.id }}
       end
 
       def self.__sugar_table : ::SugarORM::Catalog::Table
         ::SugarORM::Catalog::Table.new(
-          name: {{table}},
+          name: {{ table }},
           columns: [
             {% for column in columns %}
-              ::SugarORM::Catalog::Column.new(name: {{column[:name]}}, sql_type: {{column[:sql_type]}}, nullable: {{column[:nullable]}}, default: {{column[:default]}}, primary: {{column[:primary]}}, identity: {{column[:primary]}}, renamed_from: {{column[:renamed_from]}}),
+              ::SugarORM::Catalog::Column.new(name: {{ column[:name] }}, sql_type: {{ column[:sql_type] }}, nullable: {{ column[:nullable] }}, default: {{ column[:default] }}, primary: {{ column[:primary] }}, identity: {{ column[:primary] }}, renamed_from: {{ column[:renamed_from] }}),
             {% end %}
           ] of ::SugarORM::Catalog::Column,
           indexes: [
             {% for index in indexes %}
-              ::SugarORM::Catalog::Index.new(name: {{index[:name]}}, columns: {{index[:columns]}} of String, unique: {{index[:unique]}}),
+              ::SugarORM::Catalog::Index.new(name: {{ index[:name] }}, columns: {{ index[:columns] }} of String, unique: {{ index[:unique] }}),
             {% end %}
           ] of ::SugarORM::Catalog::Index,
           foreign_keys: [
             {% for key in foreign_keys %}
-              ::SugarORM::Catalog::ForeignKey.new(name: {{key[:name]}}, column: {{key[:column]}}, references_table: {{key[:target]}}.__sugar_table_name, references_column: {{key[:target]}}.__sugar_primary_key),
+              ::SugarORM::Catalog::ForeignKey.new(name: {{ key[:name] }}, column: {{ key[:column] }}, references_table: {{ key[:target] }}.__sugar_table_name, references_column: {{ key[:target] }}.__sugar_primary_key),
             {% end %}
           ] of ::SugarORM::Catalog::ForeignKey,
-          drops: {{drops.map(&.[:name])}} of String,
+          drops: {{ drops.map(&.[:name]) }} of String,
         )
       end
 
@@ -366,30 +366,30 @@ module SugarORM
         {% camel = association[:name].camelcase %}
         {% message = "Association '#{association[:name].id}' of #{@type} was not preloaded; using it would run one query per #{@type} (N+1). Remediation: add .preload(:#{association[:name].id}) to the query that loaded this #{@type}, e.g. #{@type}.query.preload(:#{association[:name].id}).find(id)" %}
 
-        # Returned by `#{{association[:name].id}}` until the association is
+        # Returned by `#{{ association[:name].id }}` until the association is
         # preloaded. It defines no collection or record methods, so using it
         # fails to compile at the caller's line; the remediation travels in the
         # type's name because macro errors raised while typing a method body
         # lose the caller's location.
-        struct {{camel.id}}NotLoaded(Remediation) < ::SugarORM::NotLoaded
+        struct {{ camel.id }}NotLoaded(Remediation) < ::SugarORM::NotLoaded
         end
 
-        def {{association[:name].id}} : {{camel.id}}NotLoaded(NamedTuple({{message}}: ::Nil))
-          {{camel.id}}NotLoaded(NamedTuple({{message}}: ::Nil)).new
+        def {{ association[:name].id }} : {{ camel.id }}NotLoaded(NamedTuple({{ message }}: ::Nil))
+          {{ camel.id }}NotLoaded(NamedTuple({{ message }}: ::Nil)).new
         end
 
         struct ::SugarORM::Loaded(T, L)
-          def {{association[:name].id}}
-            \{% if L.keys.map(&.stringify).includes?({{association[:name]}}) %}
-              @loaded[{{association[:name].id.symbolize}}]
+          def {{ association[:name].id }}
+            \{% if L.keys.map(&.stringify).includes?({{ association[:name] }}) %}
+              @loaded[{{ association[:name].id.symbolize }}]
             \{% else %}
-              @record.{{association[:name].id}}
+              @record.{{ association[:name].id }}
             \{% end %}
           end
         end
       {% end %}
 
-      struct QueryOf(P) < ::SugarORM::Query(::{{@type}}, P)
+      struct QueryOf(P) < ::SugarORM::Query(::{{ @type }}, P)
         {% signature = columns.map do |column|
              scalar = "::#{column[:scalar].id}"
              ranges = %w(Int32 Int64 Float64 Time).includes?(column[:scalar]) ? ["Range(#{scalar.id}, #{scalar.id})", "Range(#{scalar.id}, ::Nil)", "Range(::Nil, #{scalar.id})"] : [] of Nil
@@ -399,35 +399,35 @@ module SugarORM
 
         # Keyword conditions, checked against the columns at compile time: a
         # value, nil (IS NULL), an Array (= ANY) or a Range.
-        def where(*, {{signature.id}}) : self
+        def where(*, {{ signature.id }}) : self
           __sugar_conditions = [] of ::SugarORM::Condition
           {% for column in columns %}
-            __sugar_conditions << ::SugarORM::Condition.column({{column[:name]}}, {{column[:name].id}}) unless {{column[:name].id}}.is_a?(::SugarORM::Unset)
+            __sugar_conditions << ::SugarORM::Condition.column({{ column[:name] }}, {{ column[:name].id }}) unless {{ column[:name].id }}.is_a?(::SugarORM::Unset)
           {% end %}
           __sugar_where(__sugar_conditions)
         end
 
-        def self.where(*, {{signature.id}})
-          new.where({{columns.map { |column| "#{column[:name].id}: #{column[:name].id}" }.join(", ").id}})
+        def self.where(*, {{ signature.id }})
+          new.where({{ columns.map { |column| "#{column[:name].id}: #{column[:name].id}" }.join(", ").id }})
         end
 
         {% for association in associations %}
           {% camel = association[:name].camelcase %}
-          enum Preload{{camel.id}}
-            {{camel.id}}
+          enum Preload{{ camel.id }}
+            {{ camel.id }}
           end
 
-          def preload(association : Preload{{camel.id}})
+          def preload(association : Preload{{ camel.id }})
             {% if association[:kind] == "has_many" %}
-              QueryOf.new(@clauses, @preloads.merge({{association[:name].id}}: ::SugarORM::HasMany(::{{@type}}, {{association[:target]}}).new({{association[:key]}})))
+              QueryOf.new(@clauses, @preloads.merge({{ association[:name].id }}: ::SugarORM::HasMany(::{{ @type }}, {{ association[:target] }}).new({{ association[:key] }})))
             {% elsif association[:kind] == "has_one" %}
-              QueryOf.new(@clauses, @preloads.merge({{association[:name].id}}: ::SugarORM::HasOne(::{{@type}}, {{association[:target]}}).new({{association[:key]}})))
+              QueryOf.new(@clauses, @preloads.merge({{ association[:name].id }}: ::SugarORM::HasOne(::{{ @type }}, {{ association[:target] }}).new({{ association[:key] }})))
             {% else %}
-              QueryOf.new(@clauses, @preloads.merge({{association[:name].id}}: ::SugarORM::BelongsTo(::{{@type}}, {{association[:target]}}, {{association[:target]}}{{association[:optional] ? "?".id : "".id}}).new({{association[:key]}}, &.{{association[:key].id}})))
+              QueryOf.new(@clauses, @preloads.merge({{ association[:name].id }}: ::SugarORM::BelongsTo(::{{ @type }}, {{ association[:target] }}, {{ association[:target] }}{{ association[:optional] ? "?".id : "".id }}).new({{ association[:key] }}, &.{{ association[:key].id }})))
             {% end %}
           end
 
-          def self.preload(association : Preload{{camel.id}})
+          def self.preload(association : Preload{{ camel.id }})
             new.preload(association)
           end
         {% end %}
@@ -441,17 +441,17 @@ module SugarORM
 
       # Permits every non-system field; used by the facade unless the program
       # defines CreateChangeset / UpdateChangeset.
-      class DefaultChangeset < ::SugarORM::Changeset(::{{@type}})
+      class DefaultChangeset < ::SugarORM::Changeset(::{{ @type }})
         {% for column in columns %}
           {% unless column[:system] %}
-            param {{column[:name].id}} : {{column[:declared].id}}
+            param {{ column[:name].id }} : {{ column[:declared].id }}
           {% end %}
         {% end %}
 
         def validate(cs)
           {% for index in indexes %}
             {% if index[:unique] %}
-              cs.unique_constraint(:{{index[:columns][0].id}})
+              cs.unique_constraint(:{{ index[:columns][0].id }})
             {% end %}
           {% end %}
         end
@@ -469,10 +469,10 @@ module SugarORM
         {% for association in associations %}
           {% if association[:kind] != "belongs_to" %}
             {% location = "#{association[:node].filename.id}:#{association[:node].line_number}" %}
-            \{% target = {{association[:target]}}.resolve? %}
+            \{% target = {{ association[:target] }}.resolve? %}
             \{% fields = target && target.constant(:SUGAR_FIELDS) %}
-            \{% unless fields && fields[{{association[:key]}}] %}
-              \{% raise "{{@type}}: `{{association[:kind].id}} {{association[:name].id}} : {{association[:target]}}` (at {{location.id}}) expects the column {{association[:key].id}} on {{association[:target]}}, which does not declare it.\nRemediation: add `belongs_to {{owner_key[0..-4].id}} : {{@type}}` to {{association[:target]}}'s schema, or pass `foreign_key: :column`." %}
+            \{% unless fields && fields[{{ association[:key] }}] %}
+              \{% raise "{{ @type }}: `{{ association[:kind].id }} {{ association[:name].id }} : {{ association[:target] }}` (at {{ location.id }}) expects the column {{ association[:key].id }} on {{ association[:target] }}, which does not declare it.\nRemediation: add `belongs_to {{ owner_key[0..-4].id }} : {{ @type }}` to {{ association[:target] }}'s schema, or pass `foreign_key: :column`." %}
             \{% end %}
           {% end %}
         {% end %}
@@ -498,44 +498,44 @@ module SugarORM
       {% update_after = keywords["update"].empty? ? "".id : ", *, #{keywords["update"].id}".id %}
       {% update_forward = forwards["update"].empty? ? "".id : ", #{forwards["update"].id}".id %}
 
-      # Builds {{create}} and inserts it through the Repo.
-      def self.create{{create_alone}} : ::SugarORM::Changeset(::{{@type}})
-        ::SugarORM::Repo.insert({{create}}.new({{forwards["create"].id}}))
+      # Builds {{ create }} and inserts it through the Repo.
+      def self.create{{ create_alone }} : ::SugarORM::Changeset(::{{ @type }})
+        ::SugarORM::Repo.insert({{ create }}.new({{ forwards["create"].id }}))
       end
 
       # Like `create`, but returns the stored record or raises SugarORM::Invalid.
-      def self.create!{{create_alone}} : ::{{@type}}
-        changeset = create({{forwards["create"].id}})
+      def self.create!{{ create_alone }} : ::{{ @type }}
+        changeset = create({{ forwards["create"].id }})
         raise ::SugarORM::Invalid.new(changeset) unless changeset.saved?
         changeset.record
       end
 
-      def self.create(db : ::SugarORM::Handle{{create_after}}) : ::SugarORM::Changeset(::{{@type}})
-        ::SugarORM::Repo.using(db) { create({{forwards["create"].id}}) }
+      def self.create(db : ::SugarORM::Handle{{ create_after }}) : ::SugarORM::Changeset(::{{ @type }})
+        ::SugarORM::Repo.using(db) { create({{ forwards["create"].id }}) }
       end
 
-      def self.create!(db : ::SugarORM::Handle{{create_after}}) : ::{{@type}}
-        ::SugarORM::Repo.using(db) { create!({{forwards["create"].id}}) }
+      def self.create!(db : ::SugarORM::Handle{{ create_after }}) : ::{{ @type }}
+        ::SugarORM::Repo.using(db) { create!({{ forwards["create"].id }}) }
       end
 
-      # Builds {{update}} from this record and updates it through the Repo.
-      def update{{update_alone}} : ::SugarORM::Changeset(::{{@type}})
-        ::SugarORM::Repo.update({{update}}.new(self{{update_forward}}))
+      # Builds {{ update }} from this record and updates it through the Repo.
+      def update{{ update_alone }} : ::SugarORM::Changeset(::{{ @type }})
+        ::SugarORM::Repo.update({{ update }}.new(self{{ update_forward }}))
       end
 
       # Like `update`, but returns the stored record or raises SugarORM::Invalid.
-      def update!{{update_alone}} : ::{{@type}}
-        changeset = update({{forwards["update"].id}})
+      def update!{{ update_alone }} : ::{{ @type }}
+        changeset = update({{ forwards["update"].id }})
         raise ::SugarORM::Invalid.new(changeset) unless changeset.saved?
         changeset.record
       end
 
-      def update(db : ::SugarORM::Handle{{update_after}}) : ::SugarORM::Changeset(::{{@type}})
-        ::SugarORM::Repo.using(db) { update({{forwards["update"].id}}) }
+      def update(db : ::SugarORM::Handle{{ update_after }}) : ::SugarORM::Changeset(::{{ @type }})
+        ::SugarORM::Repo.using(db) { update({{ forwards["update"].id }}) }
       end
 
-      def update!(db : ::SugarORM::Handle{{update_after}}) : ::{{@type}}
-        ::SugarORM::Repo.using(db) { update!({{forwards["update"].id}}) }
+      def update!(db : ::SugarORM::Handle{{ update_after }}) : ::{{ @type }}
+        ::SugarORM::Repo.using(db) { update!({{ forwards["update"].id }}) }
       end
     end
 
@@ -548,13 +548,13 @@ module SugarORM
       {% unless declaration.is_a?(Call) && declaration.receiver.is_a?(Nop) && body.is_a?(Block) && declaration.named_args.is_a?(Nop) && declaration.args.all?(&.is_a?(TypeDeclaration)) %}
         {% declaration.raise "scope expects `scope name { where(...) }` or `scope name(arg : Type) { ... }` with typed arguments." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
       {% end %}
-      struct QueryOf(P) < ::SugarORM::Query(::{{@type}}, P)
-        def {{declaration.name}}({{declaration.args.splat}})
-          {{body.body}}
+      struct QueryOf(P) < ::SugarORM::Query(::{{ @type }}, P)
+        def {{ declaration.name }}({{ declaration.args.splat }})
+          {{ body.body }}
         end
 
-        def self.{{declaration.name}}({{declaration.args.splat}})
-          new.{{declaration.name}}({{declaration.args.map(&.var).splat}})
+        def self.{{ declaration.name }}({{ declaration.args.splat }})
+          new.{{ declaration.name }}({{ declaration.args.map(&.var).splat }})
         end
       end
     end

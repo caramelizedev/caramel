@@ -76,10 +76,10 @@ module Caramel::Checks
         raise "Fixture daemon exited" if @daemon.try(&.terminated?)
         begin
           document = rpc("GET", "/v1/status")
-          states = %w(postgres dns proxy).map { |name| document["services"][name]["state"].as_s }
+          states = %w[postgres dns proxy].map { |name| document["services"][name]["state"].as_s }
           return if states.all? { |item| item == state }
           raise "Fixture services failed" if state != "stopped" && states.includes?("failed")
-        rescue ex : IO::Error | Socket::Error
+        rescue IO::Error | Socket::Error
           # The socket may not exist yet during startup.
         end
         sleep 100.milliseconds
@@ -164,7 +164,6 @@ module Caramel::Checks
 
     def finish(failed : Bool) : Nil
       cleanup_ok = false
-      violation = nil
       begin
         if app = @app
           Checks.stop(app, 15.seconds) unless app.terminated?

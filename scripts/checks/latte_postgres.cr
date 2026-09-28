@@ -6,19 +6,20 @@ module Caramel::Checks::LattePostgres
 
   private def owned_postgres_pid(data : String, pid_file : String, postgres : String) : Int64?
     info = File.info?(pid_file, follow_symlinks: false)
-    return nil unless info && info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64
-    return nil if (info.permissions.value & 0o077) != 0
+    return unless info
+    return if !info.file? || info.symlink? || info.owner_id.to_i64? != LibC.getuid.to_i64
+    return if (info.permissions.value & 0o077) != 0
     lines = File.read(pid_file).lines.map(&.strip)
-    return nil if lines.size < 3 || lines[1] != data
+    return if lines.size < 3 || lines[1] != data
     pid = lines[0].to_i64
     postmaster_start = lines[2].to_i64
-    return nil unless pid > 1 && pid <= Int32::MAX
+    return unless pid > 1 && pid <= Int32::MAX
     snapshot = Checks.run(["/bin/ps", "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="], env: {"LC_ALL" => "C"}, timeout: 2.seconds)
-    return nil unless snapshot.success?
+    return unless snapshot.success?
     fields = snapshot.stdout.strip.split(/\s+/, 7)
-    return nil unless fields.size == 7 && fields[0].to_i64 == LibC.getuid.to_i64
+    return unless fields.size == 7 && fields[0].to_i64 == LibC.getuid.to_i64
     process_start = Time.parse(fields[1..5].join(" "), "%a %b %e %H:%M:%S %Y", Time::Location.local).to_unix
-    return nil if (process_start - postmaster_start).abs > 1
+    return if (process_start - postmaster_start).abs > 1
     expected = "#{postgres} -D #{data}"
     command = fields[6]
     return pid if command == expected || command.starts_with?(expected + " ")
@@ -48,7 +49,7 @@ module Caramel::Checks::LattePostgres
     project = File.join(root, "project")
     Dir.mkdir(project, 0o700)
     environment = Hash(String, String?).new
-    ENV.each do |key, value|
+    ENV.each do |key, _|
       environment[key] = nil if key.starts_with?("PG") || key.starts_with?("CARAMEL_LATTE_")
     end
     environment["CARAMEL_TOOLCHAIN_ROOT"] = toolchain
@@ -60,7 +61,7 @@ module Caramel::Checks::LattePostgres
       result = Checks.crystal(["spec", "spec/latte_integration/postgres_spec.cr", "--error-trace"], env: environment, timeout: 180.seconds)
       print result.stdout
       STDERR.print result.stderr
-      if result.timed_out
+      if result.timed_out?
         STDERR.puts "PostgreSQL integration exceeded its 180-second budget; cleaning up owned state."
         124
       else
@@ -79,7 +80,7 @@ module Caramel::Checks::LattePostgres
         begin
           result = Checks.run([File.join(pg, "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"], env: environment, timeout: 30.seconds)
           stopped = false
-          unless result.timed_out
+          unless result.timed_out?
             if result.success? && !File.exists?(pid_file) && !File.symlink?(pid_file)
               stopped = LibC.kill(pid.to_i, 0) != 0 && Errno.value == Errno::ESRCH
             end

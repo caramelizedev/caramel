@@ -10,7 +10,7 @@ module Caramel
   # htmx 4 rewrites each `<hx-partial>` into `template[hx][type=partial]` and
   # swaps it into its own target, so one response can update several regions.
   module Hypermedia
-    SWAPS            = %w(innerHTML outerHTML innerMorph outerMorph beforebegin afterbegin beforeend afterend delete none)
+    SWAPS            = %w[innerHTML outerHTML innerMorph outerMorph beforebegin afterbegin beforeend afterend delete none]
     MAX_TARGET_BYTES = 256
 
     def self.render(partials : Enumerable(Partial)) : String

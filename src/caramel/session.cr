@@ -33,10 +33,10 @@ module Caramel
     # The session a cookie value carries, or nil when it is oversized,
     # malformed or not signed with this application's secret.
     def decode(value : String) : Hash(String, String)?
-      return nil if COOKIE_NAME.bytesize + 1 + value.bytesize > MAX_COOKIE_BYTES
+      return if COOKIE_NAME.bytesize + 1 + value.bytesize > MAX_COOKIE_BYTES
       payload, dot, signature = value.rpartition('.')
-      return nil if dot.empty? || payload.empty?
-      return nil unless Crypto::Subtle.constant_time_compare(sign(payload), signature)
+      return if dot.empty? || payload.empty?
+      return unless Crypto::Subtle.constant_time_compare(sign(payload), signature)
       Hash(String, String).from_json(Base64.decode_string(payload))
     rescue JSON::ParseException | TypeCastError
       nil

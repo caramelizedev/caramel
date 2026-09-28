@@ -82,7 +82,7 @@ module SugarORM
         {% declaration.raise "param '#{name.id}' is declared twice in #{@type}.\nRemediation: remove the duplicate `param #{name.id}`." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
       {% end %}
       # {name, accepted value type}
-      {{constant}} = { {{name}}, {{declared.union_types.map { |member| "::#{member}" }.join(" | ")}} }
+      {{ constant }} = { {{ name }}, {{ declared.union_types.map { |member| "::#{member}" }.join(" | ") }} }
     end
 
     macro inherited
@@ -263,9 +263,9 @@ module SugarORM
                else
                  begin
                    Repo.in_transaction? ? Repo.transaction { yield } : yield
-                 rescue violation : UniqueViolation
-                   constraint = @unique_constraints.find { |(column, _)| violation.on?(T.__sugar_table_name, column) }
-                   raise violation unless constraint
+                 rescue ex : UniqueViolation
+                   constraint = @unique_constraints.find { |(column, _)| ex.on?(T.__sugar_table_name, column) }
+                   raise ex unless constraint
                    add_error(constraint[0], constraint[1])
                    return
                  end

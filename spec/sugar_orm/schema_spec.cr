@@ -67,7 +67,7 @@ describe SugarORM::Schema do
 
   it "serializes declared columns in declaration order and never association sentinels" do
     json = SugarUnit.team(billing_email: "a@b.c").to_json
-    JSON.parse(json).as_h.keys.should eq(%w(id name seats ratio archived motto billing_email created_at updated_at owner_id))
+    JSON.parse(json).as_h.keys.should eq(%w[id name seats ratio archived motto billing_email created_at updated_at owner_id])
     json.should contain(%("created_at":"2026-01-01T00:00:00Z"))
     json.should_not contain("members")
     json.should_not contain("charter")

@@ -13,7 +13,7 @@ module Caramel::Frappe
     # a request contract getter, so it must not collide with system columns,
     # the SugarORM schema DSL, facade or changeset API, the request contract
     # API, or Crystal keywords and core methods.
-    RESERVED = %w(
+    RESERVED = %w[
       id created_at updated_at
       schema field timestamps belongs_to has_many has_one index drop_column scope
       query with create update delete db from_row to_json record
@@ -23,10 +23,10 @@ module Caramel::Frappe
       new to_s inspect hash clone dup object_id if else elsif unless until while for do then case when in begin rescue ensure
       return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
-    )
+    ]
     getter name : String
     getter kind : String
-    getter nullable : Bool
+    getter? nullable : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
@@ -34,7 +34,7 @@ module Caramel::Frappe
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
-      unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && !RESERVED.includes?(@name) && TYPES.has_key?(@kind)
+      unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && RESERVED.none?(@name) && TYPES.has_key?(@kind)
         raise Error.new("Invalid or reserved resource field: #{declaration}")
       end
     end
@@ -88,44 +88,45 @@ module Caramel::Frappe
     def initialize(@framework_root : String)
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
     def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil) : Array(String)
-      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && !%w(App ApplicationAction Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64).includes?(name)
+      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
       singular = name.underscore
       collection = plural || pluralize(singular)
-      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && !%w(assets health home new edit).includes?(collection)
+      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit].none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
       end
       fields = declarations.map { |item| ResourceField.new(item) }
-      raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq.size != fields.size
+      raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
       used_versions = Dir.glob(File.join(project.root, "db/migrations/*.cr")).compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
       migration_version = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
       raise Error.new("Migration version must be positive and unused") if migration_version <= 0 || (version && used_versions.includes?(migration_version))
       while used_versions.includes?(migration_version)
         migration_version += 1
       end
-      required_text = fields.select { |f| f.kind == "string" && !f.nullable }
+      required_text = fields.select { |field| field.kind == "string" && !field.nullable? }
       tokens = {
         "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
         "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
         "@@COLLECTION_LABEL@@" => collection.tr("_", " ").capitalize,
-        "@@MODEL_FIELDS@@" => fields.map { |f| "      field #{f.name} : #{f.type}" }.join('\n'),
-        "@@CONTRACT_FIELDS@@" => fields.map { |f| "      field #{f.name} : #{f.type}" }.join('\n'),
-        "@@PARAMS@@" => fields.map { |f| "    param #{f.name} : #{f.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => required_text.map { |f| "      cs.validate_presence(:#{f.name})" }.join('\n'),
-        "@@ATTRIBUTES@@" => fields.map { |f| "#{f.name}: contract.#{f.name}" }.join(", "),
-        "@@VALUES@@" => fields.map { |f| "#{f.name.to_json} => record.#{f.name}.try { |value| #{f.kind == "time" ? "value.to_rfc3339" : "value.to_s"} } || \"\"" }.join(", "),
-        "@@FORM_FIELDS@@" => fields.map { |f| form_field(f, singular) }.join('\n'),
-        "@@TABLE_HEADERS@@" => fields.map { |f| "<th scope=\"col\">#{f.label}</th>" }.join,
-        "@@TABLE_CELLS@@" => fields.map { |f| "<td><%= record.#{f.name} %></td>" }.join,
-        "@@SHOW_FIELDS@@" => fields.map { |f| "  <dt>#{f.label}</dt><dd><%= record.#{f.name} %></dd>" }.join('\n'),
-        "@@SAMPLE_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.sample.to_json}" }.join(", "),
-        "@@SAMPLE_CONDITIONS@@" => fields.map { |f| "#{f.name}: #{f.literal(f.sample)}" }.join(", "),
-        "@@UPDATED_FIELDS@@" => fields.map { |f| "#{f.name.to_json} => #{f.updated_sample.to_json}" }.join(", "),
-        "@@ASSERT_FIELDS@@" => fields.map { |f| "      persisted.#{f.name}.should eq(Caramel::RequestContract.convert(#{f.updated_sample.to_json}, #{ResourceField::TYPES[f.kind][0]}))" }.join('\n'),
+        "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
+        "@@CONTRACT_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
+        "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
+        "@@VALIDATIONS@@" => required_text.map { |field| "      cs.validate_presence(:#{field.name})" }.join('\n'),
+        "@@ATTRIBUTES@@" => fields.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
+        "@@VALUES@@" => fields.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
+        "@@FORM_FIELDS@@" => fields.map { |field| form_field(field, singular) }.join('\n'),
+        "@@TABLE_HEADERS@@" => fields.map { |field| "<th scope=\"col\">#{field.label}</th>" }.join,
+        "@@TABLE_CELLS@@" => fields.map { |field| "<td><%= record.#{field.name} %></td>" }.join,
+        "@@SHOW_FIELDS@@" => fields.map { |field| "  <dt>#{field.label}</dt><dd><%= record.#{field.name} %></dd>" }.join('\n'),
+        "@@SAMPLE_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", "),
+        "@@SAMPLE_CONDITIONS@@" => fields.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
+        "@@UPDATED_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
+        "@@ASSERT_FIELDS@@" => fields.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
         "@@ASSERT_PRESENCE@@" => assert_presence(name, required_text),
-        "@@ASSERT_ESCAPING@@" => fields.select { |f| f.kind == "string" }.map { |f| "      shown.body.should contain(Caramel::HTML.escape(#{f.sample.to_json}))\n      shown.body.should_not contain(#{f.sample.to_json})" }.join('\n'),
+        "@@ASSERT_ESCAPING@@" => fields.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")
@@ -161,7 +162,7 @@ module Caramel::Frappe
         files[relative] = original.sub(marker, "#{lines.join('\n')}\n#{marker}")
       end
       publish(project, files, originals)
-      files.keys.sort
+      files.keys.sort!
     end
 
     private def pluralize(name : String) : String
@@ -176,7 +177,7 @@ module Caramel::Frappe
     private def create_table(table : String, fields : Array(ResourceField)) : Array(String)
       columns = [SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)]
       columns.concat(fields.map(&.column))
-      %w(created_at updated_at).each { |stamp| columns << SugarORM::Catalog::Column.new(stamp, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
+      %w[created_at updated_at].each { |stamp| columns << SugarORM::Catalog::Column.new(stamp, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
       plan = SugarORM::Differ.diff([SugarORM::Catalog::Table.new(table, columns)], [] of SugarORM::Catalog::Table)
       SugarORM::DDL.statements(plan.transactional)
     end
@@ -185,23 +186,23 @@ module Caramel::Frappe
     # facade writes.
     private def assert_presence(model : String, fields : Array(ResourceField)) : String
       return "" if fields.empty?
-      blanks = fields.join(", ") { |f| "#{f.name}: \" \"" }
+      blanks = fields.join(", ") { |field| "#{field.name}: \" \"" }
       String.build do |io|
         io << "      [App::" << model << ".create(" << blanks << "), persisted.update(" << blanks << ")].each do |blank|\n"
         io << "        blank.saved?.should be_false\n"
-        fields.each { |f| io << "        blank.errors[" << f.name.to_json << "]?.should eq([\"can't be blank\"])\n" }
+        fields.each { |field| io << "        blank.errors[" << field.name.to_json << "]?.should eq([\"can't be blank\"])\n" }
         io << "      end"
       end
     end
 
     private def form_field(field : ResourceField, singular : String) : String
       id = "#{singular}_#{field.name}"
-      attributes = "id=\"#{id}\" name=\"#{field.name}\"#{field.nullable ? "" : " required"} aria-describedby=\"#{id}_errors\" aria-invalid=\"<%= errors.has_key?(#{field.name.to_json}) ? \"true\" : \"false\" %>\""
+      attributes = "id=\"#{id}\" name=\"#{field.name}\"#{field.nullable? ? "" : " required"} aria-describedby=\"#{id}_errors\" aria-invalid=\"<%= errors.has_key?(#{field.name.to_json}) ? \"true\" : \"false\" %>\""
       control = if field.kind == "bool"
-                  options = field.nullable ? ["", "true", "false"] : ["true", "false"]
+                  options = field.nullable? ? ["", "true", "false"] : ["true", "false"]
                   "<select #{attributes}>" + options.map { |value| "<option value=\"#{value}\"<% if values[#{field.name.to_json}]? == #{value.to_json} %> selected<% end %>>#{value.empty? ? "Unspecified" : value.capitalize}</option>" }.join + "</select>"
                 else
-                  type = %w(int32 int64 float64).includes?(field.kind) ? "number" : "text"
+                  type = %w[int32 int64 float64].includes?(field.kind) ? "number" : "text"
                   extra = field.kind == "float64" ? " step=\"any\"" : ""
                   extra += " placeholder=\"2026-09-19T12:00:00Z\"" if field.kind == "time"
                   "<input type=\"#{type}\" #{attributes}#{extra} value=\"<%= values[#{field.name.to_json}]? || \"\" %>\">"

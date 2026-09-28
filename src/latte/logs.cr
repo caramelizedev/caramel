@@ -11,11 +11,11 @@ module Caramel::Latte
     MAX_BYTES = 1024 * 1024
 
     def self.sweep(paths : Paths) : Nil
-      %w(postgres dns proxy latte).each do |name|
+      %w[postgres dns proxy latte].each do |name|
         path = File.join(paths.logs_dir, "#{name}.log")
         info = File.info?(path, follow_symlinks: false)
         next unless info
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless StateSecurity.private_file?(info)
           raise ArgumentError.new("Managed service log is not a private owned file")
         end
         next unless info.size > MAX_BYTES

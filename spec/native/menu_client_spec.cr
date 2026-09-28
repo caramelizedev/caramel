@@ -76,7 +76,7 @@ private class MenuFixture
 
   def serve(sites : String = "[]", *, include_sites_version : Bool = true, trickle : Bool = false, delays : Hash(String, Time::Span) = Hash(String, Time::Span).new, postgres : String = "running", dns : String = "running", proxy : String = "stopped", status_error : String? = nil) : Nil
     status = %({"version":1,"services":{"postgres":{"state":#{postgres.to_json},"detail":null},"dns":{"state":#{dns.to_json},"detail":null},"proxy":{"state":#{proxy.to_json},"detail":null}})
-    status += %(,\"error\":#{status_error.to_json}) if status_error
+    status += %(,"error":#{status_error.to_json}) if status_error
     status += "}"
     sites_response = include_sites_version ? %({"sites":#{sites},"version":1}) : %({"sites":#{sites}})
     @daemon = FakeMenuDaemon.new(@socket, {"GET /v1/status" => status, "GET /v1/sites" => sites_response}, trickle, delays)

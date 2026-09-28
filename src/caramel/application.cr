@@ -23,7 +23,7 @@ module Caramel
     @public_root : String?
 
     def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
-      @authority = URI.parse(@csrf.origin).authority.not_nil!
+      @authority = URI.parse(@csrf.origin).authority || raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
       @public_root = public_root.try { |root| File.realpath(root) }
       @sessions = Session.new(@csrf.derive_key("session"))
     end
@@ -99,7 +99,7 @@ module Caramel
       path = request.path
       return Response.new(400, "Malformed path") if path.matches?(/%(?![0-9a-fA-F]{2})/)
       decoded = URI.decode(path)
-      return Response.new(404, "Not found") if decoded.includes?('\0') || decoded.includes?('\\') || decoded.split('/').any? { |segment| segment.starts_with?('.') }
+      return Response.new(404, "Not found") if decoded.includes?('\0') || decoded.includes?('\\') || decoded.split('/').any?(&.starts_with?('.'))
       candidate = File.expand_path(".#{decoded}", root)
       return unless candidate.starts_with?(root + "/") && File.file?(candidate)
       real = File.realpath(candidate)

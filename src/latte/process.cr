@@ -12,7 +12,7 @@ module Caramel::Latte
     getter status : Process::Status
     getter stdout : String
     getter stderr : String
-    getter timed_out : Bool
+    getter? timed_out : Bool
 
     def initialize(@status : Process::Status, @stdout : String, @stderr : String, @timed_out : Bool = false)
     end
@@ -53,7 +53,7 @@ module Caramel::Latte
     # the retained prefix stays in memory; no unbounded temporary output file
     # is created.
     private class BoundedOutput < IO
-      getter truncated : Bool
+      getter? truncated : Bool
 
       def initialize(@limit : Int32)
         @data = IO::Memory.new
@@ -80,6 +80,7 @@ module Caramel::Latte
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- launch, deadline and cleanup of one command
     def self.run(
       argv : Enumerable(String),
       *,
@@ -100,21 +101,21 @@ module Caramel::Latte
       error_capture = BoundedOutput.new(output_limit)
       input_file : File? = nil
       input_path : String? = nil
-      process : Process? = nil
       begin
         if input
-          input_file = File.tempfile("caramel-latte-in", ".sql", dir: Dir.tempdir)
-          input_path = input_file.not_nil!.path
-          input_file.not_nil!.chmod(0o600)
-          input_file.not_nil! << input
-          input_file.not_nil!.flush
-          input_file.not_nil!.rewind
+          staged = File.tempfile("caramel-latte-in", ".sql", dir: Dir.tempdir)
+          input_file = staged
+          input_path = staged.path
+          staged.chmod(0o600)
+          staged << input
+          staged.flush
+          staged.rewind
         end
 
         # File staging is part of this command's launch budget too; refresh
         # the outer operation's remaining time immediately before spawning.
         timeout = OperationDeadline.limit(timeout)
-        process = Process.new(
+        child = Process.new(
           command,
           env: env,
           clear_env: clear_env,
@@ -126,18 +127,15 @@ module Caramel::Latte
         input_file.try(&.close)
         input_file = nil
 
-        completion = Channel({Process::Status?, Exception?}).new(1)
-        child = process.not_nil!
+        completion = Channel(Process::Status | Exception).new(1)
         spawn do
-          begin
-            completion.send({child.wait, nil})
-          rescue ex
-            completion.send({nil, ex})
-          end
+          completion.send(child.wait)
+        rescue ex
+          completion.send(ex)
         end
 
         timed_out = false
-        event = select
+        outcome = select
         when item = completion.receive
           item
         when timeout(timeout)
@@ -157,26 +155,20 @@ module Caramel::Latte
             when timeout(2.seconds)
               # SIGKILL should reap a native command promptly. Keep this outer
               # wait bounded as well if the platform cannot report its status.
-              {Process::Status[124], nil}
+              Process::Status[124]
             end
           end
         end
 
-        status, exception = event
-        raise exception.not_nil! if exception
-        ProcessResult.new(status.not_nil!, output_capture.contents, error_capture.contents, timed_out)
+        raise outcome if outcome.is_a?(Exception)
+        ProcessResult.new(outcome, output_capture.contents, error_capture.contents, timed_out)
       rescue ex : ProcessFailure
         raise ex
       ensure
         input_file.try(&.close)
-        if input_file
+        if path = input_path
           begin
-            File.delete(input_path.not_nil!) if input_path && File.exists?(input_path.not_nil!)
-          rescue
-          end
-        elsif input_path
-          begin
-            File.delete(input_path.not_nil!) if File.exists?(input_path.not_nil!)
+            File.delete(path) if File.exists?(path)
           rescue
           end
         end
@@ -239,7 +231,7 @@ module Caramel::Latte
       @process = nil
       @executable = begin
         File.realpath(executable)
-      rescue ex : File::Error
+      rescue File::Error
         raise ArgumentError.new("managed child executable is unavailable")
       end
       ensure_private_parent(@record_path)
@@ -247,7 +239,7 @@ module Caramel::Latte
     end
 
     def identity : Identity?
-      return nil unless File.exists?(@record_path)
+      return unless File.exists?(@record_path)
       info = File.info(@record_path, follow_symlinks: false)
       raise OwnershipError.new("managed process record is a symlink") if info.symlink?
       raise OwnershipError.new("managed process record is not a regular file") unless info.file?
@@ -291,17 +283,18 @@ module Caramel::Latte
       output = File.open(@log_path, "a", 0o600)
       child : Process? = nil
       begin
-        child = Process.new([@executable, *@args], env: @environment, output: output, error: output, chdir: @working_directory)
-        snapshot = process_snapshot(child.not_nil!.pid)
+        launched = Process.new([@executable, *@args], env: @environment, output: output, error: output, chdir: @working_directory)
+        child = launched
+        snapshot = process_snapshot(launched.pid)
         raise ProcessFailure.new(ProcessResult.new(Process::Status[1], "", "managed child exited before identity could be recorded")) unless snapshot
-        uid, start_time, command_line = snapshot.not_nil!
+        uid, start_time, command_line = snapshot
         unless uid == LibC.getuid.to_i64 && command_line == expected_command
           raise ProcessFailure.new(ProcessResult.new(Process::Status[1], "", "managed child identity did not match its launch command"))
         end
-        identity = Identity.new(@name, child.not_nil!.pid, @executable, digest_args(@args), owner_token, start_time)
+        identity = Identity.new(@name, launched.pid, @executable, digest_args(@args), owner_token, start_time)
         write_identity(identity)
-        @process = child
-        wait_for_start(child.not_nil!, timeout)
+        @process = launched
+        wait_for_start(launched, timeout)
         identity
       rescue ex
         begin
@@ -327,12 +320,12 @@ module Caramel::Latte
       child = @process
       if child
         begin
-          child.not_nil!.terminate
+          child.terminate
         rescue
           # The child may have exited between identity verification and the
           # signal. Its wait below still reaps it and proves that outcome.
         end
-        return stop_owned_child(child.not_nil!, saved, timeout)
+        return stop_owned_child(child, saved, timeout)
       else
         begin
           Process.signal(Signal::TERM, saved.pid)
@@ -396,7 +389,7 @@ module Caramel::Latte
       return false unless Process.exists?(saved.pid)
       snapshot = process_snapshot(saved.pid)
       return false unless snapshot
-      uid, start_time, command_line = snapshot.not_nil!
+      uid, start_time, command_line = snapshot
       return false unless uid == LibC.getuid.to_i64 && start_time == saved.start_time
       command_line == expected_command
     rescue
@@ -410,16 +403,17 @@ module Caramel::Latte
              "/usr/bin/ps"
            end
       result = ProcessRunner.run([ps, "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="], timeout: 2.seconds, output_limit: 16 * 1024)
-      return nil unless result.success?
+      return unless result.success?
       fields = result.stdout.strip.split(/\s+/, 7)
-      return nil if fields.size < 7
+      return if fields.size < 7
       uid = fields[0].to_i64?
-      return nil unless uid
+      return unless uid
       start_time = fields[1, 5].join(" ")
       command_line = fields[6]
       {uid, start_time, command_line}
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- verifies each process-listing field before adopting
     private def adopt_existing_identity : Identity?
       ps = if File.exists?("/bin/ps")
              "/bin/ps"
@@ -430,7 +424,7 @@ module Caramel::Latte
       # argv is fetched for the small candidate set below and compared exactly
       # before a process can be adopted.
       result = ProcessRunner.run([ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="], timeout: 2.seconds, output_limit: PROCESS_LISTING_LIMIT)
-      return nil unless result.success?
+      return unless result.success?
       raise OwnershipError.new("process listing exceeded 1 MiB; refusing to guess managed child ownership") if result.stdout.bytesize >= PROCESS_LISTING_LIMIT
       candidates = [] of Int64
       result.stdout.each_line do |line|
@@ -444,12 +438,12 @@ module Caramel::Latte
         candidates << pid if executable_name == @executable || File.basename(executable_name) == expected_name
       end
       raise OwnershipError.new("multiple unrecorded managed children match this identity") if candidates.size > 1
-      return nil unless candidates.size == 1
+      return unless candidates.size == 1
       pid = candidates.first
       snapshot = process_snapshot(pid)
-      return nil unless snapshot
-      uid, start_time, command_line = snapshot.not_nil!
-      return nil unless uid == LibC.getuid.to_i64 && command_line == expected_command
+      return unless snapshot
+      uid, start_time, command_line = snapshot
+      return unless uid == LibC.getuid.to_i64 && command_line == expected_command
       Identity.new(@name, pid, @executable, digest_args(@args), Random::Secure.hex(24), start_time)
     rescue ex : OwnershipError
       raise ex
@@ -496,24 +490,20 @@ module Caramel::Latte
       true
     end
 
-    private def child_wait_channel(child : Process) : Channel({Process::Status?, Exception?})
-      completion = Channel({Process::Status?, Exception?}).new(1)
+    private def child_wait_channel(child : Process) : Channel(Process::Status | Exception)
+      completion = Channel(Process::Status | Exception).new(1)
       spawn do
-        begin
-          completion.send({child.wait, nil})
-        rescue ex
-          completion.send({nil, ex})
-        end
+        completion.send(child.wait)
+      rescue ex
+        completion.send(ex)
       end
       completion
     end
 
-    private def receive_child(completion : Channel({Process::Status?, Exception?}), timeout : Time::Span) : Bool
-      event = select
+    private def receive_child(completion : Channel(Process::Status | Exception), timeout : Time::Span) : Bool
+      select
       when item = completion.receive
-        status, exception = item
-        raise exception.not_nil! if exception
-        status
+        raise item if item.is_a?(Exception)
         true
       when timeout(timeout)
         false
@@ -538,7 +528,7 @@ module Caramel::Latte
         raise OwnershipError.new("managed process parent has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
         raise OwnershipError.new("managed process parent must be private") if (info.permissions.value & 0o077) != 0
         File.chmod(parent, 0o700) if info.permissions.value != 0o700
-      rescue ex
+      rescue
         raise OwnershipError.new("managed process parent is not a private owned directory")
       end
     end
@@ -551,7 +541,7 @@ module Caramel::Latte
         raise OwnershipError.new("managed process log must be private") if (info.permissions.value & 0o077) != 0
         File.chmod(@log_path, 0o600) if info.permissions.value != 0o600
         if info.size > 1024 * 1024
-          File.open(@log_path, "r+") { |file| file.truncate(0) }
+          File.open(@log_path, "r+", &.truncate(0))
         end
       end
     end

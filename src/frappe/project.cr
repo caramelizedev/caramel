@@ -26,7 +26,7 @@ module Caramel::Frappe
       Latte::Site.validate_name(@name)
       @domain_suffix = Latte::Site.normalize_suffix(@domain_suffix)
       raise Error.new("This Caramel release requires PostgreSQL major 18") unless @postgresql_major == 18
-      unless @extensions.uniq.size == @extensions.size && @extensions.all? { |name| name.matches?(/\A[a-z][a-z0-9_-]*\z/) }
+      unless @extensions.uniq.size == @extensions.size && @extensions.all?(&.matches?(/\A[a-z][a-z0-9_-]*\z/))
         raise Error.new("PostgreSQL extensions must be unique lowercase identifiers")
       end
     rescue ex : ArgumentError
@@ -37,8 +37,9 @@ module Caramel::Frappe
   # A deliberately literal dotenv format: no evaluation, variable expansion,
   # export statements, multiline literals, or hidden shell execution.
   module LocalEnvironment
+    # ameba:disable Metrics/CyclomaticComplexity -- a single-pass .env parser
     def self.parse(text : String) : Hash(String, String)
-      raise Error.new("Invalid local environment encoding") unless text.valid_encoding? && !text.includes?('\0')
+      raise Error.new("Invalid local environment encoding") if !text.valid_encoding? || text.includes?('\0')
       values = {} of String => String
       text.each_line.with_index(1) do |line, number|
         line = line.strip
@@ -57,7 +58,7 @@ module Caramel::Frappe
                     raise Error.new("Invalid .env quoted value on line #{number}")
                   end
                 elsif raw.starts_with?('\'')
-                  unless raw.bytesize >= 2 && raw.ends_with?('\'') && !raw[1...-1].includes?('\'')
+                  if raw.bytesize < 2 || !raw.ends_with?('\'') || raw[1...-1].includes?('\'')
                     raise Error.new("Invalid .env quoted value on line #{number}")
                   end
                   raw[1...-1]
@@ -127,7 +128,7 @@ module Caramel::Frappe
       manifest = YAML.parse(File.read(File.join(@root, "shard.yml")))
       target = manifest["name"].as_s
       source = manifest["targets"][target]["main"].as_s
-      unless source.matches?(/\Asrc\/[A-Za-z0-9_\/-]+\.cr\z/) && !source.split('/').includes?("..")
+      if !source.matches?(/\Asrc\/[A-Za-z0-9_\/-]+\.cr\z/) || source.split('/').includes?("..")
         raise Error.new("shard.yml application target must be a Crystal file under src/")
       end
       path = File.realpath(File.join(@root, source))
@@ -141,7 +142,7 @@ module Caramel::Frappe
       path = File.join(@root, ".env")
       info = File.info?(path, follow_symlinks: false)
       raise Error.new("Local configuration is missing; run frappe setup") unless info
-      unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64
+      unless Latte::StateSecurity.owned_file?(info)
         raise Error.new(".env must be an owned regular file")
       end
       raise Error.new(".env must be private (mode 0600)") unless info.permissions.value == 0o600
@@ -172,7 +173,7 @@ module Caramel::Frappe
         temporary.fsync
         temporary.close
         File.link(temporary.path, path)
-      rescue ex : File::Error
+      rescue File::Error
         raise Error.new("Could not publish local configuration; existing files were preserved")
       ensure
         temporary.close

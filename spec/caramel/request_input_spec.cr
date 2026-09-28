@@ -94,7 +94,7 @@ describe Caramel::RequestInput do
   end
 
   it "bounds multipart text parts and rejects malformed multipart bodies" do
-    request = multipart_request { |form| form.field("note", "x" * 64) }
+    request = multipart_request(&.field("note", "x" * 64))
     expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request, max_form_bytes: 32) }
     broken = HTTP::Request.new("POST", "/uploads", HTTP::Headers{"Content-Type" => "multipart/form-data"}, "--x\r\n")
     expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(broken) }

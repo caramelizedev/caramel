@@ -29,7 +29,7 @@ describe Caramel::Frappe::ResourceGenerator do
       File.read(route).should contain("# My existing route notes")
       File.read(route).should contain(%(get "/books/:id", App::Books::Show))
       File.read(File.join(project.root, "config/paths.cr")).should contain("Caramel.resource_paths :books, :book")
-      %w(index show new edit _form).each do |view|
+      %w[index show new edit _form].each do |view|
         File.file?(File.join(project.root, "app/views/books/#{view}.html.ecr")).should be_true
       end
       before = File.read(route)
@@ -46,13 +46,13 @@ describe Caramel::Frappe::ResourceGenerator do
       ["../Book", "book", "SugarORM", "Home"].each do |name|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
       end
-      reserved = %w(id created_at query with create update delete changes record errors values schema field timestamps if to_s)
+      reserved = %w[id created_at query with create update delete changes record errors values schema field timestamps if to_s]
       ([["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"]] + reserved.map { |field| ["#{field}:string"] }).each do |fields|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
       expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
-      %w(app/models app/changesets db/migrations).each do |directory|
+      %w[app/models app/changesets db/migrations].each do |directory|
         Dir.children(File.join(project.root, directory)).should eq([".keep"])
       end
     end
