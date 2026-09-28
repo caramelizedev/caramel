@@ -81,6 +81,8 @@ scripts/check browser
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
 
+`scripts/check latte-daemon` runs the real `bin/latte daemon`, which listens on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443. If you use Latte yourself, stop it first: run `frappe services stop`, then end `latte daemon`.
+
 `scripts/check browser` drives Safari through `safaridriver` against a generated app served by that isolated Latte stack to prove morph focus/scroll, `hx-partial`, islands, SSE behavior, and a Cold Brew job whose PubSub event reaches an `EventSource`; it needs Safari's "Allow Remote Automation", enabled once with `safaridriver --enable`.
 
 Optional language servers for Zed and other editors: `scripts/build-frappe`, `bin/frappe lsp install`, then `scripts/check editor-tools`; see [docs/editor-tools.md](docs/editor-tools.md).
