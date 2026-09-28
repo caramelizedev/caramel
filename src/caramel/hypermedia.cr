@@ -2,7 +2,12 @@ require "./html"
 
 module Caramel
   # A rendered page: `body` is trusted HTML, normally a rendered view.
-  record Page, title : String, body : String
+  record Page, title : String, body : String do
+    # The rendered body as trusted HTML, for a layout view: `raw page.html`.
+    def html : HTML::Safe
+      HTML::Safe.new(body)
+    end
+  end
 
   # One region of a multi-target response. `html` is trusted HTML, such as a
   # rendered view: `Partial.new("#roster", Views::Teams::Roster.new(team).to_s)`.

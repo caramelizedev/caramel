@@ -1,6 +1,6 @@
 module App::Views::Layouts
   class Application < App::ApplicationView
-    def initialize(@title : String, @body : Caramel::HTML::Safe, @csrf_token : String)
+    def initialize(@page : Caramel::Page, @csrf_token : String)
     end
 
     private def blueprint
@@ -9,7 +9,7 @@ module App::Views::Layouts
         head do
           meta charset: "utf-8"
           meta name: "viewport", content: "width=device-width, initial-scale=1"
-          title { "#{@title} · #{App::TITLE}" }
+          title { "#{@page.title} · #{App::TITLE}" }
           link rel: "stylesheet", href: "/assets/app.css"
           script src: "/assets/htmx-4.0.0.min.js", defer: true
           script src: "/assets/caramel-islands.js", defer: true
@@ -24,7 +24,7 @@ module App::Views::Layouts
             end
             span(class: "made-with") { "Made with Caramel" }
           end
-          main(id: "content") { raw @body }
+          main(id: "content") { raw @page.html }
           footer { "Make something worth opening." }
         end
       end
