@@ -3,3 +3,48 @@
 Caramel follows semantic versioning. During 0.x a minor release may break compatibility and a patch release never does ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). Write upgrade notes for the next release under Unreleased; `scripts/release` moves them into its section.
 
 ## Unreleased
+
+## 0.1.0 - 2026-09-28
+
+### Features
+
+- verify and document the isolated Caramel toolchain (17b3e3c)
+- add Crystal runtime and PostgreSQL Bookshelf reference (93eb38f)
+- add Latte managed services and native macOS controls (0fe4225)
+- add typed models and browser form inputs (de32e39)
+- add resumable private toolchain installer (72cc093)
+- add Frappé project setup and typed resource generation (d59a914)
+- add supervised development builds and local browser refresh (08e84be)
+- add development exception pages and live project status (84f3aee)
+- add Caramel Core routing, contracts and hypermedia (0488689)
+- stream responses and adopt RFC-0008 action ergonomics (1ef1f46)
+- **orm:** add SugarORM with derived, linted migrations and remove Caramel::Model (b47a9f1)
+- **cold-brew,corretto:** add PostgreSQL jobs, PubSub and cache, and the Corretto test harness (8701c36)
+- **latte:** watch with kqueue, type-check before building, clone branches with APFS and release guards on signals (13e1181)
+- **frappe:** drive the CLI from one command table and add check, agent-manifest, db branch and expand (0a0a600)
+- **latte,frappe:** find the toolchain through the checkout's .caramel-toolchain (6eae808)
+- **installer:** default the toolchain root and record it for the checkout (0711fe5)
+- **frappe:** put frappe and latte on PATH when registering a checkout (a5baa14)
+- **latte,frappe:** start Latte on demand and stop it with latte stop (190be9b)
+- **latte:** add an opt-in login item with latte service install (1bb41af)
+- adopt the RFC-0008 rule set, with frappe lint and frappe format (ADR 0017) (2d1ca25)
+- version the release and the Frappé–Latte contracts (ADR 0016) (2ba457c)
+- generated apps depend on Caramel as a shard, with a one-call main (ADR 0016) (03a34e5)
+- install tagged releases, run the newest Latte, and cut releases with scripts/release (ADR 0016) (d1673eb)
+
+### Fixes
+
+- record generated application edit-loop baselines (b5d8c2f)
+- retire old development apps without blocking new builds (f4af078)
+- **latte:** serve .localhost sites and never install Caddy CA trust (e8b8ef3)
+- **core:** keep focus and island state across morphs (0268f72)
+- **latte:** stop the daemon cleanly and tolerate Caddy restarts in checks (9389351)
+- **cold-brew:** bound the security-definer partition functions (a2d2142)
+- **latte:** let the port relay accept launchd's listening sockets (c7fd9d9)
+- **frappe:** migrate new projects and report pending migrations once (76447d2)
+- **latte:** say latte stop leaves services as they were (e11eaa8)
+- **installer:** rerun the recorded toolchain when no root is given (cf7f5d6)
+- **latte:** detach before loading the registry (1419cae)
+- **installer:** validate the recorded pointer before reusing its toolchain (c0ff474)
+- **frappe:** require the installed-releases reader where Latte starts (cf45846)
+- close the ADR 0016 and 0017 audit findings (a4bc807)
