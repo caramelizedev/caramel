@@ -927,7 +927,7 @@ Caramel’s ongoing development is sustainably funded via a two-tier product mod
 
 # RFC-0008: Poetic Ergonomics, Conceptual Compression, & Semantic Syntax
 
-**Status:** Approved · Partial. `frappe lint` checks application code against this RFC's rule set ([ADR 0017](decisions/0017-formatting-and-linting.md)).
+**Status:** Approved · Partial. `frappe lint` checks application code against this RFC's rule set ([ADR 0017](decisions/0017-formatting-and-linting.md)), and `src/caramel/units.cr` adds the §2.3 units that Crystal lacks: byte sizes on `Int` and `Time#at_midnight`.
 
 **Classification:** Developer Experience, Aesthetics, & Language Design
 
@@ -1127,6 +1127,7 @@ caramel/
 │   │   │                                  #   maintenance, scheduler, system migrations
 │   │   ├── cache.cr, sse.cr               # RFC-0003: UNLOGGED cache & SSE framing
 │   │   ├── corretto.cr, corretto/         # RFC-0006: client, matchers, worker isolation, wire proxy
+│   │   ├── units.cr                       # RFC-0008: byte sizes & Time#at_midnight
 │   │   └── outbound.cr                    # RFC-0006: proxy-aware outbound HTTP client
 │   │
 │   ├── sugar_orm.cr, sugar_orm/           # RFC-0002: schema, changeset, query, associations,
@@ -1147,4 +1148,4 @@ caramel/
 
 ```
 
-Planned but not present, out of scope for this implementation: RFC-0007's `bin/roast`, `src/ops/**` and `packages/**` (the First-Party Five SDKs), and RFC-0008's semantic and temporal unit extensions.
+Planned but not present, out of scope for this implementation: RFC-0007's `bin/roast`, `src/ops/**` and `packages/**` (the First-Party Five SDKs).
