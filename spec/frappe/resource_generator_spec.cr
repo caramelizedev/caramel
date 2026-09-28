@@ -47,9 +47,12 @@ describe Caramel::Frappe::ResourceGenerator do
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
       end
       reserved = %w[id created_at query with create update delete changes record errors values schema field timestamps if to_s]
-      ([["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"], ["code:string:server"], ["title:string:readonly"]] + reserved.map { |field| ["#{field}:string"] }).each do |fields|
+      rejected = [["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"], ["code:string:server"], ["title:string:readonly"], ["code:string:unique:unique"]]
+      (rejected + reserved.map { |field| ["#{field}:string"] }).each do |fields|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
+      expect_raises(Caramel::Frappe::Error, "cannot be :unique") { generator.generate(project, "Book", ["flag:bool:unique"]) }
+      expect_raises(Caramel::Frappe::Error, "63-byte") { generator.generate(project, "Book", ["#{"a" * 50}:string:unique"]) }
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
       expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
       %w[app/models app/changesets db/migrations].each do |directory|
@@ -72,6 +75,20 @@ describe Caramel::Frappe::ResourceGenerator do
       form.should_not contain(%(labelled "short_code"))
       read.call("app/views/links/show.cr").should contain("dd { @record.short_code }")
       read.call("spec/requests/links_spec.cr").should_not contain(%("short_code" =>))
+    end
+  end
+
+  it "backs :unique fields with a unique index, the changeset's unique_constraint and a duplicate check in the request spec" do
+    resource_project do |project, package|
+      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Invite", ["email:string:unique", "token:string:unique:server", "number:int32:server:unique"], version: 20260919000005_i64)
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+      read.call("app/models/invite.cr").should contain("      timestamps\n      index :email, unique: true\n      index :token, unique: true\n      index :number, unique: true\n")
+      read.call("app/changesets/invite.cr").should contain("      cs.unique_constraint(:email)\n      cs.unique_constraint(:token)\n      cs.unique_constraint(:number)\n")
+      read.call("app/actions/invites/create.cr").should contain("App::Invite.create(email: contract.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX))")
+      read.call("db/migrations/20260919000005_create_invites.cr").should contain(%(CREATE UNIQUE INDEX "index_invites_on_token" ON "invites" ("token")))
+      spec = read.call("spec/requests/invites_spec.cr")
+      spec.should contain(%(App::Invite.create(email: persisted.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX)).errors["email"]?.should eq(["has already been taken"])))
+      spec.should contain(%(App::Invite.create(email: "Example <email>", token: persisted.token, number: Random::Secure.rand(Int32::MAX)).errors["token"]?.should eq(["has already been taken"])))
     end
   end
 

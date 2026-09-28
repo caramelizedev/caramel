@@ -23,7 +23,7 @@ describe "@@COLLECTION_LABEL@@" do
       updated.should have_header("HX-Location", path)
       persisted = App::@@MODEL@@.query.find!(db, record.id)
 @@ASSERT_FIELDS@@
-@@ASSERT_PRESENCE@@
+@@ASSERT_CHANGESET@@
       client.delete(path, headers: {"X-CSRF-Token" => "forged"}).should have_status(403)
       client.delete(path, headers: {"Origin" => "https://attacker.example"}).should have_status(403)
       db.should have_row(App::@@MODEL@@, id: record.id)

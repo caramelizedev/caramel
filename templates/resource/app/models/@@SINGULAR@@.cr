@@ -3,7 +3,7 @@ module App
     schema "@@PLURAL@@" do
       field id : Int64, primary: true
 @@MODEL_FIELDS@@
-      timestamps
+      timestamps@@INDEXES@@
     end
   end
 end

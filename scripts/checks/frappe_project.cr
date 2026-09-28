@@ -34,7 +34,7 @@ module Caramel::Checks
         assert!(urls.uniq.size == 4)
         command([@frappe, "make", "resource", "Book", "title:string", "author:string"], chdir: @project)
         command([@frappe, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], chdir: @project)
-        command([@frappe, "make", "resource", "Link", "title:string?", "original_url:string", "short_code:string:server", "click_count:int64:server"], chdir: @project)
+        command([@frappe, "make", "resource", "Link", "title:string?", "original_url:string:unique", "short_code:string:server:unique", "click_count:int64:server"], chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
         print routes
         assert!(routes.lines.any? { |line| line.split == %w[GET /books/:id App::Books::Show id:Int64(min=1)] }, routes)

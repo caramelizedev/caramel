@@ -24,24 +24,30 @@ module Caramel::Frappe
       return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
     ]
+    MODIFIERS = %w[server unique]
     getter name : String
     getter kind : String
     getter? nullable : Bool
     # Set by the server, not a form: kept out of contracts, forms and request-spec inputs.
     getter? server : Bool
+    # Backed by a unique index; the changeset reports a duplicate as an error on the field.
+    getter? unique : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
-      unless pieces.size == 2 || (pieces.size == 3 && pieces[2] == "server")
-        raise Error.new("Use field:type or field:type:server, such as title:string, rating:float64? or short_code:string:server")
+      modifiers = pieces[2..]? || [] of String
+      unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? && modifiers.uniq.size == modifiers.size
+        raise Error.new("Use field:type, optionally followed by :server and :unique, such as title:string, rating:float64? or short_code:string:server:unique")
       end
-      @server = pieces.size == 3
+      @server = modifiers.includes?("server")
+      @unique = modifiers.includes?("unique")
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
       unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && RESERVED.none?(@name) && TYPES.has_key?(@kind)
         raise Error.new("Invalid or reserved resource field: #{declaration}")
       end
+      raise Error.new("A bool field holds only two values, so it cannot be :unique: #{declaration}") if @unique && @kind == "bool"
     end
 
     def type : String
@@ -89,14 +95,15 @@ module Caramel::Frappe
     end
 
     # The value a generated create action gives a required :server field; the
-    # developer replaces it with the real one.
+    # developer replaces it with the real one. A unique number is random, so
+    # the next record does not repeat it.
     def starting_value : String
       case @kind
       when "string"  then "Random::Secure.urlsafe_base64(8)"
-      when "int32"   then "0"
-      when "int64"   then "0_i64"
+      when "int32"   then @unique ? "Random::Secure.rand(Int32::MAX)" : "0"
+      when "int64"   then @unique ? "Random::Secure.rand(Int64::MAX)" : "0_i64"
       when "bool"    then "false"
-      when "float64" then "0.0"
+      when "float64" then @unique ? "Random::Secure.rand" : "0.0"
       else                "Time.utc"
       end
     end
@@ -120,6 +127,10 @@ module Caramel::Frappe
       raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
       inputs = fields.reject(&.server?)
       raise Error.new("Leave at least one field without :server; the form needs one") if inputs.empty?
+      uniques = fields.select(&.unique?)
+      if long = uniques.find { |field| index_name(collection, field).bytesize > 63 }
+        raise Error.new("The unique index #{index_name(collection, long)} would exceed PostgreSQL's 63-byte names; shorten the field or the plural")
+      end
       used_versions = Dir.glob(File.join(project.root, "db/migrations/*.cr")).compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
       migration_version = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
       raise Error.new("Migration version must be positive and unused") if migration_version <= 0 || (version && used_versions.includes?(migration_version))
@@ -135,7 +146,8 @@ module Caramel::Frappe
         "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => required_text.map { |field| "      cs.validate_presence(:#{field.name})" }.join('\n'),
+        "@@VALIDATIONS@@" => (required_text.map { |field| "      cs.validate_presence(:#{field.name})" } + uniques.map { |field| "      cs.unique_constraint(:#{field.name})" }).join('\n'),
+        "@@INDEXES@@" => uniques.join { |field| "\n      index :#{field.name}, unique: true" },
         "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@VALUES@@" => inputs.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
@@ -147,7 +159,7 @@ module Caramel::Frappe
         "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_PRESENCE@@" => assert_presence(name, required_inputs),
+        "@@ASSERT_CHANGESET@@" => ([assert_presence(name, required_inputs)] + uniques.map { |field| duplicate_probe(name, fields, field) }).reject(&.empty?).join('\n'),
         "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
@@ -195,13 +207,19 @@ module Caramel::Frappe
 
     # Diffs the generated schema's table against an empty database, exactly as
     # `frappe db diff --name create_<plural>` would: id identity key, the
-    # fields in order, then the timestamps.
+    # fields in order, the timestamps, then the unique indexes.
     private def create_table(table : String, fields : Array(ResourceField)) : Array(String)
       columns = [SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)]
       columns.concat(fields.map(&.column))
       %w[created_at updated_at].each { |stamp| columns << SugarORM::Catalog::Column.new(stamp, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
-      plan = SugarORM::Differ.diff([SugarORM::Catalog::Table.new(table, columns)], [] of SugarORM::Catalog::Table)
+      indexes = fields.select(&.unique?).map { |field| SugarORM::Catalog::Index.new(index_name(table, field), [field.name], unique: true) }
+      plan = SugarORM::Differ.diff([SugarORM::Catalog::Table.new(table, columns, indexes)], [] of SugarORM::Catalog::Table)
       SugarORM::DDL.statements(plan.transactional)
+    end
+
+    # The name SugarORM gives `index :field` in the schema.
+    private def index_name(table : String, field : ResourceField) : String
+      "index_#{table}_on_#{field.name}"
     end
 
     # Blank required text must fail through the generated changeset on both
@@ -215,6 +233,24 @@ module Caramel::Frappe
         fields.each { |field| io << "        blank.errors[" << field.name.to_json << "]?.should eq([\"can't be blank\"])\n" }
         io << "      end"
       end
+    end
+
+    # A second row repeating a unique field must fail through the changeset's
+    # unique_constraint, not a database error. Every other field takes a value
+    # no row holds: an input its first sample, which the row replaced when it
+    # was updated, and a server field its starting value.
+    private def duplicate_probe(model : String, fields : Array(ResourceField), unique : ResourceField) : String
+      values = fields.join(", ") do |field|
+        value = if field.name == unique.name
+                  "persisted.#{field.name}"
+                elsif field.server?
+                  field.starting_value
+                else
+                  field.literal(field.sample)
+                end
+        "#{field.name}: #{value}"
+      end
+      %(      App::#{model}.create(#{values}).errors[#{unique.name.to_json}]?.should eq(["has already been taken"]))
     end
 
     # The field's control, inside the generated form view's `labelled` helper.
