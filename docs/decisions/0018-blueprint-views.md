@@ -27,14 +27,14 @@ Blueprint 1.1.0 (github.com/stephannv/blueprint), a Phlex-style shard that write
 3. **Trusted HTML is branded.** `Caramel::HTML::Safe` includes `Blueprint::SafeObject` (`src/caramel/html.cr`), so it is written as-is in text and attribute values, as are Blueprint's `safe(...)` values. Nothing else is.
 4. **The pin is exact** because the patch replaces Blueprint internals. A Blueprint upgrade must re-verify the patch; `spec/caramel/view_spec.cr` guards it.
 5. **Naming.** `app/views/<dir>/<name>.cr` defines `App::Views::<Dir>::<Name>`.
-6. **Egress takes views.** `page(title, view)` renders a view as the page; `morph(target, with: view)` and `Caramel::Partial.new(target, view.to_s)` take views (`src/caramel/action.cr`). `Caramel::View#island(component, props)` writes an island tag ([ADR 0005](0005-island-props-helper.md)) in place.
+6. **Egress takes views.** `page(title, view)` renders a view as the page; `morph(target, with: view)` and `Caramel::Partial.new(target, view.to_s)` take views (`src/caramel/action.cr`). `Caramel::View#island(component, props)` writes an island tag ([ADR 0005](0005-island-props-helper.md)) in place. `markup { … }` builds a fragment too small for a view class with a view's escaping, as `Caramel::HTML::Safe` for `morph(target, with: …)` or `page(title, …)`.
 7. **Generated applications** (`frappe new`, `templates/application`):
    - `app/views/application_view.cr` defines `abstract class App::ApplicationView < Caramel::View`, which includes `App::Paths`.
-   - The layout is `App::Views::Layouts::Application.new(title, body : Caramel::HTML::Safe, csrf_token)` in `app/views/layouts/application.cr`, rendered by `App::ApplicationAction#layout` ([ADR 0011](0011-default-action-layout.md)).
+   - The layout is `App::Views::Layouts::Application.new(page : Caramel::Page, csrf_token)` in `app/views/layouts/application.cr`, rendered by `App::ApplicationAction#layout` ([ADR 0011](0011-default-action-layout.md)). It writes the body with `raw @page.html`: `Caramel::Page#html` is the rendered body as `Caramel::HTML::Safe`.
    - `app/views/home/index.cr` is `App::Views::Home::Index`.
    - `config/application.cr` requires `../app/views/application_view`, then `../app/views/**`, before the actions.
    - `.ameba.yml` globs `app/**/*.cr` and excludes `app/views/**/*.cr` from `Lint/DebugCalls`: in a view, `p` is the paragraph element, not the debug print.
-8. **`frappe make resource`** (`templates/resource`, `src/frappe/resource_generator.cr`) writes `app/views/<plural>/{index,show,new,edit,form}.cr` as `App::Views::<Plural>::{Index,Show,New,Edit,Form}`. The Form takes `(action, method, csrf_token, values, errors)`; New and Edit render the Form they are given. Each field is `labelled "name", "Label" do |id| ... end` around an explicit `input` or `select_tag`. Actions call, for example, `page "Books", Views::Books::Index.new(result[:records])`. `ApplicationView` is a reserved resource name and `views` a reserved plural.
+8. **`frappe make resource`** (`templates/resource`, `src/frappe/resource_generator.cr`) writes `app/views/<plural>/{index,show,new,edit,form}.cr` as `App::Views::<Plural>::{Index,Show,New,Edit,Form}`. The Form takes `(action, method, csrf_token, values, errors)`; New and Edit render the Form they are given. Each field the form takes, which is every field not declared `name:type:server`, is `labelled "name", "Label" do |id| ... end` around an explicit `input` or `select_tag`. Actions call, for example, `page "Books", Views::Books::Index.new(result[:records])`. `ApplicationView` is a reserved resource name and `views` a reserved plural.
 9. **Removed, without a deprecation release:** ECR views, `Caramel::View.render` and `embed`, the `view "..."` lookup macro (`Caramel::Templates`), `src/caramel/view/compiler.cr` with `vendor/licenses/crystal-LICENSE`, and `scripts/check views`. View errors are now ordinary Crystal errors at the view's own file and line, so the ECR location mapping that check tested no longer exists.
 
 This is an explicit exception to the deprecation rule in `CONTRIBUTING.md`. The owner chose a clean cutover because the only ECR applications are demos.
@@ -61,7 +61,7 @@ Principles followed:
 ## Verification
 
 - `spec/caramel/view_spec.cr`: attribute escaping round trip, `Safe` as-is in text and attributes, nested views, the island helper, and no retained attribute cache.
-- `spec/caramel/action_spec.cr`: a page from a view with escaped input and a nested view.
+- `spec/caramel/action_spec.cr`: a page from a view with escaped input and a nested view, and a `markup` fragment that escapes its text and attributes and calls the action's own method.
 - `spec/frappe/resource_generator_spec.cr` and `spec/frappe/new_project_spec.cr`: generated views and configuration.
 - `scripts/check frappe-project`: a generated application with Book and Person resources covering every field kind compiles, lints and passes its request specs.
 - `scripts/check browser`: the probe application's views (`spec/fixtures/browser/app/views/probe/*.cr`) in Safari.
@@ -69,6 +69,6 @@ Principles followed:
 
 ## Implementation
 
-- Framework: `src/caramel/view.cr`, `src/caramel/html.cr`, `src/caramel/action.cr`, `shard.yml`, `vendor/licenses/blueprint-LICENSE`, `THIRD_PARTY_NOTICES.md`.
+- Framework: `src/caramel/view.cr`, `src/caramel/html.cr`, `src/caramel/action.cr`, `src/caramel/hypermedia.cr`, `shard.yml`, `vendor/licenses/blueprint-LICENSE`, `THIRD_PARTY_NOTICES.md`.
 - Generator: `templates/application`, `templates/resource`, `src/frappe/resource_generator.cr`.
 - Checks: the browser probe views and the benchmarks are ported. The edit-latency benchmark's `template` kind is now `view`, and inserts a `comment` marker into `app/views/home/index.cr`; `compiler-profile`'s stage is `view_edit`.

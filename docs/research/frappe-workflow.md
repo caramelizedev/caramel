@@ -65,7 +65,7 @@ Applications depend on the framework as a shard ([ADR 0016](../decisions/0016-ve
 
 ## Generated resources
 
-`make resource` takes a singular class name and `field:type` declarations. Supported types are `string`, `int32`, `int64`, `bool`, `float64` and RFC 3339 `time`, optionally nullable with `?`. Quote nullable declarations in globbing shells. Ordinary plurals follow a small predictable inflector; irregular names use `--plural=people`.
+`make resource` takes a singular class name and `field:type` declarations. Supported types are `string`, `int32`, `int64`, `bool`, `float64` and RFC 3339 `time`, optionally nullable with `?`. Quote nullable declarations in globbing shells. A third part, `server`, marks a field the server sets, such as `short_code:string:server`: it is in the schema, changeset, migration and the index and show views, but not in the request contracts, the form or the request spec's inputs. The generated create action gives a required one a starting value to replace, and a nullable one stays NULL. At least one field must take input. Ordinary plurals follow a small predictable inflector; irregular names use `--plural=people`.
 
 Generated source contains:
 

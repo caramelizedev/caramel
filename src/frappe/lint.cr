@@ -6,9 +6,9 @@ require "./mrdp"
 module Caramel::Frappe
   # `frappe lint` (ADR 0017): checks the application against the RFC-0008
   # rule set in its .ameba.yml. The linter, Ameba plus Caramel's own rules,
-  # is built in the installation on first use and again after its sources
-  # change. It reports and never rewrites: some of Ameba's corrections
-  # change behaviour.
+  # is built when a release is installed, or on first use in a registered
+  # checkout, and again after its sources change. It reports and never
+  # rewrites: some of Ameba's corrections change behaviour.
   class Lint
     def initialize(@project : Project, @tools : Tools, @output : IO, @error : IO)
     end

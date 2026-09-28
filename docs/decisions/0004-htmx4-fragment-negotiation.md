@@ -19,7 +19,7 @@ History restoration, body-targeted boosts and `hx-select` requests all need the 
 - `Action#page` returns the page body with its `<title>` for a partial request, which htmx extracts, and the full layout otherwise.
 - `HX-Request: true` alone still marks the request as coming from htmx, and it has two effects:
   - htmx requests never negotiate JSON;
-  - `redirect_to` answers with `HX-Location` instead of a 303.
+  - `redirect_to` answers with `HX-Location` instead of a 303. `redirect_external`, which sends the browser to another site, answers with `HX-Redirect` instead of a `Location` redirect, so htmx navigates the page rather than fetching that site.
 - Responses vary on `Accept, HX-Request, HX-Request-Type`.
 - JSON egress applies when the client prefers `application/json` by q-value, does not send `HX-Request`, and `handle` returned a value rather than a `Caramel::Response`. A returned `Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) means the action chose its egress explicitly, so it passes through unchanged.
 
@@ -36,5 +36,6 @@ Principles followed:
 ## Verification
 
 - `spec/caramel/action_spec.cr` covers fragments versus full pages, JSON negotiation and `HX-Location` redirects.
+- `spec/caramel/http_spec.cr` covers `redirect_external`: `Location` for other clients, `HX-Redirect` for htmx, and refusal of anything but an absolute http or https URL and a redirect status.
 - The generated application's request specs (`templates/application/spec/requests/home_spec.cr` and `templates/resource/spec/requests/@@PLURAL@@_spec.cr`) cover full and partial responses (`scripts/check frappe-project`).
 - `scripts/check browser` shows in Safari that htmx-issued swaps receive fragments and never nest a second layout.

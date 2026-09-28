@@ -38,7 +38,7 @@ RFC-0008 asks for code that reads like prose while the compiler does the proving
    - `frappe lint [--agent|--human]` runs `bin/frappe-lint` in the project. It prints Ameba's report on a TTY and MRDP otherwise: `ERR LINT_<RULE> at file:line:col`, where `<RULE>` is the rule's group and name in upper snake case (`LINT_CARAMEL_SERVICE_NOUN`), and `MSG` ends with the rule's own name for `# ameba:disable`. It prints `OK lint <n> files` when clean.
    - `frappe lint` reports and never rewrites. Ameba's corrections are not all safe: `Lint/ComparisonToBoolean` changes behaviour, and `Lint/SpecFilename` renamed `spec/sugar_orm/support/unit_schemas.cr`, which three specs require, to `unit_schemas_spec.cr`, which broke the suite.
    - `frappe format` runs the pinned formatter on the project's `src`, `config`, `app`, `db` and `spec`.
-   - The installation builds the linter on first use, and again after its sources or `shard.lock` change.
+   - `frappe installations install` builds a release's linter with the release, and a registered checkout builds its linter on first use. Either rebuilds it after its sources or `shard.lock` change.
    - Generated code passes the rule set:
      - generated actions pass view inputs as constructor arguments ([ADR 0018](0018-blueprint-views.md)), so no local exists only for a template to read;
      - migrations quote a SQL heredoc only when it contains `#{` or a backslash, the only text an unquoted heredoc would change. A backslash that is no Crystal escape sequence gets a reasoned `Style/HeredocEscape` directive, since obeying that rule would drop it.

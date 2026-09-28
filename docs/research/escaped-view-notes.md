@@ -7,7 +7,9 @@ The stdlib `HTML.escape` and `Caramel::HTML.escape` escape the same set.
 Element and attribute names are written by the view's own code. A caller opts
 into trusted markup with an explicit `Caramel::HTML::Safe.new(...)` or
 Blueprint's `safe(...)`; both are written as-is, in text and in attribute
-values.
+values. The framework marks two values trusted itself: `Caramel::Page#html`,
+the page body its views rendered, which a layout writes with `raw`; and
+`markup { … }`, an action's inline fragment, built with a view's escaping.
 
 Blueprint 1.1.0 escaped only `"` in attribute values, so `&` reached the
 browser raw and a stored `&amp;` came back as `&`. It also rendered

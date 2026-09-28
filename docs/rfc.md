@@ -235,7 +235,7 @@ Every Action negotiates its egress from inbound headers ([ADR 0004](decisions/00
 1. `HX-Request-Type: partial` $\to$ returns the compiled HTML fragment (the page body with its `<title>`, which htmx extracts) or `<hx-partial>` blocks.
    * htmx 4 sends `HX-Request: true` on every request.
    * It sends `HX-Request-Type: full` when it targets `<body>` or uses `hx-select`, and those requests receive the full document.
-   * Redirects answer htmx requests with `HX-Location`.
+   * Redirects answer htmx requests with `HX-Location`, or with `HX-Redirect` when `redirect_external` sends the browser to another site.
 2. `Accept: application/json` preferred over `text/html` by q-value, on a request without `HX-Request` $\to$ bypasses HTML generation entirely. The value `handle` returned is serialized directly to JSON for native mobile clients or external consumers.
    * An action whose `handle` returns a `Caramel::Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) has chosen its egress explicitly, so the response passes through unchanged.
 3. A client that accepts neither receives contract failures as MRDP text (RFC-0005).
