@@ -10,7 +10,7 @@ module Caramel::Frappe
   # A tagged Caramel release on this Mac (ADR 0016). `install` clones its tag
   # into Caramel's releases directory, installs its toolchain (reusing this
   # installation's when the release pins the same one), installs its locked
-  # dependencies, builds its frappe and latte, and registers it.
+  # dependencies, builds its frappe, latte and linter, and registers it.
   class Release
     getter version : String
 
@@ -43,6 +43,7 @@ module Caramel::Frappe
       run(root, "scripts/shards", ["install", "--frozen", "--without-development"])
       run(root, "scripts/build-frappe")
       run(root, "scripts/build-latte")
+      run(root, "scripts/build-lint")
       @installations.register(@version, root)
       root
     end

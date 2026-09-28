@@ -28,6 +28,7 @@ module Caramel::Checks::Installations
       release = File.join(state, "releases", RELEASE)
       version = Checks.run([File.join(release, "bin/frappe"), "version"], env: env, clear_env: true)
       Checks.fail("the installed release reports #{version.stdout.inspect}") unless version.stdout == "Frappé #{RELEASE}\n"
+      Checks.fail("the installed release lacks its linter: #{File.join(release, "bin/frappe-lint")}") unless File.file?(File.join(release, "bin/frappe-lint"))
       recorded = File.read(File.join(release, ".caramel-toolchain")).strip
       selection = ->(toolchain : String) { JSON.parse(File.read(File.join(toolchain, ".caramel-toolchain.json")))["selection"] }
       if selection.call(recorded) == selection.call(Checks.toolchain_root) && recorded != Checks.toolchain_root
@@ -39,7 +40,7 @@ module Caramel::Checks::Installations
       Checks.fail("the launcher does not run the newest release: #{launcher}") unless launcher.includes?(File.join(release, "bin/frappe"))
       again = frappe.call(["installations", "install", RELEASE], root)
       Checks.fail(again.stdout + again.stderr) unless again.success? && again.stdout.includes?("Caramel #{RELEASE} is already installed")
-      puts "PASS: frappe installations install #{RELEASE} clones the tag, reuses this toolchain, builds, registers and points the launchers at it"
+      puts "PASS: frappe installations install #{RELEASE} clones the tag, reuses this toolchain, builds it and its linter, registers and points the launchers at it"
 
       pinned = project(root, "pinned", RELEASE)
       doctor = frappe.call(["doctor"], pinned)
