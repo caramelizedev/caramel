@@ -78,18 +78,18 @@ Principles followed:
 
 ## Implementation order
 
-1. Now, needing nothing outside the repository:
+1. Before the first release, `v0.1.0`, so that no released app ever carries a copied framework:
    - the single version source;
    - the thin application skeleton;
-   - the newest installed Latte;
-   - the version in `frappe agent-manifest`;
-   - `scripts/release` and `CHANGELOG.md`;
-   - the deprecation rule in the contributor docs.
-2. Once `github.com/caramelizedev/caramel` exists and the first release is tagged:
+   - the compatibility contracts that need code now: Latte's version and API window, state-format refusal, the PostgreSQL major guard and the stale-relay report;
    - the shard dependency, replacing `vendor/caramel/` and `.caramel-version`;
-   - `frappe installations install`.
-3. Before 1.0, with an Apple Developer ID: prebuilt, notarized binaries, relocatable OpenSSL, `SMAppService`, the signed release manifest and published support windows.
-4. Eventually: mechanical upgrades.
+   - the newest installed Latte, and `frappe installations install`;
+   - the version in `frappe agent-manifest`;
+   - `scripts/release`, `CHANGELOG.md` and the deprecation rule in the contributor docs.
+
+   Both the shard dependency and `frappe installations install` are tested against a local git repository with a tag. Only the final smoke test needs the published tag: a fresh clone of `v0.1.0` generates an app that resolves `caramelizedev/caramel` from GitHub.
+2. Before 1.0, with an Apple Developer ID: prebuilt, notarized binaries, relocatable OpenSSL, `SMAppService`, the signed release manifest and published support windows.
+3. Eventually: mechanical upgrades.
 
 ## Verification
 
