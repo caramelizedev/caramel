@@ -135,6 +135,10 @@ module Caramel::Frappe
       end
     end
 
+    # What Ameba's Style/HeredocEscape accepts as a reason to quote a heredoc:
+    # interpolation or one of Crystal's escape sequences.
+    ESCAPE = /#\{|\\(?:[abefnrtv]|[CdDhHRsSvVwWX]|[0-7]{1,3}|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]{1,6}\})/
+
     # The migration file; `frappe make resource` writes the same bytes for a
     # new table, so a generated migration is exactly what a diff would derive.
     def self.source(migration : SugarORM::Migration) : String
@@ -142,8 +146,10 @@ module Caramel::Frappe
         io << "# Derived from the declared schema. Once applied, a migration is immutable: change the schema and run frappe db diff again.\n"
         io << "App::MIGRATIONS << SugarORM::Migration.new(" << migration.version << "_i64, " << migration.name.inspect << ", [\n"
         migration.statements.each do |statement|
-          # Quoted only when interpolation or escapes must stay literal.
-          io << (statement.matches?(/#\{|\\/) ? "  <<-'SQL',\n" : "  <<-SQL,\n")
+          # Quoted only when interpolation or backslashes must stay literal.
+          literal = statement.matches?(/#\{|\\/)
+          io << "  # ameba:disable Style/HeredocEscape -- its backslashes stay literal\n" if literal && !statement.matches?(ESCAPE)
+          io << (literal ? "  <<-'SQL',\n" : "  <<-SQL,\n")
           statement.each_line { |line| io << "    " << line << '\n' }
           io << "    SQL\n"
         end

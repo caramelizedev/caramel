@@ -46,7 +46,7 @@ Zed must find the project's matching `frappe` on its login-shell PATH; `frappe i
 - Each Caramel installation pins its own tools.
 - Installations sharing a toolchain root keep versions side by side: `editor/ameba-ls/<version>` and `editor/crystalline/<version>-<fingerprint>`. The fingerprint covers the source commit, Crystal version, LLVM artifact and build recipe, so a changed build input never reuses an old binary.
 - Different Crystal pins need separate toolchain roots; `scripts/install-toolchain` enforces this.
-- A project is served by the installation whose `frappe` Zed finds. A mismatch fails with `use its matching Caramel installation`, exactly like `frappe dev`. There is no automatic per-project selection yet.
+- A project is served by the installation whose `frappe` Zed finds. `frappe lsp` runs under the release the project pins in `shard.lock`, like every project command.
 - crystalline navigates into the project's Caramel dependency in `lib/caramel`; for an unreleased checkout that is a symlink to the checkout itself.
 
 ## Verify
@@ -67,7 +67,7 @@ Zed must find the project's matching `frappe` on its login-shell PATH; `frappe i
 - `frappe lsp: checksum mismatch` or `download failed`: nothing was installed; retry on a working network.
 - `frappe lsp: … loaded a library outside Caramel or macOS`: the binary was not published; report it.
 - `frappe lsp: crystalline build directory preserved for inspection`: the build output above names the failure; remove the directory afterwards.
-- `Project framework version differs from Frappé …; use its matching Caramel installation`: put that project's Caramel installation first on Zed's PATH.
+- `This project uses Caramel X, not Y; use its matching Caramel installation`: install that release with `frappe installations install X`, or register its checkout.
 - Zed `failed to spawn command` for `bin/frappe`: run `scripts/build-frappe`. For `frappe`: the matching binary is absent from Zed's login-shell PATH. A one-off `PATH=… zed .` may work initially but not survive a worktree-environment refresh.
 - Zed `Please install crystalline manually and make sure it is on $PATH`: the project settings were not applied (untrusted worktree or missing `.zed/settings.json`).
 - Zed `Waiting for worktree … to be trusted`: trust the worktree.

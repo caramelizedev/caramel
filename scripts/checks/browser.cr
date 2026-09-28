@@ -86,7 +86,7 @@ module Caramel::Checks
       started = Time.instant
       fixture = @fixture
       puts "Browser fixture: #{fixture.root}"
-      # ameba:disable Lint/UselessAssign
+      # ameba:disable Lint/UselessAssign -- read by the ensure below
       failed = true
       begin
         fixture.start

@@ -24,7 +24,22 @@ module Caramel::Frappe
       SOURCE_FILES.each do |path|
         source[path] = digest(File.join(@root, path)) if File.file?(File.join(@root, path))
       end
+      framework_source.try { |signature| source["lib/caramel"] = signature }
       Snapshot.new(signature(source), signature(tree("app/assets").merge(tree("public"))))
+    end
+
+    # A path dependency (lib/caramel, a symlink Shards made to a checkout)
+    # builds against that checkout's working tree, so its source is part of
+    # every build. It is hashed but not watched: after editing it, save any
+    # application file or restart frappe dev. A release changes only with
+    # shard.lock.
+    private def framework_source : String?
+      link = File.join(@root, "lib/caramel")
+      return unless File.symlink?(link)
+      source = File.join(File.realpath(link), "src")
+      return unless Dir.exists?(source)
+      files = Dir.glob(File.join(source, "**", "*")).select { |path| File.file?(path) }
+      signature(files.to_h { |path| {path, Digest::SHA256.hexdigest(File.read(path))} })
     end
 
     def publish_assets : Nil

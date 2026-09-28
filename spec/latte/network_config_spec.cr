@@ -8,7 +8,7 @@ describe "Latte network configuration" do
   it "registers exact hosts and produces isolated local HTTPS configuration" do
     root = File.join("/private/tmp", "latte-network-config-#{Random::Secure.hex(8)}")
     Dir.mkdir(root, 0o700)
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- read by the ensure below
     paths = nil
     begin
       registry = Caramel::Latte::Registry.new(root)

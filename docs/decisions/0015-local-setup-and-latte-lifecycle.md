@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: accepted. Amends [RFC-0004](../rfc.md) §2.1 and [RFC-0005](../rfc.md) §2.1.
+Status: accepted. Amends [RFC-0004](../rfc.md) §2.1 and [RFC-0005](../rfc.md) §2.1. [ADR 0016](0016-versioning-and-releases.md) amends on-demand start and the launchers: both run the newest installed release.
 
 ## Context
 
@@ -30,7 +30,7 @@ The first-run path, `frappe new demo && cd demo && frappe dev`, needed four manu
    - It refuses, before writing either file, when a name is taken by a file Caramel did not create, or when the directory is writable by others.
    - `frappe installations remove` deletes the launchers that run the removed checkout.
 4. **Latte's lifecycle.**
-   - **On demand.** When no daemon serves the per-user state, every command that needs Latte services runs the `latte` beside the running `frappe` as `latte daemon --detach`.
+   - **On demand.** When no daemon serves the per-user state, every command that needs Latte services runs `latte daemon --detach`: the newest installed release's `latte`, or the one beside the running `frappe` when that release is the newest ([ADR 0016](0016-versioning-and-releases.md)).
      - The daemon moves into its own session, so Ctrl-C and closing the terminal leave it running.
      - It writes its output to `logs/latte.log`, which is retained like the service logs.
      - Frappé never starts a daemon for a `CARAMEL_HOME` someone set. Checks and fixtures run their own daemons there.

@@ -17,10 +17,11 @@ describe Caramel::Frappe::NewProject do
       end
       %w[.env .caramel-version vendor config/database.yml].each { |name| File.exists?(File.join(target, name)).should be_false }
       File.read(File.join(target, "src/reading_list.cr")).should eq(%(require "../config/application"\n\nCaramel.run(App)\n))
-      # An unreleased checkout: the application builds against it in place.
-      File.read(File.join(target, "shard.yml")).should end_with("  caramel:\n    path: #{File.realpath(framework).to_json}\n")
+      # The dependency this checkout gives: a path, unless it is a clean release tag.
+      source = generator.dependency
+      File.read(File.join(target, "shard.yml")).should end_with("  caramel:\n    #{source.shard}\n")
+      File.read(File.join(target, "shard.lock")).should contain("  caramel:\n    #{source.lock}\n    version: #{Caramel::VERSION}\n")
       lock = YAML.parse(File.read(File.join(target, "shard.lock")))["shards"]
-      lock["caramel"].as_h.transform_keys(&.as_s).transform_values(&.as_s).should eq({"path" => File.realpath(framework), "version" => Caramel::VERSION})
       lock["pg"]["version"].as_s.should eq("0.30.0")
       lock["ameba"]?.should be_nil
       Caramel::Frappe::Project.pin(target).should eq(Caramel::VERSION)
@@ -28,6 +29,27 @@ describe Caramel::Frappe::NewProject do
       File.read(File.join(target, "config/routes.cr")).should contain("Frappé resource routes")
     ensure
       FileUtils.rm_rf(parent)
+    end
+  end
+
+  it "depends on the GitHub release only from a checkout of its tag without tracked changes" do
+    repository = File.tempname("caramel-new-release-", dir: "/private/tmp")
+    Dir.mkdir(repository)
+    git = ->(arguments : Array(String)) { Caramel::Latte::ProcessRunner.run(["/usr/bin/git", "-C", repository, "-c", "user.name=Caramel specs", "-c", "user.email=specs@caramel.invalid"] + arguments, timeout: 30.seconds).success?.should be_true }
+    begin
+      generator = Caramel::Frappe::NewProject.new(repository)
+      File.write(File.join(repository, "shard.yml"), "name: caramel\nversion: #{Caramel::VERSION}\n")
+      generator.dependency.shard.should eq("path: #{File.realpath(repository).to_json}")
+      [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "release"]].each { |arguments| git.call(arguments) }
+      generator.dependency.shard.should start_with("path: ")
+      git.call(["tag", "v#{Caramel::VERSION}"])
+      generator.dependency.should eq(Caramel::Frappe::NewProject::Dependency.new(%(github: caramelizedev/caramel\n    version: "~> #{Caramel::VERSION}"), %(git: "https://github.com/caramelizedev/caramel.git")))
+      File.write(File.join(repository, "demo.txt"), "an application generated inside the clone")
+      generator.dependency.shard.should start_with("github: ")
+      File.write(File.join(repository, "shard.yml"), "name: caramel\nversion: #{Caramel::VERSION}\n# edited\n")
+      generator.dependency.shard.should start_with("path: ")
+    ensure
+      FileUtils.rm_rf(repository)
     end
   end
 

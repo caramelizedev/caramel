@@ -12,7 +12,7 @@ describe "Latte login item" do
     # group, as the daemon starts services, then exits.
     script = "/bin/sleep 120 & echo $! > '#{child}'; echo $$ > '#{ran}'"
     item = Caramel::Latte::LoginItem.new(["/bin/sh", "-c", script], label, directory)
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- read by the ensure below
     survivor = nil
     begin
       item.install

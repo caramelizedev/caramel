@@ -7,8 +7,13 @@ require "./latte/installed_releases"
 begin
   case ARGV
   when ["daemon"], ["daemon", "--detach"]
-    # Detach first, so every later failure reaches logs/latte.log.
     paths = Caramel::Latte::Paths.new
+    # One Latte, the newest installed (ADR 0016): however this daemon was
+    # started, an older release hands over to the newest release's latte.
+    if newer = Caramel::Latte::InstalledReleases.newer_latte(paths.root, Caramel::VERSION)
+      Process.exec(newer, ARGV)
+    end
+    # Detach first, so every later failure reaches logs/latte.log.
     Caramel::Latte::Daemon.detach(paths) if ARGV[1]? == "--detach"
     registry = Caramel::Latte::Registry.new(paths)
     Caramel::Latte::Daemon.new(registry, Caramel::Latte::Supervisor.new(registry)).run

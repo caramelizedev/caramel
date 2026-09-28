@@ -161,7 +161,7 @@ module Caramel::Checks
       report = json({complete: false, mode: @edit_only ? "edit-only" : "full", scenarios: {} of String => JSON::Any, hardware: {} of String => JSON::Any, resource_samples: @sampler.rows,
                      limitations: ["HTTP-visible changes, not browser paint or browser refresh execution", "50 ms polling plus a new curl process per observation", "Managed compiler cache and dependencies warmed by fixture setup", "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average", "Resource sampling every 500 ms can miss short-lived processes", "Private HTTPS ports and explicitly supplied fixture CA; no system DNS/trust acceptance"],
                      versions_manifest: version, platform: platform, sample_count_per_edit_kind: 20})
-      # ameba:disable Lint/UselessAssign
+      # ameba:disable Lint/UselessAssign -- read by the ensure below
       sampler_started = false
       begin
         %w[hw.model hw.memsize hw.ncpu machdep.cpu.brand_string].each do |key|

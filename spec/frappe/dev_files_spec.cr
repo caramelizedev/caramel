@@ -28,6 +28,30 @@ describe Caramel::Frappe::DevFiles do
     end
   end
 
+  it "rebuilds after a framework edit in a path dependency, which a release never has" do
+    root = File.tempname("caramel-watch-framework-")
+    checkout = File.tempname("caramel-watch-checkout-")
+    FileUtils.mkdir_p(File.join(root, "lib"))
+    FileUtils.mkdir_p(File.join(checkout, "src/caramel"))
+    File.write(File.join(checkout, "src/caramel/action.cr"), "module Caramel; end\n")
+    begin
+      File.symlink(checkout, File.join(root, "lib/caramel"))
+      watcher = Caramel::Frappe::DevFiles.new(File.realpath(root))
+      before = watcher.snapshot
+      File.write(File.join(checkout, "src/caramel/action.cr"), "module Caramel; VERSION = 2; end\n")
+      watcher.snapshot.source.should_not eq(before.source)
+      # A release is a real directory whose version shard.lock already pins.
+      File.delete(File.join(root, "lib/caramel"))
+      FileUtils.cp_r(checkout, File.join(root, "lib/caramel"))
+      released = watcher.snapshot
+      File.write(File.join(root, "lib/caramel/src/caramel/action.cr"), "module Caramel; VERSION = 3; end\n")
+      watcher.snapshot.source.should eq(released.source)
+    ensure
+      FileUtils.rm_rf(root)
+      FileUtils.rm_rf(checkout)
+    end
+  end
+
   it "publishes source assets, handles deletions and preserves conflicting public edits" do
     root = File.tempname("caramel-assets-")
     FileUtils.mkdir_p(File.join(root, "app/assets/stylesheets"))

@@ -378,12 +378,14 @@ module Caramel::Frappe
       states = JSON.parse(result.stdout).as_h.transform_values(&.as_s)
       return if states.values.all?("current")
       bundle = "/private/tmp/caramel-integration-bundle"
-      update = "cd #{Process.quote(root)} && rm -rf #{bundle} && scripts/install-local-integration prepare #{bundle} && sudo scripts/install-local-integration apply #{bundle}"
+      prepare = "cd #{Process.quote(root)} && rm -rf #{bundle} && scripts/install-local-integration prepare #{bundle}"
       if states.values.all?("absent")
-        raise Error.new("the .caramel resolver and ports 80/443 relay are not installed; install them: #{update}")
+        raise Error.new("the .caramel resolver and ports 80/443 relay are not installed; install them: #{prepare} && sudo scripts/install-local-integration apply #{bundle}")
       end
+      # apply refuses to replace another release's integration; uninstall
+      # removes only files that still match that integration's receipt.
       stale = states.reject { |_, state| state == "current" }.keys
-      raise Error.new("the installed #{stale.join(" and ")} #{stale.size == 1 ? "differs" : "differ"} from Caramel #{release}'s; update: #{update}")
+      raise Error.new("the installed #{stale.join(" and ")} #{stale.size == 1 ? "differs" : "differ"} from Caramel #{release}'s; replace them: #{prepare} && sudo scripts/install-local-integration uninstall && sudo scripts/install-local-integration apply #{bundle}")
     end
 
     private def sites : Nil

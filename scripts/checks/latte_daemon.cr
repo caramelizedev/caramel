@@ -1,5 +1,6 @@
 require "./support/unix_http"
 require "../../src/latte/postgres"
+require "../../src/latte/control_api"
 
 lib LibC
   fun getsid(pid : PidT) : PidT
@@ -110,6 +111,13 @@ module Caramel::Checks::LatteDaemon
     begin
       process = launch(root, log, environment)
       wait_state(socket, "running")
+      # ADR 0016: Latte reports its release and the control API window it serves.
+      status = request(socket, "GET", "/v1/status")
+      unless status["latte"] == Caramel::VERSION && status["api"].as_a.map(&.as_i) == Caramel::Latte::ControlAPI::VERSIONS
+        raise "Latte does not report its release and API window: #{status.to_json}"
+      end
+      reported = Checks.run([LATTE, "version"], env: environment)
+      raise "latte version printed #{reported.stdout.inspect}" unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1)\n"
       duplicate = Checks.run([LATTE, "daemon"], env: environment, timeout: 5.seconds)
       raise "Two daemons acquired the same instance" if duplicate.success?
       site = request(socket, "POST", "/v1/sites", JSON.parse({name: "bookshelf", directory: root}.to_json))["site"]

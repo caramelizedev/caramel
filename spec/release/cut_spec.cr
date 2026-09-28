@@ -43,6 +43,12 @@ describe Caramel::Cut do
     Caramel::Cut.next_version(zero, [commit.call("docs", false), commit.call("chore", false)]).should be_nil
   end
 
+  it "finds the Unreleased notes whether or not a header precedes them" do
+    Caramel::Cut.split("## Unreleased\n\nRun frappe setup.\n\n## 0.1.0 - 2026-09-28\n").should eq({"## Unreleased\n", "\nRun frappe setup.\n", "## 0.1.0 - 2026-09-28\n"})
+    Caramel::Cut.split("# Changelog\n\n## Unreleased\n").should eq({"# Changelog\n\n## Unreleased\n", "", ""})
+    expect_raises(Caramel::Cut::Refused, "no ## Unreleased section") { Caramel::Cut.split("# Changelog\n") }
+  end
+
   it "refuses a released framework migration that was edited, removed or preceded" do
     released = {1_i64 => {"create_jobs", "aa"}, 2_i64 => {"create_cache", "bb"}}
     Caramel::Cut.check_migrations(released, released.merge({3_i64 => {"create_runs", "cc"}}), "v0.1.0")

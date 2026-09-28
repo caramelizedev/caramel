@@ -12,5 +12,10 @@ describe Caramel::Frappe::SchemaDiff do
     migration_source(%(CREATE TABLE "notes" ("body" text NOT NULL))).should contain(%(  <<-SQL,\n    CREATE TABLE "notes"))
     migration_source(%(ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb')).should contain(%(  <<-'SQL',\n    ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb'\n))
     migration_source(%(COMMENT ON TABLE "notes" IS '\#{title}')).should contain(%(  <<-'SQL',\n    COMMENT ON TABLE "notes" IS '\#{title}'\n))
+    # A backslash that is no escape sequence still stays literal; Ameba would
+    # ask for an unquoted heredoc, which would drop it.
+    lone = migration_source(%(ALTER TABLE "notes" ALTER COLUMN "path" SET DEFAULT 'a\\_b'))
+    lone.should contain(%(  # ameba:disable Style/HeredocEscape -- its backslashes stay literal\n  <<-'SQL',\n))
+    migration_source(%(ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb')).should_not contain("ameba:disable")
   end
 end

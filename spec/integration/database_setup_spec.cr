@@ -108,7 +108,7 @@ describe "Caramel database session setup" do
     end
 
     database = nil
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- read by the ensure below
     first_connection = nil
     begin
       url = "postgresql://caramel:@/books?host=#{URI.encode_path(directory)}&port=#{SETUP_PORT}"

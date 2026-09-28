@@ -82,7 +82,8 @@ module Caramel::Frappe
       return false unless File.exists?(File.join(@framework_root, ".git"))
       tag = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "describe", "--exact-match", "--tags", "HEAD"], timeout: 10.seconds)
       return false unless tag.success? && tag.stdout.strip == "v#{Caramel::VERSION}"
-      status = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "status", "--porcelain"], timeout: 10.seconds)
+      # Untracked files, such as an app generated inside the clone, change nothing.
+      status = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "status", "--porcelain", "--untracked-files=no"], timeout: 10.seconds)
       status.success? && status.stdout.empty?
     end
 

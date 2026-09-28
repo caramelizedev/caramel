@@ -37,7 +37,7 @@ module Caramel::Checks::Integration
     end
     env["LC_ALL"] = "C"
     started = false
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- keeps failed a Bool, not Bool?, after the begin block
     failed = false
     begin
       required([File.join(pg, "initdb"), "-D", data, "--username=caramel_admin", "--encoding=UTF8", "--locale=C", "--auth-local=trust", "--auth-host=scram-sha-256"], env)

@@ -177,9 +177,9 @@ describe Caramel::Latte::ManagedChild do
     root = postgres_unit_root
     record = File.join(root, "child.json")
     log = File.join(root, "child.log")
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- read by the ensure below
     first : Process? = nil
-    # ameba:disable Lint/UselessAssign
+    # ameba:disable Lint/UselessAssign -- read by the ensure below
     second : Process? = nil
     first = Process.new(["/bin/sleep", "5"])
     second = Process.new(["/bin/sleep", "5"])

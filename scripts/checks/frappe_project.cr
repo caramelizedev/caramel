@@ -23,7 +23,7 @@ module Caramel::Checks
 
     def execute(args : Array(String)) : Nil
       puts "Frappé fixture: #{@root}"
-      # ameba:disable Lint/UselessAssign
+      # ameba:disable Lint/UselessAssign -- read by the ensure below
       failed = true
       begin
         start
@@ -184,11 +184,12 @@ module Caramel::Checks
       noun = File.join(@project, "app/models/invitation_service.cr")
       File.write(noun, "module App\n  class  InvitationService\n  end\nend\n")
       flagged = attempt([@frappe, "lint", "--agent"], chdir: @project)
-      assert!(flagged.status.exit_code == 1 && flagged.stdout.starts_with?(<<-MRDP), flagged.stdout + flagged.stderr)
+      assert!(flagged.status.exit_code == 1 && flagged.stdout == <<-MRDP, flagged.stdout + flagged.stderr)
         ERR LINT_LINT_FORMATTING at app/models/invitation_service.cr:1:1
         MSG: Use built-in formatter to format this source (Lint/Formatting)
         FIX: frappe format
-        ERR LINT_CARAMEL_SERVICE_NOUN at app/models/invitation_service.cr:2:10\n
+        ERR LINT_CARAMEL_SERVICE_NOUN at app/models/invitation_service.cr:2:10
+        MSG: `InvitationService` is a service noun; put the verb on its subject instead (RFC-0008 §2.1), e.g. a method on the model, a changeset or a job (Caramel/ServiceNoun)\n
         MRDP
       command([@frappe, "format"], chdir: @project, echo: false)
       assert!(File.read(noun) == "module App\n  class InvitationService\n  end\nend\n", File.read(noun))

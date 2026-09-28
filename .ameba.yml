@@ -18,9 +18,10 @@ Excluded:
 Caramel/ServiceNoun:
   Enabled: true
 
-# Framework dispatch tables and parsers keep Ameba's default limit of 12;
-# the few that exceed it say why inline. Applications use 10. Checks are
-# end-to-end scenarios whose branches are assertions.
+# The framework keeps Ameba's default limit of 12; the methods that exceed it,
+# dispatch tables, parsers, validation and process-lifecycle code, say why
+# inline. Applications use 10. Crystal under scripts/, the checks and the
+# release tool, is exempt: its branches are scenario steps and assertions.
 Metrics/CyclomaticComplexity:
   MaxComplexity: 12
   Excluded:

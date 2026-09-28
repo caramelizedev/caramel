@@ -239,7 +239,7 @@ private final class ToolchainInstallation {
             state = object
             if state["root"] as? String != root { throw InstallerError(message: "installation was moved; install into a fresh prefix") }
             if let format = state["version"] as? Int, format > receiptFormat {
-                throw InstallerError(message: "this toolchain was installed by a newer Caramel (receipt format \(format)); run that release's scripts/install-toolchain")
+                throw InstallerError(message: "\(receipt) was written by a newer Caramel (receipt format \(format)); this installer reads format \(receiptFormat). Run that release's scripts/install-toolchain")
             }
             if state["version"] as? Int != receiptFormat || state["selection"] as? [String: String] != selection {
                 throw InstallerError(message: "installation receipt differs from this toolchain release")

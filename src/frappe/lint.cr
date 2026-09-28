@@ -46,7 +46,7 @@ module Caramel::Frappe
     # rule's own name for `# ameba:disable` directives.
     private def mrdp(path : String, issue : JSON::Any) : Nil
       rule = issue["rule_name"].as_s
-      code = "LINT_" + rule.gsub(/([a-z\d])([A-Z])/, "\\1_\\2").tr("/", "_").upcase
+      code = "LINT_" + rule.underscore.tr("/", "_").upcase
       fields = [{"MSG", "#{issue["message"].as_s} (#{rule})"}]
       fields << {"FIX", "frappe format"} if rule == "Lint/Formatting"
       MRDP.write(@output, code, "#{path}:#{issue["location"]["line"]}:#{issue["location"]["column"]}", fields)

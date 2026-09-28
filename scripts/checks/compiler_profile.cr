@@ -22,7 +22,7 @@ STDERR.print build.stderr
 raise "generator build failed" unless build.success?
 
 scenarios = {} of String => Hash(String, NamedTuple(elapsed_ms: Float64, exit_code: Int32, log: String))
-# ameba:disable Lint/UselessAssign
+# ameba:disable Lint/UselessAssign -- read by the ensure below
 complete = false
 begin
   {2, 22}.each do |count|

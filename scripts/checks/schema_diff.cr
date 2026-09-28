@@ -54,7 +54,7 @@ module Caramel::Checks
 
     def execute : Nil
       puts "Schema diff fixture: #{@root}"
-      # ameba:disable Lint/UselessAssign
+      # ameba:disable Lint/UselessAssign -- read by the ensure below
       failed = true
       begin
         start

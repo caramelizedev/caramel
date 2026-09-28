@@ -66,10 +66,11 @@ module Caramel::Cut
   # CHANGELOG.md split around its Unreleased notes: the text through the
   # Unreleased heading, the notes, and the earlier releases.
   def self.split(changelog : String) : {String, String, String}
-    marker = "\n## Unreleased\n"
-    start = changelog.index(marker) || raise Refused.new("CHANGELOG.md has no ## Unreleased section")
-    head = changelog[0, start + marker.size]
-    after = changelog[(start + marker.size)..]
+    heading = "## Unreleased\n"
+    start = changelog.starts_with?(heading) ? 0 : changelog.index("\n#{heading}").try(&.+(1))
+    raise Refused.new("CHANGELOG.md has no ## Unreleased section") unless start
+    head = changelog[0, start + heading.size]
+    after = changelog[(start + heading.size)..]
     older = after.index("\n## ")
     older ? {head, after[0, older], after[(older + 1)..]} : {head, after, ""}
   end
