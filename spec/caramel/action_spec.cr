@@ -67,6 +67,19 @@ struct ActionSpecMorph < ActionSpecAction
   end
 end
 
+struct ActionSpecMarkup < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    morph "#panel", with: markup { span(class: %(a"b)) { "<#{guest_name}>" } }
+  end
+
+  private def guest_name : String
+    "Tom & Jerry"
+  end
+end
+
 # Inherits Caramel::Action directly, with no layout of its own.
 struct ActionSpecBare < Caramel::Action
   contract do
@@ -84,6 +97,7 @@ module ActionSpecApp
     post "/items", ActionSpecCreate
     get "/parts", ActionSpecParts
     get "/morph", ActionSpecMorph
+    get "/markup", ActionSpecMarkup
     get "/bare", ActionSpecBare
     get "/greetings/:name", Greetings::Show
   end
@@ -182,6 +196,10 @@ describe Caramel::Action do
 
   it "morphs one target" do
     get("/morph").body.should eq(%(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>))
+  end
+
+  it "builds a small fragment inline with a view's escaping and the action's own methods" do
+    get("/markup").body.should contain(%(<span class="a&quot;b">&lt;Tom &amp; Jerry&gt;</span>))
   end
 
   it "renders a view page with escaped input and a nested view" do

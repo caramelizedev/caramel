@@ -80,6 +80,19 @@ module Caramel
       page(title, body.to_s, status)
     end
 
+    # Renders `body`, trusted HTML such as `markup { … }`, as the page.
+    def page(title : String, body : HTML::Safe, status : Int32 = @status) : Response
+      page(title, body.value, status)
+    end
+
+    # Builds a fragment too small for a view class, with a view's escaping:
+    # `morph "#count", with: markup { span { count.to_s } }`. Inside the block,
+    # element methods such as `label` or `title` come first; the action's other
+    # methods and locals stay available.
+    def markup(&) : HTML::Safe
+      HTML::Safe.new(Blueprint::HTML::Builder.build { |builder| with builder yield })
+    end
+
     def partials(fragments : Enumerable(Partial), status : Int32 = @status) : Response
       Response.new(status, Hypermedia.render(fragments), html_headers)
     end
