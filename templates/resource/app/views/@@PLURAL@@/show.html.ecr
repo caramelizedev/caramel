@@ -1,9 +1,0 @@
-<a class="back" href="<%= @@PLURAL@@_path %>">← @@COLLECTION_LABEL@@</a>
-<section class="form-page"><h1>@@MODEL@@</h1><dl>
-@@SHOW_FIELDS@@
-</dl><div class="actions"><a class="button" href="<%= edit_@@SINGULAR@@_path(record.id) %>">Edit @@LABEL@@</a>
-<form action="<%= @@SINGULAR@@_path(record.id) %>" method="post">
-  <input type="hidden" name="_csrf" value="<%= csrf_token %>">
-  <input type="hidden" name="_method" value="DELETE">
-  <button class="danger" type="submit">Delete @@LABEL@@</button>
-</form></div></section>

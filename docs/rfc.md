@@ -93,7 +93,7 @@ The application and PostgreSQL sockets live in Latte's owner-only runtime direct
 │ Caramel Frappé    │ Stateless agent CLI suite (POSIX; sub-20ms target)   │
 │ Caramel Corretto  │ Zero-mock, integration-first verification harness    │
 │ Caramel Roast     │ Single-binary static compilation & SSH deployment    │
-│ Caramel Prose     │ Poetic ergonomics, semantic units & Slang templates  │
+│ Caramel Prose     │ Poetic ergonomics, semantic units & Blueprint views  │
 └───────────────────┴──────────────────────────────────────────────────────┘
 
 ```
@@ -102,7 +102,7 @@ The application and PostgreSQL sockets live in Latte's owner-only runtime direct
 
 # RFC-0001: Caramel Core (Runtime, Routing, & Hypermedia Engine)
 
-**Status:** Approved · Implemented (amended by [ADR 0003](decisions/0003-core-routing-and-contracts.md), [ADR 0004](decisions/0004-htmx4-fragment-negotiation.md), [ADR 0005](decisions/0005-island-props-helper.md) and [ADR 0011](decisions/0011-default-action-layout.md))
+**Status:** Approved · Implemented (amended by [ADR 0003](decisions/0003-core-routing-and-contracts.md), [ADR 0004](decisions/0004-htmx4-fragment-negotiation.md), [ADR 0005](decisions/0005-island-props-helper.md), [ADR 0011](decisions/0011-default-action-layout.md) and [ADR 0018](decisions/0018-blueprint-views.md))
 
 **Classification:** Foundational Architecture
 
@@ -186,7 +186,7 @@ The default presentation engine targets **htmx 4**, bundled locally with every g
 
 ```crystal
 partials [
-  Caramel::Partial.new("#team-roster", view("teams/_roster", team: team)),
+  Caramel::Partial.new("#team-roster", Views::Teams::Roster.new(team).to_s),
   Caramel::Partial.new("#seat-counter", "<span>14 / 20 Seats Used</span>", swap: "innerHTML"),
 ]
 ```
@@ -204,13 +204,13 @@ partials [
 
 #### 2.4. The Island Escape Hatch (`Caramel Islands`)
 
-Rich client-side interactivity can hit an "htmx-only complexity cliff": spreadsheets, canvas tools, drag-and-drop workflow builders. To avoid it, Caramel Core provides official Web Component wrappers. They receive server-rendered props and isolate client-side code without turning the application into an SPA ([ADR 0005](decisions/0005-island-props-helper.md)):
+Rich client-side interactivity can hit an "htmx-only complexity cliff": spreadsheets, canvas tools, drag-and-drop workflow builders. To avoid it, Caramel Core provides official Web Component wrappers. They receive server-rendered props and isolate client-side code without turning the application into an SPA ([ADR 0005](decisions/0005-island-props-helper.md)). A view writes an island in place ([ADR 0018](decisions/0018-blueprint-views.md)):
 
-```html
-<div class="canvas-container">
-  <h2>Workflow Designer</h2>
-  <%= island("WorkflowCanvas", {nodes: workflow.nodes, edges: workflow.edges}) %>
-</div>
+```crystal
+div class: "canvas-container" do
+  h2 { "Workflow Designer" }
+  island("WorkflowCanvas", {nodes: @workflow.nodes, edges: @workflow.edges})
+end
 ```
 
 ```js
@@ -242,7 +242,7 @@ Every Action negotiates its egress from inbound headers ([ADR 0004](decisions/00
 
 Responses carry `Vary: Accept, HX-Request, HX-Request-Type`. A full page wraps its body in the action's `layout(page)`:
 
-* Generated applications render `app/views/layouts/application.html.ecr` through `ApplicationAction`.
+* Generated applications render the `App::Views::Layouts::Application` view in `app/views/layouts/application.cr` through `ApplicationAction` ([ADR 0018](decisions/0018-blueprint-views.md)).
 * `Caramel::Action` itself provides a minimal escaped document ([ADR 0011](decisions/0011-default-action-layout.md)). Actions that only stream, morph or answer JSON therefore need no layout of their own.
 
 ### 3. Failure Modes & Mitigations
@@ -927,7 +927,7 @@ Caramel’s ongoing development is sustainably funded via a two-tier product mod
 
 # RFC-0008: Poetic Ergonomics, Conceptual Compression, & Semantic Syntax
 
-**Status:** Approved · Partial. `frappe lint` checks application code against this RFC's rule set ([ADR 0017](decisions/0017-formatting-and-linting.md)), and `src/caramel/units.cr` adds the §2.3 units that Crystal lacks: byte sizes on `Int` and `Time#at_midnight`.
+**Status:** Approved · Partial. `frappe lint` checks application code against this RFC's rule set ([ADR 0017](decisions/0017-formatting-and-linting.md)), views are Blueprint classes in place of §2.4's Slang ([ADR 0018](decisions/0018-blueprint-views.md)), and `src/caramel/units.cr` adds the §2.3 units that Crystal lacks: byte sizes on `Int` and `Time#at_midnight`.
 
 **Classification:** Developer Experience, Aesthetics, & Language Design
 
@@ -993,26 +993,37 @@ ColdBrew::Job.retry_on Stripe::RateLimitError,
 
 ```
 
-#### 2.4. Slang Template Engine (Whitespace as Structure)
+#### 2.4. Blueprint Views (Markup as Crystal)
 
-Caramel Core adopts **Slang** (Crystal's native, whitespace-sensitive template engine) as its primary presentation syntax, eliminating tag soup:
+*Amended by [ADR 0018](decisions/0018-blueprint-views.md), which replaces Slang.* Views are Blueprint classes: markup written in plain Crystal, so the compiler proves every expression and reports errors at the view's own line. A view takes typed inputs in its constructor and writes markup in `blueprint`. Text and attribute values are escaped; only `Caramel::HTML::Safe` or `safe(...)` values are written as-is. `app/views/<dir>/<name>.cr` defines `App::Views::<Dir>::<Name>`:
 
-```slang
-/ src/app/views/teams/_card.slang
-hx-partial hx-target="#team-#{team.id}" hx-swap="innerMorph"
-  .team-card class=(team.active? ? "border-emerald" : "border-slate")
-    header.flex.items-center.justify-between
-      h3.font-serif.text-lg = team.name
-      span.badge = team.plan.to_s.upcase
+```crystal
+# app/views/teams/card.cr
+module App::Views::Teams
+  class Card < App::ApplicationView
+    def initialize(@team : App::Team)
+    end
 
-    p.text-sm.text-muted
-      | Allocated: 
-      strong = pluralize(team.seats, "seat")
+    private def blueprint
+      div class: ["team-card", @team.active? ? "border-emerald" : "border-slate"] do
+        header class: "flex items-center justify-between" do
+          h3(class: "font-serif text-lg") { @team.name }
+          span(class: "badge") { @team.plan.to_s.upcase }
+        end
+        p class: "text-sm text-muted" do
+          plain "Allocated: "
+          strong { "#{@team.seats} seats" }
+        end
+        footer class: "mt-4" do
+          button(class: "btn-primary", hx_post: "/teams/#{@team.id}/seats", hx_vals: %({"seats": 1})) { "Add Seat" }
+        end
+      end
+    end
+  end
+end
 
-    footer.mt-4
-      button.btn-primary hx-post="/teams/#{team.id}/seats" hx-vals='{"seats": 1}'
-        | Add Seat
-
+# An action swaps it into place:
+morph "#team-#{team.id}", with: Views::Teams::Card.new(team)
 ```
 
 #### 2.5. Single-Thought Vertical Slice Actions
@@ -1121,7 +1132,7 @@ caramel/
 │   │   ├── action.cr                      # Contract, handle & negotiated egress
 │   │   ├── hypermedia.cr                  # htmx 4 hx-partial builders
 │   │   ├── islands.cr / islands.js        # <caramel-island> helper & custom element
-│   │   ├── view.cr, view/compiler.cr      # Escaping compiled ECR views
+│   │   ├── view.cr                        # Blueprint views: escaping, islands (ADR 0018)
 │   │   ├── application.cr, csrf.cr, session.cr, response.cr, database.cr, html.cr
 │   │   ├── cold_brew.cr, cold_brew/       # RFC-0003: job, queue, worker, drain, broker,
 │   │   │                                  #   maintenance, scheduler, system migrations

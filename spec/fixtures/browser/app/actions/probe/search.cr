@@ -4,10 +4,10 @@ module App::Probe
   module SearchPanel
     SWAPS = {"morph" => "innerMorph", "html" => "innerHTML"}
 
-    private def search_panel(panel : String, text : String) : Caramel::HTML::Safe
+    private def search_panel(panel : String, text : String) : Views::Probe::SearchPanel
       label = text.empty? ? "Item" : text
       items = (1..40).map { |index| "#{label} #{index}" }
-      Caramel::HTML::Safe.new(view("probe/_search_panel", mode: panel, swap: SWAPS[panel], query: text, results: items))
+      Views::Probe::SearchPanel.new(panel, SWAPS[panel], text, items)
     end
   end
 
@@ -18,7 +18,7 @@ module App::Probe
     end
 
     def handle(contract : Contract)
-      page "Live search", view("probe/search", morph: search_panel("morph", ""), html: search_panel("html", ""))
+      page "Live search", Views::Probe::Search.new(search_panel("morph", ""), search_panel("html", ""))
     end
   end
 
@@ -32,7 +32,7 @@ module App::Probe
 
     def handle(contract : Contract)
       return not_found unless SWAPS.has_key?(contract.mode)
-      page "Live search", search_panel(contract.mode, contract.q).to_s
+      page "Live search", search_panel(contract.mode, contract.q)
     end
   end
 end

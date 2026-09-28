@@ -3,9 +3,3 @@ abstract struct GreetingsAction < Caramel::Action
     page.body
   end
 end
-
-module Greetings::Signature
-  private def signature : String
-    view("greetings/signature")
-  end
-end

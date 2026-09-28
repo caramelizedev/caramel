@@ -8,7 +8,7 @@ module App::@@COLLECTION@@
     end
 
     def render(result)
-      page "@@COLLECTION_LABEL@@", view("@@PLURAL@@/index", records: result[:records])
+      page "@@COLLECTION_LABEL@@", Views::@@COLLECTION@@::Index.new(result[:records])
     end
   end
 end

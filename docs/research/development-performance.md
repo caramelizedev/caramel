@@ -17,7 +17,7 @@ Use `--edit-benchmark` instead of `--benchmark` to repeat the same edit/startup/
 
 The small fixture contains Book and mixed-scalar Person resources. The larger fixture adds twenty two-field resources, each with a model, input, controller, CRUD templates, routes, migration and request specs. Both serve the same simple homepage; this tests the cost of a larger compiled application, not a heavy database query or complex page render.
 
-Each fixture receives twenty sequential changes for each of CSS, JavaScript, ECR templates and Crystal controller source. Every change has a unique marker. Timing starts immediately before the file write and ends when a CA-verified HTTPS response contains the expected marker. Observations poll every 50 ms using a new curl process. All individual samples are retained; p95 is the nearest-rank 19th observation in the sorted twenty samples.
+Each fixture receives twenty sequential changes for each of CSS, JavaScript, views and Crystal controller source. When this baseline was measured, views were ECR templates; the benchmark's `view` kind now inserts a `comment` marker into the Blueprint view `app/views/home/index.cr` ([ADR 0018](../decisions/0018-blueprint-views.md)). Every change has a unique marker. Timing starts immediately before the file write and ends when a CA-verified HTTPS response contains the expected marker. Observations poll every 50 ms using a new curl process. All individual samples are retained; p95 is the nearest-rank 19th observation in the sorted twenty samples.
 
 This is HTTP-visible edit latency, including the watcher, compilation where applicable, application readiness and proxy response. It does not measure the browser refresh script, DOM updates, or paint. Those remain browser acceptance work. Private fixture ports and an explicit fixture CA do not establish ordinary installed HTTPS behavior.
 
@@ -33,7 +33,7 @@ The first run uses an Apple M3 Pro (12 logical CPUs, 36 GiB RAM). Framework sour
 | --- | ---: | ---: |
 | CSS | 158 ms | 157 ms |
 | JavaScript | 156 ms | 159 ms |
-| ECR template | 4.58 s | 7.65 s |
+| ECR template (views were ECR) | 4.58 s | 7.65 s |
 | Crystal controller | 4.55 s | 7.76 s |
 
 First development readiness took 4.14 seconds for Bookshelf and 5.96 seconds for the larger application. Static edit visibility is well below the proposed one-second threshold in this HTTP fixture. Compiled changes miss the proposed three-second threshold in both applications. Do not describe source/template edits as meeting that target, or describe the static results as browser-paint measurements.
@@ -60,10 +60,10 @@ The baseline session awaited old-process retirement after making the replacement
 | --- | ---: | ---: |
 | Empty compiler cache | 21.94 s | 27.72 s |
 | Unchanged source, warm cache | 2.67 s | 6.15 s |
-| Template edit, warm cache | 2.51 s | 5.69 s |
+| ECR template edit, warm cache | 2.51 s | 5.69 s |
 | Controller edit, warm cache | 2.43 s | 5.72 s |
 
-These are individual diagnostic observations, not percentile estimates. In the larger controller-edit case, main semantic analysis takes 3.05 seconds and Crystal code generation 0.89 seconds. The compiler reuses 1,210 of 1,211 object files; warm edits are not rebuilding every object. Improving the process handoff alone cannot meet the proposed three-second larger-app target.
+These are individual diagnostic observations, not percentile estimates. The template edit was measured when views were ECR; the stage is now `view_edit`, a Blueprint view edit. In the larger controller-edit case, main semantic analysis takes 3.05 seconds and Crystal code generation 0.89 seconds. The compiler reuses 1,210 of 1,211 object files; warm edits are not rebuilding every object. Improving the process handoff alone cannot meet the proposed three-second larger-app target.
 
 ## Acceptance still required
 

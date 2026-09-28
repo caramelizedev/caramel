@@ -1,5 +1,6 @@
 require "spec"
 require "../../src/caramel"
+require "../fixtures/app/views/greetings/show"
 require "../fixtures/app/actions/greetings"
 require "../fixtures/app/actions/greetings/show"
 
@@ -183,7 +184,7 @@ describe Caramel::Action do
     get("/morph").body.should eq(%(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>))
   end
 
-  it "renders conventional views with escaped locals and trusted partial views" do
+  it "renders a view page with escaped input and a nested view" do
     response = get("/greetings/%3CAda%3E", HTTP::Headers{"HX-Request-Type" => "partial"})
     response.body.should end_with("<p>Hello, &lt;Ada&gt;</p><footer>Caramel</footer>")
   end

@@ -2,7 +2,7 @@
 
 Date: 2026-09-27
 
-Status: accepted. Amends [RFC-0001](../rfc.md) §2.4.
+Status: accepted. Amends [RFC-0001](../rfc.md) §2.4. [ADR 0018](0018-blueprint-views.md) amends where views are ECR: views are Blueprint classes, and `Caramel::View#island(component, props)` writes the island tag in place.
 
 ## Context
 
@@ -14,7 +14,7 @@ RFC-0001 §2.4 shows an island written as raw markup, with the value `props="<%=
 
 ## Decision
 
-- Views render islands with the action helper `island("WorkflowCanvas", props)`. It checks that the name is PascalCase and 1 to 64 characters long, serializes `props` to JSON, escapes it for the attribute, and emits `<caramel-island component="…" props="…" hx-morph-skip-children>`. It returns `HTML::Safe`, so the escaping view compiler does not escape it again.
+- Views render islands with the action helper `island("WorkflowCanvas", props)`. It checks that the name is PascalCase and 1 to 64 characters long, serializes `props` to JSON, escapes it for the attribute, and emits `<caramel-island component="…" props="…" hx-morph-skip-children>`. It returns `HTML::Safe`, so the escaping view compiler did not escape it again. Since [ADR 0018](0018-blueprint-views.md), `Caramel::View#island` writes the same tag from a Blueprint view.
 - `src/caramel/islands.js`, bundled with every generated application, defines the `<caramel-island>` element and `CaramelIslands.define(name, mount)`.
   - `mount(element, props)` may return nothing, an unmount function, or `{update(props), unmount()}`.
   - An element mounts once it is both connected and registered, in either order. Until then it is `data-island-state="pending"`.

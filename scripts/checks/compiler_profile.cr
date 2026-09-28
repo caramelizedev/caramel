@@ -45,13 +45,13 @@ begin
     File.symlink(File.join(installed, "bin"), File.join(prefix, "bin"))
     environment = {"CARAMEL_TOOLCHAIN_ROOT" => prefix} of String => String?
     controller = File.join(project, "app/actions/home/show.cr")
-    template = File.join(project, "app/views/home/index.html.ecr")
+    view = File.join(project, "app/views/home/index.cr")
     stages = scenarios[count.to_s] = {} of String => NamedTuple(elapsed_ms: Float64, exit_code: Int32, log: String)
-    {"cold", "unchanged_warm", "template_edit", "controller_edit"}.each do |stage|
-      if stage == "template_edit"
-        File.write(template, File.read(template) + "\n<!-- compiler-profile-template -->\n")
+    {"cold", "unchanged_warm", "view_edit", "controller_edit"}.each do |stage|
+      if stage == "view_edit"
+        File.write(view, File.read(view).sub(%(section class: "welcome-grid"), %(comment "compiler-profile-view"\n      section class: "welcome-grid")))
       elsif stage == "controller_edit"
-        File.write(controller, File.read(controller).gsub(%(view("home/index")), %(view("home/index") + "<!-- compiler-profile-controller -->")))
+        File.write(controller, File.read(controller).gsub(%(Views::Home::Index.new), %(Views::Home::Index.new.to_s + "<!-- compiler-profile-controller -->")))
       end
       log = File.join(directory, "#{stage}.log")
       command = ["build", "src/bookshelf.cr", "-D", "caramel_development", "--stats", "--error-trace", "-o", File.join(directory, "application")]

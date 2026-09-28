@@ -3,11 +3,11 @@ module App::@@COLLECTION@@
   module Form
     private def render_form(values : Hash(String, String), errors : Hash(String, Array(String)), id : Int64? = nil, status : Int32 = 200) : Caramel::Response
       action = id ? @@SINGULAR@@_path(id) : @@PLURAL@@_path
-      form = Caramel::HTML::Safe.new(view("@@PLURAL@@/_form", action: action, method: id ? "PATCH" : "POST"))
+      form = Views::@@COLLECTION@@::Form.new(action, id ? "PATCH" : "POST", csrf_token, values, errors)
       if id
-        page "Edit @@LABEL@@", view("@@PLURAL@@/edit", form: form), status
+        page "Edit @@LABEL@@", Views::@@COLLECTION@@::Edit.new(id, form), status
       else
-        page "New @@LABEL@@", view("@@PLURAL@@/new", form: form), status
+        page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status
       end
     end
 

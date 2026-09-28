@@ -1,43 +1,45 @@
-# SPDX-License-Identifier: Apache-2.0
+require "html"
+require "blueprint/html"
 require "./html"
+require "./islands"
 
 module Caramel
-  # Compile-time ECR rendering with HTML escaping for every interpolation.
-  module View
-    CompilerPath = "#{__DIR__}/view/compiler"
+  # A view is a Blueprint class (ADR 0018): its inputs are typed in
+  # `initialize` and its markup is Crystal in `private def blueprint`.
+  #
+  #     class App::Views::Books::Show < App::ApplicationView
+  #       def initialize(@book : App::Book)
+  #       end
+  #
+  #       private def blueprint
+  #         h1 { @book.title }
+  #       end
+  #     end
+  #
+  # Text and attribute values are escaped. `Caramel::HTML::Safe` and
+  # Blueprint's `safe(...)` values are written as they are. A view renders
+  # once: build a new one for each response.
+  abstract class View
+    include Blueprint::HTML
 
-    # Embeds an ECR template and returns its rendered String.
-    #
-    # Expressions resolve in the caller's lexical scope, so Crystal reports
-    # an unknown template local as a normal compile-time error. Values marked
-    # with HTML::Safe pass through the escape helper unchanged.
-    # The hygienic buffer forwarding follows the Crystal 1.21 stdlib ECR
-    # embed/render macro convention in src/ecr/macros.cr (Apache-2.0; see
-    # THIRD_PARTY_NOTICES.md).
-    macro render(filename)
-      ::String.build do |%io|
-        ::Caramel::View.embed({{ filename }}, %io)
-      end
-    end
-
-    macro embed(filename, io_name)
-      \{{ run({{ CompilerPath }}, {{ filename }}, {{ io_name.id.stringify }}) }}
+    # Writes an island (ADR 0005) in place.
+    def island(component : String, props) : Nil
+      raw Island.tag(component, props)
     end
   end
+end
 
-  # Conventional template lookup for application actions: `view "books/show"`
-  # renders <project>/app/views/books/show.html.ecr from any file under
-  # <project>/app/actions. Named arguments become template locals; a local
-  # passed under its own name, as in `form: form`, is used as it is. The
-  # macro's own parameters are prefixed so any local name, including `name`,
-  # is free.
-  module Templates
-    macro view(__caramel_template, __caramel_dir = __DIR__, **locals)
-      {% root = __caramel_dir.gsub(/\/app\/actions(\/.*)?\z/, "") %}
-      {% if root == __caramel_dir %}
-        {% __caramel_template.raise "view must be called from a file under app/actions (called from #{__caramel_dir.id})" %}
-      {% end %}
-      ({% for key, value in locals %}{% unless value.is_a?(Var) && value.id == key.id %}{{ key.id }} = {{ value }}; {% end %}{% end %}::Caramel::View.render({{ "#{root.id}/app/views/#{__caramel_template.id}.html.ecr" }}))
-    end
+# Caramel's escaping contract, applied to Blueprint 1.1.0 (ADR 0018).
+# Attribute values are escaped like text: Blueprint escaped only `"`, so `&`
+# reached the browser raw and a stored `&amp;` came back as `&`. Attributes
+# render per call: Blueprint cached every rendered attribute set in a
+# process-wide hash, keyed by a 64-bit hash, that never evicted.
+module Blueprint::HTML::AttributesRenderer
+  def render(attributes : NamedTuple | Hash, to buffer : String::Builder) : Nil
+    attributes.each { |name, value| append_attribute(buffer, name, value) }
+  end
+
+  private def append_value(buffer : String::Builder, value : String) : Nil
+    ::HTML.escape(value, buffer)
   end
 end

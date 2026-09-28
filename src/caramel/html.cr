@@ -1,3 +1,5 @@
+require "blueprint/safe_object"
+
 module Caramel
   # Helpers for values written into HTML text and quoted attribute contexts.
   #
@@ -5,8 +7,11 @@ module Caramel
   # CSS, URL, or other non-HTML contexts. Callers should use the appropriate
   # policy for those contexts before rendering a value.
   module HTML
-    # A value that a caller has explicitly marked as trusted HTML.
+    # A value that a caller has explicitly marked as trusted HTML. Views write
+    # it as it is, in text and in attribute values.
     struct Safe
+      include Blueprint::SafeObject
+
       getter value : String
 
       def initialize(@value : String)

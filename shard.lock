@@ -4,6 +4,10 @@ shards:
     git: https://github.com/crystal-ameba/ameba.git
     version: 1.7.0
 
+  blueprint:
+    git: https://github.com/stephannv/blueprint.git
+    version: 1.1.0
+
   db:
     git: https://github.com/crystal-lang/crystal-db.git
     version: 0.14.0

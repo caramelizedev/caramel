@@ -7,7 +7,7 @@ module App::Probe
     end
 
     def handle(contract : Contract)
-      page "Server-sent events", view("probe/events")
+      page "Server-sent events", Views::Probe::Events.new
     end
   end
 

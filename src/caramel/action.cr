@@ -12,8 +12,6 @@ module Caramel
   # `def handle(contract : Contract)` returning either a `Caramel::Response`
   # or a JSON-serializable result that `render(result)` turns into HTML.
   abstract struct Action
-    include Templates
-
     VARY = "Accept, HX-Request, HX-Request-Type"
 
     getter context : RequestContext
@@ -77,11 +75,16 @@ module Caramel
       Response.new(status, html, html_headers)
     end
 
+    # Renders `body`, a view, as the page.
+    def page(title : String, body : View, status : Int32 = @status) : Response
+      page(title, body.to_s, status)
+    end
+
     def partials(fragments : Enumerable(Partial), status : Int32 = @status) : Response
       Response.new(status, Hypermedia.render(fragments), html_headers)
     end
 
-    # Replaces one target's content; `html` is trusted.
+    # Replaces one target's content with `html`, a view or trusted HTML.
     def morph(target : String, with html, swap : String = "innerMorph", status : Int32 = @status) : Response
       partials([Partial.new(target, html.to_s, swap)], status)
     end

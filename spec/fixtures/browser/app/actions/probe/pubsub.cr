@@ -6,7 +6,7 @@ module App::Probe
     end
 
     def handle(contract : Contract)
-      page "PubSub", view("probe/pubsub", board: PUBSUB_BOARD)
+      page "PubSub", Views::Probe::Pubsub.new(PUBSUB_BOARD)
     end
   end
 

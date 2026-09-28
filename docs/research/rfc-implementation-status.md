@@ -16,7 +16,7 @@ Update a row when its status changes, and cite the change or check that proves i
 
 ## Summary
 
-Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0015. RFC-0004's system resolver, ports 80/443 and CA trust are applied and verified on the owner's machine. RFC-0007 (Roast) is out of scope and unchanged. RFC-0008 is a design constraint whose rows are updated as in-scope work touched them.
+Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0018. RFC-0004's system resolver, ports 80/443 and CA trust are applied and verified on the owner's machine. RFC-0007 (Roast) is out of scope and unchanged. RFC-0008 is a design constraint whose rows are updated as in-scope work touched them.
 
 | RFC | Overall | State |
 |---|---|---|
@@ -27,7 +27,7 @@ Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0015. 
 | 0005 Frappé | Implemented | One command table drives `frappe`. It provides `agent-manifest`, a Tier-1 `check` with MRDP and RFC-0008 typography (whose PATCH lines apply mechanically), `routes FILTER`, `db branch`, `db diff`, `corretto`, `expand`, and exit 1 with syntax on bad input. It needs no environment variables: it finds the toolchain through its checkout, starts Latte when a command needs it, and `frappe new` applies the new project's migrations. The RFC text is amended by ADRs [0013](../decisions/0013-frappe-cli-check-mrdp.md) and [0015](../decisions/0015-local-setup-and-latte-lifecycle.md). |
 | 0006 Corretto | Implemented | `Corretto.session` with an in-process client, `sign_in` and matchers. Every example runs in a rolled-back savepoint. Catalog changes trigger resets, `frappe corretto --concurrency` gives each worker its own Latte database, queues are drained synchronously, wire fakes run through a local proxy, and mocks are refused. The RFC text is amended by [ADR 0010](../decisions/0010-corretto-harness.md). |
 | 0007 Roast | Absent | There is no static artifact, asset embedding, deployment or SDK; only an optional release-build measurement exists. |
-| 0008 Poetic ergonomics | Partial | Contract, handle and response actions, sentence scopes with `preload`, `retry_on`, semantic units (`50.gigabytes`, `3.days.from_now.at_midnight`), RFC-0008 §2.6 terminal typography (`frappe check --human`), `frappe expand` and the `frappe lint` rule set all work. Domain verbs and Slang do not exist. |
+| 0008 Poetic ergonomics | Partial | Contract, handle and response actions, sentence scopes with `preload`, `retry_on`, semantic units (`50.gigabytes`, `3.days.from_now.at_midnight`), RFC-0008 §2.6 terminal typography (`frappe check --human`), `frappe expand`, the `frappe lint` rule set and Blueprint views in place of Slang ([ADR 0018](../decisions/0018-blueprint-views.md)) all work. Domain verbs do not exist. |
 
 ## Ranked gaps and divergences
 
@@ -43,7 +43,7 @@ Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0015. 
    - The compiler profile shows that faster process handoff alone cannot close the gap.
 7. **Database branching (RFC-0004 §2.2) is in place.** Guarded APFS-clone branches serve `frappe db branch`, `frappe db diff`'s scratch catalog and Corretto's per-worker test databases.
 8. **Agent tooling (RFC-0005) is in place.** `agent-manifest`, `check` and MRDP agent mode (with mechanically applicable PATCH lines) all work, and invalid input exits 1.
-9. **The RFC text matches the code for RFCs 0001–0006.** ADRs 0003–0015 amended:
+9. **The RFC text matches the code for RFCs 0001–0006.** ADRs 0003–0015 and 0018 amended:
    - the fragment header;
    - the contract and router sketches;
    - the `frappe` CLI name and exit code;
@@ -51,8 +51,9 @@ Every in-scope RFC (0001–0006) is implemented as amended by ADRs 0003–0015. 
    - kqueue-only watching;
    - the Section 5 layout;
    - Latte's on-demand and login-item lifecycle.
+   - views as Blueprint classes, in RFC-0001's partials, island and layout text (ADR 0018).
    
-   Each in-scope RFC's status line links its ADRs. RFC-0008's Slang (which is out of scope) still differs from the ECR views.
+   Each in-scope RFC's status line links its ADRs.
 10. **The rest of RFC-0008 is missing.** Domain DSLs are absent.
 
 ## RFC-0001 Caramel Core
@@ -168,7 +169,7 @@ The RFC-0003 code samples (`SendInvitation`, the transactional enqueue, `every` 
 | §2.1 subject-verb-object domain macros (`team.invite`) | Absent | — | none | Requires changesets and jobs (RFC-0002, RFC-0003). |
 | §2.2 sentence scopes with `preload` | Implemented | `scope name(args) { … }` on SugarORM schemas; `Team.query.larger_than(3).preload(:users).order_by(:name, :asc)` (`src/sugar_orm/schema.cr`, `src/sugar_orm/query.cr`) | `spec/sugar_orm/query_spec.cr`, `spec/integration/sugar_orm_spec.cr` | `order_by(:field, :dir)` follows the RFC. `past_due(by: 30.days)`-style scopes are ordinary scope arguments. |
 | §2.3 semantic and temporal units; `retry_on` | Implemented | `Caramel::ColdBrew::Job.retry_on Error, attempts:, backoff: :exponential, base: 2.seconds`, globally and per job (`src/caramel/cold_brew/job.cr`); `Int#kilobytes` through `#terabytes` and `Time#at_midnight` (`src/caramel/units.cr`) | `spec/caramel/units_spec.cr`, `spec/cold_brew/job_spec.cr`, `spec/integration/cold_brew_spec.cr` | Crystal supplies `3.days`, `48.hours` and `Time::Span#from_now`. Sizes are `Int64` byte counts in binary multiples, so `50.gigabytes` fits and a size past `Int64::MAX` raises `OverflowError`. |
-| §2.4 Slang templates | Diverged | Compiled, escaping ECR (`src/caramel/view.cr`, `src/caramel/view/compiler.cr`) | `spec/caramel/view_spec.cr`, `scripts/check views` | Rationale: `docs/research/escaped-view-notes.md`. |
+| §2.4 Blueprint views (Slang in the original) | Implemented | Views are Blueprint classes (`src/caramel/view.cr`, Blueprint 1.1.0 pinned in `shard.yml`) with escaped text and attribute values | `spec/caramel/view_spec.cr`, `scripts/check frappe-project`, `scripts/check browser` | Amended by [ADR 0018](../decisions/0018-blueprint-views.md), which records why Slang was not adopted. Escaping contract: `docs/research/escaped-view-notes.md`. |
 | §2.5 contract, handle and response actions | Implemented | `abstract struct Caramel::Action` with `contract`, `handle`, `page`, `morph`, `partials`, `json` and `stream`; contracts support nilable `Time`, bounds and defaults | `spec/caramel/action_spec.cr`, `spec/caramel/request_contract_spec.cr`, generated resource request specs | Adopted in commit `1ef1f46`; the RFC's `Subscriptions::Pause` domain example is not shipped. |
 | §2.6 terminal typography with remediation | Implemented | `frappe check --human` (or any TTY) draws the RFC's box with the file and line, the source line, a caret, the message and a Remediation block. The same applies to N+1 diagnostics from SugarORM's `NotLoaded` sentinels (`src/frappe/diagnostics.cr`). Route-contract compile errors carry locations and remediation. Runtime errors render an HTML exception page. | `spec/frappe/diagnostics_spec.cr`, `scripts/check frappe-project` (`--human` box), `scripts/check route-compilation`, `scripts/check orm-compilation`, `scripts/check runtime-diagnostics` | |
 | §3 `caramel expand` | Implemented | `frappe expand FILE:LINE:COL` prints the plain Crystal a macro call expands to, using `crystal tool expand` over the project's files (`src/frappe/cli.cr`) | `scripts/check frappe-project` (expands `Caramel::Router.draw` and a `contract` block; exits 1 where no macro is called) | RFC-0008 §3 now names `frappe expand` ([ADR 0013](../decisions/0013-frappe-cli-check-mrdp.md)). |

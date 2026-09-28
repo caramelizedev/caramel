@@ -40,14 +40,16 @@ RFC-0008 asks for code that reads like prose while the compiler does the proving
    - `frappe format` runs the pinned formatter on the project's `src`, `config`, `app`, `db` and `spec`.
    - The installation builds the linter on first use, and again after its sources or `shard.lock` change.
    - Generated code passes the rule set:
-     - the form action hands `action`, `method` and `form` to its views as named locals, which the other actions already did;
+     - generated actions pass view inputs as constructor arguments ([ADR 0018](0018-blueprint-views.md)), so no local exists only for a template to read;
      - migrations quote a SQL heredoc only when it contains `#{` or a backslash, the only text an unquoted heredoc would change. A backslash that is no Crystal escape sequence gets a reasoned `Style/HeredocEscape` directive, since obeying that rule would drop it.
-6. **The framework follows the same rule set** through `.ameba.yml` at the repository root, run by `scripts/check lint`. Apart from the globs each layout needs, it differs in five places:
+   - The application rule set globs `app/**/*.cr` and excludes `app/views/**/*.cr` from `Lint/DebugCalls`: in a Blueprint view `p` is the paragraph element, not the debug print ([ADR 0018](0018-blueprint-views.md)).
+6. **The framework follows the same rule set** through `.ameba.yml` at the repository root, run by `scripts/check lint`. Apart from the globs each layout needs, it differs in six places:
    - Complexity keeps Ameba's default limit of 12. Dispatch tables, parsers, scanners, state machines, and step-by-step validation or process-lifecycle code that exceed it carry an inline `ameba:disable` naming why, so new code still meets the limit.
    - Crystal under `scripts/`, the checks and the release tool, is exempt from the complexity rule: its branches are scenario steps and assertions.
    - Specs and the Crystal under `scripts/` may assert presence with `not_nil!`.
    - Fixture data is excluded: some of it is invalid on purpose, and checks assert exact positions inside it.
    - `Lint/SpecFilename` also ignores `spec/**/support/**`, where each product keeps files its specs require.
+   - `Lint/DebugCalls` has no view exclusion: the framework's views live in fixture applications, which the fixture exclusion already covers.
 7. **Every inline `ameba:disable` names its reason** on the directive line, above the code it covers.
 
 ## Reasons

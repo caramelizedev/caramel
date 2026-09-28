@@ -6,7 +6,7 @@ module App::Probe
     end
 
     def handle(contract : Contract)
-      page "Roster", view("probe/roster", names: ROSTER, list: Caramel::HTML::Safe.new(view("probe/_roster", names: ROSTER)))
+      page "Roster", Views::Probe::Roster.new(ROSTER)
     end
   end
 
@@ -19,7 +19,7 @@ module App::Probe
     def handle(contract : Contract)
       members = ROSTER + [contract.name]
       partials([
-        Caramel::Partial.new("#roster", view("probe/_roster", names: members), "innerMorph"),
+        Caramel::Partial.new("#roster", Views::Probe::RosterMembers.new(members).to_s, "innerMorph"),
         Caramel::Partial.new("#roster-count", members.size.to_s, "innerHTML"),
       ])
     end

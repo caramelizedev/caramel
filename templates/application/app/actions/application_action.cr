@@ -3,7 +3,7 @@ module App
     include App::Paths
 
     def layout(page : Caramel::Page) : String
-      view("layouts/application", title: page.title, body: Caramel::HTML::Safe.new(page.body))
+      Views::Layouts::Application.new(page.title, Caramel::HTML::Safe.new(page.body), csrf_token).to_s
     end
 
     def title_for(page : Caramel::Page) : String

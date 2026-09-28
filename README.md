@@ -6,7 +6,7 @@ The intended workflow combines PostgreSQL, server-rendered HTML with bundled htm
 
 ## Current state
 
-The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped compiled views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
+The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped Blueprint views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
 
 Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configuration, a shared service daemon and a native macOS menu client. Frappé starts the daemon when a command needs it; an opt-in login item starts it at login instead. Disposable integration checks cover service startup, crash recovery, two-site HTTPS and database retention.
 
@@ -78,7 +78,6 @@ Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) 
 scripts/shards install --frozen
 scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm spec/corretto spec/cold_brew spec/release
 scripts/check lint
-scripts/check views
 scripts/check compiler
 scripts/check orm-compilation
 scripts/check route-compilation

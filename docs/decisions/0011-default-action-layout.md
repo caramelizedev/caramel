@@ -2,11 +2,11 @@
 
 Date: 2026-09-27
 
-Status: accepted. Amends [RFC-0001](../rfc.md) §2.5.
+Status: accepted. Amends [RFC-0001](../rfc.md) §2.5. [ADR 0018](0018-blueprint-views.md) amends the generated layout: `App::ApplicationAction#layout` renders the `App::Views::Layouts::Application` view in `app/views/layouts/application.cr`, not `application.html.ecr`.
 
 ## Context
 
-Every Action inherited an abstract `layout(page) : String`, so any action type without a layout failed to compile. The RFCs' own examples inherit `Caramel::Action` directly: RFC-0003 §2.3's `Boards::Live` and RFC-0008 §2.5's `Subscriptions::Pause`. Neither compiled as written, even though neither ever renders a full page: one streams SSE and the other morphs a region. Generated applications always go through `App::ApplicationAction`, which renders `app/views/layouts/application.html.ecr`.
+Every Action inherited an abstract `layout(page) : String`, so any action type without a layout failed to compile. The RFCs' own examples inherit `Caramel::Action` directly: RFC-0003 §2.3's `Boards::Live` and RFC-0008 §2.5's `Subscriptions::Pause`. Neither compiled as written, even though neither ever renders a full page: one streams SSE and the other morphs a region. Generated applications always go through `App::ApplicationAction`, which rendered `app/views/layouts/application.html.ecr`.
 
 ## Decision
 

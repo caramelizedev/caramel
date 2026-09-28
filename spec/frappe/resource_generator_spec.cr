@@ -29,8 +29,8 @@ describe Caramel::Frappe::ResourceGenerator do
       File.read(route).should contain("# My existing route notes")
       File.read(route).should contain(%(get "/books/:id", App::Books::Show))
       File.read(File.join(project.root, "config/paths.cr")).should contain("Caramel.resource_paths :books, :book")
-      %w[index show new edit _form].each do |view|
-        File.file?(File.join(project.root, "app/views/books/#{view}.html.ecr")).should be_true
+      %w[index show new edit form].each do |view|
+        File.file?(File.join(project.root, "app/views/books/#{view}.cr")).should be_true
       end
       before = File.read(route)
       expect_raises(Caramel::Frappe::Error, "exists") { generator.generate(project, "Book", ["title:string"], version: 20260919000002_i64) }
@@ -43,7 +43,7 @@ describe Caramel::Frappe::ResourceGenerator do
   it "rejects malformed declarations, reserved fields and route conflicts before writing source" do
     resource_project do |project, package|
       generator = Caramel::Frappe::ResourceGenerator.new(package)
-      ["../Book", "book", "SugarORM", "Home"].each do |name|
+      ["../Book", "book", "SugarORM", "Home", "ApplicationView", "View"].each do |name|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
       end
       reserved = %w[id created_at query with create update delete changes record errors values schema field timestamps if to_s]

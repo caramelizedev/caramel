@@ -4,7 +4,7 @@
 Version: "1.7.0"
 
 Globs:
-  - "src/**/*.{cr,ecr}"
+  - "src/**/*.cr"
   - "spec/**/*.cr"
   - "scripts/**/*.cr"
 

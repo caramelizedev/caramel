@@ -4,7 +4,7 @@ module App::Probe
     end
 
     def handle(contract : Contract)
-      page "Islands", view("probe/islands", counter: island("ProbeCounter", {label: "first", version: 1}), late: island("LateProbe", {label: "late"}))
+      page "Islands", Views::Probe::Islands.new
     end
   end
 

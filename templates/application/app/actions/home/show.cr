@@ -4,7 +4,7 @@ module App::Home
     end
 
     def handle(contract : Contract)
-      page "Welcome", view("home/index")
+      page "Welcome", Views::Home::Index.new
     end
   end
 end

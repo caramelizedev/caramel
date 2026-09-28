@@ -174,8 +174,8 @@ module Caramel::Checks
         sampler_started = true
         controller = File.join(p.project, "app/actions/home/show.cr")
         original_controller = File.read(controller)
-        template = File.join(p.project, "app/views/home/index.html.ecr")
-        original_template = File.read(template)
+        view = File.join(p.project, "app/views/home/index.cr")
+        original_view = File.read(view)
         {"bookshelf" => 2, "larger" => 22}.each do |scenario, resources|
           metrics = json({generated_resources: resources, edits: {} of String => JSON::Any})
           report["scenarios"].as_h[scenario] = metrics
@@ -190,7 +190,7 @@ module Caramel::Checks
           metrics.as_h["first_dev_ready_ms"] = json(elapsed { start(scenario); visible("/", "A little less setup.") })
           {"css" => {File.join(p.project, "app/assets/stylesheets/app.css"), "/assets/app.css"},
            "javascript" => {File.join(p.project, "app/assets/javascript/app.js"), "/assets/app.js"},
-           "template" => {template, "/"}, "crystal" => {controller, "/"}}.each do |kind, pair|
+           "view" => {view, "/"}, "crystal" => {controller, "/"}}.each do |kind, pair|
             path, url = pair
             @sampler.phase = "#{scenario}/#{kind}"
             before = File.read(path)
@@ -199,13 +199,14 @@ module Caramel::Checks
               marker = "benchmark-#{scenario}-#{kind}-#{index}"
               updated = case kind
                         when "crystal"
-                          original_controller.sub(%(view("home/index")), %(view("home/index") + "<!-- #{marker} -->"))
-                        when "template"
-                          original_template + "\n<!-- #{marker} -->\n"
+                          original_controller.sub(%(Views::Home::Index.new), %(Views::Home::Index.new.to_s + "<!-- #{marker} -->"))
+                        when "view"
+                          original_view.sub(%(section class: "welcome-grid"), %(comment #{marker.to_json}\n      section class: "welcome-grid"))
                         else
                           before + "\n/* #{marker} */\n"
                         end
               assert!(updated != original_controller) if kind == "crystal"
+              assert!(updated != original_view) if kind == "view"
               samples << elapsed { File.write(path, updated); visible(url, marker) }
             end
             data = distribution(samples)

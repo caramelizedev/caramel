@@ -13,7 +13,7 @@ describe Caramel::Frappe::DevFiles do
       initial = watcher.snapshot
       File.write(File.join(root, ".caramel/application"), "binary")
       watcher.snapshot.should eq(initial)
-      File.write(File.join(root, "app/views/page.html.ecr"), "hello")
+      File.write(File.join(root, "app/views/page.cr"), "hello")
       edited = watcher.snapshot
       edited.source.should_not eq(initial.source)
       edited.assets.should eq(initial.assets)
@@ -21,7 +21,7 @@ describe Caramel::Frappe::DevFiles do
       styled = watcher.snapshot
       styled.source.should eq(edited.source)
       styled.assets.should_not eq(edited.assets)
-      File.delete(File.join(root, "app/views/page.html.ecr"))
+      File.delete(File.join(root, "app/views/page.cr"))
       watcher.snapshot.source.should eq(initial.source)
     ensure
       FileUtils.rm_rf(root)

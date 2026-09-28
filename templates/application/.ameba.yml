@@ -6,7 +6,7 @@ Version: "1.7.0"
 Globs:
   - "src/**/*.cr"
   - "config/**/*.cr"
-  - "app/**/*.{cr,ecr}"
+  - "app/**/*.cr"
   - "db/**/*.cr"
   - "spec/**/*.cr"
 
@@ -25,3 +25,9 @@ Metrics/CyclomaticComplexity:
 # Manifesto: no placeholders in shipped code.
 Documentation/Admonition:
   Enabled: true
+
+# Views are Blueprint classes, where `p` is the paragraph element, not the
+# debug print (ADR 0018).
+Lint/DebugCalls:
+  Excluded:
+    - "app/views/**/*.cr"

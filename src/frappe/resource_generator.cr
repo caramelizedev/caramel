@@ -90,12 +90,12 @@ module Caramel::Frappe
 
     # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
     def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil) : Array(String)
-      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
+      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction ApplicationView Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
       singular = name.underscore
       collection = plural || pluralize(singular)
-      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit].none?(collection)
+      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit views].none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
       end
       fields = declarations.map { |item| ResourceField.new(item) }
@@ -117,10 +117,10 @@ module Caramel::Frappe
         "@@VALIDATIONS@@" => required_text.map { |field| "      cs.validate_presence(:#{field.name})" }.join('\n'),
         "@@ATTRIBUTES@@" => fields.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@VALUES@@" => fields.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
-        "@@FORM_FIELDS@@" => fields.map { |field| form_field(field, singular) }.join('\n'),
-        "@@TABLE_HEADERS@@" => fields.map { |field| "<th scope=\"col\">#{field.label}</th>" }.join,
-        "@@TABLE_CELLS@@" => fields.map { |field| "<td><%= record.#{field.name} %></td>" }.join,
-        "@@SHOW_FIELDS@@" => fields.map { |field| "  <dt>#{field.label}</dt><dd><%= record.#{field.name} %></dd>" }.join('\n'),
+        "@@FORM_FIELDS@@" => fields.map { |field| form_field(field) }.join('\n'),
+        "@@TABLE_HEADERS@@" => fields.map { |field| "              th(scope: \"col\") { #{field.label.to_json} }" }.join('\n'),
+        "@@TABLE_CELLS@@" => fields.map { |field| "                td { record.#{field.name} }" }.join('\n'),
+        "@@SHOW_FIELDS@@" => fields.map { |field| "          dt { #{field.label.to_json} }\n          dd { @record.#{field.name} }" }.join('\n'),
         "@@SAMPLE_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", "),
         "@@SAMPLE_CONDITIONS@@" => fields.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => fields.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
@@ -195,19 +195,21 @@ module Caramel::Frappe
       end
     end
 
-    private def form_field(field : ResourceField, singular : String) : String
-      id = "#{singular}_#{field.name}"
-      attributes = "id=\"#{id}\" name=\"#{field.name}\"#{field.nullable? ? "" : " required"} aria-describedby=\"#{id}_errors\" aria-invalid=\"<%= errors.has_key?(#{field.name.to_json}) ? \"true\" : \"false\" %>\""
+    # The field's control, inside the generated form view's `labelled` helper.
+    private def form_field(field : ResourceField) : String
+      name = field.name.to_json
+      attributes = "id: id, name: #{name}#{field.nullable? ? "" : ", required: true"}, aria_describedby: \"\#{id}_errors\", aria_invalid: @errors.has_key?(#{name}).to_s"
       control = if field.kind == "bool"
                   options = field.nullable? ? ["", "true", "false"] : ["true", "false"]
-                  "<select #{attributes}>" + options.map { |value| "<option value=\"#{value}\"<% if values[#{field.name.to_json}]? == #{value.to_json} %> selected<% end %>>#{value.empty? ? "Unspecified" : value.capitalize}</option>" }.join + "</select>"
+                  choices = options.map { |value| "            option(value: #{value.to_json}, selected: @values[#{name}]? == #{value.to_json}) { #{(value.empty? ? "Unspecified" : value.capitalize).to_json} }" }
+                  "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
                 else
                   type = %w[int32 int64 float64].includes?(field.kind) ? "number" : "text"
-                  extra = field.kind == "float64" ? " step=\"any\"" : ""
-                  extra += " placeholder=\"2026-09-19T12:00:00Z\"" if field.kind == "time"
-                  "<input type=\"#{type}\" #{attributes}#{extra} value=\"<%= values[#{field.name.to_json}]? || \"\" %>\">"
+                  extra = field.kind == "float64" ? ", step: \"any\"" : ""
+                  extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
+                  "          input type: \"#{type}\", #{attributes}#{extra}, value: @values[#{name}]? || \"\""
                 end
-      "  <label for=\"#{id}\">#{field.label}</label>#{control}\n  <div id=\"#{id}_errors\"><% (errors[#{field.name.to_json}]? || [] of String).each do |error| %><p class=\"field-error\"><%= error %></p><% end %></div>"
+      "        labelled #{name}, #{field.label.to_json} do |id|\n#{control}\n        end"
     end
 
     private def validate_path(root : String, relative : String) : Nil

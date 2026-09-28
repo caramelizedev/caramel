@@ -11,7 +11,7 @@ module App::@@COLLECTION@@
     end
 
     def render(result)
-      page "@@MODEL@@", view("@@PLURAL@@/show", record: result[:record])
+      page "@@MODEL@@", Views::@@COLLECTION@@::Show.new(result[:record], csrf_token)
     end
   end
 end

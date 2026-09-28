@@ -1,76 +1,74 @@
 require "spec"
 require "../../src/caramel/view"
 
-describe Caramel::HTML do
-  it "escapes HTML syntax characters in ordinary values" do
-    Caramel::HTML.escape(%q(<script>& "')).should eq("&lt;script&gt;&amp; &quot;&#39;")
+private class LinkView < Caramel::View
+  def initialize(@value : String)
   end
 
-  it "keeps explicit safe output trusted" do
-    Caramel::HTML.escape(Caramel::HTML::Safe.new("<strong>trusted</strong>")).should eq("<strong>trusted</strong>")
+  private def blueprint
+    a(href: "/items?q=#{@value}", title: @value) { @value }
+  end
+end
+
+private class TrustedView < Caramel::View
+  def initialize(@markup : Caramel::HTML::Safe)
+  end
+
+  private def blueprint
+    div(data_markup: @markup) { raw @markup }
+  end
+end
+
+private class OuterView < Caramel::View
+  def initialize(@text : String)
+  end
+
+  private def blueprint
+    section { render InnerView.new(@text) }
+  end
+end
+
+private class InnerView < Caramel::View
+  def initialize(@text : String)
+  end
+
+  private def blueprint
+    span { @text }
+  end
+end
+
+private class IslandView < Caramel::View
+  private def blueprint
+    island "Counter", {label: "first"}
+  end
+end
+
+module Blueprint::HTML::AttributesRenderer
+  def self.cached_attribute_sets : Int32
+    CACHE.size
   end
 end
 
 describe Caramel::View do
-  it "renders typed locals with escaped expressions and unchanged literals" do
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    title = %q(<Hello & goodbye>)
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    slug = %q(a"b'c)
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    items = ["one", %q(<two>)]
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    trusted = Caramel::HTML::Safe.new("<em>trusted once</em>")
-
-    rendered = Caramel::View.render("spec/fixtures/views/example.html.ecr")
-
-    rendered.should eq(
-      "<h1>&lt;Hello &amp; goodbye&gt;</h1>\n" +
-      "<a href=\"/items/a&quot;b&#39;c\" title=\"&lt;Hello &amp; goodbye&gt;\">&lt;Hello &amp; goodbye&gt;</a>\n" +
-      "<ul>\n" +
-      "  <li>one</li>\n" +
-      "  <li>&lt;two&gt;</li>\n" +
-      "</ul>\n" +
-      "<p><em>trusted once</em></p>\n"
-    )
+  it "escapes attribute values like text, so a stored entity survives a round trip" do
+    escaped = "Tom &amp;amp; &quot;Jerry&quot; &lt;3 &#39;"
+    LinkView.new(%(Tom &amp; "Jerry" <3 ')).to_s.should eq(%(<a href="/items?q=#{escaped}" title="#{escaped}">#{escaped}</a>))
   end
 
-  it "renders an empty collection without changing surrounding literals" do
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    title = "Nothing"
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    slug = "nothing"
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    items = [] of String
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    trusted = Caramel::HTML::Safe.new("<span>ready</span>")
-
-    Caramel::View.render("spec/fixtures/views/example.html.ecr").should eq(
-      "<h1>Nothing</h1>\n" +
-      "<a href=\"/items/nothing\" title=\"Nothing\">Nothing</a>\n" +
-      "<ul>\n" +
-      "</ul>\n" +
-      "<p><span>ready</span></p>\n"
-    )
+  it "writes Caramel::HTML::Safe values as they are, in text and in attributes" do
+    TrustedView.new(Caramel::HTML::Safe.new("<em>trusted</em>")).to_s.should eq(%(<div data-markup="<em>trusted</em>"><em>trusted</em></div>))
   end
 
-  it "honors ECR leading and trailing whitespace suppression" do
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    visible = true
-
-    Caramel::View.render("spec/fixtures/views/whitespace.html.ecr").should eq("before\n  shown\nafter\n")
+  it "renders nested views into the same document, each escaping its own input" do
+    OuterView.new("<inner>").to_s.should eq("<section><span>&lt;inner&gt;</span></section>")
   end
 
-  it "keeps a caller local named __io__ separate from the render buffer" do
-    __io__ = %q(<caller>)
-
-    Caramel::View.render("spec/fixtures/views/io_collision.html.ecr").should eq("<p>&lt;caller&gt;</p>\n")
+  it "writes an island tag in place, without escaping it again" do
+    IslandView.new.to_s.should eq(%(<caramel-island component="Counter" props="{&quot;label&quot;:&quot;first&quot;}" hx-morph-skip-children></caramel-island>))
   end
 
-  it "keeps nested buffers separate when nested output is explicitly safe" do
-    # ameba:disable Lint/UselessAssign -- read by the rendered ECR template
-    inner_value = %q(<inner>)
-
-    Caramel::View.render("spec/fixtures/views/nested_outer.html.ecr").should eq("<div><span>&lt;inner&gt;</span>\n</div>\n")
+  it "keeps no rendered attribute values after rendering" do
+    LinkView.new("kept?").to_s
+    Blueprint::HTML::AttributesRenderer.cached_attribute_sets.should eq(0)
   end
 end
