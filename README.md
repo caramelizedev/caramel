@@ -108,3 +108,7 @@ These checks use isolated temporary state and local listeners. Running the syste
 `scripts/check browser` drives Safari through `safaridriver` against a generated app served by that isolated Latte stack to prove morph focus/scroll, `hx-partial`, islands, SSE behavior, and a Cold Brew job whose PubSub event reaches an `EventSource`; it needs Safari's "Allow Remote Automation", enabled once with `safaridriver --enable`.
 
 Optional language servers for Zed and other editors: `scripts/build-frappe`, `bin/frappe lsp install`, then `scripts/check editor-tools`; see [docs/editor-tools.md](docs/editor-tools.md).
+
+## License
+
+Caramel is released under the [MIT License](LICENSE). Components distributed under other licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
