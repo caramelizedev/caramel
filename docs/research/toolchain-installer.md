@@ -9,17 +9,17 @@ This is one component of the consumer installer, not the finished Caramel instal
 On Apple Silicon macOS with Apple's Command Line Tools (clang, Swift and a usable macOS SDK):
 
 ```sh
-scripts/install-toolchain --root '/path/to/a/private/final/toolchain'
+scripts/install-toolchain
 ```
 
-The destination must be empty or an installation previously claimed by this component. Use its final location: conda native packages and compiled application rpaths may depend on that prefix. Moving an installation is rejected. A different toolchain release belongs in a new versioned prefix.
+Without `--root`, the installer uses `~/Library/Application Support/Caramel/toolchains/<release>` (under `CARAMEL_HOME` when that is set), where `<release>` is a short digest of the pinned selection. `--root DIR` picks another private final location. The destination must be empty or an installation previously claimed by this component. Use its final location: conda native packages and compiled application rpaths may depend on that prefix. Moving an installation is rejected. A different toolchain release gets a new prefix; the default name does this on its own, and an old prefix can be deleted once nothing points at it.
 
-The compiler entry point is `<root>/bin/crystal`; it needs no shell activation. Internal Frappé/Shards integration can also use the copied launchers with `CARAMEL_TOOLCHAIN_ROOT` set. Global shell files and existing mise/Homebrew installations are not modified.
+When the toolchain is installed or verified, the installer writes its path to the checkout's `.caramel-toolchain` (git-ignored, mode 0644). This is the only writer of that file. `frappe`, `latte`, `scripts/crystal`, `scripts/shards`, `scripts/install-latte-tools` and every `scripts/check` target read it. `CARAMEL_TOOLCHAIN_ROOT` overrides it; checks use the override for test toolchains. The pointer must be a regular file the user owns that no one else can write, and it must name an absolute path. The compiler entry point is `<root>/bin/crystal`; it needs no shell activation. Global shell files and existing mise/Homebrew installations are not modified.
 
 For a completed installation:
 
 ```sh
-scripts/install-toolchain --root '/path/to/a/private/final/toolchain' --offline
+scripts/install-toolchain --offline
 ```
 
 Offline mode verifies and reuses existing files; it cannot install a fresh prefix from cached archives. `--mise-binary PATH` can reuse an already downloaded mise executable, but still checks the pinned SHA-256. Other artifacts use the locked provider downloads.

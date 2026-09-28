@@ -177,10 +177,8 @@ struct InstallLatteTools {
         #else
         cli.error("this provider supports Apple Silicon macOS")
         #endif
-        guard let rootValue = ProcessInfo.processInfo.environment["CARAMEL_TOOLCHAIN_ROOT"], !rootValue.isEmpty else {
-            cli.error("set CARAMEL_TOOLCHAIN_ROOT to the isolated contributor installation")
-        }
         do {
+            let rootValue = try caramelToolchainRoot()
             guard let resolvedRoot = realpath(rootValue, nil) else {
                 throw InstallerError(message: "\(rootValue): \(String(cString: strerror(errno)))")
             }

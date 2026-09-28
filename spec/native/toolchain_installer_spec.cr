@@ -9,12 +9,14 @@ private class NativeToolchainFixture
   getter base : String
   getter root : String
   getter config : String
+  getter pointer : String
   getter critical : Array(String)
 
   def initialize
     @base = Caramel::Checks.private_temp("caramel-toolchain-native-")
     @root = File.join(@base, "Toolchain With Spaces")
     @config = File.join(@base, "fixture.json")
+    @pointer = File.join(@base, "checkout.caramel-toolchain")
     @critical = ["bin/mise", "data/installs/test/bin/compiler"]
     configure("create-critical")
   end
@@ -25,6 +27,7 @@ private class NativeToolchainFixture
       "critical" => @critical,
       "aliases" => {} of String => String,
       "provider" => provider,
+      "pointer" => @pointer,
     }.to_json)
   end
 
@@ -121,6 +124,37 @@ describe "Swift toolchain installer" do
       result.success?.should be_true
       result.stdout.should contain("Verified installed Caramel toolchain: #{fixture.root}")
       fixture.receipt["status"].as_s.should eq("complete")
+    end
+  end
+
+  it "records the toolchain for the checkout after installing and after verifying" do
+    with_toolchain_fixture do |fixture|
+      fixture.complete
+      File.read(fixture.pointer).should eq("#{fixture.root}\n")
+      (File.info(fixture.pointer).permissions.value & 0o777).should eq(0o644)
+      File.delete(fixture.pointer)
+      fixture.configure("fail")
+      result = fixture.invoke(["--offline"])
+      result.success?.should be_true
+      result.stdout.should contain("Recorded in #{fixture.pointer}")
+      File.read(fixture.pointer).should eq("#{fixture.root}\n")
+    end
+  end
+
+  it "installs into Caramel's toolchains directory when no root is given" do
+    with_toolchain_fixture do |fixture|
+      home = File.join(fixture.base, "Caramel Home")
+      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
+        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result.success?.should be_true
+      root = File.read(fixture.pointer).chomp
+      File.dirname(root).should eq(File.join(home, "toolchains"))
+      File.basename(root).should match(/\A[0-9a-f]{12}\z/)
+      result.stdout.should contain("Installed and verified Caramel toolchain: #{root}")
+      (File.info(home).permissions.value & 0o777).should eq(0o700)
+      again = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "--offline"],
+        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      again.stdout.should contain("Verified installed Caramel toolchain: #{root}")
     end
   end
 
