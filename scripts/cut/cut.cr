@@ -90,7 +90,8 @@ module Caramel::Cut
   def self.run(repository : String = REPO, check : Array(String) = [File.join(REPO, "scripts/check"), "all"], dry_run : Bool = false, output : IO = STDOUT, today : Time = Time.local) : Nil
     raise Refused.new("the working tree has uncommitted changes; commit or stash them first") unless git(repository, "status", "--porcelain").empty?
     tag = last_tag(repository)
-    commits = log(repository, tag)
+    # Before a first release nothing shipped, so nothing it changes can break.
+    commits = log(repository, tag).map { |commit| tag ? commit : commit.copy_with(breaking: false) }
     manifest = File.join(repository, "shard.yml")
     declared = SemanticVersion.parse(File.read_lines(manifest).find!(&.starts_with?("version:")).split(':', 2)[1].strip)
     # The first release is the version shard.yml already declares.

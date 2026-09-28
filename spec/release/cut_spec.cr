@@ -60,10 +60,14 @@ describe Caramel::Cut do
       day = Time.utc(2026, 9, 28)
       output = IO::Memory.new
       commit(repository, "feat: first light")
+      commit(repository, "fix!: an early rename")
       Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: output, today: day)
       git(repository, "tag", "--list").should eq("v0.1.0\n")
       git(repository, "show", "--no-patch", "--format=%B", "v0.1.0").should contain("Caramel 0.1.0\n\n## 0.1.0 - 2026-09-28")
-      File.read(File.join(repository, "CHANGELOG.md")).should contain("## Unreleased\n\n## 0.1.0 - 2026-09-28\n\n### Features\n\n- first light (")
+      first = File.read(File.join(repository, "CHANGELOG.md"))
+      first.should contain("## Unreleased\n\n## 0.1.0 - 2026-09-28\n\n### Features\n\n- first light (")
+      first.should contain("### Fixes\n\n- an early rename (")
+      first.should_not contain("Breaking changes")
 
       changelog = File.join(repository, "CHANGELOG.md")
       File.write(changelog, File.read(changelog).sub("## Unreleased\n", "## Unreleased\n\nRun frappe setup after upgrading.\n"))

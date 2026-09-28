@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: accepted. Implementation is pending and follows the order below; each part cites its check when it lands.
+Status: accepted. Everything the implementation order lists before `v0.1.0` is implemented; see Implementation. The parts it lists for before 1.0 and eventually remain.
 
 ## Context
 
@@ -34,7 +34,7 @@ Caramel has never been released:
    - Latte's CA is never replaced silently.
    - `frappe doctor` reports a relay whose plist digest is stale, with the command that updates it.
 3. **Apps depend on the framework as a shard.**
-   - Generated apps declare `caramel: github: caramelizedev/caramel, version: "~> X.Y.Z"`, and `shard.lock` pins the commit.
+   - Generated apps declare `caramel: github: caramelizedev/caramel, version: "~> X.Y.Z"`, and `shard.lock` pins the release, whose tag Shards checks out.
    - `vendor/caramel/`, `snapshot.json` and `.caramel-version` are removed. Frappé reads the pinned version from `shard.lock`.
    - An unreleased checkout generates apps with a `path:` dependency on itself.
 4. **Frappé installs the version a project pins.**
@@ -95,9 +95,24 @@ Principles followed:
 
 Each part is accepted by a check when it lands:
 
-- The version source: a spec that `Caramel::VERSION`, `shard.yml` and `Latte.app`'s bundle version agree.
+- The version source: `spec/native/version_spec.cr`, run by `scripts/check native`, requires `Caramel::VERSION`, `shard.yml` and the built `Latte.app`'s bundle versions to agree.
 - The thin skeleton: `scripts/check frappe-project` and `scripts/check browser` run apps whose main is one call.
-- The newest Latte: a spec that the launcher chooses the newest registered release.
-- `scripts/release`: a spec over a temporary repository with Conventional Commits and tags.
+- The newest Latte: `spec/frappe/launchers_spec.cr` requires the launchers to choose the newest registered release, and `spec/latte/installed_releases_spec.cr` the Latte that on-demand start and the login item run.
+- `scripts/release`: `spec/release/cut_spec.cr` cuts releases in a temporary repository with Conventional Commits and tags.
 - The shard dependency: `scripts/check frappe-project` resolves the framework from a git source.
-- `frappe installations install`: a check that installs a tag from a local repository.
+- `frappe installations install`: `scripts/check installations` installs a tag from a local repository.
+
+## Implementation
+
+Before `v0.1.0`:
+
+- **Version source.** `Caramel::VERSION` reads `shard.yml` when the framework compiles (`src/caramel/version.cr`), and `scripts/build-latte-menu` writes `Latte.app`'s bundle versions from it.
+- **Control API.** Latte serves the versions in `Latte::ControlAPI::VERSIONS`, reports its release and window in `/v1/status`, and answers any other version with `unsupported_api` and both. Frappé needs `LatteClient::API_VERSION` and names the release that fixes a mismatch (`spec/latte/server_spec.cr`, `spec/frappe/latte_client_spec.cr`). `latte version` prints both.
+- **State formats.** Latte's registry, `installations.json`, the trust receipt and toolchain receipts refuse a newer format with the file and the release that reads it (`src/latte/state_format.cr`, the Swift toolchain installer; `spec/latte/registry_spec.cr`, `spec/frappe/installations_spec.cr`). Every format is still version 1, so no forward migration exists yet; the first new format adds one.
+- **PostgreSQL.** The cluster lives in `services/postgres/<major>/data`. Latte refuses to start an empty cluster beside another major's data (`spec/latte/postgres_spec.cr`), as it already refused a cluster of another major.
+- **Framework migrations.** `scripts/release` refuses to tag when a migration the last release shipped was edited or removed, or a new one sorts before it.
+- **Relay.** `install-local-integration status` compares the installed resolver, relay and plist with the ones a release would install, without sudo (`spec/native/local_integration_spec.cr`). `frappe doctor` asks the newest installed release and prints the command that updates them.
+- **Shard dependency and thin app.** Described under Decision 3 and 10: `Caramel.run(App)` and `Corretto.configure(App)` replace the generated main, configuration and spec helper bodies, and `config/database.yml` is gone because `Caramel::Database.url` knows Frappé's variables. An unreleased checkout generates `path:` dependencies, and `CARAMEL_REPOSITORY` substitutes a git repository for GitHub. `frappe dev` does not watch framework sources, which change only with `shard.lock`.
+- **Installs and the newest Latte.** Described under Decisions 4 and 5. `frappe installations install` reuses this toolchain when the release pins the same selection, and installs the release's own otherwise.
+- **Agents.** `frappe agent-manifest` prints `VERSION:` and `DOCS:` lines after its first line.
+- **Deprecation.** `CONTRIBUTING.md` states the rule. A command carries `deprecated:` in the command table, and framework APIs use Crystal's `@[Deprecated]`.
