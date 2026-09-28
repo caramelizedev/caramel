@@ -171,6 +171,18 @@ describe "Swift toolchain installer" do
     end
   end
 
+  it "refuses a recorded pointer that others can write when no root is given" do
+    with_toolchain_fixture do |fixture|
+      fixture.complete
+      File.chmod(fixture.pointer, 0o666)
+      home = File.join(fixture.base, "Caramel Home")
+      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
+        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      expect_toolchain_error(result, "#{fixture.pointer} must be a regular file you own that no one else can write")
+      File.exists?(home).should be_false
+    end
+  end
+
   it "installs a changed release beside the recorded toolchain when no root is given" do
     with_toolchain_fixture do |fixture|
       fixture.complete

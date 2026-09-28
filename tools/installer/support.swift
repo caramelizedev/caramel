@@ -177,18 +177,13 @@ func installerRepositoryRoot() throws -> String {
     return (bin as NSString).deletingLastPathComponent
 }
 
-// The checkout's toolchain, found the way every Caramel command finds it:
-// CARAMEL_TOOLCHAIN_ROOT when set, otherwise the checkout's
-// .caramel-toolchain, which scripts/install-toolchain writes.
-func caramelToolchainRoot() throws -> String {
-    if let value = ProcessInfo.processInfo.environment["CARAMEL_TOOLCHAIN_ROOT"], !value.isEmpty {
-        return value
-    }
-    let pointer = try installerRepositoryRoot() + "/.caramel-toolchain"
+// The toolchain root a .caramel-toolchain pointer names, or nil when there is
+// no pointer. Like every Caramel reader, it refuses a pointer that is not a
+// regular file the user owns that no one else can write, or that names a
+// relative path.
+func readToolchainPointer(_ pointer: String) throws -> String? {
     var st = stat()
-    guard lstat(pointer, &st) == 0 else {
-        throw InstallerError(message: "no Caramel toolchain is installed for this checkout; run scripts/install-toolchain")
-    }
+    guard lstat(pointer, &st) == 0 else { return nil }
     guard (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(), (st.st_mode & 0o022) == 0 else {
         throw InstallerError(message: "\(pointer) must be a regular file you own that no one else can write")
     }
@@ -196,6 +191,19 @@ func caramelToolchainRoot() throws -> String {
     let root = String(text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? "").trimmingCharacters(in: .whitespaces)
     guard root.hasPrefix("/") else {
         throw InstallerError(message: "\(pointer) must name an absolute toolchain directory")
+    }
+    return root
+}
+
+// The checkout's toolchain, found the way every Caramel command finds it:
+// CARAMEL_TOOLCHAIN_ROOT when set, otherwise the checkout's
+// .caramel-toolchain, which scripts/install-toolchain writes.
+func caramelToolchainRoot() throws -> String {
+    if let value = ProcessInfo.processInfo.environment["CARAMEL_TOOLCHAIN_ROOT"], !value.isEmpty {
+        return value
+    }
+    guard let root = try readToolchainPointer(try installerRepositoryRoot() + "/.caramel-toolchain") else {
+        throw InstallerError(message: "no Caramel toolchain is installed for this checkout; run scripts/install-toolchain")
     }
     return root
 }

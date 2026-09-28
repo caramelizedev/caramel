@@ -477,9 +477,7 @@ private func defaultRoot() throws -> String {
     let fixture = try InstallerFixture.load()
     let selection = try ToolchainInstallation.releasePayloads(fixture: fixture).mapValues { sha256(data: $0) }
     if let pointer = try pointerPath(fixture),
-       let text = try? String(contentsOfFile: pointer, encoding: .utf8),
-       let recorded = text.split(separator: "\n").first.map({ String($0).trimmingCharacters(in: .whitespaces) }),
-       recorded.hasPrefix("/"),
+       let recorded = try readToolchainPointer(pointer),
        let receipt = try? Data(contentsOf: URL(fileURLWithPath: path(recorded, receiptName))),
        let state = try? JSONSerialization.jsonObject(with: receipt) as? [String: Any],
        state["selection"] as? [String: String] == selection {
