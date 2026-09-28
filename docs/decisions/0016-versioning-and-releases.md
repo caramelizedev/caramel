@@ -25,7 +25,7 @@ Caramel has never been released:
 
 ## Decision
 
-1. **One version for the repository.** The public repository `github.com/caramelize/caramel` tags releases `vX.Y.Z` (semantic versioning), with pre-releases `X.Y.Z-rc.N`. During 0.x a minor release may break compatibility, and a patch release never does. The version is written only in `shard.yml`; `Caramel::VERSION` and `Latte.app`'s bundle version are generated from it at build time.
+1. **One version for the repository.** The public repository `github.com/caramelizedev/caramel` tags releases `vX.Y.Z` (semantic versioning), with pre-releases `X.Y.Z-rc.N`. During 0.x a minor release may break compatibility, and a patch release never does. The version is written only in `shard.yml`; `Caramel::VERSION` and `Latte.app`'s bundle version are generated from it at build time.
 2. **Explicit compatibility contracts.** Each release keeps these promises:
    - Latte's control API is versioned. Latte serves a window of API versions, and each Frappé states the one it needs.
    - Latte's state formats migrate forward when Latte starts.
@@ -34,7 +34,7 @@ Caramel has never been released:
    - Latte's CA is never replaced silently.
    - `frappe doctor` reports a relay whose plist digest is stale, with the command that updates it.
 3. **Apps depend on the framework as a shard.**
-   - Generated apps declare `caramel: github: caramelize/caramel, version: "~> X.Y.Z"`, and `shard.lock` pins the commit.
+   - Generated apps declare `caramel: github: caramelizedev/caramel, version: "~> X.Y.Z"`, and `shard.lock` pins the commit.
    - `vendor/caramel/`, `snapshot.json` and `.caramel-version` are removed. Frappé reads the pinned version from `shard.lock`.
    - An unreleased checkout generates apps with a `path:` dependency on itself.
 4. **Frappé installs the version a project pins.**
@@ -85,7 +85,7 @@ Principles followed:
    - the version in `frappe agent-manifest`;
    - `scripts/release` and `CHANGELOG.md`;
    - the deprecation rule in the contributor docs.
-2. Once `github.com/caramelize/caramel` exists and the first release is tagged:
+2. Once `github.com/caramelizedev/caramel` exists and the first release is tagged:
    - the shard dependency, replacing `vendor/caramel/` and `.caramel-version`;
    - `frappe installations install`.
 3. Before 1.0, with an Apple Developer ID: prebuilt, notarized binaries, relocatable OpenSSL, `SMAppService`, the signed release manifest and published support windows.
