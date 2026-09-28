@@ -66,7 +66,7 @@ end
 - **Updates** write only the changed columns plus `updated_at`. Updating a row that no longer exists yields a `_base` error.
 - **Bang forms.** `create!` and `update!` return the record or raise `SugarORM::Invalid`.
 - **Delete.** `book.delete` returns whether a row was deleted.
-- **Validators** are `validate_required`, `validate_presence` (non-blank text), `validate_greater_than`, `validate_less_than`, `validate_length`, `validate_format` and `validate_inclusion`. `unique_constraint(:email)` maps a unique violation on that column's index to a field error instead of raising.
+- **Validators** are `validate_required`, `validate_presence` (non-blank text), `validate_greater_than`, `validate_less_than`, `validate_length`, `validate_format` and `validate_inclusion`. `unique_constraint(:email)` maps a unique violation on that column's index to a field error instead of raising. Caramel adds `validate_url(:field)`: a changed string must be a URL `redirect_external` accepts (`Caramel::ExternalURL`).
 - **Explicit handles.** Every facade method and query terminal also accepts a `DB::Database` or `DB::Connection` first, for example `App::Book.create!(db, title: "Dune", author: "Frank Herbert")`.
 
 A generated resource uses one class because its create and update forms submit the same fields under the same rules. When they differ, replace an alias with its own class.

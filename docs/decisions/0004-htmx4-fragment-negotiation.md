@@ -36,6 +36,6 @@ Principles followed:
 ## Verification
 
 - `spec/caramel/action_spec.cr` covers fragments versus full pages, JSON negotiation and `HX-Location` redirects.
-- `spec/caramel/http_spec.cr` covers `redirect_external`: `Location` for other clients, `HX-Redirect` for htmx, and refusal of anything but an absolute http or https URL and a redirect status.
+- `spec/caramel/http_spec.cr` covers `redirect_external`: `Location` for other clients, `HX-Redirect` for htmx, and refusal of anything but an absolute http or https URL without credentials and a redirect status. `spec/caramel/validate_url_spec.cr` holds `cs.validate_url` to the same rule.
 - The generated application's request specs (`templates/application/spec/requests/home_spec.cr` and `templates/resource/spec/requests/@@PLURAL@@_spec.cr`) cover full and partial responses (`scripts/check frappe-project`).
 - `scripts/check browser` shows in Safari that htmx-issued swaps receive fragments and never nest a second layout.

@@ -120,4 +120,5 @@ Before `v0.1.0`:
 
 After `v0.1.0`:
 
+- **Release builds.** `frappe installations install` builds a release with that release's own `scripts/build-release`, and with fixed steps for releases through 0.3.0, which have none, so a later release's build steps apply whichever frappe installs it. Installing a registered release again builds what it lacks, such as the linter a frappe older than 0.3.0 left out, and `frappe doctor` names that command (`scripts/check installations`).
 - **PostgreSQL handover.** Latte adopts a postmaster that another toolchain's build of the major started on the cluster's directory, so a newer release's Latte takes over the running cluster; 0.1.0's Latte refuses it as unverified. The private PID file, owner, start time and data directory identify it (`spec/latte_integration/postgres_spec.cr`).
