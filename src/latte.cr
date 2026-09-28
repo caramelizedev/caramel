@@ -10,7 +10,7 @@ begin
     Caramel::Latte::Daemon.new(registry, Caramel::Latte::Supervisor.new(registry)).run
   when ["stop"]
     stopped = Caramel::Latte::Daemon.stop(Caramel::Latte::Paths.new)
-    puts stopped ? "Latte stopped. Services keep running; frappe services stop stops them." : "Latte is not running."
+    puts stopped ? "Latte stopped; its services were left as they were (frappe services stop stops them)." : "Latte is not running."
   when ["service", "install"]
     latte = Process.executable_path || raise Caramel::Latte::PublicError.new("login_item", "Cannot locate this latte executable")
     paths = Caramel::Latte::Paths.new
