@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+cd "$ROOT"
+# Ameba is a development dependency of the framework checkout.
+[ -f lib/ameba/src/ameba.cr ] || "$ROOT/scripts/shards" install --frozen
+mkdir -p "$ROOT/bin"
+"$ROOT/scripts/crystal" build "$ROOT/src/frappe_lint.cr" -o "$ROOT/bin/frappe-lint"
+echo "Built $ROOT/bin/frappe-lint"

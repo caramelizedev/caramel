@@ -1,0 +1,46 @@
+# The framework's own code follows the rule set generated applications use
+# (templates/application/.ameba.yml, ADR 0017). The differences below are
+# the framework's, each with its reason. Run it with `scripts/check lint`.
+Version: "1.7.0"
+
+Globs:
+  - "src/**/*.{cr,ecr}"
+  - "spec/**/*.cr"
+  - "scripts/**/*.cr"
+
+Excluded:
+  - "lib"
+  # Fixture data: some is invalid on purpose, and checks assert exact
+  # file:line:col positions inside it. The fixture programs directly in
+  # spec/fixtures are real code and are linted.
+  - "spec/fixtures/*/**/*"
+
+Caramel/ServiceNoun:
+  Enabled: true
+
+# Framework dispatch tables and parsers keep Ameba's default limit of 12;
+# the few that exceed it say why inline. Applications use 10. Checks are
+# end-to-end scenarios whose branches are assertions.
+Metrics/CyclomaticComplexity:
+  MaxComplexity: 12
+  Excluded:
+    - "scripts/**/*.cr"
+
+Documentation/Admonition:
+  Enabled: true
+
+# Specs and checks assert presence with `not_nil!`; framework code does not.
+Lint/NotNil:
+  Excluded:
+    - "spec/**/*.cr"
+    - "scripts/**/*.cr"
+
+# Ameba's defaults, plus the support files each product keeps under
+# spec/<product>/support, which specs require rather than run.
+Lint/SpecFilename:
+  IgnoredPaths:
+    - "spec/support/**"
+    - "spec/**/support/**"
+    - "spec/fixtures/**"
+    - "spec/data/**"
+    - "spec/**/spec_helper.cr"
