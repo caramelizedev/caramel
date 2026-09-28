@@ -73,7 +73,7 @@ module Caramel::Checks::LatteNetwork
   end
 
   def main : Int32
-    tool_root = File.realpath(Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the pinned toolchain root."))
+    tool_root = File.realpath(Checks.toolchain_root)
     installs = File.join(tool_root, "data/installs")
     coredns = File.join(installs, "github-coredns-coredns/1.14.7/coredns")
     caddy = File.join(installs, "aqua-caddyserver-caddy/2.11.4/caddy")

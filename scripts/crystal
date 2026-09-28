@@ -1,16 +1,25 @@
 #!/bin/sh
 set -eu
 
-unavailable() {
-    echo 'Crystal is unavailable. Run scripts/install-toolchain --root <dir> and set CARAMEL_TOOLCHAIN_ROOT to that directory.' >&2
-    exit 1
-}
-
+# The managed toolchain: CARAMEL_TOOLCHAIN_ROOT when set, otherwise this
+# checkout's .caramel-toolchain, which scripts/install-toolchain writes.
 if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
-    COMPILER=$(command -v crystal || true)
-    [ -n "$COMPILER" ] && [ -f "$COMPILER" ] || unavailable
-    [ "$(/bin/realpath -- "$COMPILER")" != "$(/bin/realpath -- "$0")" ] || unavailable
-    exec "$COMPILER" "$@"
+    POINTER=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)/.caramel-toolchain
+    if [ ! -f "$POINTER" ] || [ -L "$POINTER" ]; then
+        echo 'No Caramel toolchain is installed for this checkout. Run scripts/install-toolchain.' >&2
+        exit 1
+    fi
+    if [ "$(stat -f %u "$POINTER")" != "$(id -u)" ] || [ $(( 0$(stat -f %Lp "$POINTER") & 022 )) -ne 0 ]; then
+        echo "$POINTER must be a regular file you own that no one else can write" >&2
+        exit 1
+    fi
+    CARAMEL_TOOLCHAIN_ROOT=
+    IFS= read -r CARAMEL_TOOLCHAIN_ROOT < "$POINTER" || true
+    case $CARAMEL_TOOLCHAIN_ROOT in
+        /*) ;;
+        *) echo "$POINTER must name an absolute toolchain directory" >&2; exit 1 ;;
+    esac
+    export CARAMEL_TOOLCHAIN_ROOT
 fi
 
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
@@ -92,5 +101,8 @@ case ${1:-} in
         ;;
 esac
 
-[ -f "$COMPILER" ] || unavailable
+if [ ! -f "$COMPILER" ]; then
+    echo "Managed Crystal is missing from $BASE. Run scripts/install-toolchain." >&2
+    exit 1
+fi
 exec "$COMPILER" "$@"

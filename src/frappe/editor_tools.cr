@@ -76,22 +76,18 @@ module Caramel::Frappe
       Digest::SHA256.hexdigest("#{pins.crystalline.commit}\n#{pins.crystalline.crystal}\n#{pins.llvmdev.sha256}\n#{BUILD_RECIPE}")[0, 12]
     end
 
-    # CARAMEL_TOOLCHAIN_ROOT wins; the installer-written pointer is the
-    # fallback for editors started without the variable.
+    # The same toolchain every Frappé command uses (Latte::Toolchain.locate):
+    # editors started without CARAMEL_TOOLCHAIN_ROOT find it through the
+    # checkout's .caramel-toolchain.
     def toolchain_root(env : ENV.class | Hash(String, String) = ENV) : {String, String}
-      value, source = if (selected = env["CARAMEL_TOOLCHAIN_ROOT"]?) && !selected.empty?
-                        {selected, "CARAMEL_TOOLCHAIN_ROOT"}
-                      elsif (line = pointer_line) && !line.empty?
-                        {line, ".caramel-toolchain"}
-                      else
-                        raise Error.new("frappe lsp: no Caramel toolchain is configured. Set CARAMEL_TOOLCHAIN_ROOT or run frappe lsp install.")
-                      end
-      toolchain = begin
-        Latte::Toolchain.new(value)
+      begin
+        located = Latte::Toolchain.locate(@framework_root, env)
+        raise Error.new("frappe lsp: no Caramel toolchain is configured. Run scripts/install-toolchain.") unless located
+        value, source = located
+        {Latte::Toolchain.new(value).root, source}
       rescue ex : Latte::Toolchain::Unavailable
         raise Error.new("frappe lsp: #{ex.message}")
       end
-      {toolchain.root, source}
     end
 
     def server(name : String, env : ENV.class | Hash(String, String) = ENV) : Server
@@ -168,7 +164,6 @@ module Caramel::Frappe
         end
         ameba = install_ameba(root)
         crystalline = install_crystalline(root, crystal, tools)
-        write_pointer(root)
         @output.puts("Verified ameba-ls #{manifest.ameba_ls.version}: #{ameba}")
         @output.puts("Verified crystalline #{manifest.crystalline.reported_version}: #{crystalline}")
       end
@@ -388,17 +383,6 @@ module Caramel::Frappe
       false
     end
 
-    private def write_pointer(root : String) : Nil
-      destination = File.join(@framework_root, ".caramel-toolchain")
-      temporary = File.join(@framework_root, ".caramel-toolchain.#{Random::Secure.hex(8)}.tmp")
-      begin
-        File.write(temporary, root + "\n", perm: 0o644)
-        File.rename(temporary, destination)
-      ensure
-        File.delete?(temporary)
-      end
-    end
-
     private def download(url : String, path : String, sha256 : String) : Nil
       result = Latte::ProcessRunner.run(["/usr/bin/curl", "--fail", "--location", "--silent", "--show-error", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", "600", "--retry", "2", "--output", path, url], timeout: 660.seconds)
       raise Error.new("frappe lsp: download failed: #{url}") unless result.success? && File.file?(path)
@@ -457,12 +441,6 @@ module Caramel::Frappe
 
     private def crystalline_directory(root : String) : String
       File.join(root, "editor/crystalline", "#{manifest.crystalline.reported_version}-#{crystalline_fingerprint}")
-    end
-
-    private def pointer_line : String?
-      path = File.join(@framework_root, ".caramel-toolchain")
-      return nil unless File.file?(path)
-      File.read(path).lines.first?.try(&.strip)
     end
 
     private def not_installed(name : String, version : String, root : String) : NoReturn

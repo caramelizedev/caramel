@@ -1,23 +1,36 @@
 #!/bin/sh
 set -eu
 
-unavailable() {
-    echo 'Shards is unavailable. Set CARAMEL_TOOLCHAIN_ROOT to the verified installation.' >&2
-    exit 1
-}
-
+# The managed toolchain: CARAMEL_TOOLCHAIN_ROOT when set, otherwise this
+# checkout's .caramel-toolchain, which scripts/install-toolchain writes.
 if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
-    BINARY=$(command -v shards || true)
-    [ -n "$BINARY" ] && [ -f "$BINARY" ] || unavailable
-    [ "$(/bin/realpath -- "$BINARY")" != "$(/bin/realpath -- "$0")" ] || unavailable
-else
-    BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
-    CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
-    BINARY=$CRYSTAL_ROOT/embedded/bin/shards
-    PATH=$CRYSTAL_ROOT/bin:${PATH-}
-    SHARDS_CACHE_PATH=$BASE/shards-cache
-    export PATH SHARDS_CACHE_PATH
+    POINTER=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)/.caramel-toolchain
+    if [ ! -f "$POINTER" ] || [ -L "$POINTER" ]; then
+        echo 'No Caramel toolchain is installed for this checkout. Run scripts/install-toolchain.' >&2
+        exit 1
+    fi
+    if [ "$(stat -f %u "$POINTER")" != "$(id -u)" ] || [ $(( 0$(stat -f %Lp "$POINTER") & 022 )) -ne 0 ]; then
+        echo "$POINTER must be a regular file you own that no one else can write" >&2
+        exit 1
+    fi
+    CARAMEL_TOOLCHAIN_ROOT=
+    IFS= read -r CARAMEL_TOOLCHAIN_ROOT < "$POINTER" || true
+    case $CARAMEL_TOOLCHAIN_ROOT in
+        /*) ;;
+        *) echo "$POINTER must name an absolute toolchain directory" >&2; exit 1 ;;
+    esac
+    export CARAMEL_TOOLCHAIN_ROOT
 fi
 
-[ -f "$BINARY" ] || unavailable
+BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
+BINARY=$CRYSTAL_ROOT/embedded/bin/shards
+PATH=$CRYSTAL_ROOT/bin:${PATH-}
+SHARDS_CACHE_PATH=$BASE/shards-cache
+export PATH SHARDS_CACHE_PATH
+
+if [ ! -f "$BINARY" ]; then
+    echo "Managed Shards is missing from $BASE. Run scripts/install-toolchain." >&2
+    exit 1
+fi
 exec "$BINARY" "$@"

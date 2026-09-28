@@ -24,7 +24,7 @@ module Caramel::Latte
     @dns_child : ManagedChild
     @proxy_child : ManagedChild
 
-    def initialize(@registry : Registry, @toolchain : Toolchain = Toolchain.new,
+    def initialize(@registry : Registry, @toolchain : Toolchain = Toolchain.for_checkout,
                    dns_port : Int32 = 15353, http_port : Int32 = 18080, https_port : Int32 = 18443)
       paths = @registry.paths
       @postgres = Postgres.new(paths, @toolchain)

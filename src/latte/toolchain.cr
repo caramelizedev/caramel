@@ -34,21 +34,56 @@ module Caramel::Latte
       end
     end
 
+    # A checkout's pointer to its toolchain root, written by
+    # scripts/install-toolchain.
+    POINTER = ".caramel-toolchain"
+
     getter root : String
 
-    def initialize(root : String? = nil)
+    # The Caramel checkout that contains the running `bin/frappe` or
+    # `bin/latte`.
+    def self.executable_checkout : String?
+      Process.executable_path.try { |path| File.expand_path("..", File.dirname(path)) }
+    end
+
+    # Where a checkout's toolchain lives, and why: CARAMEL_TOOLCHAIN_ROOT when
+    # set (checks and deliberate overrides), otherwise the checkout's
+    # .caramel-toolchain. Nil when neither exists.
+    def self.locate(checkout : String?, env : ENV.class | Hash(String, String) = ENV) : {String, String}?
+      if (value = env["CARAMEL_TOOLCHAIN_ROOT"]?) && !value.empty?
+        return {value, "CARAMEL_TOOLCHAIN_ROOT"}
+      end
+      return nil unless checkout
+      pointer = File.join(checkout, POINTER)
+      info = File.info?(pointer, follow_symlinks: false)
+      return nil unless info
+      # Whoever can rewrite the pointer chooses the compiler this user runs.
+      unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64 && (info.permissions.value & 0o022) == 0
+        raise Unavailable.new("#{pointer} must be a regular file you own that no one else can write")
+      end
+      root = File.read(pointer).lines.first?.try(&.strip) || ""
+      raise Unavailable.new("#{pointer} must name an absolute toolchain directory") unless Path[root].absolute?
+      {root, POINTER}
+    end
+
+    # A checkout's toolchain (see `.locate`).
+    def self.for_checkout(checkout : String? = executable_checkout, env : ENV.class | Hash(String, String) = ENV) : Toolchain
+      located = locate(checkout, env)
+      raise Unavailable.new("No Caramel toolchain is installed#{checkout ? " for #{checkout}" : ""}. Run scripts/install-toolchain.") unless located
+      new(located[0])
+    end
+
+    def initialize(root : String)
       @root = ""
-      selected = root || ENV["CARAMEL_TOOLCHAIN_ROOT"]?
-      raise Unavailable.new("CARAMEL_TOOLCHAIN_ROOT is required for managed tools") unless selected
       begin
-        info = File.info(selected.not_nil!, follow_symlinks: false)
+        info = File.info(root, follow_symlinks: false)
         raise Unavailable.new("toolchain root must not be a symlink") if info.symlink?
         raise Unavailable.new("toolchain root must be a directory") unless info.directory?
         raise Unavailable.new("toolchain root has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
         raise Unavailable.new("toolchain root must be private") if (info.permissions.value & 0o077) != 0
-        @root = File.realpath(selected.not_nil!)
+        @root = File.realpath(root)
       rescue ex : File::Error
-        raise Unavailable.new("managed toolchain root is unavailable")
+        raise Unavailable.new("managed toolchain root is unavailable: #{root}")
       end
     end
 

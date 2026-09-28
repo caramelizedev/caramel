@@ -1,6 +1,6 @@
 require "./support/harness"
 
-installed = File.realpath(Caramel::Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the verified tool installation"))
+installed = File.realpath(Caramel::Checks.toolchain_root)
 root = Caramel::Checks.private_temp("Caramel's Toolchain $literal ")
 begin
   Dir.mkdir(File.join(root, "data"))

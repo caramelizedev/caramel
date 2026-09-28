@@ -7,7 +7,7 @@ module Caramel::Latte
   # Trust is a per-user operation. The privileged port/DNS installer never
   # receives CA private keys and never modifies the system trust store.
   class Trust
-    def initialize(@paths : Paths, @proxy : Proxy, @toolchain : Toolchain = Toolchain.new)
+    def initialize(@paths : Paths, @proxy : Proxy, @toolchain : Toolchain = Toolchain.for_checkout)
     end
 
     def fingerprint : String

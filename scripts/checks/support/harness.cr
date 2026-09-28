@@ -5,9 +5,16 @@ require "http/client"
 require "digest/sha256"
 require "../../../src/latte/process"
 require "../../../src/latte/paths"
+require "../../../src/latte/toolchain"
 
 module Caramel::Checks
   REPO = File.expand_path("../../..", __DIR__)
+
+  # A check and every tool it starts use one toolchain, resolved the way
+  # Frappé resolves it: CARAMEL_TOOLCHAIN_ROOT, else .caramel-toolchain.
+  if located = Caramel::Latte::Toolchain.locate(REPO)
+    ENV["CARAMEL_TOOLCHAIN_ROOT"] = located[0]
+  end
 
   def self.run(argv : Array(String), *, chdir : String = REPO, env : Hash(String, String?)? = nil, clear_env : Bool = false, input : String? = nil, timeout : Time::Span = 90.seconds) : Caramel::Latte::ProcessResult
     Caramel::Latte::ProcessRunner.run(argv, chdir: chdir, env: env, clear_env: clear_env, input: input, timeout: timeout, output_limit: 16 * 1024 * 1024)
@@ -26,10 +33,10 @@ module Caramel::Checks
     exit 1
   end
 
-  def self.toolchain_root(message : String) : String
+  def self.toolchain_root : String
     root = ENV["CARAMEL_TOOLCHAIN_ROOT"]?
-    return root.not_nil! if root && !root.empty?
-    fail(message)
+    return root if root && !root.empty?
+    fail("No Caramel toolchain is installed for #{REPO}. Run scripts/install-toolchain.")
   end
 
   def self.private_temp(prefix : String) : String

@@ -65,7 +65,7 @@ module Caramel::Checks
     @driver : WebDriver?
 
     def initialize
-      toolchain = Checks.toolchain_root("Set CARAMEL_TOOLCHAIN_ROOT to the managed toolchain")
+      toolchain = Checks.toolchain_root
       @psql = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin/psql")
       @fixture = LatteFixture.new("caramel-browser-")
       @project = File.join(@fixture.projects, NAME)

@@ -56,7 +56,7 @@ module Caramel::Checks::LatteDaemon
 
   # Runs *sql* as Latte's PostgreSQL administrator over the private socket.
   private def admin(root : String, runtime : String, sql : String) : String
-    toolchain = Caramel::Latte::Toolchain.new
+    toolchain = Caramel::Latte::Toolchain.new(Caramel::Checks.toolchain_root)
     password = JSON.parse(File.read(File.join(root, "secrets/postgres-admin.json")))["password"].as_s
     passfile = File.join(root, "check-admin.pgpass")
     File.write(passfile, "*:*:*:#{Caramel::Latte::Postgres::ADMIN_USER}:#{password}\n", perm: 0o600)

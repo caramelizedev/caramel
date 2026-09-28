@@ -57,7 +57,7 @@ scripts/check toolchain-paths
 scripts/check integration
 ```
 
-The integration command creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS/certificate trust. Ordinary system-installed Crystal and Shards can also be used for unit tests when `CARAMEL_TOOLCHAIN_ROOT` is absent; the integration harness requires the pinned managed tools.
+The integration command creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS/certificate trust. Every command uses the pinned managed tools; none falls back to a Crystal or Shards found on `PATH`.
 
 Latte contributor checks additionally require the pinned CoreDNS artifact and the macOS Swift compiler:
 

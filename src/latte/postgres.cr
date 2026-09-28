@@ -259,7 +259,7 @@ module Caramel::Latte
     getter paths : Paths
     getter toolchain : Toolchain
 
-    def initialize(@paths : Paths, @toolchain : Toolchain = Toolchain.new)
+    def initialize(@paths : Paths, @toolchain : Toolchain = Toolchain.for_checkout)
       @lock = Mutex.new
       @data_directory = @paths.postgres_data
       @socket_directory = @paths.postgres_socket_dir

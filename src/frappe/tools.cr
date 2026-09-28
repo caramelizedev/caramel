@@ -8,7 +8,7 @@ module Caramel::Frappe
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
       @toolchain = begin
-        Latte::Toolchain.new
+        Latte::Toolchain.for_checkout(@framework_root)
       rescue ex : Latte::Toolchain::Unavailable
         raise Error.new(ex.message)
       end

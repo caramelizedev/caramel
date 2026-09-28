@@ -37,15 +37,10 @@ module Caramel::Checks::LattePostgres
         return 2
       end
     end
-    root_setting = ENV["CARAMEL_TOOLCHAIN_ROOT"]?
-    if root_setting.nil? || root_setting.empty?
-      STDERR.puts "Set CARAMEL_TOOLCHAIN_ROOT to the pinned toolchain root."
-      return 2
-    end
-    toolchain = File.realpath(root_setting)
+    toolchain = File.realpath(Checks.toolchain_root)
     pg = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin")
     unless File.file?(File.join(pg, "initdb")) && File.file?(File.join(pg, "pg_ctl"))
-      STDERR.puts "Pinned PostgreSQL 18.6 tools are unavailable under CARAMEL_TOOLCHAIN_ROOT."
+      STDERR.puts "Pinned PostgreSQL 18.6 tools are unavailable in the managed toolchain; rerun scripts/install-toolchain."
       return 2
     end
 

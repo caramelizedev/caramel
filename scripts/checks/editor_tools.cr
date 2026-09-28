@@ -4,7 +4,7 @@ module EditorCheck
   REPO = Caramel::Checks::REPO
   FRAPPE = File.join(REPO, "bin/frappe")
   POINTER = File.join(REPO, ".caramel-toolchain")
-  Caramel::Checks.fail("run scripts/build-frappe and bin/frappe lsp install first") unless File.file?(FRAPPE) && File.file?(POINTER)
+  Caramel::Checks.fail("run scripts/install-toolchain, scripts/build-frappe and bin/frappe lsp install first") unless File.file?(FRAPPE) && File.file?(POINTER)
   ROOT = File.read(POINTER).lines.first.strip
   CRYSTAL = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.21.0")
   MANIFEST = JSON.parse(File.read(File.join(REPO, "tools/editor-darwin-arm64.json")))

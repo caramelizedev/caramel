@@ -19,16 +19,11 @@ module Caramel::Checks::Integration
   end
 
   def main : Int32
-    root_value = ENV["CARAMEL_TOOLCHAIN_ROOT"]?
-    unless root_value && !root_value.empty?
-      STDERR.puts "Set CARAMEL_TOOLCHAIN_ROOT to the verified contributor installation."
-      return 1
-    end
-    installs = File.join(File.realpath(root_value), "data/installs")
+    installs = File.join(File.realpath(Checks.toolchain_root), "data/installs")
     pg = File.join(installs, "conda-postgresql/18.6/bin")
     openssl = File.join(installs, "conda-openssl/3.6.4/bin/openssl")
     unless File.file?(File.join(pg, "initdb")) && File.file?(openssl)
-      STDERR.puts "Managed PostgreSQL or OpenSSL is missing; rerun scripts/install-toolchain for CARAMEL_TOOLCHAIN_ROOT."
+      STDERR.puts "Managed PostgreSQL or OpenSSL is missing; rerun scripts/install-toolchain."
       return 1
     end
     owned = Checks.private_temp("caramel-integration-")

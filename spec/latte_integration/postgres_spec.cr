@@ -9,7 +9,7 @@ require "../../src/latte/postgres"
 root = ENV["CARAMEL_LATTE_ROOT"]? || raise "CARAMEL_LATTE_ROOT is required; run scripts/check latte-postgres"
 project = ENV["CARAMEL_LATTE_PROJECT"]? || raise "CARAMEL_LATTE_PROJECT is required"
 paths = Caramel::Latte::Paths.new(root)
-toolchain = Caramel::Latte::Toolchain.new
+toolchain = Caramel::Latte::Toolchain.for_checkout
 service = Caramel::Latte::Postgres.new(paths, toolchain)
 site = Caramel::Latte::Site.new("bookshelf", project)
 credentials = service.provision(site)

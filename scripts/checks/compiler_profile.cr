@@ -1,7 +1,7 @@
 require "./support/harness"
 
 repo = Caramel::Checks::REPO
-installed = File.realpath(ENV["CARAMEL_TOOLCHAIN_ROOT"])
+installed = File.realpath(Caramel::Checks.toolchain_root)
 root = Caramel::Checks.private_temp("caramel-compiler-profile-")
 puts "Compiler profile: #{root}"
 generator = File.join(root, "generate.cr")
