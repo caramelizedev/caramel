@@ -13,7 +13,6 @@ The pins live in `tools/editor-darwin-arm64.json`.
 ## Install (once per Caramel installation)
 
 ```sh
-export CARAMEL_TOOLCHAIN_ROOT=<your toolchain root>
 frappe lsp install
 ```
 
@@ -30,7 +29,7 @@ bin/frappe lsp install
 - The pinned crystalline/LSP sources do not advertise `didSave` despite implementing save diagnostics. This build adds `textDocumentSync.save` to their capability before compilation (build recipe 3), so Zed sends saves and crystalline publishes errors.
 - Every binary is checked by digest and must load libraries only from the toolchain root or macOS.
 - The build compiles through the toolchain's `scripts/crystal` and `scripts/shards`; no additional language runtime is required.
-- The installer writes `<caramel>/.caramel-toolchain` with the toolchain root. `frappe lsp` uses it when `CARAMEL_TOOLCHAIN_ROOT` is not set.
+- `frappe lsp` finds the toolchain the way every Caramel command does: `CARAMEL_TOOLCHAIN_ROOT` when set, otherwise the checkout's `.caramel-toolchain`, which `scripts/install-toolchain` writes.
 
 ## Framework contributors
 
@@ -40,7 +39,7 @@ The repository's `.zed/settings.json` runs `bin/frappe lsp crystalline` and `bin
 
 New projects include `.zed/settings.json` running `frappe lsp crystalline` and `frappe lsp ameba-ls`. For older projects, copy it from the framework's `templates/application/.zed/settings.json`.
 
-Zed must find the project's matching `frappe` on its login-shell PATH. A one-off `PATH=… zed .` can start the servers initially but may be lost when Zed refreshes the worktree environment. `CARAMEL_TOOLCHAIN_ROOT` is optional here because the installation's `.caramel-toolchain` is the fallback. Before starting a server, `frappe lsp` runs the same `.caramel-version` check as `frappe dev`.
+Zed must find the project's matching `frappe` on its login-shell PATH; `frappe installations register` puts it in `~/.local/bin`. A one-off `PATH=… zed .` can start the servers initially but may be lost when Zed refreshes the worktree environment. `CARAMEL_TOOLCHAIN_ROOT` is optional because the installation's `.caramel-toolchain` names the toolchain. Before starting a server, `frappe lsp` runs the same `.caramel-version` check as `frappe dev`.
 
 ## Multiple Caramel versions
 
@@ -58,9 +57,9 @@ Zed must find the project's matching `frappe` on its login-shell PATH. A one-off
 
 ## Troubleshooting
 
-- `frappe lsp: no Caramel toolchain is configured`: set `CARAMEL_TOOLCHAIN_ROOT` or run `frappe lsp install`.
+- `frappe lsp: no Caramel toolchain is configured`: run `scripts/install-toolchain` in the Caramel checkout.
 - `frappe lsp: toolchain root …` (ownership, symlink or privacy): the root must be an owned, private (0700) directory; fix it or point to the right root.
-- `frappe lsp: <root> is not a completed Caramel toolchain`: finish `scripts/install-toolchain --root <root>`.
+- `frappe lsp: <root> is not a completed Caramel toolchain`: rerun `scripts/install-toolchain` to finish it.
 - `frappe lsp: <root> does not provide Crystal <version>`: this installation needs a toolchain root with its Crystal pin.
 - `frappe lsp: <name> <version> is not installed in <root>`: run `frappe lsp install` for this installation.
 - `frappe lsp: <binary> failed verification`: remove the named directory and run `frappe lsp install`.
@@ -84,8 +83,7 @@ Configure a stdio language server that runs `frappe lsp crystalline` or `frappe 
 
 ## Removal
 
-- All editor tools in a root: `rm -rf "$CARAMEL_TOOLCHAIN_ROOT/editor"`.
+- All editor tools in a root: `rm -rf "<toolchain root>/editor"`, where the root is the first line of the checkout's `.caramel-toolchain`.
 - One version: delete its `editor/ameba-ls/<version>` or `editor/crystalline/<version>-<fingerprint>` directory.
-- The pointer: `rm <caramel>/.caramel-toolchain`.
 
-After deleting tools, launches report "not installed". If the pointer is also removed and no `CARAMEL_TOOLCHAIN_ROOT` is set, launches report "no Caramel toolchain is configured". Nothing else changes.
+After deleting tools, launches report "not installed". Nothing else changes.

@@ -579,7 +579,7 @@ The `Caramel::Cache` facade wraps an `UNLOGGED` PostgreSQL table (`caramel_cache
 
 # RFC-0004: Caramel Latte (Bare-Metal Local DX & Database Branching)
 
-**Status:** Approved · Implemented (amended by [ADR 0006](decisions/0006-browser-acceptance-and-localhost-sites.md) and [ADR 0012](decisions/0012-latte-supervision-watching-branching.md)). Applying the system resolver, ports 80/443 and CA trust on a machine needs the owner's administrator rights.
+**Status:** Approved · Implemented (amended by [ADR 0006](decisions/0006-browser-acceptance-and-localhost-sites.md), [ADR 0012](decisions/0012-latte-supervision-watching-branching.md) and [ADR 0015](decisions/0015-local-setup-and-latte-lifecycle.md)). Applying the system resolver, ports 80/443 and CA trust on a machine needs the owner's administrator rights.
 
 **Classification:** Local Developer Experience & Substrate
 
@@ -600,6 +600,7 @@ Latte manages the local substrate using direct POSIX host process signals ([ADR 
 * **Shared service supervisor:** The per-user `latte daemon` starts, adopts after restart and recovers PostgreSQL 18, CoreDNS and Caddy.
   * Applications run under terminal-owned `frappe dev` sessions, which register their development gateway socket with Latte.
   * The daemon owns processes and databases. It holds no agent protocol state.
+  * When a Frappé command needs Latte and none is running, Frappé starts `latte daemon --detach`. The daemon runs in its own session and logs to `logs/latte.log`. `latte stop` ends it and leaves the services running, and the opt-in `latte service install` starts it at login instead ([ADR 0015](decisions/0015-local-setup-and-latte-lifecycle.md)).
 * **UNIX Domain Socket Binding:** All internal communication (App to Postgres) bypasses the TCP network loopback.
   * PostgreSQL listens only on `.s.PGSQL.5432` inside a private, owner-only socket directory in Latte's state, with `listen_addresses = ''` and SCRAM authentication.
   * A shared `/tmp` socket is never used, because `/tmp` is shared by every local user.
@@ -656,7 +657,7 @@ The same guarded clone backs `frappe db diff`'s scratch branch (RFC-0002 §2.5) 
 
 # RFC-0005: Caramel Frappé (Stateless Agent CLI & Dual-Mode Diagnostics)
 
-**Status:** Approved · Implemented (amended by [ADR 0013](decisions/0013-frappe-cli-check-mrdp.md))
+**Status:** Approved · Implemented (amended by [ADR 0013](decisions/0013-frappe-cli-check-mrdp.md) and [ADR 0015](decisions/0015-local-setup-and-latte-lifecycle.md))
 
 **Classification:** Autonomous Agent Tooling & Interface
 
@@ -672,7 +673,7 @@ Caramel Frappé discards long-running daemons in favor of **stateless POSIX CLI 
 
 #### 2.1. Stateless POSIX Tooling Surface
 
-The CLI is `frappe` ([ADR 0013](decisions/0013-frappe-cli-check-mrdp.md)). Every command is a one-shot process. Commands that need services, databases or branches ask Latte's service supervisor (RFC-0004) and keep no session state.
+The CLI is `frappe` ([ADR 0013](decisions/0013-frappe-cli-check-mrdp.md)). Every command is a one-shot process. Commands that need services, databases or branches ask Latte's service supervisor (RFC-0004), starting it first when it is not running, and keep no session state ([ADR 0015](decisions/0015-local-setup-and-latte-lifecycle.md)). Frappé finds its pinned toolchain through its checkout's `.caramel-toolchain`, so no environment setup is needed.
 
 One command table drives `help`, `COMMAND --help`, validation and the invariant discovery manifest, `frappe agent-manifest` (excerpt):
 
@@ -1128,7 +1129,8 @@ caramel/
 │   │                                      #   repo, sql, catalog, introspection, differ, ddl,
 │   │                                      #   linter, migration
 │   ├── latte.cr, latte/                   # RFC-0004: daemon, supervisor, postgres (branches,
-│   │                                      #   test workers, guards), watcher, dns, proxy, trust
+│   │                                      #   test workers, guards), watcher, dns, proxy, trust,
+│   │                                      #   login_item, toolchain
 │   └── frappe.cr, frappe/                 # RFC-0005: cli, commands, check, diagnostics, mrdp,
 │                                          #   schema_diff, corretto_runner, dev_session, …
 │

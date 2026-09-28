@@ -8,10 +8,9 @@ The intended workflow combines PostgreSQL, server-rendered HTML with bundled htm
 
 The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped compiled views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
 
-Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configuration, a shared service daemon and a native macOS menu client. Disposable integration checks cover service startup, crash recovery, two-site HTTPS and database retention.
+Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configuration, a shared service daemon and a native macOS menu client. Frappé starts the daemon when a command needs it; an opt-in login item starts it at login instead. Disposable integration checks cover service startup, crash recovery, two-site HTTPS and database retention.
 
-- Its fixed macOS resolver/port installer passed review, but applying that system installation awaits the owner's administrator authorization. The exact commands are in the RFC-0004 status table.
-- System-resolved, browser-trusted HTTPS remains an acceptance gate.
+- The macOS resolver/port installer and `latte trust install` are applied on the development machine: `https://<site>.caramel` resolves through `/etc/resolver/caramel`, reaches Caddy on port 443 through the launchd relay, and is trusted by Safari and curl without flags.
 - Sites can instead choose the `.localhost` suffix, which macOS and browsers resolve without a resolver entry ([ADR 0006](docs/decisions/0006-browser-acceptance-and-localhost-sites.md)).
 
 The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts, actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
@@ -21,7 +20,7 @@ The application workflow branch adds SugarORM (immutable schemas, explicit chang
 - The watched development loop reacts to kqueue events, type-checks before building, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes.
 - `scripts/check browser` accepts the browser experience on a `.localhost` site.
 
-Still unfinished: smaller individual generators, custom commands, dependency editing, optional authentication and production deployment. Consumer installation and system-trusted `.caramel` HTTPS still wait on the owner-applied installer. Mise provides the pinned private toolchain.
+Still unfinished: smaller individual generators, custom commands, dependency editing, optional authentication, a consumer installer and production deployment. Mise provides the pinned private toolchain.
 
 Frappé's agent surface (RFC-0005) is one command table: `frappe --help`, `frappe COMMAND --help`, argument validation and the stateless `frappe agent-manifest` all read it, and unknown commands or malformed arguments exit 1 with the intended command's exact syntax and a "Did you mean" suggestion. `frappe check` runs the Tier-1 `crystal build --no-codegen` type check and reports compiler errors either in the RFC-0008 terminal typography (a TTY, or `--human`) or as token-dense MRDP (`--agent`, or piped output), including `CONTRACT_MISMATCH` and `N_PLUS_ONE` diagnostics whose `PATCH:` lines can be applied mechanically. `frappe routes FILTER`, `frappe db branch create|list|delete`, `frappe dev --branch NAME` and `frappe expand FILE:LINE:COL` complete it; usage errors, `frappe migrate` lint refusals and `frappe db diff` halts print as MRDP in agent mode too.
 
@@ -39,6 +38,28 @@ Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enq
 - [Resumable toolchain installer component](docs/research/toolchain-installer.md)
 - [Optional Crystal editor tools (Zed)](docs/editor-tools.md)
 - [Incident 2026-09-27: Caddy installed an implicit local CA (cleanup steps)](docs/research/incident-2026-09-27-caddy-local-ca.md)
+
+## Getting started
+
+On Apple Silicon with Apple's Command Line Tools, from a checkout ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md)):
+
+```sh
+scripts/install-toolchain                   # pinned Crystal, PostgreSQL, Caddy and CoreDNS; recorded in .caramel-toolchain
+scripts/build-frappe && scripts/build-latte
+bin/frappe installations register           # frappe and latte in ~/.local/bin
+frappe services start                       # starts Latte in the background
+scripts/install-local-integration prepare /private/tmp/caramel-integration-bundle
+sudo scripts/install-local-integration apply /private/tmp/caramel-integration-bundle   # .caramel resolver and ports 80/443
+latte trust install                         # trusts Latte's local CA in your login keychain
+frappe new demo && cd demo && frappe dev
+```
+
+The integration and trust steps are needed once per machine. `sudo scripts/install-local-integration uninstall` and `latte trust remove` undo them. After that, the last line is the whole workflow:
+
+- `frappe new` configures the site and applies its migrations.
+- Any command that needs Latte starts it when it is not running. It keeps running after the terminal closes and logs to `~/Library/Application Support/Caramel/logs/latte.log`.
+- `latte stop` stops Latte, and `frappe services stop` stops its services.
+- `latte service install` starts Latte at every login instead; `latte service uninstall` removes that login item.
 
 ## Contributor checks
 

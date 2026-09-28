@@ -1,10 +1,10 @@
 # Frappé generated-project workflow
 
-This is an implementation preview on `codex/frappe-application-workflow`, not a consumer release. The framework and toolchain are pinned; consumer launchers and browser acceptance remain open. Independent review is pending while the requested Luna workers are unavailable.
+This is an implementation preview on `codex/frappe-application-workflow`, not a consumer release. The framework and toolchain are pinned; a consumer installer remains open. Independent review is pending while the requested Luna workers are unavailable.
 
 ## Implemented interface
 
-`scripts/build-frappe` builds `bin/frappe`. Set `CARAMEL_TOOLCHAIN_ROOT` to the verified private installation and run Latte's shared daemon before using project setup. Frappé communicates through Latte's owned Unix socket. It waits for managed services when necessary, but does not install or bootstrap a missing daemon.
+`scripts/build-frappe` builds `bin/frappe`, and `frappe installations register` puts `frappe` and `latte` launchers in `~/.local/bin` ([ADR 0015](../decisions/0015-local-setup-and-latte-lifecycle.md)). Frappé finds the toolchain through the checkout's `.caramel-toolchain`, which `scripts/install-toolchain` writes; `CARAMEL_TOOLCHAIN_ROOT` overrides it. Frappé communicates through Latte's owned Unix socket. When a command needs Latte and no daemon is running, Frappé starts `latte daemon --detach` from its own checkout, which keeps running in its own session and logs to `logs/latte.log`. `latte stop` ends it, and `latte service install` starts it at login instead.
 
 ```sh
 frappe new bookshelf
@@ -18,7 +18,7 @@ frappe corretto
 
 The binary also implements `setup`, `dev`, `seed`, `services`, `sites`, `doctor` and `open`. See [development workflow](frappe-development.md) for watcher ownership, build diagnostics, refresh and verification limits. Help is authoritative for currently available commands. `open` checks system DNS and certificate trust before opening the URL. `doctor` checks project metadata, framework snapshot, managed compiler, installed dependencies, PostgreSQL tool, private configuration, service state and named HTTPS; it does not repair state.
 
-`new` writes the complete starter before invoking locked Shards installation. An interrupted dependency step retains the project and directs the user to `setup`. Setup preserves application edits and existing valid secrets; it refuses mismatched credentials. Compilation uses the main target in `shard.yml`, independently of the local site name. A simultaneous clone needs a distinct name in `config/environment.yml` because two directories cannot own the same local origin.
+`new` writes the complete starter, installs the locked Shards, registers the site and applies its migrations, so `frappe dev` serves it immediately. An interrupted step retains the project and directs the user to `setup`, which does the same and preserves application edits and existing valid secrets; it refuses mismatched credentials. Compilation uses the main target in `shard.yml`, independently of the local site name. A simultaneous clone needs a distinct name in `config/environment.yml` because two directories cannot own the same local origin.
 
 ## Command table and agent mode (RFC-0005)
 
@@ -108,5 +108,5 @@ Unit specs cover configuration, literal environment parsing, secret preservation
 - Individual model/action/migration/command generators, custom commands, explicit dependency add/update and spec worker isolation.
 - A committed schema snapshot file. The application's `schema` command prints the declared catalog, and migrations remain authoritative.
 - Complete optional authentication, native Linux/musl production artifact and its assets/configuration.
-- Full macOS installation, native menu acceptance, system DNS/ports, CA trust and real browser CRUD, including htmx history/focus/422 handling and JavaScript-disabled forms.
+- A consumer macOS installation, native menu acceptance and real browser CRUD, including htmx history/focus/422 handling and JavaScript-disabled forms. System DNS, ports 80/443 and CA trust are applied and verified on the development machine (RFC-0004 status).
 - Independent implementation review and clean-machine installation proof.

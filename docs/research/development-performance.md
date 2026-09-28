@@ -5,7 +5,6 @@ The numbers below were measured before `frappe dev` switched from polling to kqu
 The measurement entry point is:
 
 ```sh
-CARAMEL_TOOLCHAIN_ROOT=/path/to/verified/toolchain \
 CARAMEL_BENCHMARK_OUTPUT=/private/tmp/caramel-performance.json \
 scripts/check frappe-project --benchmark
 ```
