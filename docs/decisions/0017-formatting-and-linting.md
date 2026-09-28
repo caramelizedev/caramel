@@ -36,7 +36,7 @@ RFC-0008 asks for code that reads like prose while the compiler does the proving
    - `Lint/ComparisonToBoolean`: its automatic correction turns `json["key"]? == false` into `!json["key"]?`, which is never true for a present `JSON::Any`. Applying it to this repository would have silently changed the CA trust guard in `scripts/checks/support/latte_fixture.cr`, weakened one of the browser check's CSRF assertions and broken the other's compilation, so those corrections were reverted.
 5. **Applications** get the rule set and two commands:
    - `frappe lint [--agent|--human]` runs `bin/frappe-lint` in the project. It prints Ameba's report on a TTY and MRDP otherwise: `ERR LINT_<RULE> at file:line:col`, where `<RULE>` is the rule's group and name in upper snake case (`LINT_CARAMEL_SERVICE_NOUN`), and `MSG` ends with the rule's own name for `# ameba:disable`. It prints `OK lint <n> files` when clean.
-   - `frappe lint` reports and never rewrites. Ameba's corrections are not all safe: `Lint/ComparisonToBoolean` changes behaviour, and `Lint/SpecFilename` renamed a required spec support file here, which broke the suite.
+   - `frappe lint` reports and never rewrites. Ameba's corrections are not all safe: `Lint/ComparisonToBoolean` changes behaviour, and `Lint/SpecFilename` renamed `spec/sugar_orm/support/unit_schemas.cr`, which three specs require, to `unit_schemas_spec.cr`, which broke the suite.
    - `frappe format` runs the pinned formatter on the project's `src`, `config`, `app`, `db` and `spec`.
    - The installation builds the linter on first use, and again after its sources or `shard.lock` change.
    - Generated code passes the rule set:
