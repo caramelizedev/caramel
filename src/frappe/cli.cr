@@ -4,6 +4,7 @@ require "./check"
 require "./new_project"
 require "./latte_client"
 require "./installations"
+require "./launchers"
 require "./tools"
 require "./resource_generator"
 require "./dev_session"
@@ -441,17 +442,25 @@ module Caramel::Frappe
         end
       when "installations register"
         root = File.realpath(@framework_root)
-        binary = File.join(root, "bin/frappe")
-        info = File.info?(binary, follow_symlinks: false)
-        unless info && info.file? && File::Info.executable?(binary)
-          raise Error.new("#{binary} is missing; run scripts/build-frappe first")
+        {"frappe" => "scripts/build-frappe", "latte" => "scripts/build-latte"}.each do |name, build|
+          binary = File.join(root, "bin", name)
+          info = File.info?(binary, follow_symlinks: false)
+          unless info && info.file? && File::Info.executable?(binary)
+            raise Error.new("#{binary} is missing; run #{build} first")
+          end
         end
+        launchers = Launchers.new
+        launchers.install(root)
         previous = registry.register(Caramel::VERSION, root)
         @output.puts("Registered Caramel #{Caramel::VERSION}: #{root}#{previous && previous != root ? " (replaced #{previous})" : ""}")
+        @output.puts("#{launchers.path("frappe")} and #{launchers.path("latte")} run this checkout.")
+        @output.puts("Add #{launchers.directory} to PATH to run them by name.") unless launchers.on_path?
       else
         release = invocation["VERSION"]
-        raise Error.new("Caramel #{release} is not registered") unless registry.remove(release)
+        root = registry.lookup(release)
+        raise Error.new("Caramel #{release} is not registered") unless root && registry.remove(release)
         @output.puts("Removed Caramel #{release} from the installation registry.")
+        Launchers.new.remove(root).each { |path| @output.puts("Removed #{path}.") }
       end
     end
   end
