@@ -70,13 +70,19 @@ module Caramel::Checks
         duplicate = p.attempt([@executable, project], chdir: project, timeout: 20.seconds)
         assert!(!duplicate.success? && duplicate.stderr.includes?("already running"))
 
-        # Taken before the clone migrates, this branch keeps its pending migration.
+        # Setup migrated the clone; a resource added since gives it a pending
+        # migration, which this branch, taken before migrating, keeps.
+        p.command([File.join(p.repo, "bin/frappe"), "make", "resource", "Note", "body:string"], chdir: @clone, echo: false)
         branch_url = p.command([File.join(p.repo, "bin/frappe"), "db", "branch", "create", "unmigrated"], chdir: @clone, echo: false).stdout.strip
         assert!(branch_url.starts_with?("postgresql://") && branch_url.includes?("_unmigrated?"), "branch create did not print a runtime URL")
         clone_session = start(@clone, "bookshelf-clone")
         wait_for("bookshelf-clone") { |code, content| code == 503 && content.includes?("Pending migrations") }
+        # Let the session retry a few times before the migration is applied.
+        sleep 3.seconds
         p.command([File.join(p.repo, "bin/frappe"), "migrate"], chdir: @clone)
         wait_for("bookshelf-clone") { |code, content| code == 200 && content.includes?("A little less setup.") }
+        clone_log = File.read(File.join(p.root, "bookshelf-clone-dev.log"))
+        assert!(clone_log.scan("Pending migrations").size == 1 && clone_log.includes?("Application ready"), "frappe dev did not report the pending migration exactly once:\n#{clone_log}")
 
         controller = File.join(project, "app/actions/home/show.cr")
         original = File.read(controller)

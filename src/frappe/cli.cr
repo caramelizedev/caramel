@@ -72,6 +72,7 @@ module Caramel::Frappe
         client.ready!
         tools.dependencies(project)
         configure(project, client)
+        migrate_configured(project, tools)
         @output.puts("#{project.name} is configured. Run frappe dev.")
       when "dev"
         dev(invocation)
@@ -185,6 +186,7 @@ module Caramel::Frappe
       begin
         tools.dependencies(project)
         configure(project, client)
+        migrate_configured(project, tools)
       rescue ex : Error
         raise Error.new("#{ex.message}\nProject files were preserved. Run cd #{name} && frappe setup to resume.")
       end
@@ -256,9 +258,7 @@ module Caramel::Frappe
       tools = Tools.new(@framework_root, @output, @error)
       binary = tools.compile(project)
       flags = invocation.flag?("--dev-override") ? ["--dev-override"] : [] of String
-      settings = values.merge({"CARAMEL_EXPECTED_DATABASE_URL" => values["MIGRATION_DATABASE_URL"]})
-      settings["CARAMEL_DIAGNOSTICS"] = "mrdp" if agent
-      status = tools.execute(binary, ["migrate"] + flags, project.root, settings)
+      status = apply_migrations(project, tools, binary, values, flags, agent)
       unless status.success?
         return 1 if agent
         raise Error.new("Command failed (exit #{status.exit_code}); see the diagnostic above")
@@ -271,6 +271,24 @@ module Caramel::Frappe
         @error.print(report)
       end
       0
+    end
+
+    # Lints and applies pending migrations through the migration role.
+    private def apply_migrations(project : Project, tools : Tools, binary : String, values : Hash(String, String),
+                                 flags : Array(String) = [] of String, agent : Bool = false) : Process::Status
+      settings = values.merge({"CARAMEL_EXPECTED_DATABASE_URL" => values["MIGRATION_DATABASE_URL"]})
+      settings["CARAMEL_DIAGNOSTICS"] = "mrdp" if agent
+      tools.execute(binary, ["migrate"] + flags, project.root, settings)
+    end
+
+    # A new or newly set-up project starts migrated, so frappe dev serves it
+    # at once.
+    private def migrate_configured(project : Project, tools : Tools) : Nil
+      @output.puts("Applying migrations…")
+      values = development_environment(project).merge({"CARAMEL_ENV" => "development"})
+      unless apply_migrations(project, tools, tools.compile(project), values).success?
+        raise Error.new("Migrations were not applied; see the diagnostic above. Fix them, then run frappe migrate.")
+      end
     end
 
     private def configure(project : Project, client : LatteClient) : Nil

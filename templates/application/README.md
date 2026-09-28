@@ -3,7 +3,7 @@
 A Crystal browser application built with Caramel @@VERSION@@, PostgreSQL and locally bundled htmx 4.
 
 ```sh
-frappe setup  # after cloning; creates fresh private local credentials
+frappe setup  # after cloning; creates fresh private local credentials and applies migrations
 frappe dev    # compiles, watches, and opens your named HTTPS project
 ```
 

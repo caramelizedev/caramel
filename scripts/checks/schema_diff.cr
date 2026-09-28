@@ -70,8 +70,8 @@ module Caramel::Checks
         created = diff("create_books")
         assert!(created.size == 1 && created[0].includes?("    CREATE TABLE \"books\" (\n      \"id\" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n      \"title\" text NOT NULL,"), created.inspect)
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
-        # Three framework-owned Cold Brew migrations precede the application's.
-        assert!(migrated.includes?("Applied 4 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
+        # frappe new applied Caramel's three Cold Brew migrations; this applies the application's first.
+        assert!(migrated.includes?("Applied 1 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
         assert!(sql(runtime_url, "SELECT count(*) FROM books") == "0")
         unchanged = command([@frappe, "db", "diff", "--name", "nothing"], chdir: @project, timeout: COMPILE).stdout
         assert!(unchanged.includes?("already matches the declared schema") && unchanged.includes?("ignored table caramel_migrations") && unchanged.includes?("ignored table caramel_jobs (owned by Caramel)"), unchanged)

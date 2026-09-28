@@ -156,7 +156,10 @@ module Caramel::Frappe
       @busy = true
       spawn do
         begin
-          boot(binary)
+          if boot(binary, quiet: true)
+            @output.puts("Application ready · #{@project.origin}")
+            @output.flush
+          end
         rescue ex
           @gateway.failed("Application startup failed: #{ex.message}") unless @stopping
         ensure
@@ -238,20 +241,28 @@ module Caramel::Frappe
       command
     end
 
-    private def boot(binary : String) : Bool
+    # A quiet boot retries a start that stopped on pending migrations. It does
+    # not print or log that refusal again, and forwards the application's
+    # output once it serves.
+    private def boot(binary : String, quiet : Bool = false) : Bool
       return false if @stopping
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
       # Request serving receives only the runtime role, never migration/spec credentials.
       values = @values.reject { |key, _| key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL" }
       database = @runtime_url || @values["DATABASE_URL"]
       values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "DATABASE_URL" => database, "CARAMEL_EXPECTED_DATABASE_URL" => database})
-      @app_log.try(&.mark("start #{@project.name}"))
-      candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, @output, log: @app_log)
+      @app_log.try(&.mark("start #{@project.name}")) unless quiet
+      candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, quiet ? nil : @output, log: quiet ? nil : @app_log)
       accepted = false
       begin
         deadline = Time.instant + 20.seconds
         while candidate.running? && !@stopping && Time.instant < deadline
           if ready?(socket)
+            if quiet
+              @app_log.try(&.mark("start #{@project.name}"))
+              candidate.output.forward = @output
+              candidate.output.log = @app_log
+            end
             previous, previous_socket = @application, @application_socket
             @application, @application_socket = candidate, socket
             @application_binary = binary
@@ -277,7 +288,13 @@ module Caramel::Frappe
           message = candidate.output.contents
           message = "Application did not become ready within 20 seconds. Check /health and terminal output." if message.empty?
           @gateway.failed(message)
-          @retry_at = Time.instant + 1.second if message.includes?("Pending migrations")
+          if message.includes?("Pending migrations")
+            @retry_at = Time.instant + 1.second
+          elsif quiet
+            # A retry that fails for another reason shows why, as a first start does.
+            @output.puts(message.chomp)
+            @output.flush
+          end
         end
         false
       ensure

@@ -4,6 +4,9 @@ module Caramel::Frappe
   class DevCommand
     class Output < IO
       getter contents = ""
+      # A quiet start forwards nothing until the command proves healthy.
+      setter forward : IO?
+      setter log : IO?
 
       def initialize(@forward : IO? = nil, @log : IO? = nil)
       end

@@ -24,7 +24,7 @@ Ctrl-C closes owned commands, conditionally clears the exact registered gateway 
 
 ## Diagnostics and refresh
 
-Compiler/startup diagnostics are escaped, bounded and redacted using known local secret values plus database-URL patterns. They are served at the project HTTPS origin with no-store and restrictive browser policies. Repeated identical failures do not repeatedly advance the refresh generation.
+Compiler/startup diagnostics are escaped, bounded and redacted using known local secret values plus database-URL patterns. They are served at the project HTTPS origin with no-store and restrictive browser policies. Repeated identical failures do not repeatedly advance the refresh generation. An app that refuses to start because of pending migrations is reported once. The session then retries it quietly every second, without printing or logging the same refusal again, and prints `Application ready` once `frappe migrate` has applied them. A retry that fails for another reason prints that reason.
 
 Application exceptions have an additional development-only page with an escaped message, application locations first, collapsed internal frames and a request reference. Frame classification accounts for Crystal's relative paths. Known environment secrets, database credentials and credential-like assignments are redacted before truncation; the page does not dump request bodies or environment variables, or read arbitrary source files. These diagnostics require both the `caramel_development` compile flag and `CARAMEL_ENV=development`. Production builds exclude the diagnostic implementation; production/test runtime modes use the generic response even in a development binary. Runtime exceptions do not mark an otherwise healthy app as a compiler failure.
 
