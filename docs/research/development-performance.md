@@ -27,7 +27,7 @@ A sampler records the descendants of the fixture's known Latte daemon and develo
 
 ## Initial baseline: 2026-09-19
 
-The first run uses an Apple M3 Pro (12 logical CPUs, 36 GiB RAM). Framework source is commit `ec942df`. This is a single host/run with warm compiler/dependency caches; it establishes a baseline, not a general performance guarantee.
+The first run uses an Apple M3 Pro (12 logical CPUs, 36 GiB RAM). Framework source is commit `84f3aee`. This is a single host/run with warm compiler/dependency caches; it establishes a baseline, not a general performance guarantee.
 
 | HTTP-visible edit latency, p95 of 20 | Bookshelf, 2 resources | Larger, 22 resources |
 | --- | ---: | ---: |
