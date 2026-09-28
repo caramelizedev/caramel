@@ -111,6 +111,11 @@ module Caramel
       Response.navigate(request, path)
     end
 
+    # Sends the browser to another site; `url` must be an absolute http(s) URL.
+    def redirect_external(url : String, status : Int32 = 302) : Response
+      Response.redirect_external(request, url, status)
+    end
+
     def not_found(message : String = "Not found") : Response
       Response.new(404, message)
     end
