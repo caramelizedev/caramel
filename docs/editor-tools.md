@@ -39,7 +39,7 @@ The repository's `.zed/settings.json` runs `bin/frappe lsp crystalline` and `bin
 
 New projects include `.zed/settings.json` running `frappe lsp crystalline` and `frappe lsp ameba-ls`. For older projects, copy it from the framework's `templates/application/.zed/settings.json`.
 
-Zed must find the project's matching `frappe` on its login-shell PATH; `frappe installations register` puts it in `~/.local/bin`. A one-off `PATH=… zed .` can start the servers initially but may be lost when Zed refreshes the worktree environment. `CARAMEL_TOOLCHAIN_ROOT` is optional because the installation's `.caramel-toolchain` names the toolchain. Before starting a server, `frappe lsp` runs the same `.caramel-version` check as `frappe dev`.
+Zed must find the project's matching `frappe` on its login-shell PATH; `frappe installations register` puts it in `~/.local/bin`. A one-off `PATH=… zed .` can start the servers initially but may be lost when Zed refreshes the worktree environment. `CARAMEL_TOOLCHAIN_ROOT` is optional because the installation's `.caramel-toolchain` names the toolchain. Before starting a server, `frappe lsp` checks the release pinned in `shard.lock`, as `frappe dev` does.
 
 ## Multiple Caramel versions
 
@@ -47,7 +47,7 @@ Zed must find the project's matching `frappe` on its login-shell PATH; `frappe i
 - Installations sharing a toolchain root keep versions side by side: `editor/ameba-ls/<version>` and `editor/crystalline/<version>-<fingerprint>`. The fingerprint covers the source commit, Crystal version, LLVM artifact and build recipe, so a changed build input never reuses an old binary.
 - Different Crystal pins need separate toolchain roots; `scripts/install-toolchain` enforces this.
 - A project is served by the installation whose `frappe` Zed finds. A mismatch fails with `use its matching Caramel installation`, exactly like `frappe dev`. There is no automatic per-project selection yet.
-- crystalline navigates into the project's own vendored Caramel. Zed may display `lib/caramel/...`; that Shards path resolves to `vendor/caramel/...`.
+- crystalline navigates into the project's Caramel dependency in `lib/caramel`; for an unreleased checkout that is a symlink to the checkout itself.
 
 ## Verify
 

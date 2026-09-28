@@ -6,7 +6,7 @@ private def project_fixture(&)
   root = File.tempname("caramel-project-")
   Dir.mkdir(root)
   Dir.mkdir(File.join(root, "config"))
-  File.write(File.join(root, ".caramel-version"), "0.1.0\n")
+  File.write(File.join(root, "shard.lock"), "version: 2.0\nshards:\n  caramel:\n    path: /private/tmp/caramel\n    version: #{Caramel::VERSION}\n")
   File.write(File.join(root, "config/environment.yml"), <<-YAML)
     version: 1
     name: bookshelf
@@ -34,11 +34,15 @@ describe Caramel::Frappe::Project do
     end
   end
 
-  it "rejects incompatible framework versions and unknown manifest fields" do
+  it "rejects another pinned release, a lock without caramel and unknown manifest fields" do
     project_fixture do |root|
-      File.write(File.join(root, ".caramel-version"), "9.0.0\n")
-      expect_raises(Caramel::Frappe::Error, "framework version") { Caramel::Frappe::Project.load(root) }
-      File.write(File.join(root, ".caramel-version"), "0.1.0\n")
+      lock = File.join(root, "shard.lock")
+      original = File.read(lock)
+      File.write(lock, original.sub("version: #{Caramel::VERSION}", "version: 9.0.0"))
+      expect_raises(Caramel::Frappe::Error, "This project uses Caramel 9.0.0, not #{Caramel::VERSION}") { Caramel::Frappe::Project.load(root) }
+      File.write(lock, "version: 2.0\nshards:\n  db:\n    git: https://github.com/crystal-lang/crystal-db.git\n    version: 0.14.0\n")
+      expect_raises(Caramel::Frappe::Error, "shard.lock does not pin caramel") { Caramel::Frappe::Project.load(root) }
+      File.write(lock, original)
       File.open(File.join(root, "config/environment.yml"), "a") { |io| io.puts("secret: do-not-accept-here") }
       expect_raises(Caramel::Frappe::Error, "environment.yml") { Caramel::Frappe::Project.load(root) }
     end

@@ -118,6 +118,7 @@ module Caramel::Checks
         command([@frappe, "setup"], chdir: resumed, echo: false)
         assert!(site("resumed")["id"].as_s == resumed_id && local_values(resumed)["DATABASE_URL"] == resumed_url)
         puts "PASS: frappe db dump/restore with safety dump, missing-log guidance, and site removal with retained data and re-registration"
+        git_source
 
         Dev.new(self, clone).check if args.includes?("--dev")
         Benchmark.new(self, edit_only: args.includes?("--edit-benchmark")).check if args.includes?("--benchmark") || args.includes?("--edit-benchmark")
@@ -130,6 +131,34 @@ module Caramel::Checks
       ensure
         finish(failed)
       end
+    end
+
+    # ADR 0016: a generated application depends on a tagged Caramel release by
+    # git. A repository of this working tree, tagged as this release, stands in
+    # for github.com/caramelizedev/caramel.
+    def git_source : Nil
+      repository = File.join(@root, "caramel.git")
+      listed = command(["/usr/bin/git", "-C", @repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], echo: false).stdout
+      listed.split('\0', remove_empty: true).each do |relative|
+        source = File.join(@repo, relative)
+        next unless File.file?(source)
+        Dir.mkdir_p(File.dirname(File.join(repository, relative)))
+        File.copy(source, File.join(repository, relative))
+      end
+      git = ["/usr/bin/git", "-C", repository, "-c", "user.name=Caramel checks", "-c", "user.email=checks@caramel.invalid"]
+      [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "Caramel #{Caramel::VERSION}"], ["tag", "v#{Caramel::VERSION}"]].each do |arguments|
+        command(git + arguments, echo: false)
+      end
+      url = "file://#{repository}"
+      command([@frappe, "new", "tagged"], chdir: @projects, environment: environment({"CARAMEL_REPOSITORY" => url}))
+      tagged = File.join(@projects, "tagged")
+      assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(%(  caramel:\n    git: #{url.to_json}\n    version: "~> #{Caramel::VERSION}"\n)))
+      assert!(File.read(File.join(tagged, "shard.lock")).includes?(%(  caramel:\n    git: #{url.to_json}\n    version: #{Caramel::VERSION}\n)))
+      library = File.join(tagged, "lib/caramel")
+      assert!(File.info(library, follow_symlinks: false).directory? && File.file?(File.join(library, "src/caramel/command_line.cr")), "lib/caramel is not the tagged release")
+      checked = command([@frappe, "check"], chdir: tagged, echo: false)
+      assert!(checked.stdout.starts_with?("OK check "), checked.stdout)
+      puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} resolves the framework by git, migrates and type-checks"
     end
 
     # RFC-0005 agent tooling on the generated project: the stateless manifest,
@@ -458,7 +487,7 @@ module Caramel::Checks
         end
 
         it "leaks DDL through a second connection" do
-          leak = Caramel::Database.open(App.database_url(migration: true), 1)
+          leak = Caramel::Database.open(Caramel::Database.url(migration: true), 1)
           leak.exec("CREATE TABLE leaked_probe (id integer)")
           leak.close
         end

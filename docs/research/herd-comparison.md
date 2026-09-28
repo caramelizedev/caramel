@@ -7,7 +7,7 @@
 | `park`, `link` | Explicit `frappe new` / `frappe setup` registration as `<name>.caramel` | Different by design; parking deferred |
 | `unlink` | `frappe sites remove NAME` | Implemented; keeps project, databases, credentials, logs, backups |
 | `secure` | Caddy internal `caramel` CA; `latte trust install` | Implemented; browser-trust acceptance pending |
-| `isolate` with `herd php` proxies | `.caramel-version` + `frappe installations` dispatch | Implemented; one toolchain per installation; Latte shared |
+| `isolate` with `herd php` proxies | the caramel pin in `shard.lock` + `frappe installations` dispatch | Implemented; one toolchain per installation; Latte shared |
 | `herd.yml` / `herd init` | `config/environment.yml` + `frappe setup` | Partial |
 | Services | One PostgreSQL 18 cluster with per-site dev/spec databases, CoreDNS, Caddy | Partial (PostgreSQL only) |
 | Database tooling | `frappe db dump` / `frappe db restore FILE` | Implemented (development database, private backups, pre-restore safety dump) |

@@ -7,4 +7,4 @@ targets:
     main: src/@@SHARD@@.cr
 dependencies:
   caramel:
-    path: vendor/caramel
+    @@CARAMEL@@

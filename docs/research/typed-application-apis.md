@@ -26,7 +26,7 @@ A schema is an immutable value. Every instance is a stored row with getters only
 - **Other declarations** are `belongs_to`, `has_many`, `has_one`, `index :a, :b, unique: true` and `drop_column :legacy`.
 - **Compile errors.** Unsupported types, non-literal defaults, unknown options, duplicate or reserved names and a missing primary key fail compilation at the declaration, with a remediation.
 
-`SugarORM::Repo.database = db` binds the application pool once at boot; the generated `App.build` does this, and generated specs bind the verified spec database. `SugarORM::Repo.transaction { ... }` runs in a transaction and nests as savepoints. `SugarORM::Repo.bind(connection) { ... }` binds a connection or transaction to the current fiber.
+`SugarORM::Repo.database = db` binds the application pool once at boot; `Caramel.build(App, …)` does this when the application serves, and Corretto binds the verified spec database. `SugarORM::Repo.transaction { ... }` runs in a transaction and nests as savepoints. `SugarORM::Repo.bind(connection) { ... }` binds a connection or transaction to the current fiber.
 
 ## Changesets and the facade
 

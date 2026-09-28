@@ -1,9 +1,0 @@
-development:
-  url_env: DATABASE_URL
-  migration_url_env: MIGRATION_DATABASE_URL
-test:
-  url_env: SPEC_DATABASE_URL
-  migration_url_env: SPEC_MIGRATION_DATABASE_URL
-production:
-  url_env: DATABASE_URL
-  migration_url_env: MIGRATION_DATABASE_URL

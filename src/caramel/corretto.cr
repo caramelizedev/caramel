@@ -26,6 +26,18 @@ module Corretto
   @@application : {DB::Database, Caramel::Application}? = nil
   @@wire : Wire? = nil
 
+  # The generated spec/spec_helper.cr's configuration: this worker's Latte
+  # spec databases, and the application built on the spec pool. Call it from
+  # spec/: its __DIR__ locates the project.
+  def self.configure(app : T.class, source : String = __DIR__) : Nil forall T
+    root = File.expand_path("..", source)
+    configure do |config|
+      config.database_url = Caramel::Database.url
+      config.migration_url = Caramel::Database.url(migration: true)
+      config.application = ->(db : DB::Database) { Caramel.build(app, db, ENV["APP_SECRET"], ENV["APP_ORIGIN"], root) }
+    end
+  end
+
   # Verifies that this process runs under `frappe corretto` against its own
   # worker database, then installs the per-example isolation and the wire proxy.
   # ameba:disable Metrics/CyclomaticComplexity -- checks each worker precondition before specs run
@@ -35,9 +47,9 @@ module Corretto
     abort("Run these specs with frappe corretto") unless ENV["CARAMEL_ENV"]? == "test" && index
     config = Config.new
     yield config
-    runtime_url = config.database_url || raise Error.new("Set config.database_url (App.database_url) in Corretto.configure")
-    migration_url = config.migration_url || raise Error.new("Set config.migration_url (App.database_url(migration: true)) in Corretto.configure")
-    build = config.application || raise Error.new("Set config.application = ->(db : DB::Database) { App.build(db, …) } in Corretto.configure")
+    runtime_url = config.database_url || raise Error.new("Set config.database_url (Caramel::Database.url) in Corretto.configure")
+    migration_url = config.migration_url || raise Error.new("Set config.migration_url (Caramel::Database.url(migration: true)) in Corretto.configure")
+    build = config.application || raise Error.new("Set config.application = ->(db : DB::Database) { Caramel.build(App, db, …) } in Corretto.configure")
     expected = ENV["CARAMEL_SPEC_DATABASE"]?
     database = Caramel::Database::Config.parse(runtime_url).database
     unless runtime_url == ENV["CARAMEL_EXPECTED_DATABASE_URL"]? && expected && database == expected && database.matches?(WORKER_DATABASE) &&

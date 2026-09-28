@@ -5,8 +5,8 @@ require "./project"
 module Caramel::Frappe
   class DevFiles
     record Snapshot, source : String, assets : String
-    SOURCE_TREES = %w[src config db app vendor/caramel/src]
-    SOURCE_FILES = %w[shard.yml shard.lock .caramel-version .env]
+    SOURCE_TREES = %w[src config db app]
+    SOURCE_FILES = %w[shard.yml shard.lock .env]
     # Every path whose change can alter a snapshot (app/assets is inside app).
     WATCHED = SOURCE_TREES + SOURCE_FILES + %w[public]
 

@@ -1,9 +1,14 @@
 require "file_utils"
-require "digest/sha256"
+require "yaml"
 require "./project"
+require "../latte/process"
 
 module Caramel::Frappe
   class NewProject
+    # How a generated application depends on the framework (ADR 0016): its
+    # shard.yml source lines and its shard.lock source line.
+    record Dependency, shard : String, lock : String
+
     def initialize(framework_root : String)
       @framework_root = File.realpath(framework_root)
     end
@@ -40,26 +45,17 @@ module Caramel::Frappe
       suffix = Latte::Site.normalize_suffix(suffix)
       shard_name = name.tr("-", "_")
       title = name.split('-').map(&.capitalize).join(' ')
-      substitutions = {"@@NAME@@" => name, "@@SHARD@@" => shard_name, "@@TITLE@@" => title, "@@VERSION@@" => Caramel::VERSION, "@@SUFFIX@@" => suffix}
-      files = tree(File.join(@framework_root, "templates/application"))
+      source = dependency
+      substitutions = {"@@NAME@@" => name, "@@SHARD@@" => shard_name, "@@TITLE@@" => title, "@@VERSION@@" => Caramel::VERSION, "@@SUFFIX@@" => suffix, "@@CARAMEL@@" => source.shard}
       result = {} of String => String
-      files.each do |path, content|
+      tree(File.join(@framework_root, "templates/application")).each do |path, content|
         substitutions.each do |token, value|
           path = path.gsub(token, value)
           content = content.gsub(token, value)
         end
         result[path] = content
       end
-      framework = tree(File.join(@framework_root, "src/caramel"), "src/caramel")
-      framework.merge!(tree(File.join(@framework_root, "src/sugar_orm"), "src/sugar_orm"))
-      framework["src/caramel.cr"] = File.read(File.join(@framework_root, "src/caramel.cr"))
-      framework["src/sugar_orm.cr"] = File.read(File.join(@framework_root, "src/sugar_orm.cr"))
-      %w[shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md].each do |file|
-        framework[file] = File.read(File.join(@framework_root, file))
-      end
-      manifest = {version: Caramel::VERSION, files: framework.transform_values { |content| Digest::SHA256.hexdigest(content) }}.to_json
-      framework.each { |path, content| result["vendor/caramel/#{path}"] = content }
-      result["vendor/caramel/snapshot.json"] = manifest + "\n"
+      result["shard.lock"] = shard_lock(source)
       result["public/assets/htmx-4.0.0.min.js"] = File.read(File.join(@framework_root, "vendor/htmx/htmx-4.0.0.min.js"))
       result["app/assets/vendor/htmx-4.0.0.min.js"] = result["public/assets/htmx-4.0.0.min.js"]
       result["public/assets/caramel-islands.js"] = File.read(File.join(@framework_root, "src/caramel/islands.js"))
@@ -69,19 +65,41 @@ module Caramel::Frappe
       result
     end
 
-    def verify_snapshot(project : Project) : Nil
-      root = File.join(project.root, "vendor/caramel")
-      manifest = JSON.parse(File.read(File.join(root, "snapshot.json")))
-      raise Error.new("Framework snapshot version differs") unless manifest["version"].as_s == Caramel::VERSION
-      files = manifest["files"].as_h
-      actual = tree(root)
-      actual.delete("snapshot.json")
-      raise Error.new("Framework snapshot file inventory differs") unless actual.keys.sort! == files.keys.sort!
-      files.each do |path, expected|
-        raise Error.new("Framework snapshot changed: #{path}") unless Digest::SHA256.hexdigest(actual[path]) == expected.as_s
+    # The tagged release on GitHub; CARAMEL_REPOSITORY, a git URL, for tests
+    # and forks; or, from a checkout that is not exactly its clean release
+    # tag, the checkout itself.
+    def dependency : Dependency
+      if repository = ENV["CARAMEL_REPOSITORY"]?
+        Dependency.new("git: #{repository.to_json}\n    version: \"~> #{Caramel::VERSION}\"", "git: #{repository.to_json}")
+      elsif released?
+        Dependency.new("github: caramelizedev/caramel\n    version: \"~> #{Caramel::VERSION}\"", "git: #{"#{Caramel::REPOSITORY}.git".to_json}")
+      else
+        Dependency.new("path: #{@framework_root.to_json}", "path: #{@framework_root.to_json}")
       end
-    rescue JSON::ParseException | KeyError | TypeCastError | File::Error
-      raise Error.new("Framework snapshot is missing or invalid; preserve the project's locked vendor/caramel directory")
+    end
+
+    private def released? : Bool
+      return false unless File.exists?(File.join(@framework_root, ".git"))
+      tag = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "describe", "--exact-match", "--tags", "HEAD"], timeout: 10.seconds)
+      return false unless tag.success? && tag.stdout.strip == "v#{Caramel::VERSION}"
+      status = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "status", "--porcelain"], timeout: 10.seconds)
+      status.success? && status.stdout.empty?
+    end
+
+    # The framework at this release, then its runtime dependencies exactly as
+    # the framework locks them.
+    private def shard_lock(source : Dependency) : String
+      framework = YAML.parse(File.read(File.join(@framework_root, "shard.yml")))
+      development = framework["development_dependencies"]?.try(&.as_h.keys.map(&.as_s)) || [] of String
+      locked = YAML.parse(File.read(File.join(@framework_root, "shard.lock")))["shards"].as_h
+      String.build do |io|
+        io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock << "\n    version: " << Caramel::VERSION << '\n'
+        locked.each do |name, entry|
+          next if development.includes?(name.as_s)
+          io << "\n  " << name.as_s << ":\n"
+          entry.as_h.each { |key, value| io << "    " << key.as_s << ": " << value.as_s << '\n' }
+        end
+      end
     end
 
     private def preflight_destination(path : String) : Nil
@@ -94,19 +112,19 @@ module Caramel::Frappe
 
     private def tree(root : String, prefix : String = "") : Hash(String, String)
       info = File.info(root, follow_symlinks: false)
-      raise Error.new("Framework snapshot/template directory must be regular") unless info.directory?
+      raise Error.new("Framework template directory must be regular") unless info.directory?
       result = {} of String => String
       Dir.children(root).sort.each do |name|
         path = File.join(root, name)
         relative = prefix.empty? ? name : File.join(prefix, name)
         info = File.info(path, follow_symlinks: false)
-        raise Error.new("Framework snapshot/template must not contain symlinks") if info.symlink?
+        raise Error.new("Framework template must not contain symlinks") if info.symlink?
         if info.directory?
           result.merge!(tree(path, relative))
         elsif info.file?
           result[relative] = File.read(path)
         else
-          raise Error.new("Unexpected file in framework snapshot/template")
+          raise Error.new("Unexpected file in framework template")
         end
       end
       result

@@ -1,7 +1,6 @@
 require "./project"
 require "./tools"
 require "./latte_client"
-require "./new_project"
 require "../caramel/database"
 require "../latte/postgres"
 
@@ -62,7 +61,6 @@ module Caramel::Frappe
     def run(paths : Array(String), concurrency : Int32) : Nil
       files = self.class.spec_files(@project.root, paths)
       refuse_mocks
-      NewProject.new(@framework_root).verify_snapshot(@project)
       client = LatteClient.new
       client.ready!
       id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)

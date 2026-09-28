@@ -88,9 +88,9 @@ describe Caramel::Frappe::CLI do
     project = File.tempname("caramel-lsp-project-")
     Dir.mkdir(project)
     begin
-      File.write(File.join(project, ".caramel-version"), "0.0.0\n")
+      File.write(File.join(project, "shard.lock"), "version: 2.0\nshards:\n  caramel:\n    path: /private/tmp/caramel\n    version: 0.0.0\n")
       Dir.cd(project) { frappe.run(["lsp", "ameba-ls"]) }.should eq(1)
-      errors.to_s.should contain("Project framework version differs from Frappé #{Caramel::VERSION}; use its matching Caramel installation")
+      errors.to_s.should contain("This project uses Caramel 0.0.0, not #{Caramel::VERSION}; use its matching Caramel installation")
     ensure
       FileUtils.rm_rf(project)
     end

@@ -18,5 +18,6 @@ require "./sugar_orm"
 require "./caramel/sse"
 require "./caramel/cache"
 require "./caramel/cold_brew"
+require "./caramel/command_line"
 
 require "./caramel/version"

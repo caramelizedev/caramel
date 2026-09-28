@@ -225,6 +225,16 @@ module Caramel
       end
     end
 
+    # The connection for CARAMEL_ENV, production unless set. Frappé and Latte
+    # provide DATABASE_URL and MIGRATION_DATABASE_URL, and for specs
+    # SPEC_DATABASE_URL and SPEC_MIGRATION_DATABASE_URL.
+    def self.url(migration : Bool = false) : String
+      environment = ENV["CARAMEL_ENV"]? || "production"
+      raise "CARAMEL_ENV must be development, test or production" unless %w[development test production].includes?(environment)
+      key = "#{environment == "test" ? "SPEC_" : ""}#{migration ? "MIGRATION_" : ""}DATABASE_URL"
+      ENV[key]? || raise "Missing database configuration: #{key}"
+    end
+
     def self.open(url : String, pool_size : Int = Config::DEFAULT_POOL_SIZE) : DB::Database
       config = Config.parse(url, pool_size)
       connection_options = config.connection_options

@@ -68,7 +68,6 @@ module Caramel::Frappe
         create(invocation["NAME"])
       when "setup"
         project = Project.load
-        NewProject.new(@framework_root).verify_snapshot(project)
         tools = Tools.new(@framework_root, @output, @error)
         client = LatteClient.new
         client.ready!
@@ -207,7 +206,6 @@ module Caramel::Frappe
     private def dev(invocation : Commands::Invocation) : Nil
       requested = invocation["--branch"]?.try { |name| branch_name!(invocation, name) }
       project = Project.load
-      NewProject.new(@framework_root).verify_snapshot(project)
       values = development_environment(project)
       client = LatteClient.new
       runtime_url = requested.try do |name|
@@ -340,7 +338,6 @@ module Caramel::Frappe
       failures = 0
       checks = {
         "Project configuration"       => -> { Project.load; nil },
-        "Framework snapshot"          => -> { NewProject.new(@framework_root).verify_snapshot(Project.load) },
         "Managed Crystal compiler"    => -> { Tools.new(@framework_root).check_compiler },
         "Locked dependencies"         => -> { Tools.new(@framework_root).check_dependencies(Project.load) },
         "Managed PostgreSQL tool"     => -> { Tools.new(@framework_root).toolchain.verify_postgres_version!; nil },

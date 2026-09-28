@@ -91,9 +91,9 @@ module Caramel::Frappe
 
     def self.load(directory : String = Dir.current) : self
       root = Latte::Site.canonical_directory(directory)
-      version_path = File.join(root, ".caramel-version")
-      unless File.file?(version_path) && File.read(version_path).strip == Caramel::VERSION
-        raise Error.new("Project framework version differs from Frappé #{Caramel::VERSION}; use its matching Caramel installation")
+      pin = pin(root)
+      unless pin == Caramel::VERSION
+        raise Error.new(pin ? "This project uses Caramel #{pin}, not #{Caramel::VERSION}; use its matching Caramel installation" : "shard.lock does not pin caramel; restore it from version control")
       end
       begin
         metadata = EnvironmentManifest.from_yaml(File.read(File.join(root, "config/environment.yml")))
@@ -104,6 +104,18 @@ module Caramel::Frappe
       new(root, metadata)
     rescue ex : ArgumentError
       raise Error.new(ex.message)
+    end
+
+    # The Caramel release a project pins (ADR 0016): the version of the caramel
+    # entry in its shard.lock, without build metadata.
+    def self.pin(root : String) : String?
+      path = File.join(root, "shard.lock")
+      info = File.info?(path, follow_symlinks: false)
+      return unless info && info.file? && info.size <= 1_048_576
+      entry = YAML.parse(File.read(path))["shards"]?.try(&.as_h?).try(&.[YAML::Any.new("caramel")]?).try(&.as_h?)
+      entry.try(&.[YAML::Any.new("version")]?).try(&.as_s?).try(&.split('+').first)
+    rescue YAML::ParseException
+      nil
     end
 
     def name : String

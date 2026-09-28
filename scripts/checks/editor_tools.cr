@@ -109,14 +109,17 @@ module EditorCheck
         action = File.realpath(File.join(project, "app/actions/application_action.cr"))
         client.definition_until(show, Caramel::Checks::LSPClient.position(text, "ApplicationAction", 2), 300.seconds) { |item| item == action }
         puts "PASS: frappe lsp crystalline definition into application source"
+        # An unreleased checkout is a path dependency: lib/caramel resolves to it.
+        framework = File.join(REPO, "src/caramel/action.cr")
         client.definition_until(show, Caramel::Checks::LSPClient.position(text, "page \"Welcome\"", 1), 180.seconds) do |item|
-          item.ends_with?("/bookshelf/vendor/caramel/src/caramel/action.cr")
+          item.ends_with?("/bookshelf/lib/caramel/src/caramel/action.cr") || item == framework
         end
-        puts "PASS: frappe lsp crystalline definition into the project's vendored Caramel"
+        puts "PASS: frappe lsp crystalline definition into the project's Caramel dependency"
       ensure
         client.close
       end
-      File.write(File.join(project, ".caramel-version"), "0.0.0\n")
+      lock = File.join(project, "shard.lock")
+      File.write(lock, File.read(lock).sub(/(  caramel:\n    [^\n]+\n    version: )[^\n]+/) { |_, match| "#{match[1]}0.0.0" })
       refused = Caramel::Checks.run([FRAPPE, "lsp", "ameba-ls"], chdir: project, env: env.merge({"CARAMEL_HOME" => parent}), clear_env: true, timeout: 30.seconds)
       raise "Frappé accepted a mismatched version: #{refused.stderr}" unless refused.status.exit_code == 1 && refused.stderr.includes?("no Caramel installation is registered for it")
       puts "PASS: frappe lsp refuses a project pinned to another Caramel version"

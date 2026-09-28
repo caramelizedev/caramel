@@ -61,7 +61,7 @@ Extension names are validated metadata; automatic extension provisioning is not 
 
 Latte supplies four distinct connection URLs over owner-only IPC: development runtime/migration and spec runtime/migration. Frappé writes them with a fresh application secret to mode-0600 `.env`. Temporary secret files stay under ignored, private `.caramel/`. Neither public status nor site listings include these credentials.
 
-The unpublished preview includes the framework under `vendor/caramel`, with a version and per-file checksum manifest. The application lock pins that source plus crystal-db 0.14.0 and crystal-pg 0.30.0. Setup verifies the project's own snapshot and installs with `--frozen`; it does not silently replace source with the latest checkout. The manifest detects accidental drift, not a maliciously modified manifest and source pair.
+Applications depend on the framework as a shard ([ADR 0016](../decisions/0016-versioning-and-releases.md)). From a release, `frappe new` writes `caramel: github: caramelizedev/caramel, version: "~> X.Y.Z"`; from an unreleased checkout, a `path:` dependency on that checkout; with `CARAMEL_REPOSITORY` set, a `git:` dependency on that repository. The generated lock pins that source plus the framework's own locks of crystal-db 0.14.0 and crystal-pg 0.30.0, and setup installs with `--frozen`. Frappé reads the pinned release from the caramel entry of `shard.lock`.
 
 ## Generated resources
 
