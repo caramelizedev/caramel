@@ -5,8 +5,10 @@ require "./latte/trust"
 begin
   case ARGV
   when ["daemon"], ["daemon", "--detach"]
-    registry = Caramel::Latte::Registry.new
-    Caramel::Latte::Daemon.detach(registry.paths) if ARGV[1]? == "--detach"
+    # Detach first, so every later failure reaches logs/latte.log.
+    paths = Caramel::Latte::Paths.new
+    Caramel::Latte::Daemon.detach(paths) if ARGV[1]? == "--detach"
+    registry = Caramel::Latte::Registry.new(paths)
     Caramel::Latte::Daemon.new(registry, Caramel::Latte::Supervisor.new(registry)).run
   when ["stop"]
     stopped = Caramel::Latte::Daemon.stop(Caramel::Latte::Paths.new)
