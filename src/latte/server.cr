@@ -115,6 +115,7 @@ module Caramel::Latte
   class Server
     MAX_BODY = 16 * 1024
     @http_server : HTTP::Server? = nil
+    @stop_requested = false
 
     def initialize(@registry : Registry, @services : ServiceControl)
     end
@@ -125,6 +126,11 @@ module Caramel::Latte
         context.response.status_code = response.status
         response.headers.each { |key, values| context.response.headers[key] = values }
         context.response.print(response.body)
+        if @stop_requested
+          # Deliver the answer before the daemon exits.
+          context.response.close
+          close
+        end
       end
       server.max_request_line_size = 2048
       server.max_headers_size = 16 * 1024
@@ -166,6 +172,12 @@ module Caramel::Latte
         OperationDeadline.check!
         @services.stop_services
         return json(@services.status_json)
+      when {"POST", "/v1/daemon/stop"}
+        # Ends this daemon; managed services keep running and are adopted
+        # by the next one.
+        body(request, [] of String)
+        @stop_requested = true
+        return json({version: 1, stopping: true}.to_json)
       end
       if match = path.match(/\A\/v1\/sites\/([0-9a-f]{16})\/branches(?:\/([^\/]+))?\z/)
         id, name = match[1], match[2]?

@@ -11,11 +11,22 @@ module Caramel::Frappe
     getter socket_path : String
     getter root : String
 
-    def initialize(root : String? = nil)
+    # *launcher* is the `latte` that `ready!` starts when no daemon serves the
+    # state root. By default that is the `latte` built beside the running
+    # `frappe`, for the per-user state only: a CARAMEL_HOME somebody set, as
+    # checks do, belongs to whoever set it.
+    def initialize(root : String? = nil, @launcher : String? = nil)
       selected = root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT
       @root = Latte::StateSecurity.canonical_creation_path(selected)
       @runtime = Latte::StateSecurity.runtime_root(@root)
       @socket_path = File.join(@runtime, "latte.sock")
+      if @launcher.nil? && root.nil? && !ENV.has_key?("CARAMEL_HOME")
+        @launcher = Process.executable_path.try { |path| File.join(File.dirname(path), "latte") }
+      end
+    end
+
+    def log_path : String
+      File.join(@root, "logs", Latte::Paths::DAEMON_LOG)
     end
 
     def status : JSON::Any
@@ -34,7 +45,10 @@ module Caramel::Frappe
       request("POST", "/v1/services/stop", "{}")
     end
 
+    # Starts Latte when it is not running, then its services, and waits
+    # until all of them run.
     def ready!(timeout : Time::Span = 95.seconds) : Nil
+      start_daemon
       deadline = Time.instant + timeout
       current = status
       states = service_states(current)
@@ -49,6 +63,64 @@ module Caramel::Frappe
         raise Error.new("Latte services did not become ready; inspect frappe services") if Time.instant >= deadline
         sleep 200.milliseconds
       end
+    end
+
+    # Runs `latte daemon --detach` when no daemon serves the state root and
+    # this client has a launcher, and waits until it accepts connections.
+    private def start_daemon : Nil
+      launcher = @launcher
+      return unless launcher && daemon_absent?
+      unless File.file?(launcher) && File::Info.executable?(launcher)
+        raise Error.new("Latte is not running and #{launcher} is missing; run scripts/build-latte")
+      end
+      null = File.open(File::NULL, "r+")
+      process = begin
+        Process.new(launcher, ["daemon", "--detach"], input: null, output: null, error: null)
+      ensure
+        null.close
+      end
+      deadline = Time.instant + 30.seconds
+      exited_at = nil
+      while daemon_absent?
+        # A daemon that exits at once lost the instance lock to one that is
+        # already binding its socket, or failed; either shows within a second.
+        exited_at ||= Time.instant if process.terminated?
+        if Time.instant >= deadline || exited_at.try { |at| Time.instant - at >= 1.second }
+          reason = last_log_line.try(&.rstrip('.'))
+          raise Error.new("Latte did not start#{reason ? ": #{reason}" : ""}. Log: #{log_path}")
+        end
+        sleep 50.milliseconds
+      end
+      STDERR.puts("Started Latte in the background. Log: #{log_path}")
+    end
+
+    # True when no daemon listens: the socket is absent or refuses.
+    private def daemon_absent? : Bool
+      return true unless File.info?(@socket_path, follow_symlinks: false)
+      socket = Socket.unix
+      begin
+        socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: 1.second)
+        false
+      rescue ex : Socket::ConnectError
+        ex.os_error.in?(Errno::ECONNREFUSED, Errno::ENOENT)
+      rescue IO::Error
+        false
+      ensure
+        socket.close
+      end
+    rescue File::Error
+      false
+    end
+
+    private def last_log_line : String?
+      info = File.info?(log_path, follow_symlinks: false)
+      return unless info && info.file?
+      File.open(log_path) do |file|
+        file.seek({info.size - 4096, 0}.max)
+        file.gets_to_end.lines.map(&.strip).reject(&.empty?).last?
+      end
+    rescue File::Error
+      nil
     end
 
     def register(project : Project) : JSON::Any
@@ -172,7 +244,8 @@ module Caramel::Frappe
         Latte::StateSecurity.validate_owned_directory(@runtime)
         Latte::StateSecurity.validate_socket_entry(@socket_path, require_socket: true)
       rescue ex : ArgumentError
-        raise Error.new("Latte is unavailable: #{ex.message}. Start Latte and try again.")
+        hint = @launcher ? "Run frappe services start." : "Start latte daemon with CARAMEL_HOME=#{@root} and try again."
+        raise Error.new("Latte is unavailable: #{ex.message}. #{hint}")
       end
       socket = Socket.unix
       socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: 1.second)

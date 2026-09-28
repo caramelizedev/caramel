@@ -144,6 +144,8 @@ module Caramel
     # state and may be recreated after a reboot.
     class Paths
       DEFAULT_ROOT = "~/Library/Application Support/Caramel"
+      # The detached daemon's output, in logs_dir.
+      DAEMON_LOG = "latte.log"
 
       getter root : String
 

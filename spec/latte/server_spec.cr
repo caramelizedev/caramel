@@ -205,4 +205,35 @@ describe Caramel::Latte::Server do
       FileUtils.rm_rf(root)
     end
   end
+
+  it "answers a stop request, then stops listening" do
+    root = File.join("/private/tmp", "latte-api-stop-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    server = Caramel::Latte::Server.new(registry, TestServices.new(registry))
+    stopped = Channel(Nil).new(1)
+    spawn do
+      server.listen
+      stopped.send(nil)
+    end
+    begin
+      socket_path = registry.paths.control_socket
+      until File.exists?(socket_path)
+        sleep 10.milliseconds
+      end
+      socket = UNIXSocket.new(socket_path)
+      response = HTTP::Client.new(socket).post("/v1/daemon/stop", HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}, "{}")
+      response.status_code.should eq(200)
+      JSON.parse(response.body)["stopping"].as_bool.should be_true
+      select
+      when stopped.receive
+      when timeout(5.seconds)
+        fail "the server kept listening after a stop request"
+      end
+    ensure
+      server.close
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
 end

@@ -1,8 +1,69 @@
+require "http/client"
 require "./supervisor"
+
+lib LibC
+  fun setsid : PidT
+end
 
 module Caramel::Latte
   class Daemon
     def initialize(@registry : Registry, @supervisor : Supervisor)
+    end
+
+    # Moves this process into its own session, so closing the terminal that
+    # started it or pressing Ctrl-C there does not stop Latte, and sends its
+    # output to logs/latte.log. Fails harmlessly for a process group leader,
+    # which a launchd job already is.
+    def self.detach(paths : Paths) : Nil
+      LibC.setsid
+      log = File.join(paths.logs_dir, Paths::DAEMON_LOG)
+      if info = File.info?(log, follow_symlinks: false)
+        unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+          raise ArgumentError.new("Latte log is not a private owned file")
+        end
+      end
+      output = File.open(log, "a", perm: 0o600)
+      STDIN.reopen(File.open(File::NULL))
+      STDOUT.reopen(output)
+      STDERR.reopen(output)
+      STDOUT.sync = true
+      STDERR.sync = true
+      output.close
+    end
+
+    # Whether a daemon holds the instance lock for *paths*.
+    def self.running?(paths : Paths) : Bool
+      lock_path = File.join(paths.run_dir, "daemon.lock")
+      return false unless File.info?(lock_path, follow_symlinks: false)
+      File.open(lock_path, "r") do |lock|
+        lock.flock_exclusive(blocking: false)
+        lock.flock_unlock
+        false
+      rescue IO::Error
+        true
+      end
+    end
+
+    # Asks the daemon for *paths* to exit and waits until it has. Services
+    # keep running. Returns false when no daemon was running.
+    def self.stop(paths : Paths, timeout : Time::Span = 20.seconds) : Bool
+      return false unless running?(paths)
+      socket = Socket.unix
+      begin
+        socket.connect(Socket::UNIXAddress.new(paths.control_socket), timeout: 2.seconds)
+        socket.read_timeout = timeout
+        HTTP::Client.new(socket, "latte").post("/v1/daemon/stop", HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}, "{}")
+      rescue ex : IO::Error
+        raise PublicError.new("stop_failed", "Latte did not accept the stop request: #{ex.message}")
+      ensure
+        socket.close
+      end
+      deadline = Time.instant + timeout
+      while running?(paths)
+        raise PublicError.new("stop_failed", "Latte did not stop within #{timeout.total_seconds.to_i} seconds") if Time.instant >= deadline
+        sleep 50.milliseconds
+      end
+      true
     end
 
     def run : Nil
