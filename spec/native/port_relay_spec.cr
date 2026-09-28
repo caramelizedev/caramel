@@ -1,5 +1,8 @@
 require "spec"
 require "../../scripts/checks/support/harness"
+require "file_utils"
+require "html"
+require "random/secure"
 
 RELAY_BINARY = File.join(Caramel::Checks::REPO, "bin/latte-port-relay")
 raise "Run scripts/check native" unless File.file?(RELAY_BINARY)
@@ -187,6 +190,75 @@ private class RelayChurn
   end
 end
 
+# Runs the relay the way the installed daemon runs: launchd owns the "http"
+# and "https" listeners and hands them over through launch_activate_socket.
+# A per-user job on unprivileged loopback ports stands in for the system job.
+private class LaunchdRelay
+  getter http_port : Int32
+  getter https_port : Int32
+  @domain : String
+
+  def initialize(target_http : Int32, target_https : Int32)
+    @directory = Caramel::Checks.private_temp("caramel-relay-launchd-")
+    @label = "dev.caramel.ports.check.#{Random::Secure.hex(6)}"
+    @log = File.join(@directory, "relay.log")
+    @http_port = Caramel::Checks.free_tcp_port
+    @https_port = Caramel::Checks.free_tcp_port
+    while @https_port == @http_port
+      @https_port = Caramel::Checks.free_tcp_port
+    end
+    plist = File.join(@directory, "#{@label}.plist")
+    File.write(plist, plist(target_http, target_https), perm: 0o600)
+    @domain = begin
+      bootstrap(plist)
+    rescue ex
+      FileUtils.rm_rf(@directory)
+      raise ex
+    end
+  end
+
+  def log : String
+    File.exists?(@log) ? File.read(@log) : ""
+  end
+
+  def close : Nil
+    Caramel::Checks.run(["/bin/launchctl", "bootout", "#{@domain}/#{@label}"], timeout: 15.seconds)
+    FileUtils.rm_rf(@directory)
+  end
+
+  # Terminal sessions load per-user jobs into gui/<uid>; sessions without a
+  # GUI (for example over SSH) only have user/<uid>.
+  private def bootstrap(plist : String) : String
+    uid = LibC.getuid
+    failures = ["gui/#{uid}", "user/#{uid}"].map do |domain|
+      result = Caramel::Checks.run(["/bin/launchctl", "bootstrap", domain, plist], timeout: 15.seconds)
+      return domain if result.success?
+      "#{domain}: #{result.stderr.strip}"
+    end
+    raise "launchctl could not load the relay job (#{failures.join("; ")})"
+  end
+
+  private def plist(target_http : Int32, target_https : Int32) : String
+    arguments = [RELAY_BINARY, "--test-launchd", @http_port.to_s, @https_port.to_s, target_http.to_s, target_https.to_s]
+    sockets = {"http" => @http_port, "https" => @https_port}.map do |name, port|
+      "<key>#{name}</key><dict><key>SockNodeName</key><string>127.0.0.1</string><key>SockServiceName</key><string>#{port}</string>" \
+      "<key>SockFamily</key><string>IPv4</string><key>SockType</key><string>stream</string></dict>"
+    end
+    <<-PLIST
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+      <key>Label</key><string>#{@label}</string>
+      <key>ProgramArguments</key><array>#{arguments.map { |argument| "<string>#{HTML.escape(argument)}</string>" }.join}</array>
+      <key>Sockets</key><dict>#{sockets.join}</dict>
+      <key>RunAtLoad</key><true/>
+      <key>StandardOutPath</key><string>#{HTML.escape(@log)}</string>
+      <key>StandardErrorPath</key><string>#{HTML.escape(@log)}</string>
+      </dict></plist>
+      PLIST
+  end
+end
+
 describe "native Latte port relay" do
   it "round trips clear and TLS-like opaque bytes with half-closes" do
     with_relay_fixture do |fixture|
@@ -266,6 +338,37 @@ describe "native Latte port relay" do
       fixture.relay.terminate
       Caramel::Checks.wait_until(3.seconds, 10.milliseconds) { fixture.relay.terminated? }.should be_true
       expect_raises(Socket::Error) { TCPSocket.new("127.0.0.1", fixture.http_port, connect_timeout: 0.4) }
+    end
+  end
+
+  it "serves the listeners launchd hands over, as the installed daemon does" do
+    http = RelayByteServer.new("http-ready", "http-eof")
+    https = RelayByteServer.new("tls-ready", "tls-eof")
+    relay = LaunchdRelay.new(http.port, https.port)
+    begin
+      { {relay.http_port, "http-ready"}, {relay.https_port, "tls-ready"} }.each do |port, ready|
+        client = TCPSocket.new("127.0.0.1", port, connect_timeout: 3.seconds)
+        begin
+          client.read_timeout = 5.seconds
+          initial = Bytes.new(ready.bytesize)
+          begin
+            client.read_fully(initial)
+          rescue ex : IO::Error
+            fail "the relay did not serve launchd's listener on 127.0.0.1:#{port} (#{ex.message}); relay output: #{relay.log.inspect}"
+          end
+          String.new(initial).should eq(ready)
+          client << "launchd-payload"
+          echoed = Bytes.new("launchd-payload".bytesize)
+          client.read_fully(echoed)
+          String.new(echoed).should eq("launchd-payload")
+        ensure
+          client.close
+        end
+      end
+    ensure
+      relay.close
+      http.close
+      https.close
     end
   end
 end

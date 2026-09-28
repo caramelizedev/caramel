@@ -46,29 +46,35 @@ private struct Destination {
     let port: UInt16
 }
 
+// Where the relay's two loopback listeners come from.
+private enum ListenerSource {
+    // launchd's "http" and "https" sockets, expected on 127.0.0.1 at these
+    // ports. Production uses 80 and 443; --test-launchd runs under a per-user
+    // launchd job on unprivileged ports.
+    case launchd(httpPort: UInt16, httpsPort: UInt16)
+    // --test-listen: the relay binds its own listeners.
+    case bind(httpPort: UInt16, httpsPort: UInt16)
+}
+
 private struct RelayConfiguration {
-    let httpListenerPort: UInt16?
-    let httpsListenerPort: UInt16?
+    let listeners: ListenerSource
     let httpDestination: Destination
     let httpsDestination: Destination
-
-    var isTestMode: Bool { httpListenerPort != nil }
 
     static func parse(arguments: ArraySlice<String>) throws -> RelayConfiguration {
         if arguments.isEmpty {
             return RelayConfiguration(
-                httpListenerPort: nil,
-                httpsListenerPort: nil,
+                listeners: .launchd(httpPort: productionHTTPPort, httpsPort: productionHTTPSPort),
                 httpDestination: Destination(port: productionHTTPDestination),
                 httpsDestination: Destination(port: productionHTTPSDestination)
             )
         }
 
-        guard arguments.first == "--test-listen" else {
-            throw RelayError.usage("the only alternate mode is --test-listen HTTPPORT HTTPSPORT HTTPDEST HTTPSDEST")
+        guard let mode = arguments.first, mode == "--test-listen" || mode == "--test-launchd" else {
+            throw RelayError.usage("the only alternate modes are --test-listen and --test-launchd, each with HTTPPORT HTTPSPORT HTTPDEST HTTPSDEST")
         }
         guard arguments.count == 5 else {
-            throw RelayError.usage("--test-listen requires HTTPPORT HTTPSPORT HTTPDEST HTTPSDEST")
+            throw RelayError.usage("\(mode) requires HTTPPORT HTTPSPORT HTTPDEST HTTPSDEST")
         }
         let values = arguments.dropFirst().map { argument -> UInt16? in
             guard let value = Int(argument), value >= 1024, value <= Int(UInt16.max) else {
@@ -83,9 +89,11 @@ private struct RelayConfiguration {
         guard Set(ports).count == ports.count else {
             throw RelayError.usage("test ports must be distinct")
         }
+        let listeners: ListenerSource = mode == "--test-listen"
+            ? .bind(httpPort: ports[0], httpsPort: ports[1])
+            : .launchd(httpPort: ports[0], httpsPort: ports[1])
         return RelayConfiguration(
-            httpListenerPort: ports[0],
-            httpsListenerPort: ports[1],
+            listeners: listeners,
             httpDestination: Destination(port: ports[2]),
             httpsDestination: Destination(port: ports[3])
         )
@@ -138,18 +146,13 @@ private func socketError(_ descriptor: Int32) -> Int32? {
     return value
 }
 
+// Whether an inherited descriptor is a TCP socket bound to 127.0.0.1 at the
+// expected port.
 private func validateInheritedListener(_ descriptor: Int32, expectedPort: UInt16) -> Bool {
     var type: Int32 = 0
     var typeLength = socklen_t(MemoryLayout<Int32>.size)
     guard getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &typeLength) == 0,
           type == SOCK_STREAM else {
-        return false
-    }
-
-    var accepting: Int32 = 0
-    var acceptingLength = socklen_t(MemoryLayout<Int32>.size)
-    guard getsockopt(descriptor, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &acceptingLength) == 0,
-          accepting != 0 else {
         return false
     }
 
@@ -196,7 +199,15 @@ private func activateLaunchdListener(name: String, expectedPort: UInt16) throws 
     let descriptor = descriptorArray[0]
     guard validateInheritedListener(descriptor, expectedPort: expectedPort) else {
         close(descriptor)
-        throw RelayError.invalidInheritedSocket("\(name) is not an AF_INET loopback listener on port \(expectedPort)")
+        throw RelayError.invalidInheritedSocket("\(name) is not a TCP socket bound to 127.0.0.1:\(expectedPort)")
+    }
+    // Darwin rejects getsockopt(SO_ACCEPTCONN) with ENOPROTOOPT, so the
+    // listening state cannot be read back. listen() is harmless on a socket
+    // launchd already listens on, and guarantees that it accepts connections.
+    guard Darwin.listen(descriptor, SOMAXCONN) == 0 else {
+        let message = posixMessage()
+        close(descriptor)
+        throw RelayError.invalidInheritedSocket("\(name) cannot accept connections: \(message)")
     }
     guard setNonBlocking(descriptor) else {
         close(descriptor)
@@ -623,19 +634,16 @@ private final class PortRelay {
 
     func start() throws {
         do {
-            if configuration.isTestMode {
-                guard let httpPort = configuration.httpListenerPort,
-                      let httpsPort = configuration.httpsListenerPort else {
-                    throw RelayError.usage("test listener ports are incomplete")
-                }
+            switch configuration.listeners {
+            case let .bind(httpPort, httpsPort):
                 let httpDescriptor = try makeTestListener(port: httpPort)
                 listeners.append(RelayListener(descriptor: httpDescriptor, destination: configuration.httpDestination))
                 let httpsDescriptor = try makeTestListener(port: httpsPort)
                 listeners.append(RelayListener(descriptor: httpsDescriptor, destination: configuration.httpsDestination))
-            } else {
-                let httpDescriptor = try activateLaunchdListener(name: "http", expectedPort: productionHTTPPort)
+            case let .launchd(httpPort, httpsPort):
+                let httpDescriptor = try activateLaunchdListener(name: "http", expectedPort: httpPort)
                 listeners.append(RelayListener(descriptor: httpDescriptor, destination: configuration.httpDestination))
-                let httpsDescriptor = try activateLaunchdListener(name: "https", expectedPort: productionHTTPSPort)
+                let httpsDescriptor = try activateLaunchdListener(name: "https", expectedPort: httpsPort)
                 listeners.append(RelayListener(descriptor: httpsDescriptor, destination: configuration.httpsDestination))
             }
         } catch {
