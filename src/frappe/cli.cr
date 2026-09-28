@@ -344,6 +344,7 @@ module Caramel::Frappe
       checks = {
         "Project configuration"       => -> { Project.load; nil },
         "Managed Crystal compiler"    => -> { Tools.new(@framework_root).check_compiler },
+        "Caramel installation"        => -> { verify_installation },
         "Locked dependencies"         => -> { Tools.new(@framework_root).check_dependencies(Project.load) },
         "Managed PostgreSQL tool"     => -> { Tools.new(@framework_root).toolchain.verify_postgres_version!; nil },
         "Private local configuration" => -> { Project.load.local_environment; nil },
@@ -359,6 +360,13 @@ module Caramel::Frappe
         @output.puts("CHECK #{label}: #{ex.is_a?(Error) ? ex.message : ex.class.to_s}")
       end
       failures == 0 ? 0 : 1
+    end
+
+    # A frappe older than 0.3.0 installed releases without their linter;
+    # installing the release again builds it.
+    private def verify_installation : Nil
+      return if !Release.installed?(Installations.new, Caramel::VERSION, @framework_root) || Release.linter?(@framework_root)
+      raise Error.new("Caramel #{Caramel::VERSION} was installed without its linter; finish it: frappe installations install #{Caramel::VERSION}")
     end
 
     private def verify_origin(project : Project) : Nil
@@ -508,7 +516,11 @@ module Caramel::Frappe
       when "installations install"
         release = invocation["VERSION"]
         if root = registry.lookup(release)
-          @output.puts("Caramel #{release} is already installed: #{root}")
+          if Release.new(release, registry, @output, @error).finish(root)
+            @output.puts("Finished installing Caramel #{release}: #{root}")
+          else
+            @output.puts("Caramel #{release} is already installed: #{root}")
+          end
           return
         end
         root = Release.new(release, registry, @output, @error).install(Tools.new(@framework_root).toolchain.root)

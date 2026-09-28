@@ -1,0 +1,12 @@
+#!/bin/sh
+# Builds this checkout as an installed release (ADR 0016): its locked
+# dependencies, including Ameba for the linter, then frappe, latte and the
+# linter. `frappe installations install` runs this script when a release has
+# it, so each release names its own build, whichever release's frappe
+# installs it.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$ROOT/scripts/shards" install --frozen
+"$ROOT/scripts/build-frappe"
+"$ROOT/scripts/build-latte"
+"$ROOT/scripts/build-lint"

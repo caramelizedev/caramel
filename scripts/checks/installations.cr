@@ -3,8 +3,9 @@ require "../../src/caramel/version"
 
 # ADR 0016: `frappe installations install VERSION` clones a release tag,
 # installs its toolchain (reusing this one when it pins the same), builds it
-# and registers it, and a project pinned to that release runs its Frappé. A
-# repository of this working tree tagged v9.9.9 stands in for
+# with its own scripts/build-release and registers it, and a project pinned to
+# that release runs its Frappé. Installing it again builds a linter it lacks.
+# A repository of this working tree tagged v9.9.9 stands in for
 # github.com/caramelizedev/caramel; HOME and CARAMEL_HOME are private, so this
 # Mac's launchers and registry stay as they are.
 module Caramel::Checks::Installations
@@ -45,11 +46,26 @@ module Caramel::Checks::Installations
       pinned = project(root, "pinned", RELEASE)
       doctor = frappe.call(["doctor"], pinned)
       Checks.fail("the pinned project did not run Frappé #{RELEASE}:\n#{doctor.stdout}#{doctor.stderr}") unless doctor.stdout.starts_with?("OK    Project configuration\n")
+      Checks.fail("frappe doctor did not accept the installed release:\n#{doctor.stdout}") unless doctor.stdout.includes?("OK    Caramel installation\n")
       missing = frappe.call(["doctor"], project(root, "missing", "9.9.8"))
       unless missing.status.exit_code == 1 && missing.stderr.includes?("Install it: frappe installations install 9.9.8")
         Checks.fail("an uninstalled pin did not name its install command:\n#{missing.stderr}")
       end
       puts "PASS: a project pinned to #{RELEASE} runs that release's Frappé, and one pinned to an uninstalled release is told how to install it"
+
+      linter = File.join(release, "bin/frappe-lint")
+      File.delete(linter)
+      unfinished = frappe.call(["doctor"], pinned).stdout
+      unless unfinished.includes?("CHECK Caramel installation: Caramel #{RELEASE} was installed without its linter; finish it: frappe installations install #{RELEASE}\n")
+        Checks.fail("frappe doctor did not name the install that builds a missing linter:\n#{unfinished}")
+      end
+      finished = frappe.call(["installations", "install", RELEASE], root)
+      unless finished.success? && finished.stdout.includes?("Finished installing Caramel #{RELEASE}: #{release}") && File.file?(linter)
+        Checks.fail("installing #{RELEASE} again did not build its missing linter:\n#{finished.stdout}#{finished.stderr}")
+      end
+      healed = frappe.call(["doctor"], pinned).stdout
+      Checks.fail("frappe doctor still reports the linter missing:\n#{healed}") unless healed.includes?("OK    Caramel installation\n")
+      puts "PASS: a release installed without its linter makes frappe doctor name frappe installations install #{RELEASE}, which builds it"
       0
     ensure
       FileUtils.rm_rf(root)

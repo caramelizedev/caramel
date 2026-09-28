@@ -9,8 +9,8 @@ require "../latte/process"
 module Caramel::Frappe
   # A tagged Caramel release on this Mac (ADR 0016). `install` clones its tag
   # into Caramel's releases directory, installs its toolchain (reusing this
-  # installation's when the release pins the same one), installs its locked
-  # dependencies, builds its frappe, latte and linter, and registers it.
+  # installation's when the release pins the same one), builds it with its
+  # own scripts/build-release, and registers it.
   class Release
     getter version : String
 
@@ -40,12 +40,37 @@ module Caramel::Frappe
         chdir: root, env: {"CARAMEL_TOOLCHAIN_ROOT" => nil}, timeout: 600.seconds, output_limit: 64 * 1024)
       run(root, "scripts/install-toolchain") unless reused.success?
       @output.puts("Building Caramel #{@version}…")
-      run(root, "scripts/shards", ["install", "--frozen", "--without-development"])
-      run(root, "scripts/build-frappe")
-      run(root, "scripts/build-latte")
-      run(root, "scripts/build-lint")
+      if File.file?(File.join(root, "scripts/build-release"))
+        run(root, "scripts/build-release")
+      else
+        # Releases through 0.3.0 name no build of their own.
+        run(root, "scripts/shards", ["install", "--frozen", "--without-development"])
+        run(root, "scripts/build-frappe")
+        run(root, "scripts/build-latte")
+        run(root, "scripts/build-lint")
+      end
       @installations.register(@version, root)
       root
+    end
+
+    # Builds what an installed release lacks and returns whether it built
+    # anything: a frappe older than 0.3.0 installed releases without their
+    # linter. A registered checkout builds its linter on first use instead.
+    def finish(root : String) : Bool
+      return false if !Release.installed?(@installations, @version, root) || Release.linter?(root)
+      @output.puts("Building the linter Caramel #{@version} was installed without…")
+      run(root, "scripts/build-lint")
+      true
+    end
+
+    # Whether *root* is where `install` puts *version*, not a registered checkout.
+    def self.installed?(installations : Installations, version : String, root : String) : Bool
+      expected = File.join(installations.root, "releases", version)
+      File.exists?(expected) && File.exists?(root) && File.realpath(expected) == File.realpath(root)
+    end
+
+    def self.linter?(root : String) : Bool
+      File::Info.executable?(File.join(root, "bin/frappe-lint"))
     end
 
     private def clone(releases : String, root : String) : Nil
