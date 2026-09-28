@@ -52,15 +52,20 @@ private func identical(_ a: [String: Any], _ b: [String: Any]) -> Bool {
     NSDictionary(dictionary: a).isEqual(to: b)
 }
 
+// The relay, launchd plist and resolver this checkout installs for `username`.
+private func integrationPayloads(uid: uid_t, username: String) throws -> [String: Data] {
+    let relay = try ownedBytes(try installerRepositoryRoot() + "/bin/latte-port-relay", uid: uid)
+    let plist = try PropertyListSerialization.data(fromPropertyList: plistConfiguration(username: username), format: .xml, options: 0)
+    return ["relay": relay, "plist": plist, "resolver": resolverBytes]
+}
+
 private func prepare(_ bundle: String, host: SystemHost) throws {
     guard host.euid() != host.rootUID else {
         throw integrationError("Prepare the installation as the ordinary installing user")
     }
     let uid = getuid()
     let username = try account(uid)
-    let relay = try ownedBytes(try installerRepositoryRoot() + "/bin/latte-port-relay", uid: uid)
-    let plist = try PropertyListSerialization.data(fromPropertyList: plistConfiguration(username: username), format: .xml, options: 0)
-    let payloads = ["relay": relay, "plist": plist, "resolver": resolverBytes]
+    let payloads = try integrationPayloads(uid: uid, username: username)
     guard mkdir(bundle, 0o700) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     for name in ["relay", "plist", "resolver"] {
         try atomicWrite(payloads[name]!, to: bundle + "/" + name, mode: 0o600, prefix: ".caramel-")
@@ -378,6 +383,24 @@ private func uninstall(_ host: SystemHost) throws {
     print("Removed only the recorded Caramel resolver and relay. User certificate trust is managed separately.")
 }
 
+// Compares each installed file with the one this checkout would install,
+// reading only the world-readable system copies: "current", "stale" or
+// "absent" per payload. Needs no administrator rights.
+private func status(_ host: SystemHost) throws {
+    let uid = getuid()
+    let expected = try integrationPayloads(uid: uid, username: try account(uid))
+    var states: [String: String] = [:]
+    for (name, bytes) in expected {
+        let installed = host.destinations[name]!
+        if !existing(installed) {
+            states[name] = "absent"
+        } else {
+            states[name] = sha256(data: try Data(contentsOf: URL(fileURLWithPath: installed))) == sha256(data: bytes) ? "current" : "stale"
+        }
+    }
+    print(String(decoding: try canonicalJSON(states), as: UTF8.self))
+}
+
 @main
 private enum LocalIntegrationInstaller {
     static func main() {
@@ -395,30 +418,31 @@ private enum LocalIntegrationInstaller {
         let program = (CommandLine.arguments[0] as NSString).lastPathComponent
         let options = CommandLineOptions(
             program: program,
-            usage: "\(program) [-h] {prepare,apply,uninstall} ...",
+            usage: "\(program) [-h] {prepare,apply,uninstall,status} ...",
             description: "Prepare/review the fixed macOS DNS/port integration; apply requires root.\n\nCertificate trust is installed separately as the user, never by the root helper.\nNo project code is executed by this installer.",
             options: [("-h, --help", "show this help message and exit")])
         if args.first == "-h" || args.first == "--help" { options.help() }
         guard let command = args.first else { options.error("the following arguments are required: command") }
-        let commands = ["prepare", "apply", "uninstall"]
+        let commands = ["prepare", "apply", "uninstall", "status"]
+        let bare = ["uninstall", "status"].contains(command)
 #if CARAMEL_INSTALLER_TESTING
         let hidden = ["test-validate", "test-verify-job"]
 #else
         let hidden = [String]()
 #endif
         guard commands.contains(command) || hidden.contains(command) else {
-            options.error("argument command: invalid choice: '\(command)' (choose from 'prepare', 'apply', 'uninstall')")
+            options.error("argument command: invalid choice: '\(command)' (choose from 'prepare', 'apply', 'uninstall', 'status')")
         }
         if args.dropFirst().contains("-h") || args.dropFirst().contains("--help") {
             CommandLineOptions(program: program + " " + command,
-                               usage: "\(program) \(command) [-h]" + (command == "uninstall" ? "" : " bundle"),
+                               usage: "\(program) \(command) [-h]" + (bare ? "" : " bundle"),
                                description: "", options: [("-h, --help", "show this help message and exit")]).help()
         }
-        if args.count == 1 && command != "uninstall" {
+        if args.count == 1 && !bare {
             options.error("the following arguments are required: bundle")
         }
-        if args.count != (command == "uninstall" ? 1 : 2) {
-            options.error("unrecognized arguments: \(args.dropFirst(command == "uninstall" ? 1 : 2).joined(separator: " "))")
+        if args.count != (bare ? 1 : 2) {
+            options.error("unrecognized arguments: \(args.dropFirst(bare ? 1 : 2).joined(separator: " "))")
         }
         if args.count == 2 && args[1].hasPrefix("-") {
             options.error("the following arguments are required: bundle")
@@ -444,6 +468,8 @@ private enum LocalIntegrationInstaller {
             try prepare(URL(fileURLWithPath: args[1]).standardizedFileURL.path, host: host)
         } else if command == "apply" {
             try apply(URL(fileURLWithPath: args[1]).standardizedFileURL.path, host: host)
+        } else if command == "status" {
+            try status(host)
         } else {
             try uninstall(host)
         }

@@ -16,7 +16,7 @@ describe Caramel::Latte::Toolchain do
   it "resolves every managed executable from the explicit root" do
     root = postgres_unit_root
     begin
-      %w(conda-postgresql/18.6/bin/postgres conda-postgresql/18.6/bin/initdb conda-postgresql/18.6/bin/pg_ctl conda-postgresql/18.6/bin/psql conda-postgresql/18.6/bin/pg_dump conda-postgresql/18.6/bin/pg_restore conda-openssl/3.6.4/bin/openssl).each do |relative|
+      %w[conda-postgresql/18.6/bin/postgres conda-postgresql/18.6/bin/initdb conda-postgresql/18.6/bin/pg_ctl conda-postgresql/18.6/bin/psql conda-postgresql/18.6/bin/pg_dump conda-postgresql/18.6/bin/pg_restore conda-openssl/3.6.4/bin/openssl].each do |relative|
         path = File.join(root, "data", "installs", relative)
         Dir.mkdir_p(File.dirname(path), mode: 0o700)
         File.write(path, "#!/bin/sh\n")
@@ -71,7 +71,7 @@ end
 describe Caramel::Latte::ProcessRunner do
   it "kills a command that exceeds its deadline and bounds diagnostics" do
     result = Caramel::Latte::ProcessRunner.run(["/bin/sh", "-c", "sleep 2"], timeout: 50.milliseconds)
-    result.timed_out.should be_true
+    result.timed_out?.should be_true
     result.status.success?.should be_false
   end
 
@@ -82,7 +82,7 @@ describe Caramel::Latte::ProcessRunner do
       ["/bin/sh", "-c", "echo $$ > #{pid_path}; exec /bin/sleep 2"],
       timeout: 50.milliseconds,
     )
-    result.timed_out.should be_true
+    result.timed_out?.should be_true
     pid = File.read(pid_path).strip.to_i64
     deadline = Time.instant + 2.seconds
     while Process.exists?(pid) && Time.instant < deadline
@@ -97,7 +97,7 @@ describe Caramel::Latte::ProcessRunner do
     expect_raises(Caramel::Latte::DeadlineExceeded) do
       Caramel::Latte::OperationDeadline.run(100.milliseconds) do
         first = Caramel::Latte::ProcessRunner.run(["/bin/sleep", "2"], timeout: 5.seconds)
-        first.timed_out.should be_true
+        first.timed_out?.should be_true
         Caramel::Latte::ProcessRunner.run(["/bin/echo", "must-not-launch"], timeout: 5.seconds)
       end
     end
@@ -177,7 +177,9 @@ describe Caramel::Latte::ManagedChild do
     root = postgres_unit_root
     record = File.join(root, "child.json")
     log = File.join(root, "child.log")
+    # ameba:disable Lint/UselessAssign
     first : Process? = nil
+    # ameba:disable Lint/UselessAssign
     second : Process? = nil
     first = Process.new(["/bin/sleep", "5"])
     second = Process.new(["/bin/sleep", "5"])
@@ -187,12 +189,10 @@ describe Caramel::Latte::ManagedChild do
     Process.exists?(second.pid).should be_true
   ensure
     [first, second].each do |stray|
-      begin
-        process = stray.not_nil!
-        process.terminate(graceful: false) unless process.terminated?
-        process.wait
-      rescue
-      end
+      process = stray.not_nil!
+      process.terminate(graceful: false) unless process.terminated?
+      process.wait
+    rescue
     end
     FileUtils.rm_rf(root) if root
   end
@@ -210,6 +210,32 @@ describe Caramel::Latte::Postgres do
     url.should start_with("postgresql://caramel_runtime_#{id}:secret@/")
     url.should contain("host=%2Fprivate%2Ftmp%2Fcaramel-test%2Fpostgres")
     url.should_not contain("127.0.0.1")
+  end
+
+  it "refuses to start an empty cluster beside another major's data, and keeps that data" do
+    tools = postgres_unit_root
+    state = "/private/tmp/caramel-latte-majors-#{Random::Secure.hex(8)}"
+    Dir.mkdir(state, 0o700)
+    begin
+      bin = File.join(tools, "data/installs/conda-postgresql/18.6/bin")
+      Dir.mkdir_p(bin, mode: 0o700)
+      marker = File.join(tools, "initdb-ran")
+      {"postgres" => "echo 'postgres (PostgreSQL) 18.6'", "initdb" => "touch '#{marker}'"}.each do |name, body|
+        File.write(File.join(bin, name), "#!/bin/sh\n#{body}\n")
+        File.chmod(File.join(bin, name), 0o700)
+      end
+      previous = File.join(state, "services/postgres/17/data")
+      Dir.mkdir_p(previous, mode: 0o700)
+      File.write(File.join(previous, "PG_VERSION"), "17\n")
+      service = Caramel::Latte::Postgres.new(Caramel::Latte::Paths.new(state), Caramel::Latte::Toolchain.new(tools))
+      expect_raises(Caramel::Latte::Postgres::WrongMajor, "Latte's databases are in PostgreSQL 17, but Caramel #{Caramel::VERSION} uses PostgreSQL 18") { service.start }
+      File.exists?(marker).should be_false
+      Dir.children(File.join(state, "services/postgres/18/data")).should be_empty
+      File.read(File.join(previous, "PG_VERSION")).should eq("17\n")
+    ensure
+      remove_postgres_unit_root(tools)
+      FileUtils.rm_rf(state)
+    end
   end
 
   it "quotes generated SQL identifiers and literals" do

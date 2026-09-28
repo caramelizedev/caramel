@@ -22,6 +22,11 @@ mkdir -p "$MACOS" "$RESOURCES" "$CACHE_ROOT"
   -framework CryptoKit
 
 cp "$ROOT/latte/macos/Info.plist" "$CONTENTS/Info.plist"
+# shard.yml is the only version source (ADR 0016). Bundle versions take the
+# numeric core: 0.2.0-rc.1 becomes 0.2.0.
+VERSION=$(sed -n 's/^version: *//p' "$ROOT/shard.yml")
+/usr/bin/plutil -replace CFBundleShortVersionString -string "${VERSION%%-*}" "$CONTENTS/Info.plist"
+/usr/bin/plutil -replace CFBundleVersion -string "${VERSION%%-*}" "$CONTENTS/Info.plist"
 
 # Keep a real ICNS resource in the bundle for Finder and LaunchServices. The
 # in-menu icon remains the native cup-and-saucer glyph from AppKit.

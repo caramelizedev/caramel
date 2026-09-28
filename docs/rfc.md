@@ -679,7 +679,10 @@ One command table drives `help`, `COMMAND --help`, validation and the invariant 
 
 ```text
 CARAMEL CLI INTERFACE (STRICT TOKENS)
+VERSION: 0.1.0
+DOCS: https://github.com/caramelizedev/caramel/tree/v0.1.0
 frappe check [--agent|--human]  # Run the Tier-1 type check (crystal build --no-codegen) and report diagnostics; MRDP unless stdout is a TTY.
+frappe lint [--agent|--human]  # Check the application against Caramel's RFC-0008 rule set in .ameba.yml; MRDP unless stdout is a TTY.
 frappe routes [FILTER]  # List routes with their contracts; FILTER keeps routes whose method, path or action contains it (any case).
 frappe db branch create NAME  # Clone the development database into branch NAME and print its connection URL.
 frappe db diff --name NAME [--dev-override] [--agent|--human]  # Derive migrations from the declared schema and prove them on a scratch branch.
@@ -924,7 +927,7 @@ Caramel’s ongoing development is sustainably funded via a two-tier product mod
 
 # RFC-0008: Poetic Ergonomics, Conceptual Compression, & Semantic Syntax
 
-**Status:** Approved
+**Status:** Approved · Partial. `frappe lint` checks application code against this RFC's rule set ([ADR 0017](decisions/0017-formatting-and-linting.md)).
 
 **Classification:** Developer Experience, Aesthetics, & Language Design
 
@@ -954,6 +957,7 @@ end
 ```
 
 * **Under the Hood:** The `invite` macro expands directly into a verified `Team::InviteChangeset`, validates tenant boundaries, and writes an enqueued `SendInvitationJob` into the PostgreSQL `caramel_jobs` table within the same transaction.
+* **Service nouns are reported:** `frappe lint` flags types named like `InvitationService` or `AbstractDataTransformerFactory` (`Caramel/ServiceNoun`, [ADR 0017](decisions/0017-formatting-and-linting.md)).
 
 #### 2.2. Declarative Sentence Scopes
 

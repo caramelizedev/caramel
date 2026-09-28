@@ -3,6 +3,7 @@ import Darwin
 import CryptoKit
 
 private let receiptName = ".caramel-toolchain.json"
+private let receiptFormat = 1
 private let miseURL = "https://github.com/jdx/mise/releases/download/v2026.9.11/mise-v2026.9.11-macos-arm64"
 private let miseSHA = "bbfd47ef65c2278c4e9ba09b523beb1019365a3c0b9c9fc60f686dc16f358e0f"
 private let releaseCritical = [
@@ -237,14 +238,17 @@ private final class ToolchainInstallation {
             }
             state = object
             if state["root"] as? String != root { throw InstallerError(message: "installation was moved; install into a fresh prefix") }
-            if state["version"] as? Int != 1 || state["selection"] as? [String: String] != selection {
+            if let format = state["version"] as? Int, format > receiptFormat {
+                throw InstallerError(message: "this toolchain was installed by a newer Caramel (receipt format \(format)); run that release's scripts/install-toolchain")
+            }
+            if state["version"] as? Int != receiptFormat || state["selection"] as? [String: String] != selection {
                 throw InstallerError(message: "installation receipt differs from this toolchain release")
             }
             if !["installing", "complete"].contains(state["status"] as? String ?? "") {
                 throw InstallerError(message: "unrecognized installation state")
             }
         } else {
-            state = ["version": 1, "root": root, "selection": selection, "status": "installing"]
+            state = ["version": receiptFormat, "root": root, "selection": selection, "status": "installing"]
             try save()
         }
     }

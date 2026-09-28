@@ -23,20 +23,21 @@ module Caramel::Checks
 
     def execute(args : Array(String)) : Nil
       puts "Frappé fixture: #{@root}"
+      # ameba:disable Lint/UselessAssign
       failed = true
       begin
         start
         command([@frappe, "new", "bookshelf"], chdir: @projects)
         values = local_values(@project)
         assert!(File.info(File.join(@project, ".env")).permissions.value == 0o600)
-        urls = %w(DATABASE_URL MIGRATION_DATABASE_URL SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL).map { |key| values[key] }
+        urls = %w[DATABASE_URL MIGRATION_DATABASE_URL SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL].map { |key| values[key] }
         assert!(urls.uniq.size == 4)
         command([@frappe, "make", "resource", "Book", "title:string", "author:string"], chdir: @project)
         command([@frappe, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
         print routes
-        assert!(routes.lines.any? { |line| line.split == %w(GET /books/:id App::Books::Show id:Int64(min=1)) }, routes)
-        assert!(routes.lines.any? { |line| line.split == %w(PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?) }, routes)
+        assert!(routes.lines.any? { |line| line.split == %w[GET /books/:id App::Books::Show id:Int64(min=1)] }, routes)
+        assert!(routes.lines.any? { |line| line.split == %w[PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?] }, routes)
         agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
@@ -68,7 +69,7 @@ module Caramel::Checks
         clone = File.join(@projects, "bookshelf-clone")
         Dir.mkdir(clone, 0o700)
         Dir.children(@project).each do |entry|
-          next if %w(lib .caramel .env).includes?(entry)
+          next if %w[lib .caramel .env].includes?(entry)
           command(["/bin/cp", "-R", File.join(@project, entry), File.join(clone, entry)], echo: false)
         end
         manifest = File.join(clone, "config/environment.yml")
@@ -85,8 +86,8 @@ module Caramel::Checks
 
         injected = File.join(@root, "package-with-failed-installer")
         Dir.mkdir(injected)
-        %w(src templates vendor).each { |folder| command(["/bin/cp", "-R", File.join(@repo, folder), File.join(injected, folder)], echo: false) }
-        %w(shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md).each { |name| File.copy(File.join(@repo, name), File.join(injected, name)) }
+        %w[src templates vendor].each { |folder| command(["/bin/cp", "-R", File.join(@repo, folder), File.join(injected, folder)], echo: false) }
+        %w[shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md].each { |name| File.copy(File.join(@repo, name), File.join(injected, name)) }
         Dir.mkdir(File.join(injected, "scripts"))
         failed_shards = File.join(injected, "scripts/shards")
         File.write(failed_shards, "#!/bin/sh\nexit 67\n")
@@ -139,10 +140,11 @@ module Caramel::Checks
       absent = environment({"CARAMEL_HOME" => File.join(@root, "absent-latte")})
       manifest = command([@frappe, "agent-manifest"], chdir: "/", environment: absent, echo: false).stdout.lines
       assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
+      assert!(manifest[1]? == "VERSION: #{Caramel::VERSION}", manifest[1]?.to_s)
       Caramel::Frappe::Commands::TABLE.each do |entry|
         assert!(manifest.includes?("frappe #{entry.syntax}  # #{entry.description}"), "manifest lacks frappe #{entry.syntax}")
       end
-      ["check [--agent|--human]", "routes [FILTER]", "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]", "expand FILE:LINE:COL"].each do |syntax|
+      ["check [--agent|--human]", "lint [--agent|--human]", "format", "routes [FILTER]", "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]", "expand FILE:LINE:COL"].each do |syntax|
         assert!(manifest.any?(&.starts_with?("frappe #{syntax}")), "manifest lacks frappe #{syntax}")
       end
       assert!(manifest.any?(&.starts_with?(%(PATCH: INSERT "<text>" AT <line>:<col>))), manifest.join("\n"))
@@ -155,9 +157,27 @@ module Caramel::Checks
       people = command([@frappe, "routes", "people"], chdir: @project, echo: false).stdout.lines
       assert!(people.size == 7 && people.all? { |line| line.split[1].starts_with?("/people") && line.split[2].starts_with?("App::People::") }, people.join("\n"))
       patches = command([@frappe, "routes", "patch"], chdir: @project, echo: false).stdout.lines
-      assert!(patches.map { |line| line.split[0, 2] } == [%w(PATCH /books/:id), %w(PATCH /people/:id)], patches.join("\n"))
+      assert!(patches.map { |line| line.split[0, 2] } == [%w[PATCH /books/:id], %w[PATCH /people/:id]], patches.join("\n"))
       assert!(command([@frappe, "routes", "no-such-route"], chdir: @project, echo: false).stdout.empty?)
       puts "PASS: frappe routes FILTER keeps routes whose method, path or action contains it, ignoring case"
+
+      assert!(File.file?(File.join(@project, ".ameba.yml")), "the generated application lacks its rule set, .ameba.yml")
+      linted = command([@frappe, "lint"], chdir: @project, echo: false)
+      assert!(linted.stdout.matches?(/\AOK lint \d+ files\n\z/), linted.stdout)
+      noun = File.join(@project, "app/models/invitation_service.cr")
+      File.write(noun, "module App\n  class  InvitationService\n  end\nend\n")
+      flagged = attempt([@frappe, "lint", "--agent"], chdir: @project)
+      assert!(flagged.status.exit_code == 1 && flagged.stdout.starts_with?(<<-MRDP), flagged.stdout + flagged.stderr)
+        ERR LINT_LINT_FORMATTING at app/models/invitation_service.cr:1:1
+        MSG: Use built-in formatter to format this source (Lint/Formatting)
+        FIX: frappe format
+        ERR LINT_CARAMEL_SERVICE_NOUN at app/models/invitation_service.cr:2:10\n
+        MRDP
+      command([@frappe, "format"], chdir: @project, echo: false)
+      assert!(File.read(noun) == "module App\n  class InvitationService\n  end\nend\n", File.read(noun))
+      File.delete(noun)
+      assert!(command([@frappe, "lint"], chdir: @project, echo: false).stdout.starts_with?("OK lint "))
+      puts "PASS: the generated application and its resources pass frappe lint; a planted service noun yields ERR LINT_CARAMEL_SERVICE_NOUN, and frappe format fixes its layout"
 
       clean = command([@frappe, "check"], chdir: @project, echo: false)
       assert!(clean.stdout.matches?(/\AOK check \d+ files\n\z/), clean.stdout)
@@ -250,7 +270,7 @@ module Caramel::Checks
       assert!(!file.nil?, "no ERR line in #{mrdp}")
     end
 
-    SHELF_ACTION = <<-CRYSTAL
+    SHELF_ACTION = <<-'CRYSTAL'
       module App::Shelves
         struct Show < App::ApplicationAction
           contract do
@@ -258,7 +278,7 @@ module Caramel::Checks
 
           # One shelf's volume titles.
           def handle(contract : Contract)
-            page "Shelf", "Shelf \#{contract.id}"
+            page "Shelf", "Shelf #{contract.id}"
           end
         end
       end
@@ -307,7 +327,7 @@ module Caramel::Checks
       result = command([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
       assert!(result.stdout.includes?("Corretto: 5 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
-      %w([w1] [w2]).each do |prefix|
+      %w[[w1] [w2]].each do |prefix|
         assert!(result.stdout.lines.any? { |line| line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors") }, output)
       end
       assert!(result.stderr.matches?(/corretto_probe_spec\.cr:25 changed the database catalog outside its transaction; worker [12] was reset/), output)
@@ -386,7 +406,7 @@ module Caramel::Checks
           end
         end
         CRYSTAL
-      "app/actions/teams/create.cr" => <<-CRYSTAL,
+      "app/actions/teams/create.cr" => <<-'CRYSTAL',
         module Teams
           struct Create < App::ApplicationAction
             contract do
@@ -405,7 +425,7 @@ module Caramel::Checks
                 NotifyTeamOwner.enqueue(user_id: owner_id)
               end
               created = team.not_nil!
-              partials [Caramel::Partial.new("#team-list", "<li>\#{Caramel::HTML.escape(created.name)} · \#{created.seats} seats</li>", "innerMorph")]
+              partials [Caramel::Partial.new("#team-list", "<li>#{Caramel::HTML.escape(created.name)} · #{created.seats} seats</li>", "innerMorph")]
             end
           end
         end
@@ -492,7 +512,7 @@ module Caramel::Checks
       end
       CRYSTAL
 
-    PROBE_ACTION = <<-CRYSTAL
+    PROBE_ACTION = <<-'CRYSTAL'
       module App::Probe
         struct Enqueue < App::ApplicationAction
           contract do
@@ -501,16 +521,16 @@ module Caramel::Checks
 
           def handle(contract : Contract)
             App::ProbeJob.enqueue(title: contract.title)
-            morph("#jobs", "Queued \#{Caramel::HTML.escape(contract.title)}")
+            morph("#jobs", "Queued #{Caramel::HTML.escape(contract.title)}")
           end
         end
       end
       CRYSTAL
   end
 end
+
 require "./frappe_project/dev"
 require "./frappe_project/benchmark"
-
 
 begin
   Caramel::Checks::FrappeProject.new.execute(ARGV)

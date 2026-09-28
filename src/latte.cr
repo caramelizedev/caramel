@@ -1,6 +1,7 @@
 require "./latte/daemon"
 require "./latte/login_item"
 require "./latte/trust"
+require "./latte/control_api"
 
 begin
   case ARGV
@@ -40,20 +41,23 @@ begin
     trust = Caramel::Latte::Trust.new(registry.paths, Caramel::Latte::Proxy.new(registry))
     ARGV[1] == "install" ? trust.install : trust.remove
     puts "Latte certificate trust #{ARGV[1] == "install" ? "installed" : "removed"}."
+  when ["version"], ["--version"]
+    puts "Latte #{Caramel::VERSION} (control API #{Caramel::Latte::ControlAPI::VERSIONS.join(", ")})"
   when ["--help"], ["help"], [] of String
     puts "Latte — Caramel's local environment"
-    puts "Usage: latte daemon [--detach] | stop | service install | service uninstall | trust install | trust remove"
+    puts "Usage: latte daemon [--detach] | stop | service install | service uninstall | trust install | trust remove | version"
     puts "  daemon             Run Latte in this terminal."
     puts "  daemon --detach    Run Latte in its own session, logging to logs/latte.log. Frappé starts Latte this way when it is not running."
     puts "  stop               Stop the running Latte. Services keep running."
     puts "  service install    Start Latte whenever you log in (a per-user login item), and now."
     puts "  service uninstall  Remove that login item; the Latte it started stops."
+    puts "  version            Print this Latte's release and the control API versions it serves."
     puts "Start and inspect services from Latte in the menu bar or with Frappé."
   else
     STDERR.puts "Unknown command. Use latte --help."
     exit 2
   end
-rescue ex : Caramel::Latte::PublicError | Caramel::Latte::Toolchain::Unavailable
+rescue ex : Caramel::Latte::PublicError | Caramel::Latte::Toolchain::Unavailable | Caramel::Latte::StateFormat::Newer
   STDERR.puts ex.message
   exit 1
 rescue ex

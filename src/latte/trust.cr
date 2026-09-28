@@ -1,4 +1,5 @@
 require "./toolchain"
+require "./state_format"
 require "./proxy"
 require "./server"
 require "digest/sha256"
@@ -7,6 +8,8 @@ module Caramel::Latte
   # Trust is a per-user operation. The privileged port/DNS installer never
   # receives CA private keys and never modifies the system trust store.
   class Trust
+    RECEIPT_FORMAT = 1
+
     def initialize(@paths : Paths, @proxy : Proxy, @toolchain : Toolchain = Toolchain.for_checkout)
     end
 
@@ -26,12 +29,12 @@ module Caramel::Latte
       # interrupted installation and later removal refer to the same CA.
       ConfigFile.directory(trust_directory)
       ConfigFile.write(snapshot, certificate)
-      ConfigFile.write(receipt_path, {version: 1, sha256: digest, keychain: keychain, state: "pending"}.to_json)
+      ConfigFile.write(receipt_path, {version: RECEIPT_FORMAT, sha256: digest, keychain: keychain, state: "pending"}.to_json)
       result = ProcessRunner.run(["/usr/bin/security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, snapshot], timeout: 60.seconds)
       unless result.success?
         raise PublicError.new("trust_failed", "macOS did not install the local certificate trust; retry Latte HTTPS setup")
       end
-      ConfigFile.write(receipt_path, {version: 1, sha256: digest, keychain: keychain, state: "installed"}.to_json)
+      ConfigFile.write(receipt_path, {version: RECEIPT_FORMAT, sha256: digest, keychain: keychain, state: "installed"}.to_json)
     end
 
     def remove : Nil
@@ -53,7 +56,7 @@ module Caramel::Latte
     private def certificate_path : String
       path = @proxy.root_certificate
       info = File.info?(path, follow_symlinks: false)
-      unless info && info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && (info.permissions.value & 0o022) == 0
+      unless info && StateSecurity.owned_file?(info) && (info.permissions.value & 0o022) == 0
         raise PublicError.new("ca_unavailable", "Start Latte HTTPS services before installing certificate trust")
       end
       path
@@ -89,14 +92,15 @@ module Caramel::Latte
     end
 
     private def receipt : JSON::Any?
-      return nil unless File.info?(receipt_path, follow_symlinks: false)
+      return unless File.info?(receipt_path, follow_symlinks: false)
       StateSecurity.validate_owned_directory(trust_directory)
       info = File.info(receipt_path, follow_symlinks: false)
-      unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+      unless StateSecurity.private_file?(info)
         raise PublicError.new("trust_receipt_invalid", "Latte certificate receipt is not a private owned file")
       end
       saved = JSON.parse(File.read(receipt_path))
-      unless saved["version"].as_i == 1 && saved["sha256"].as_s.matches?(/\A[0-9a-f]{64}\z/)
+      StateFormat.check!(receipt_path, saved["version"].as_i, RECEIPT_FORMAT)
+      unless saved["sha256"].as_s.matches?(/\A[0-9a-f]{64}\z/)
         raise PublicError.new("trust_receipt_invalid", "Latte certificate receipt is invalid")
       end
       saved

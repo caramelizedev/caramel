@@ -137,7 +137,7 @@ describe "Latte managed PostgreSQL" do
   end
 
   it "repairs retained configuration overrides while preserving the running cluster" do
-    config = File.join(paths.postgres_data, "postgresql.conf")
+    config = File.join(paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "postgresql.conf")
     original = File.read(config)
     begin
       File.open(config, "a") do |file|
@@ -387,7 +387,7 @@ describe "Latte managed PostgreSQL" do
 
   it "refuses a wrong major without changing the owned data directory" do
     service.stop
-    version = File.join(paths.postgres_data, "PG_VERSION")
+    version = File.join(paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "PG_VERSION")
     original = File.read(version)
     File.write(version, "17\n")
     begin
@@ -401,8 +401,6 @@ describe "Latte managed PostgreSQL" do
 end
 
 Spec.after_suite do
-  begin
-    service.stop
-  rescue
-  end
+  service.stop
+rescue
 end

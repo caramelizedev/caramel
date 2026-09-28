@@ -26,11 +26,12 @@ describe Caramel::Frappe::CLI do
     frappe.run(["agent-manifest"]).should eq(0)
     lines = output.to_s.lines
     lines.first.should eq("CARAMEL CLI INTERFACE (STRICT TOKENS)")
-    commands = lines[1...lines.index("").not_nil!]
+    lines[1, 2].should eq(["VERSION: #{Caramel::VERSION}", "DOCS: https://github.com/caramelizedev/caramel/tree/v#{Caramel::VERSION}"])
+    commands = lines[3...lines.index!("")]
     commands.should eq(Caramel::Frappe::Commands::TABLE.map { |command| "frappe #{command.syntax}  # #{command.description}" })
-    %w(check routes expand dev corretto).each { |name| commands.any?(&.starts_with?("frappe #{name} ")).should be_true }
+    %w[check routes expand dev corretto].each { |name| commands.any?(&.starts_with?("frappe #{name} ")).should be_true }
     commands.should contain("frappe db branch create NAME  # Clone the development database into branch NAME and print its connection URL.")
-    grammar = lines[(commands.size + 2)..]
+    grammar = lines[(commands.size + 4)..]
     grammar.should contain(%(PATCH: INSERT "<text>" AT <line>:<col>  # insert <text> as a new line before <line> of the ERR file, indented to <col>))
     grammar.any?(&.starts_with?("CODES: CONTRACT_MISMATCH N_PLUS_ONE")).should be_true
     errors.to_s.should eq("")
@@ -56,7 +57,7 @@ describe Caramel::Frappe::CLI do
   end
 
   it "refuses an invalid branch name and a malformed expand location before loading a project" do
-    frappe, output, errors = cli
+    frappe, _, errors = cli
     frappe.run(["db", "branch", "create", "Feature"]).should eq(1)
     errors.to_s.should eq("ERR USAGE at frappe db branch create\nMSG: branch name Feature must be a lowercase letter followed by up to 30 lowercase letters, digits or underscores\nSYNTAX: frappe db branch create NAME\n")
     errors.clear
@@ -77,7 +78,7 @@ describe Caramel::Frappe::CLI do
   end
 
   it "routes frappe lsp to a known server only after the project version check" do
-    frappe, output, errors = cli(File.expand_path("../..", __DIR__))
+    frappe, _, errors = cli(File.expand_path("../..", __DIR__))
     frappe.run(["lsp", "--human"]).should eq(1)
     errors.to_s.should contain("Usage: frappe lsp crystalline|ameba-ls [SERVER_ARGS...] | frappe lsp install")
     errors.clear

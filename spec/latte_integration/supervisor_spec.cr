@@ -24,7 +24,7 @@ describe Caramel::Latte::Supervisor do
       (Time.instant - before).should be < 500.milliseconds
       supervisor.await_idle(90.seconds)
       status = JSON.parse(supervisor.status_json)
-      %w(postgres dns proxy).each { |name| status["services"][name]["state"].as_s.should eq("running") }
+      %w[postgres dns proxy].each { |name| status["services"][name]["state"].as_s.should eq("running") }
       site = supervisor.register("bookshelf", root, "caramel")
       # Proxy health checks must not execute project handlers (or depend on
       # how quickly those handlers respond).
@@ -56,8 +56,8 @@ describe Caramel::Latte::Supervisor do
       supervisor.stop_services
       supervisor.await_idle(60.seconds)
       status = JSON.parse(supervisor.status_json)
-      %w(postgres dns proxy).each { |name| status["services"][name]["state"].as_s.should eq("stopped") }
-      File.exists?(File.join(registry.paths.postgres_data, "PG_VERSION")).should be_true
+      %w[postgres dns proxy].each { |name| status["services"][name]["state"].as_s.should eq("stopped") }
+      File.exists?(File.join(registry.paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "PG_VERSION")).should be_true
     ensure
       supervisor.stop_monitor
       app.try { |server| server.close unless server.closed? }
@@ -81,7 +81,7 @@ describe Caramel::Latte::Supervisor do
       status["services"]["proxy"]["state"].as_s.should eq("failed")
       supervisor.postgres.running?.should be_false
       occupied.closed?.should be_false
-      File.exists?(File.join(registry.paths.postgres_data, "PG_VERSION")).should be_true
+      File.exists?(File.join(registry.paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "PG_VERSION")).should be_true
     ensure
       supervisor.stop_services
       supervisor.await_idle(60.seconds)

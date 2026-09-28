@@ -8,6 +8,8 @@ module Caramel::Frappe
   # Constructing or inspecting this client never creates Latte state.
   class LatteClient
     MAX_RESPONSE = 1024 * 1024
+    # The control API version this Frappé speaks (ADR 0016).
+    API_VERSION = 1
     getter socket_path : String
     getter root : String
 
@@ -85,7 +87,7 @@ module Caramel::Frappe
         # A daemon that exits at once lost the instance lock to one that is
         # already binding its socket, or failed; either shows within a second.
         exited_at ||= Time.instant if process.terminated?
-        if Time.instant >= deadline || exited_at.try { |at| Time.instant - at >= 1.second }
+        if Time.instant >= deadline || exited_at.try { |exited| Time.instant - exited >= 1.second }
           reason = last_log_line.try(&.rstrip('.'))
           raise Error.new("Latte did not start#{reason ? ": #{reason}" : ""}. Log: #{log_path}")
         end
@@ -214,7 +216,7 @@ module Caramel::Frappe
       directory = site_directory(id)
       lock_path = File.join(directory, "dev.lock")
       if info = File.info?(lock_path, follow_symlinks: false)
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless Latte::StateSecurity.private_file?(info)
           raise Error.new("Development lock must be an owned private file")
         end
       end
@@ -233,7 +235,7 @@ module Caramel::Frappe
     end
 
     private def service_states(document : JSON::Any) : Array(String)
-      %w(postgres dns proxy).map { |name| document["services"][name]["state"].as_s }
+      %w[postgres dns proxy].map { |name| document["services"][name]["state"].as_s }
     rescue KeyError | TypeCastError
       raise Error.new("Latte returned an invalid service status")
     end
@@ -264,7 +266,9 @@ module Caramel::Frappe
         size = response.body_io.read_greedy(bytes)
         raise Error.new("Latte response exceeded 1 MiB") if size > MAX_RESPONSE
         document = JSON.parse(String.new(bytes[0, size]))
-        raise Error.new("Unsupported Latte API version") unless document["version"].as_i == 1
+        code = document["error"]?.try(&.as_h?).try(&.["code"]?).try(&.as_s?)
+        raise Error.new(unsupported_api(document)) if code == "unsupported_api"
+        raise Error.new("Unsupported Latte API version") unless document["version"].as_i == API_VERSION
         if response.status_code >= 400
           raise Error.new(document["error"]["message"].as_s)
         end
@@ -278,6 +282,17 @@ module Caramel::Frappe
       finished = true
       client.try(&.close)
       socket.try(&.close)
+    end
+
+    # The running Latte does not serve API_VERSION: name what fixes it.
+    private def unsupported_api(document : JSON::Any) : String
+      latte = document["latte"]?.try(&.as_s?) || "of an unknown release"
+      served = document["api"]?.try(&.as_a?).try(&.compact_map(&.as_i?)) || [] of Int32
+      if served.empty? || served.max < API_VERSION
+        "Latte #{latte} is running, but Frappé #{Caramel::VERSION} needs control API #{API_VERSION}, from Caramel #{Caramel::VERSION} or newer. Run latte stop so the next command starts the newest installed Latte, or install this release: frappe installations install #{Caramel::VERSION}"
+      else
+        "Latte #{latte} no longer serves control API #{API_VERSION}, which Frappé #{Caramel::VERSION} uses. Upgrade this project to Caramel #{latte}."
+      end
     end
   end
 end

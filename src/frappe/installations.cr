@@ -1,9 +1,13 @@
 require "json"
+require "semantic_version"
 require "./project"
 require "../latte/config_file"
+require "../latte/state_format"
 
 module Caramel::Frappe
   class Installations
+    FORMAT = 1
+
     def initialize(root : String? = nil)
       @root = Latte::StateSecurity.canonical_creation_path(root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT)
       @path = File.join(@root, "installations.json")
@@ -18,13 +22,19 @@ module Caramel::Frappe
       read_entries
     end
 
+    # The newest registered release and its checkout, by semantic version:
+    # the one whose Latte, relay and launchers serve every project (ADR 0016).
+    def newest : {String, String}?
+      list.max_by? { |release, _| SemanticVersion.parse(release) }
+    end
+
     def register(release : String, framework_root : String) : String?
       raise Error.new("Caramel installation root must be absolute") unless Path[framework_root].absolute?
       with_lock do
         entries = read_entries
         previous = entries[release]?
         entries[release] = framework_root
-        Latte::ConfigFile.write(@path, {version: 1, installations: entries}.to_json + "\n")
+        Latte::ConfigFile.write(@path, {version: FORMAT, installations: entries}.to_json + "\n")
         previous
       end
     end
@@ -33,7 +43,7 @@ module Caramel::Frappe
       with_lock do
         entries = read_entries
         if entries.delete(release)
-          Latte::ConfigFile.write(@path, {version: 1, installations: entries}.to_json + "\n")
+          Latte::ConfigFile.write(@path, {version: FORMAT, installations: entries}.to_json + "\n")
           true
         else
           false
@@ -43,20 +53,23 @@ module Caramel::Frappe
 
     private def read_entries : Hash(String, String)
       return {} of String => String unless info = File.info?(@path, follow_symlinks: false)
-      unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+      unless Latte::StateSecurity.private_file?(info)
         raise Error.new("Caramel installation registry must be a private owned file: #{@path}")
       end
       begin
         document = JSON.parse(File.read(@path))
-        raise Error.new("invalid version") unless document["version"].as_i == 1
+        Latte::StateFormat.check!(@path, document["version"].as_i, FORMAT)
         entries = {} of String => String
         document["installations"].as_h.each do |release, value|
+          SemanticVersion.parse(release)
           root = value.as_s
           raise Error.new("installation root must be absolute") unless Path[root].absolute?
           entries[release] = root
         end
         entries
-      rescue JSON::ParseException | KeyError | TypeCastError | Error
+      rescue ex : Latte::StateFormat::Newer
+        raise Error.new(ex.message)
+      rescue JSON::ParseException | KeyError | TypeCastError | ArgumentError | Error
         raise Error.new("Caramel installation registry is invalid: #{@path}")
       end
     end
@@ -64,7 +77,7 @@ module Caramel::Frappe
     private def with_lock(& : -> T) : T forall T
       Latte::Paths.new(@root)
       if info = File.info?(@lock_path, follow_symlinks: false)
-        unless info.file? && !info.symlink? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless Latte::StateSecurity.private_file?(info)
           raise Error.new("Caramel installation registry lock must be a private owned file: #{@lock_path}")
         end
       end

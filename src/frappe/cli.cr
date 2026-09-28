@@ -1,6 +1,7 @@
 require "./commands"
 require "./mrdp"
 require "./check"
+require "./lint"
 require "./new_project"
 require "./latte_client"
 require "./installations"
@@ -35,7 +36,7 @@ module Caramel::Frappe
     rescue ex : Error
       @error.puts(ex.message)
       1
-    rescue ex : File::Error
+    rescue File::Error
       @error.puts("A required project or installation file is unavailable. Run frappe doctor.")
       1
     rescue ex
@@ -54,6 +55,7 @@ module Caramel::Frappe
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per command
     private def execute(invocation : Commands::Invocation) : Int32
       case name = invocation.command.name
       when "help"
@@ -79,6 +81,13 @@ module Caramel::Frappe
       when "check"
         agent = MRDP.agent?(invocation.flags, @output)
         return Check.new(Project.load, Tools.new(@framework_root, @output, @error), @output).run(agent, !agent && @output.tty?)
+      when "lint"
+        agent = MRDP.agent?(invocation.flags, @output)
+        return Lint.new(Project.load, Tools.new(@framework_root, @output, @error), @output, @error).run(agent, !agent && @output.tty?)
+      when "format"
+        project = Project.load
+        directories = %w[src config app db spec].select { |directory| Dir.exists?(File.join(project.root, directory)) }
+        Tools.new(@framework_root, @output, @error).run(File.join(@framework_root, "scripts/crystal"), ["tool", "format"] + directories, project.root)
       when "routes"
         routes(invocation["FILTER"]?)
       when "expand"
@@ -164,6 +173,8 @@ module Caramel::Frappe
     # Stateless: reads only the command table (RFC-0005 §2.1).
     private def manifest : Nil
       @output.puts("CARAMEL CLI INTERFACE (STRICT TOKENS)")
+      @output.puts("VERSION: #{Caramel::VERSION}")
+      @output.puts("DOCS: #{Caramel::REPOSITORY}/tree/v#{Caramel::VERSION}")
       Commands::TABLE.each { |command| @output.puts("frappe #{command.syntax}  # #{command.description}") }
       @output.puts
       @output.puts(MRDP::GRAMMAR)
@@ -174,7 +185,7 @@ module Caramel::Frappe
       generator.plan(name) # Validate the name and package before side effects.
       destination = File.join(Dir.current, name)
       if File.info?(destination, follow_symlinks: false)
-        unless Dir.exists?(destination) && !File.symlink?(destination) && Dir.children(destination).empty?
+        if !Dir.exists?(destination) || File.symlink?(destination) || !Dir.children(destination).empty?
           raise Error.new("Project destination must be empty; existing files were preserved")
         end
       end
@@ -303,7 +314,7 @@ module Caramel::Frappe
       id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
       authoritative = client.environment(id, project.root)
       values = project.local_environment
-      %w(DATABASE_URL MIGRATION_DATABASE_URL).each do |key|
+      %w[DATABASE_URL MIGRATION_DATABASE_URL].each do |key|
         raise Error.new("#{key} differs from this project's Latte credentials; command refused") unless values[key]? == authoritative[key]?
       end
       raise Error.new("APP_ORIGIN differs from this project; run frappe setup") unless values["APP_ORIGIN"]? == project.origin
@@ -336,15 +347,14 @@ module Caramel::Frappe
         "Private local configuration" => -> { Project.load.local_environment; nil },
         "Latte services"              => -> { document = LatteClient.new.status; raise Error.new("Latte services are not all running") unless document["services"].as_h.values.all? { |item| item["state"].as_s == "running" }; nil },
         "Named, trusted HTTPS"        => -> { verify_origin(Project.load) },
+        "Port relay"                  => -> { verify_relay },
       }
       checks.each do |label, check|
-        begin
-          check.call
-          @output.puts("OK    #{label}")
-        rescue ex
-          failures += 1
-          @output.puts("CHECK #{label}: #{ex.is_a?(Error) ? ex.message : ex.class.to_s}")
-        end
+        check.call
+        @output.puts("OK    #{label}")
+      rescue ex
+        failures += 1
+        @output.puts("CHECK #{label}: #{ex.is_a?(Error) ? ex.message : ex.class.to_s}")
       end
       failures == 0 ? 0 : 1
     end
@@ -356,10 +366,28 @@ module Caramel::Frappe
       end
     end
 
+    # The resolver, the 80/443 relay and its launchd plist serve every
+    # project, so they must be the ones the newest installed release installs
+    # (ADR 0016). That release's installer compares them without sudo.
+    private def verify_relay : Nil
+      release, root = Installations.new.newest || {Caramel::VERSION, @framework_root}
+      result = Latte::ProcessRunner.run([File.join(root, "scripts/install-local-integration"), "status"], chdir: root, timeout: 300.seconds, output_limit: 64 * 1024)
+      raise Error.new("could not compare the installed port relay: #{result.stderr.strip}") unless result.success?
+      states = JSON.parse(result.stdout).as_h.transform_values(&.as_s)
+      return if states.values.all?("current")
+      bundle = "/private/tmp/caramel-integration-bundle"
+      update = "cd #{Process.quote(root)} && rm -rf #{bundle} && scripts/install-local-integration prepare #{bundle} && sudo scripts/install-local-integration apply #{bundle}"
+      if states.values.all?("absent")
+        raise Error.new("the .caramel resolver and ports 80/443 relay are not installed; install them: #{update}")
+      end
+      stale = states.reject { |_, state| state == "current" }.keys
+      raise Error.new("the installed #{stale.join(" and ")} #{stale.size == 1 ? "differs" : "differ"} from Caramel #{release}'s; update: #{update}")
+    end
+
     private def sites : Nil
       LatteClient.new.sites.each do |site|
         state = site["state"]?.try(&.as_s?) || "unknown"
-        state = "unknown" unless %w(running building build-error stopped unavailable unknown).includes?(state)
+        state = "unknown" unless %w[running building build-error stopped unavailable unknown].includes?(state)
         owner = site["owner"]?.try(&.as_s?) == "terminal" ? " (terminal)" : ""
         @output.puts("#{site["name"].as_s.ljust(24)} #{(state + owner).ljust(24)} #{site["origin"].as_s}  #{site["directory"].as_s}")
       end
@@ -397,8 +425,8 @@ module Caramel::Frappe
       else
         @output.puts("Saved #{project.name} development database: #{dump_to.call("development")}")
       end
-    rescue ex : Latte::Postgres::SecretMissing
-      raise Error.new("frappe db: #{project.not_nil!.name} has no provisioned database; run frappe setup first")
+    rescue Latte::Postgres::SecretMissing
+      raise Error.new("frappe db: #{project.try(&.name) || "this project"} has no provisioned database; run frappe setup first")
     rescue ex : Latte::Postgres::Error | Latte::OwnershipError | ArgumentError
       raise Error.new("frappe db: #{ex.message}")
     end
@@ -413,7 +441,8 @@ module Caramel::Frappe
       id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
       case invocation.command.name
       when "db branch create"
-        url = client.create_branch(id, name.not_nil!)["runtime_url"].as_s
+        branch = name || raise Error.new("frappe db branch create needs NAME")
+        url = client.create_branch(id, branch)["runtime_url"].as_s
         @error.puts("Created database branch #{name} from #{project.name}'s development database.")
         @output.puts(url)
       when "db branch list"
@@ -421,7 +450,8 @@ module Caramel::Frappe
         names.each { |entry| @output.puts(entry) }
         @error.puts("#{project.name} has no database branches.") if names.empty?
       else
-        client.drop_branch(id, name.not_nil!)
+        branch = name || raise Error.new("frappe db branch delete needs NAME")
+        client.drop_branch(id, branch)
         @output.puts("Deleted database branch #{name}.")
       end
     end
@@ -444,6 +474,7 @@ module Caramel::Frappe
       Process.run("/usr/bin/tail", ["-n", "200", *(follow ? ["-F"] : [] of String), path], output: @output, error: @error).exit_code
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per installations subcommand
     private def installations(invocation : Commands::Invocation) : Nil
       registry = Installations.new
       case invocation.command.name
@@ -453,7 +484,7 @@ module Caramel::Frappe
           @output.puts("No Caramel installations are registered. Run frappe installations register from a Caramel checkout.")
         else
           current = File.realpath(@framework_root)
-          entries.keys.sort.each do |release|
+          entries.keys.sort!.each do |release|
             root = entries[release]
             @output.puts("#{release.ljust(12)} #{root}#{root == current ? "  (this installation)" : ""}")
           end

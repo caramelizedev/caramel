@@ -11,12 +11,13 @@ frappe new bookshelf
 cd bookshelf
 frappe make resource Book title:string author:string
 frappe check
+frappe lint
 frappe migrate
 frappe routes books
 frappe corretto
 ```
 
-The binary also implements `setup`, `dev`, `seed`, `services`, `sites`, `doctor` and `open`. See [development workflow](frappe-development.md) for watcher ownership, build diagnostics, refresh and verification limits. Help is authoritative for currently available commands. `open` checks system DNS and certificate trust before opening the URL. `doctor` checks project metadata, framework snapshot, managed compiler, installed dependencies, PostgreSQL tool, private configuration, service state and named HTTPS; it does not repair state.
+The binary also implements `setup`, `dev`, `seed`, `services`, `sites`, `doctor` and `open`. See [development workflow](frappe-development.md) for watcher ownership, build diagnostics, refresh and verification limits. Help is authoritative for currently available commands. `open` checks system DNS and certificate trust before opening the URL. `doctor` checks project metadata, framework snapshot, managed compiler, installed dependencies, PostgreSQL tool, private configuration, service state, named HTTPS, and whether the resolver and port relay match the newest installed release, printing the command that updates them; it does not repair state.
 
 `new` writes the complete starter, installs the locked Shards, registers the site and applies its migrations, so `frappe dev` serves it immediately. An interrupted step retains the project and directs the user to `setup`, which does the same and preserves application edits and existing valid secrets; it refuses mismatched credentials. Compilation uses the main target in `shard.yml`, independently of the local site name. A simultaneous clone needs a distinct name in `config/environment.yml` because two directories cannot own the same local origin.
 
@@ -43,6 +44,8 @@ PATCH: INSERT "field id : Int64" AT 4:7
 ```
 
 `INSERT "<text>" AT L:C` inserts the text as a new line before line L of the ERR file, indented to column C. An N+1 access whose query appears earlier on the same line gets `PATCH: INSERT ".preload(:volumes)" AFTER L:C`, which inserts after column C of line L; otherwise it gets `FIX:` with SugarORM's remediation. A mistyped route field gets `MSG:` and `FIX:`, because its declaration's line is unknown. Mode A boxes the file and line, shows the source line with a caret under the column, the message, the code's summary and a `Remediation:` block, and uses colour only on a terminal.
+
+`frappe lint [--agent|--human]` checks the project against its `.ameba.yml`, Caramel's RFC-0008 rule set ([ADR 0017](../decisions/0017-formatting-and-linting.md)). On a terminal it prints Ameba's report. In Mode B each issue is `ERR LINT_<RULE> at file:line:col`, where `<RULE>` is the rule's group and name in upper snake case, and `MSG` ends with the rule's own name; a clean project prints `OK lint <n> files`. It never rewrites code. `frappe format` runs the pinned formatter over `src`, `config`, `app`, `db` and `spec`.
 
 `frappe routes [FILTER]` keeps the routes whose method, path or action contains FILTER, ignoring case. `frappe db branch create NAME` clones the development database into a Latte branch and prints only its runtime connection URL on stdout. `frappe db branch list` prints branch names, and `frappe db branch delete NAME` drops the branch. `frappe dev --branch NAME` runs the development app against an existing branch; branch listings carry no credentials, so Frappé derives the branch URL from the project's development URL. `frappe expand FILE:LINE:COL` runs `crystal tool expand` for the main target and prints the plain Crystal that the macro call at that location generates (RFC-0008 §3).
 

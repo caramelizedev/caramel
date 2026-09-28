@@ -3,6 +3,8 @@ require "socket/unix_server"
 require "json"
 require "uuid"
 require "./registry"
+require "./control_api"
+require "./state_format"
 require "./deadline"
 require "./project_status"
 require "../caramel/response"
@@ -147,16 +149,21 @@ module Caramel::Latte
       @http_server.try(&.close)
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per control API route
     def handle(request : HTTP::Request) : Caramel::Response
       OperationDeadline.check!
       path = request.path
+      if (requested = path.match(/\A\/v(\d+)\//)) && !ControlAPI::VERSIONS.includes?(requested[1].to_i?)
+        message = "Latte #{Caramel::VERSION} serves control API #{ControlAPI::VERSIONS.join(", ")}, not #{requested[1]}"
+        return json({version: ControlAPI::VERSIONS.max, latte: Caramel::VERSION, api: ControlAPI::VERSIONS, error: {code: "unsupported_api", message: message}}.to_json, 404)
+      end
       case {request.method, path}
       when {"GET", "/v1/status"}
         return json(@services.status_json)
       when {"GET", "/v1/sites"}
         return json({version: 1, sites: @registry.list.map { |site| summary(site) }}.to_json)
       when {"POST", "/v1/sites"}
-        fields = body(request, %w(name directory suffix))
+        fields = body(request, %w[name directory suffix])
         OperationDeadline.check!
         site = OperationDeadline.run(12.seconds) do
           @services.register(string(fields, "name"), string(fields, "directory"), fields["suffix"]?.try(&.as_s) || "caramel")
@@ -188,7 +195,7 @@ module Caramel::Latte
         elsif name.nil? && request.method == "GET"
           return json(OperationDeadline.run(12.seconds) { @services.branches_json(id) })
         elsif name.nil? && request.method == "POST"
-          fields = body(request, %w(name))
+          fields = body(request, %w[name])
           OperationDeadline.check!
           return json(OperationDeadline.run(12.seconds) { @services.create_branch_json(id, string(fields, "name")) }, 201)
         end
@@ -215,16 +222,16 @@ module Caramel::Latte
           return failure("not_found", "Project is not registered", 404) unless removed
           return json({version: 1, removed: id}.to_json)
         elsif request.method == "POST" && match[2]? == "/upstream"
-          fields = body(request, %w(socket))
+          fields = body(request, %w[socket])
           OperationDeadline.check!
           site = OperationDeadline.run(12.seconds) { @services.set_upstream(id, string(fields, "socket")) }
           return json({version: 1, site: summary(site)}.to_json)
         elsif request.method == "POST" && match[2]? == "/environment"
-          fields = body(request, %w(directory))
+          fields = body(request, %w[directory])
           OperationDeadline.check!
           return json(@services.environment_json(id, string(fields, "directory")))
         elsif request.method == "DELETE" && match[2]? == "/upstream"
-          fields = body(request, %w(socket))
+          fields = body(request, %w[socket])
           OperationDeadline.check!
           cleared = OperationDeadline.run(12.seconds) { @services.clear_upstream(id, string(fields, "socket")) }
           return json({version: 1, cleared: cleared}.to_json)
@@ -235,6 +242,8 @@ module Caramel::Latte
       failure("operation_timeout", "Operation timed out; retry after checking Latte services", 503)
     rescue ex : PublicError
       failure(ex.code, ex.message || "Service operation failed", ex.status)
+    rescue ex : StateFormat::Newer
+      failure("newer_state", ex.message || "Latte state was written by a newer Caramel", 409)
     rescue JSON::ParseException | TypeCastError
       failure("invalid_json", "Expected a JSON object with the documented fields", 400)
     rescue ex : ArgumentError

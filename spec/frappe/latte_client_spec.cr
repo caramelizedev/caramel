@@ -16,9 +16,15 @@ describe Caramel::Frappe::LatteClient do
         removed.send("#{context.request.method} #{context.request.path}")
         context.response.print(%({"version":1}))
       when "/v1/status"
-        context.response.print(%({"version":1,"services":{"postgres":{"state":"running"},"dns":{"state":"running"},"proxy":{"state":"running"}}}))
+        context.response.print(%({"version":1,"latte":"0.1.0","api":[1],"services":{"postgres":{"state":"running"},"dns":{"state":"running"},"proxy":{"state":"running"}},"error":null}))
       when "/old"
         context.response.print(%({"version":2}))
+      when "/newer-latte"
+        context.response.status_code = 404
+        context.response.print(%({"version":3,"latte":"0.9.0","api":[2,3],"error":{"code":"unsupported_api","message":"Latte 0.9.0 serves control API 2, 3, not 1"}}))
+      when "/older-latte"
+        context.response.status_code = 404
+        context.response.print(%({"version":0,"latte":"0.0.9","api":[0],"error":{"code":"unsupported_api","message":"Latte 0.0.9 serves control API 0, not 1"}}))
       when "/large"
         context.response.print(" " * (Caramel::Frappe::LatteClient::MAX_RESPONSE + 1))
       when "/invalid"
@@ -36,6 +42,8 @@ describe Caramel::Frappe::LatteClient do
       client.ready!(1.second)
       client.status["services"]["postgres"]["state"].as_s.should eq("running")
       expect_raises(Caramel::Frappe::Error, "API version") { client.request("GET", "/old") }
+      expect_raises(Caramel::Frappe::Error, "Latte 0.9.0 no longer serves control API 1, which Frappé #{Caramel::VERSION} uses. Upgrade this project to Caramel 0.9.0.") { client.request("GET", "/newer-latte") }
+      expect_raises(Caramel::Frappe::Error, "Latte 0.0.9 is running, but Frappé #{Caramel::VERSION} needs control API 1, from Caramel #{Caramel::VERSION} or newer. Run latte stop so the next command starts the newest installed Latte, or install this release: frappe installations install #{Caramel::VERSION}") { client.request("GET", "/older-latte") }
       expect_raises(Caramel::Frappe::Error, "1 MiB") { client.request("GET", "/large") }
       expect_raises(Caramel::Frappe::Error, "invalid response") { client.request("GET", "/invalid") }
       expect_raises(Caramel::Frappe::Error, "already registered") { client.request("POST", "/conflict", "{}") }

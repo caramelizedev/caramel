@@ -1,6 +1,7 @@
 require "json"
 require "random/secure"
 require "./paths"
+require "./state_format"
 require "./site"
 
 module Caramel
@@ -38,10 +39,10 @@ module Caramel
             end
             raise Error.new("site name is already registered")
           end
-          if existing = sites.find { |site| site.directory == candidate.directory }
+          if sites.any? { |site| site.directory == candidate.directory }
             raise Error.new("project directory is already registered")
           end
-          if existing = sites.find { |site| site.id == candidate.id }
+          if sites.any? { |site| site.id == candidate.id }
             raise Error.new("site id collides with an existing site")
           end
           write_unlocked(sites + [candidate])
@@ -65,7 +66,7 @@ module Caramel
         with_exclusive_lock do
           sites = read_unlocked
           index = sites.index { |site| site.id == id_or_name || site.name == id_or_name }
-          next nil unless index
+          next unless index
           removed = sites.delete_at(index)
           write_unlocked(sites)
           removed
@@ -99,8 +100,8 @@ module Caramel
         with_exclusive_lock do
           sites = read_unlocked
           index = sites.index { |site| site.id == id_or_name || site.name == id_or_name }
-          next nil unless index
-          next nil if expected_socket && sites[index].upstream != expected_socket
+          next unless index
+          next if expected_socket && sites[index].upstream != expected_socket
           updated = sites[index].without_upstream
           sites[index] = updated
           write_unlocked(sites)
@@ -124,7 +125,7 @@ module Caramel
         raise Error.new("registry lock path is unavailable") unless info
         raise Error.new("registry lock path contains a symlink") if info.symlink?
         raise Error.new("registry lock path is not private") unless info.permissions.value == StateSecurity::FILE_MODE
-      rescue ex : File::Error
+      rescue File::Error
         raise Error.new("unable to create registry lock")
       end
 
@@ -163,7 +164,7 @@ module Caramel
 
         begin
           parse_unlocked(File.read(@registry_file))
-        rescue ex : Error
+        rescue ex : Error | StateFormat::Newer
           raise ex
         rescue
           raise Error.new("registry file is corrupt")
@@ -173,9 +174,9 @@ module Caramel
       private def parse_unlocked(document : String) : Array(Site)
         parsed = JSON.parse(document)
         object = parsed.as_h
+        version = object["version"]?.try(&.as_i) || raise Error.new("registry version is missing")
+        StateFormat.check!(@registry_file, version, VERSION)
         reject_unknown_keys(object, ["version", "sites"])
-        version = object["version"]?.try(&.as_i)
-        raise Error.new("unsupported registry version") unless version == VERSION
         rows = object["sites"]?.try(&.as_a)
         raise Error.new("registry sites must be an array") unless rows
 
@@ -212,37 +213,33 @@ module Caramel
       end
 
       private def write_unlocked(sites : Array(Site)) : Nil
-        temporary_file : File? = nil
-        temporary = ""
+        # File.tempfile uses O_EXCL, so even a hostile pre-existing name
+        # cannot redirect this replacement. The file remains beside the
+        # registry, making rename a single-filesystem atomic replacement.
+        temporary_file = File.tempfile(".registry", ".tmp", dir: @paths.root)
+        temporary = temporary_file.path
         begin
-          # File.tempfile uses O_EXCL, so even a hostile pre-existing name
-          # cannot redirect this replacement. The file remains beside the
-          # registry, making rename a single-filesystem atomic replacement.
-          temporary_file = File.tempfile(".registry", ".tmp", dir: @paths.root)
-          temporary = temporary_file.not_nil!.path
-          temporary_file.not_nil!.chmod(StateSecurity::FILE_MODE)
-          JSON.build(temporary_file.not_nil!) do |json|
+          temporary_file.chmod(StateSecurity::FILE_MODE)
+          JSON.build(temporary_file) do |json|
             json.object do
               json.field "version", VERSION
               json.field "sites" do
                 json.array do
-                  sites.each { |site| site.to_json(json) }
+                  sites.each(&.to_json(json))
                 end
               end
             end
           end
-          temporary_file.not_nil!.flush
-          temporary_file.not_nil!.fsync
-          temporary_file.not_nil!.close
+          temporary_file.flush
+          temporary_file.fsync
+          temporary_file.close
           File.rename(temporary, @registry_file)
           File.chmod(@registry_file, StateSecurity::FILE_MODE)
         ensure
-          temporary_file.try do |file|
-            file.close unless file.closed?
-          end
-          File.delete(temporary) if !temporary.empty? && File.info?(temporary, follow_symlinks: false)
+          temporary_file.close unless temporary_file.closed?
+          File.delete(temporary) if File.info?(temporary, follow_symlinks: false)
         end
-      rescue ex : File::Error
+      rescue File::Error
         raise Error.new("unable to atomically update registry")
       end
 

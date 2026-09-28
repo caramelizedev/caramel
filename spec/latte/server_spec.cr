@@ -126,6 +126,10 @@ describe Caramel::Latte::Server do
       services.starts.should eq(1)
       server.handle(HTTP::Request.new("POST", "/v1/services/stop", headers, "{}")).status.should eq(200)
       services.stops.should eq(1)
+      other = server.handle(HTTP::Request.new("GET", "/v2/status"))
+      other.status.should eq(404)
+      answer = JSON.parse(other.body)
+      {answer["error"]["code"].as_s, answer["latte"].as_s, answer["api"].as_a.map(&.as_i)}.should eq({"unsupported_api", Caramel::VERSION, [1]})
       server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, "{" + " " * 16384)).status.should eq(413)
       services.starts.should eq(1)
       server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, %({"extra":true}))).status.should eq(400)
@@ -192,7 +196,7 @@ describe Caramel::Latte::Server do
       services.workers.should eq([2])
       server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, %({"template":"caramel_dev_0123456789abcdef"}))).status.should eq(400)
       server.handle(HTTP::Request.new("POST", "#{endpoint}/2", HTTP::Headers.new, "{}")).status.should eq(415)
-      %w(0 9 two 100).each do |index|
+      %w[0 9 two 100].each do |index|
         server.handle(HTTP::Request.new("POST", "#{endpoint}/#{index}", headers, "{}")).status.should eq(400)
       end
       server.handle(HTTP::Request.new("GET", "#{endpoint}/2")).status.should eq(404)

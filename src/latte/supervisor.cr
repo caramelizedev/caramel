@@ -39,7 +39,7 @@ module Caramel::Latte
     end
 
     def status_json : String
-      {version: 1, services: @states.transform_values { |state| {state: state} }, error: @error}.to_json
+      {version: 1, latte: Caramel::VERSION, api: ControlAPI::VERSIONS, services: @states.transform_values { |state| {state: state} }, error: @error}.to_json
     end
 
     def start_services : Nil
@@ -69,15 +69,15 @@ module Caramel::Latte
             {"proxy" => @proxy_child, "dns" => @dns_child}.each do |name, child|
               begin
                 child.stop if !previous[name] && child.running?
-              rescue cleanup_error
-                STDERR.puts("Latte startup cleanup: #{cleanup_error.class}")
+              rescue error
+                STDERR.puts("Latte startup cleanup: #{error.class}")
               end
               @states[name] = "failed" unless previous[name]
             end
             begin
               @postgres.stop unless previous["postgres"]
-            rescue cleanup_error
-              STDERR.puts("Latte database cleanup: #{cleanup_error.class}")
+            rescue error
+              STDERR.puts("Latte database cleanup: #{error.class}")
             end
             @states["postgres"] = "failed" unless previous["postgres"]
           end
@@ -90,13 +90,11 @@ module Caramel::Latte
       schedule("stopping") do
         errors = false
         {"proxy" => @proxy_child, "dns" => @dns_child}.each do |name, child|
-          begin
-            child.stop if child.running?
-            @states[name] = "stopped"
-          rescue
-            @states[name] = "failed"
-            errors = true
-          end
+          child.stop if child.running?
+          @states[name] = "stopped"
+        rescue
+          @states[name] = "failed"
+          errors = true
         end
         begin
           @postgres.stop
@@ -174,9 +172,9 @@ module Caramel::Latte
         branch = @postgres.create_branch(registered(id), name)
         {version: 1, branch: {name: branch.name, database: branch.database, migration_url: branch.migration_url, runtime_url: branch.runtime_url}}.to_json
       end
-    rescue ex : Postgres::BranchExists
+    rescue Postgres::BranchExists
       raise PublicError.new("branch_exists", "Branch #{name} already exists; delete it first", 409)
-    rescue ex : Postgres::SecretMissing
+    rescue Postgres::SecretMissing
       raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
     rescue ex : Postgres::Error
       raise PublicError.new("branch_failed", ex.message || "Database branch operation failed")
@@ -210,7 +208,7 @@ module Caramel::Latte
         worker = @postgres.reset_test_worker(registered(id), index)
         {version: 1, worker: {index: index, database: worker.database, migration_url: worker.migration_url, runtime_url: worker.runtime_url}}.to_json
       end
-    rescue ex : Postgres::SecretMissing
+    rescue Postgres::SecretMissing
       raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
     rescue ex : Postgres::Error
       raise PublicError.new("test_worker_failed", ex.message || "Test worker database operation failed")
@@ -271,6 +269,7 @@ module Caramel::Latte
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- one branch per service health state
     def monitor : Nil
       return if @monitoring
       @monitoring = true
@@ -286,28 +285,26 @@ module Caramel::Latte
           next if @busy
           crashed = false
           @lock.synchronize do
-            begin
-              if @states["postgres"] == "running" && !@postgres.running?
-                @states["postgres"] = "failed"
-                crashed = true
-              end
-              if @states["dns"] == "running" && (!@dns_child.running? || readiness_failed?("dns", dns_ready?))
-                @states["dns"] = "failed"
-                crashed = true
-              end
-              if @states["proxy"] == "running"
-                if !@proxy_child.running? || readiness_failed?("proxy", proxy_ready?)
-                  @states["proxy"] = "failed"
-                  crashed = true
-                else
-                  reconcile if @proxy.configuration != @configuration
-                end
-              end
-            rescue ex
-              @states["proxy"] = "failed"
-              @error = "Service health check failed; use Start Services to retry"
-              STDERR.puts("Latte health: #{ex.class}")
+            if @states["postgres"] == "running" && !@postgres.running?
+              @states["postgres"] = "failed"
+              crashed = true
             end
+            if @states["dns"] == "running" && (!@dns_child.running? || readiness_failed?("dns", dns_ready?))
+              @states["dns"] = "failed"
+              crashed = true
+            end
+            if @states["proxy"] == "running"
+              if !@proxy_child.running? || readiness_failed?("proxy", proxy_ready?)
+                @states["proxy"] = "failed"
+                crashed = true
+              else
+                reconcile if @proxy.configuration != @configuration
+              end
+            end
+          rescue ex
+            @states["proxy"] = "failed"
+            @error = "Service health check failed; use Start Services to retry"
+            STDERR.puts("Latte health: #{ex.class}")
           end
           if crashed
             if @recovery_attempted
@@ -333,26 +330,24 @@ module Caramel::Latte
       @states.keys.each { |key| @states[key] = state }
       spawn do
         @lock.synchronize do
-          begin
-            OperationDeadline.run(state == "starting" ? 90.seconds : 60.seconds) { block.call }
-          rescue ex
-            @error = case ex
-                     when PublicError, DeadlineExceeded, Postgres::Error, Toolchain::Unavailable, Toolchain::VersionMismatch
-                       ex.message || "Managed service operation failed"
-                     else
-                       "Managed service operation failed; check Latte logs"
-                     end
-            STDERR.puts("Latte services: #{ex.class}: #{@error}")
-            @states.keys.each { |key| @states[key] = "failed" if @states[key] == state }
-          ensure
-            @busy = false
-          end
+          OperationDeadline.run(state == "starting" ? 90.seconds : 60.seconds) { block.call }
+        rescue ex
+          @error = case ex
+                   when PublicError, DeadlineExceeded, Postgres::Error, Toolchain::Unavailable, Toolchain::VersionMismatch
+                     ex.message || "Managed service operation failed"
+                   else
+                     "Managed service operation failed; check Latte logs"
+                   end
+          STDERR.puts("Latte services: #{ex.class}: #{@error}")
+          @states.keys.each { |key| @states[key] = "failed" if @states[key] == state }
+        ensure
+          @busy = false
         end
       end
     end
 
     private def require_ready! : Nil
-      unless !@busy && @states.values.all? { |state| state == "running" }
+      if @busy || @states.values.any? { |state| state != "running" }
         raise PublicError.new("services_not_ready", "Start Latte services and wait for them to be ready", 409)
       end
     end

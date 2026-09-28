@@ -1,7 +1,7 @@
 require "spec"
 require "../../scripts/checks/support/harness"
 
-INTEGRATION_BINARY = File.join(Caramel::Checks::REPO, "bin/install-local-integration")
+INTEGRATION_BINARY      = File.join(Caramel::Checks::REPO, "bin/install-local-integration")
 INTEGRATION_TEST_BINARY = File.join(Caramel::Checks::REPO, "bin/test/install-local-integration")
 raise "Run scripts/check native" unless File.file?(INTEGRATION_BINARY) && File.file?(INTEGRATION_TEST_BINARY)
 
@@ -37,7 +37,7 @@ private class IntegrationFixture
   def fixture(jobs : Array(String?), ports : Array(Int32)) : String
     path = File.join(@root, "host.json")
     File.write(path, {
-      "root_uid"    => LibC.getuid,
+      "root_uid"     => LibC.getuid,
       "destinations" => @destinations,
       "receipt"      => @receipt,
       "system_root"  => @system_root,
@@ -84,6 +84,21 @@ describe "local integration installer" do
       manifest = JSON.parse(File.read(File.join(fixture.bundle, "manifest.json")))
       manifest["uid"].as_i.should eq(LibC.getuid.to_i)
       File.read(File.join(fixture.bundle, "resolver")).should contain("port 15353")
+    end
+  end
+
+  it "reports each installed file as absent, current or stale, as the ordinary user" do
+    with_integration_fixture do |fixture|
+      host = fixture.fixture([nil] of String?, [] of Int32)
+      states = -> { JSON.parse(fixture.run(["status"], fixture: host).stdout).as_h.transform_values(&.as_s) }
+      states.call.should eq({"plist" => "absent", "relay" => "absent", "resolver" => "absent"})
+      fixture.destinations.each do |name, path|
+        Dir.mkdir_p(File.dirname(path))
+        File.copy(File.join(fixture.bundle, name), path)
+      end
+      states.call.should eq({"plist" => "current", "relay" => "current", "resolver" => "current"})
+      File.write(fixture.destinations["plist"], "a plist from another release")
+      states.call.should eq({"plist" => "stale", "relay" => "current", "resolver" => "current"})
     end
   end
 

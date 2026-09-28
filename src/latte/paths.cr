@@ -13,6 +13,18 @@ module Caramel
         LibC.getuid.to_i64
       end
 
+      # A regular file owned by the current user. Pass the info of an lstat
+      # (`follow_symlinks: false`): a symlink then reports its own type, so it
+      # is never a regular file.
+      def self.owned_file?(info : File::Info) : Bool
+        info.file? && info.owner_id.to_i64? == current_uid
+      end
+
+      # An owned file with exactly *mode*, as Latte writes its private state.
+      def self.private_file?(info : File::Info, mode : Int32 = FILE_MODE) : Bool
+        owned_file?(info) && info.permissions.value == mode
+      end
+
       def self.reject_controls!(value : String, label : String) : Nil
         value.each_byte do |byte|
           if byte < 0x20 || byte == 0x7f
@@ -25,6 +37,7 @@ module Caramel
       # created component at 0700 and lets us reject symlinks before following
       # them. Existing system parents are only checked for symlinks; the final
       # managed directory is owned and normalized below.
+      # ameba:disable Metrics/CyclomaticComplexity -- verifies each path component before using it
       def self.ensure_owned_directory(path : String) : String
         path = Path[path].expand(home: Path.home).normalize.to_s
         reject_controls!(path, "state path")
@@ -60,7 +73,7 @@ module Caramel
             info = File.info?(current, follow_symlinks: false)
           end
 
-          raise ArgumentError.new("state path contains a symlink") if info.not_nil!.symlink?
+          raise ArgumentError.new("state path contains a symlink") if info.nil? || info.symlink?
         end
 
         info = File.info?(path, follow_symlinks: false)
@@ -178,11 +191,17 @@ module Caramel
         StateSecurity.ensure_owned_directory(File.join(sites, id))
       end
 
-      def postgres_data : String
+      # Each PostgreSQL major keeps its own cluster in
+      # services/postgres/<major>/data, as Postgres.app does, so a major
+      # upgrade never starts on another major's files.
+      def postgres_data(major : Int32) : String
+        directory = StateSecurity.ensure_owned_directory(File.join(postgres_root, major.to_s))
+        StateSecurity.ensure_owned_directory(File.join(directory, "data"))
+      end
+
+      def postgres_root : String
         services = StateSecurity.ensure_owned_directory(File.join(root, "services"))
-        postgres = StateSecurity.ensure_owned_directory(File.join(services, "postgres"))
-        major = StateSecurity.ensure_owned_directory(File.join(postgres, "18"))
-        StateSecurity.ensure_owned_directory(File.join(major, "data"))
+        StateSecurity.ensure_owned_directory(File.join(services, "postgres"))
       end
 
       def postgres_socket_dir : String

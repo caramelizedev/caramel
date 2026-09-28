@@ -32,4 +32,30 @@ describe Caramel::Frappe::Installations do
   ensure
     FileUtils.rm_rf(root) if root
   end
+
+  it "names the newest registered release by semantic version" do
+    root = "/private/tmp/caramel-installations-#{Random::Secure.hex(8)}"
+    registry = Caramel::Frappe::Installations.new(root)
+    registry.newest.should be_nil
+    {"0.9.0" => "/a", "0.10.0-rc.1" => "/b", "0.10.0" => "/c", "0.2.0" => "/d"}.each { |release, checkout| registry.register(release, checkout) }
+    registry.newest.should eq({"0.10.0", "/c"})
+    registry.remove("0.10.0")
+    registry.newest.should eq({"0.10.0-rc.1", "/b"})
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses a registry written in a newer format and keeps it" do
+    root = "/private/tmp/caramel-installations-#{Random::Secure.hex(8)}"
+    Dir.mkdir(root, 0o700)
+    path = File.join(root, "installations.json")
+    original = %({"version":2,"installations":{"0.9.0":{"root":"/a","source":"tag"}}})
+    File.write(path, original, perm: 0o600)
+    expect_raises(Caramel::Frappe::Error, "written by a newer Caramel (format 2)") do
+      Caramel::Frappe::Installations.new(root).register("0.1.0", "/b")
+    end
+    File.read(path).should eq(original)
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
 end

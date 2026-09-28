@@ -2,6 +2,7 @@ require "file_utils"
 require "json"
 require "random/secure"
 require "uri"
+require "../caramel/version"
 require "./paths"
 require "./site"
 require "./process"
@@ -52,7 +53,7 @@ module Caramel::Latte
       getter actual : Int32
 
       def initialize(@expected : Int32, @actual : Int32)
-        super("managed PostgreSQL major #{@expected} is required; existing cluster has major #{@actual}")
+        super("Latte's databases are in PostgreSQL #{@actual}, but Caramel #{Caramel::VERSION} uses PostgreSQL #{@expected} and has no upgrade from #{@actual}; the data was preserved. Use the newest Caramel release that uses PostgreSQL #{@actual}.")
       end
     end
 
@@ -261,7 +262,7 @@ module Caramel::Latte
 
     def initialize(@paths : Paths, @toolchain : Toolchain = Toolchain.for_checkout)
       @lock = Mutex.new
-      @data_directory = @paths.postgres_data
+      @data_directory = @paths.postgres_data(MAJOR)
       @socket_directory = @paths.postgres_socket_dir
       @admin_record = nil
     end
@@ -480,9 +481,9 @@ module Caramel::Latte
 
     def self.branch_guard_sql(database : String) : String
       <<-SQL
-      ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS false;
-      SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = #{quote_literal(database)} AND pid <> pg_backend_pid();
-      SQL
+        ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS false;
+        SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = #{quote_literal(database)} AND pid <> pg_backend_pid();
+        SQL
     end
 
     def self.branch_release_sql(database : String) : String
@@ -496,10 +497,10 @@ module Caramel::Latte
     # Database-level settings and grants are not copied from a template.
     def self.branch_access_sql(branch : String, migration_role : String, runtime_role : String) : String
       <<-SQL
-      ALTER DATABASE #{quote_identifier(branch)} SET timezone TO 'UTC';
-      REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{quote_identifier(branch)} FROM PUBLIC;
-      GRANT CONNECT ON DATABASE #{quote_identifier(branch)} TO #{quote_identifier(migration_role)}, #{quote_identifier(runtime_role)};
-      SQL
+        ALTER DATABASE #{quote_identifier(branch)} SET timezone TO 'UTC';
+        REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{quote_identifier(branch)} FROM PUBLIC;
+        GRANT CONNECT ON DATABASE #{quote_identifier(branch)} TO #{quote_identifier(migration_role)}, #{quote_identifier(runtime_role)};
+        SQL
     end
 
     def self.branch_drop_sql(branch : String) : String
@@ -532,6 +533,7 @@ module Caramel::Latte
     @socket_directory : String
     @admin_record : AdminMaterial?
 
+    # ameba:disable Metrics/CyclomaticComplexity -- recovery for each startup step
     private def start_locked! : Nil
       @toolchain.verify_postgres_version!(Toolchain::POSTGRES_VERSION)
       validate_data_directory!
@@ -539,6 +541,7 @@ module Caramel::Latte
         verify_cluster_major!
         ensure_admin_material!(false)
       else
+        refuse_other_major_cluster!
         ensure_admin_material!(true)
         initialize_cluster!
       end
@@ -598,7 +601,7 @@ module Caramel::Latte
         timeout: 30.seconds,
         output_limit: 16 * 1024,
       )
-      unless result.success? || !verified_postmaster_pid?
+      if !result.success? && verified_postmaster_pid?
         raise Error.new("managed PostgreSQL failed to stop: #{result.diagnostic}")
       end
       raise Error.new("managed PostgreSQL is still running") if verified_postmaster_pid?
@@ -616,28 +619,28 @@ module Caramel::Latte
 
     private def managed_configuration_ok? : Bool
       sql = <<-SQL
-      SELECT current_setting('listen_addresses') = ''
-        AND current_setting('unix_socket_directories') = #{self.class.quote_literal(@socket_directory)}
-        AND current_setting('unix_socket_permissions') IN ('0700', '700')
-        AND current_setting('max_connections') = '#{MAX_CONNECTIONS}'
-        AND current_setting('password_encryption') = 'scram-sha-256'
-        AND current_setting('timezone') = 'UTC'
-        AND current_setting('log_statement') = 'none'
-        AND current_setting('log_min_error_statement') = 'panic'
-        AND current_setting('log_parameter_max_length') = '0'
-        AND current_setting('log_parameter_max_length_on_error') = '0'
-        AND current_setting('file_copy_method') = 'clone';
-      SQL
+        SELECT current_setting('listen_addresses') = ''
+          AND current_setting('unix_socket_directories') = #{self.class.quote_literal(@socket_directory)}
+          AND current_setting('unix_socket_permissions') IN ('0700', '700')
+          AND current_setting('max_connections') = '#{MAX_CONNECTIONS}'
+          AND current_setting('password_encryption') = 'scram-sha-256'
+          AND current_setting('timezone') = 'UTC'
+          AND current_setting('log_statement') = 'none'
+          AND current_setting('log_min_error_statement') = 'panic'
+          AND current_setting('log_parameter_max_length') = '0'
+          AND current_setting('log_parameter_max_length_on_error') = '0'
+          AND current_setting('file_copy_method') = 'clone';
+        SQL
       run_psql(sql, "postgres", ADMIN_USER, admin_material.password).strip == "t"
     rescue
       false
     end
 
     private def cleanup_started_postgres_locked!(attempt : PostmasterIdentity?, previous : PostmasterIdentity?) : Exception?
-      return nil unless attempt
-      return nil if previous && same_postmaster_identity?(attempt.not_nil!, previous.not_nil!)
+      return unless attempt
+      return if previous && same_postmaster_identity?(attempt, previous)
       current = postmaster_identity
-      return nil unless current && same_postmaster_identity?(current.not_nil!, attempt.not_nil!)
+      return unless current && same_postmaster_identity?(current, attempt)
       begin
         OperationDeadline.without { stop_locked! }
         nil
@@ -677,6 +680,19 @@ module Caramel::Latte
       raise WrongMajor.new(MAJOR, actual) unless actual == MAJOR
     end
 
+    # Until a release ships the pg_upgrade step for a major bump (ADR 0016),
+    # another major's cluster holds the user's databases: starting an empty
+    # cluster beside it would look like losing them.
+    private def refuse_other_major_cluster! : Nil
+      root = @paths.postgres_root
+      Dir.children(root).each do |name|
+        next if name == MAJOR.to_s
+        version = File.join(root, name, "data", "PG_VERSION")
+        next unless File.file?(version)
+        raise WrongMajor.new(MAJOR, File.read(version).strip.to_i? || 0)
+      end
+    end
+
     private def initialize_cluster! : Nil
       passfile = initdb_password_file
       result = ProcessRunner.run(
@@ -698,20 +714,20 @@ module Caramel::Latte
       validate_private_file!(hba, "managed PostgreSQL authentication configuration")
       managed_block = <<-CONF
 
-      # Caramel Latte managed settings
-      listen_addresses = ''
-      unix_socket_directories = #{config_literal(@socket_directory)}
-      unix_socket_permissions = 0700
-      max_connections = #{MAX_CONNECTIONS}
-      password_encryption = 'scram-sha-256'
-      timezone = 'UTC'
-      log_statement = 'none'
-      log_min_error_statement = 'panic'
-      log_parameter_max_length = 0
-      log_parameter_max_length_on_error = 0
-      # STRATEGY FILE_COPY branches clone files copy-on-write (APFS clonefile).
-      file_copy_method = clone
-      CONF
+        # Caramel Latte managed settings
+        listen_addresses = ''
+        unix_socket_directories = #{config_literal(@socket_directory)}
+        unix_socket_permissions = 0700
+        max_connections = #{MAX_CONNECTIONS}
+        password_encryption = 'scram-sha-256'
+        timezone = 'UTC'
+        log_statement = 'none'
+        log_min_error_statement = 'panic'
+        log_parameter_max_length = 0
+        log_parameter_max_length_on_error = 0
+        # STRATEGY FILE_COPY branches clone files copy-on-write (APFS clonefile).
+        file_copy_method = clone
+        CONF
       config_text = File.read(config)
       managed_text = managed_block.strip
       unless config_text.rstrip.ends_with?(managed_text)
@@ -721,11 +737,11 @@ module Caramel::Latte
       hba_text = File.read(hba)
       hba_block = <<-HBA
 
-      # Caramel Latte managed authentication
-      local all all scram-sha-256
-      host all all 0.0.0.0/0 reject
-      host all all ::0/0 reject
-      HBA
+        # Caramel Latte managed authentication
+        local all all scram-sha-256
+        host all all 0.0.0.0/0 reject
+        host all all ::0/0 reject
+        HBA
       # pg_hba.conf uses first-match semantics. Put Latte's SCRAM/local and
       # no-TCP rules before provider defaults so an old trust rule cannot win.
       unless hba_text.lstrip.starts_with?(hba_block.strip)
@@ -748,32 +764,33 @@ module Caramel::Latte
       !!postmaster_identity
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity -- verifies each postmaster.pid field before trusting it
     private def postmaster_identity : PostmasterIdentity?
       pid_file = File.join(@data_directory, "postmaster.pid")
       info = File.info?(pid_file, follow_symlinks: false)
-      return nil unless info
+      return unless info
       raise OwnershipError.new("managed PostgreSQL PID file is a symlink") if info.symlink?
-      return nil unless info.file?
+      return unless info.file?
       raise OwnershipError.new("managed PostgreSQL PID file has foreign ownership") unless info.owner_id.to_i64? == StateSecurity.current_uid
       raise OwnershipError.new("managed PostgreSQL PID file must be private") if (info.permissions.value & 0o077) != 0
       pid_lines = File.read(pid_file).lines.map(&.strip)
-      return nil if pid_lines.size < 3 || pid_lines[1] != @data_directory
+      return if pid_lines.size < 3 || pid_lines[1] != @data_directory
       pid = pid_lines[0].to_i64?
-      return nil unless pid && pid > 1
+      return unless pid && pid > 1
       postmaster_start = pid_lines[2].to_i64?
-      return nil unless postmaster_start
-      return nil unless Process.exists?(pid)
+      return unless postmaster_start
+      return unless Process.exists?(pid)
       ps = File.exists?("/bin/ps") ? "/bin/ps" : "/usr/bin/ps"
       result = ProcessRunner.run([ps, "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="], timeout: 2.seconds, output_limit: 16 * 1024)
-      return nil unless result.success?
+      return unless result.success?
       fields = result.stdout.strip.split(/\s+/, 7)
-      return nil if fields.size < 7
-      return nil unless fields[0].to_i64? == StateSecurity.current_uid
+      return if fields.size < 7
+      return unless fields[0].to_i64? == StateSecurity.current_uid
       process_start = Time::Format.new("%a %b %e %T %Y", Time::Location.local).parse(fields[1, 5].join(" ")).to_unix
-      return nil unless (process_start - postmaster_start).abs <= 1
+      return unless (process_start - postmaster_start).abs <= 1
       command_line = fields[6]
       expected = "#{@toolchain.postgres} -D #{@data_directory}"
-      return nil unless command_line == expected || command_line.starts_with?("#{expected} ")
+      return unless command_line == expected || command_line.starts_with?("#{expected} ")
       PostmasterIdentity.new(pid, @data_directory, postmaster_start)
     rescue ex : OwnershipError
       raise ex
@@ -805,7 +822,7 @@ module Caramel::Latte
 
     private def load_admin_material? : AdminMaterial?
       path = admin_secret_path
-      return nil unless File.exists?(path)
+      return unless File.exists?(path)
       info = File.info(path, follow_symlinks: false)
       raise OwnershipError.new("managed administrator secret is a symlink") if info.symlink?
       raise OwnershipError.new("managed administrator secret has foreign ownership") unless info.owner_id.to_i64? == StateSecurity.current_uid
@@ -814,7 +831,7 @@ module Caramel::Latte
       json = JSON.parse(File.read(path))
       username = json["username"].as_s
       password = json["password"].as_s
-      raise SecretMissing.new("managed administrator secret is invalid") unless username == ADMIN_USER && password.size >= 32 && !password.includes?('\n')
+      raise SecretMissing.new("managed administrator secret is invalid") if username != ADMIN_USER || password.size < 32 || password.includes?('\n')
       AdminMaterial.new(username, password)
     rescue JSON::ParseException
       raise SecretMissing.new("managed administrator secret is invalid")
@@ -940,15 +957,15 @@ module Caramel::Latte
 
     private def ensure_role(role : String, password : String, connection_limit : Int32) : Nil
       sql = <<-SQL
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = #{self.class.quote_literal(role)}) THEN
-          CREATE ROLE #{self.class.quote_identifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS CONNECTION LIMIT #{connection_limit} PASSWORD #{self.class.quote_literal(password)};
-        END IF;
-      END
-      $$;
-      ALTER ROLE #{self.class.quote_identifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS CONNECTION LIMIT #{connection_limit} PASSWORD #{self.class.quote_literal(password)};
-      SQL
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = #{self.class.quote_literal(role)}) THEN
+            CREATE ROLE #{self.class.quote_identifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS CONNECTION LIMIT #{connection_limit} PASSWORD #{self.class.quote_literal(password)};
+          END IF;
+        END
+        $$;
+        ALTER ROLE #{self.class.quote_identifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS CONNECTION LIMIT #{connection_limit} PASSWORD #{self.class.quote_literal(password)};
+        SQL
       run_psql(sql, "postgres", ADMIN_USER, admin_material.password)
     end
 
@@ -987,32 +1004,32 @@ module Caramel::Latte
 
     private def configure_database(database : String, migration_role : String, runtime_role : String) : Nil
       sql = <<-SQL
-      ALTER DATABASE #{self.class.quote_identifier(database)} OWNER TO #{self.class.quote_identifier(migration_role)};
-      ALTER DATABASE #{self.class.quote_identifier(database)} SET timezone TO 'UTC';
-      REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{self.class.quote_identifier(database)} FROM PUBLIC;
-      GRANT CONNECT ON DATABASE #{self.class.quote_identifier(database)} TO #{self.class.quote_identifier(migration_role)}, #{self.class.quote_identifier(runtime_role)};
-      SQL
+        ALTER DATABASE #{self.class.quote_identifier(database)} OWNER TO #{self.class.quote_identifier(migration_role)};
+        ALTER DATABASE #{self.class.quote_identifier(database)} SET timezone TO 'UTC';
+        REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{self.class.quote_identifier(database)} FROM PUBLIC;
+        GRANT CONNECT ON DATABASE #{self.class.quote_identifier(database)} TO #{self.class.quote_identifier(migration_role)}, #{self.class.quote_identifier(runtime_role)};
+        SQL
       run_psql(sql, "postgres", ADMIN_USER, admin_material.password)
 
       database_sql = <<-SQL
-      REVOKE ALL ON SCHEMA public FROM PUBLIC;
-      ALTER SCHEMA public OWNER TO #{self.class.quote_identifier(migration_role)};
-      REVOKE ALL ON SCHEMA public FROM #{self.class.quote_identifier(runtime_role)};
-      GRANT USAGE ON SCHEMA public TO #{self.class.quote_identifier(runtime_role)};
-      ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC;
-      ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO #{self.class.quote_identifier(runtime_role)};
-      ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC;
-      ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO #{self.class.quote_identifier(runtime_role)};
-      CREATE TABLE IF NOT EXISTS caramel_migrations (
-        version bigint PRIMARY KEY,
-        name text NOT NULL,
-        checksum text NOT NULL,
-        applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      ALTER TABLE caramel_migrations OWNER TO #{self.class.quote_identifier(migration_role)};
-      REVOKE ALL ON TABLE caramel_migrations FROM #{self.class.quote_identifier(runtime_role)};
-      GRANT SELECT ON TABLE caramel_migrations TO #{self.class.quote_identifier(runtime_role)};
-      SQL
+        REVOKE ALL ON SCHEMA public FROM PUBLIC;
+        ALTER SCHEMA public OWNER TO #{self.class.quote_identifier(migration_role)};
+        REVOKE ALL ON SCHEMA public FROM #{self.class.quote_identifier(runtime_role)};
+        GRANT USAGE ON SCHEMA public TO #{self.class.quote_identifier(runtime_role)};
+        ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC;
+        ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO #{self.class.quote_identifier(runtime_role)};
+        ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC;
+        ALTER DEFAULT PRIVILEGES FOR ROLE #{self.class.quote_identifier(migration_role)} IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO #{self.class.quote_identifier(runtime_role)};
+        CREATE TABLE IF NOT EXISTS caramel_migrations (
+          version bigint PRIMARY KEY,
+          name text NOT NULL,
+          checksum text NOT NULL,
+          applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE caramel_migrations OWNER TO #{self.class.quote_identifier(migration_role)};
+        REVOKE ALL ON TABLE caramel_migrations FROM #{self.class.quote_identifier(runtime_role)};
+        GRANT SELECT ON TABLE caramel_migrations TO #{self.class.quote_identifier(runtime_role)};
+        SQL
       run_psql(database_sql, database, ADMIN_USER, admin_material.password)
     end
 
@@ -1125,22 +1142,22 @@ module Caramel::Latte
     private def validate_private_file!(path : String, label : String) : Nil
       info = File.info?(path, follow_symlinks: false)
       raise Error.new("#{label} is missing") unless info
-      raise OwnershipError.new("#{label} is a symlink") if info.not_nil!.symlink?
-      raise OwnershipError.new("#{label} has foreign ownership") unless info.not_nil!.owner_id.to_i64? == StateSecurity.current_uid
-      raise Error.new("#{label} is not a regular file") unless info.not_nil!.file?
-      raise OwnershipError.new("#{label} must be private") if (info.not_nil!.permissions.value & 0o077) != 0
+      raise OwnershipError.new("#{label} is a symlink") if info.symlink?
+      raise OwnershipError.new("#{label} has foreign ownership") unless info.owner_id.to_i64? == StateSecurity.current_uid
+      raise Error.new("#{label} is not a regular file") unless info.file?
+      raise OwnershipError.new("#{label} must be private") if (info.permissions.value & 0o077) != 0
     end
 
     private def validate_replacement_target!(path : String, label : String, expected_mode : Int32? = nil) : Nil
       info = File.info?(path, follow_symlinks: false)
       return unless info
-      raise OwnershipError.new("#{label} is a symlink") if info.not_nil!.symlink?
-      raise OwnershipError.new("#{label} has foreign ownership") unless info.not_nil!.owner_id.to_i64? == StateSecurity.current_uid
-      raise OwnershipError.new("#{label} is not a regular file") unless info.not_nil!.file?
+      raise OwnershipError.new("#{label} is a symlink") if info.symlink?
+      raise OwnershipError.new("#{label} has foreign ownership") unless info.owner_id.to_i64? == StateSecurity.current_uid
+      raise OwnershipError.new("#{label} is not a regular file") unless info.file?
       if expected_mode
-        raise OwnershipError.new("#{label} must be mode #{expected_mode.to_s(8)}") unless info.not_nil!.permissions.value == expected_mode
+        raise OwnershipError.new("#{label} must be mode #{expected_mode.to_s(8)}") unless info.permissions.value == expected_mode
       else
-        raise OwnershipError.new("#{label} must be private") if (info.not_nil!.permissions.value & 0o077) != 0
+        raise OwnershipError.new("#{label} must be private") if (info.permissions.value & 0o077) != 0
       end
     end
 

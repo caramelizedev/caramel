@@ -188,14 +188,15 @@ describe Caramel::Latte::Registry do
     end
   end
 
-  it "rejects unsupported and corrupt registry versions without resetting data" do
+  it "refuses a newer registry format and corrupt registries without resetting data" do
     root = latte_temp_root
     begin
       registry = Caramel::Latte::Registry.new(root)
-      original = %({"version":99,"sites":[]})
+      # A newer format may add keys; it is refused as newer, not as corrupt.
+      original = %({"version":2,"sites":[],"aliases":[]})
       File.write(registry.registry_file, original)
       File.chmod(registry.registry_file, 0o600)
-      expect_raises(ArgumentError) { registry.list }
+      expect_raises(Caramel::Latte::StateFormat::Newer, "written by a newer Caramel (format 2); Caramel #{Caramel::VERSION} reads format 1") { registry.list }
       File.read(registry.registry_file).should eq(original)
 
       malformed = "{not json"
@@ -251,7 +252,7 @@ describe Caramel::Latte::Registry do
       started = Channel(Nil).new
       release = Channel(Nil).new
       finished = Channel(Nil).new
-      workers = [
+      [
         {"one", first_directory},
         {"two", second_directory},
       ].map do |name, directory|
@@ -265,7 +266,7 @@ describe Caramel::Latte::Registry do
       2.times { started.receive }
       2.times { release.send(nil) }
       2.times { finished.receive }
-      registry.list.map(&.name).sort.should eq(["one", "two"])
+      registry.list.map(&.name).sort!.should eq(["one", "two"])
     ensure
       remove_latte_root(root)
     end
