@@ -2,6 +2,7 @@ require "http/client"
 require "socket/unix_socket"
 require "./project"
 require "../latte/postgres"
+require "../latte/installed_releases"
 
 module Caramel::Frappe
   # Frappé and the menu application speak to the same private service owner.
