@@ -14,7 +14,7 @@ module Caramel::Checks::All
 
   # Performance measurements, not pass/fail checks.
   EXEMPT = %w[all compiler-profile]
-  SPECS  = %w[spec/caramel spec/frappe spec/latte spec/sugar_orm spec/cold_brew spec/corretto]
+  SPECS  = %w[spec/caramel spec/frappe spec/latte spec/sugar_orm spec/cold_brew spec/corretto spec/release]
 
   def main(args : Array(String)) : Int32
     skipped = [] of String

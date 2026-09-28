@@ -1,0 +1,8 @@
+#!/bin/sh
+# Cuts the next Caramel release (ADR 0016); --dry-run prints it without
+# changing anything. Pushing the tag and publishing stay manual.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$ROOT/bin"
+"$ROOT/scripts/crystal" build "$ROOT/scripts/cut/main.cr" -o "$ROOT/bin/release"
+exec "$ROOT/bin/release" "$@"

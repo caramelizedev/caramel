@@ -5,6 +5,7 @@ require "./lint"
 require "./new_project"
 require "./latte_client"
 require "./installations"
+require "./release"
 require "./launchers"
 require "./tools"
 require "./resource_generator"
@@ -26,10 +27,14 @@ module Caramel::Frappe
       args[0] = "help" if {"--help", "-h"}.includes?(args[0])
       args[0] = "version" if {"--version", "-v"}.includes?(args[0])
       if args.size > 1 && {"--help", "-h"}.includes?(args.last) && !(matches = Commands.matching(args[0...-1])).empty?
-        matches.each { |command| @output.puts("Usage: frappe #{command.syntax}\n  #{command.description}") }
+        matches.each { |command| @output.puts("Usage: frappe #{command.syntax}\n  #{command.summary}") }
         return 0
       end
-      execute(Commands.parse(args))
+      invocation = Commands.parse(args)
+      invocation.command.deprecated.try do |replacement|
+        @error.puts("Warning: frappe #{invocation.command.name} is deprecated and will be removed in the next minor release. #{replacement}")
+      end
+      execute(invocation)
     rescue ex : Commands::Usage
       usage(ex, arguments)
       1
@@ -125,7 +130,7 @@ module Caramel::Frappe
         sites
       when "sites remove"
         remove_site(invocation["NAME"])
-      when "installations", "installations register", "installations remove"
+      when "installations", "installations install", "installations register", "installations remove"
         installations(invocation)
       when "doctor"
         return doctor
@@ -165,7 +170,7 @@ module Caramel::Frappe
 
     private def help : Nil
       @output.puts("Frappé — Caramel's application CLI\n")
-      Commands::TABLE.each { |command| @output.puts("  frappe #{command.syntax}\n      #{command.description}") }
+      Commands::TABLE.each { |command| @output.puts("  frappe #{command.syntax}\n      #{command.summary}") }
       @output.puts("\nUse frappe COMMAND --help for one command's syntax. Diagnostics print as MRDP with --agent or when stdout is not a terminal; --human selects the terminal layout.")
     end
 
@@ -174,7 +179,7 @@ module Caramel::Frappe
       @output.puts("CARAMEL CLI INTERFACE (STRICT TOKENS)")
       @output.puts("VERSION: #{Caramel::VERSION}")
       @output.puts("DOCS: #{Caramel::REPOSITORY}/tree/v#{Caramel::VERSION}")
-      Commands::TABLE.each { |command| @output.puts("frappe #{command.syntax}  # #{command.description}") }
+      Commands::TABLE.each { |command| @output.puts("frappe #{command.syntax}  # #{command.summary}") }
       @output.puts
       @output.puts(MRDP::GRAMMAR)
     end
@@ -478,10 +483,10 @@ module Caramel::Frappe
       when "installations"
         entries = registry.list
         if entries.empty?
-          @output.puts("No Caramel installations are registered. Run frappe installations register from a Caramel checkout.")
+          @output.puts("No Caramel releases are installed. Run frappe installations install VERSION, or frappe installations register from a Caramel checkout.")
         else
           current = File.realpath(@framework_root)
-          entries.keys.sort!.each do |release|
+          entries.keys.sort_by! { |release| SemanticVersion.parse(release) }.each do |release|
             root = entries[release]
             @output.puts("#{release.ljust(12)} #{root}#{root == current ? "  (this installation)" : ""}")
           end
@@ -495,18 +500,36 @@ module Caramel::Frappe
             raise Error.new("#{binary} is missing; run #{build} first")
           end
         end
-        launchers = Launchers.new
-        launchers.install(root)
         previous = registry.register(Caramel::VERSION, root)
         @output.puts("Registered Caramel #{Caramel::VERSION}: #{root}#{previous && previous != root ? " (replaced #{previous})" : ""}")
-        @output.puts("#{launchers.path("frappe")} and #{launchers.path("latte")} run this checkout.")
-        @output.puts("Add #{launchers.directory} to PATH to run them by name.") unless launchers.on_path?
+        follow(registry)
+      when "installations install"
+        release = invocation["VERSION"]
+        if root = registry.lookup(release)
+          @output.puts("Caramel #{release} is already installed: #{root}")
+          return
+        end
+        root = Release.new(release, registry, @output, @error).install(Tools.new(@framework_root).toolchain.root)
+        @output.puts("Installed Caramel #{release}: #{root}")
+        follow(registry)
       else
         release = invocation["VERSION"]
         root = registry.lookup(release)
         raise Error.new("Caramel #{release} is not registered") unless root && registry.remove(release)
         @output.puts("Removed Caramel #{release} from the installation registry.")
-        Launchers.new.remove(root).each { |path| @output.puts("Removed #{path}.") }
+        follow(registry, root)
+      end
+    end
+
+    # Leaves ~/.local/bin/frappe and latte on the newest installed release.
+    private def follow(registry : Installations, previous : String? = nil) : Nil
+      launchers = Launchers.new
+      if root = launchers.follow(registry, previous)
+        release = registry.newest.try(&.[0])
+        @output.puts("#{launchers.path("frappe")} and #{launchers.path("latte")} run the newest installed release, Caramel #{release}: #{root}")
+        @output.puts("Add #{launchers.directory} to PATH to run them by name.") unless launchers.on_path?
+      else
+        @output.puts("No Caramel release remains installed; the #{launchers.directory} launchers Caramel wrote were removed.")
       end
     end
   end

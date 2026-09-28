@@ -1,16 +1,17 @@
 require "json"
-require "semantic_version"
 require "./project"
 require "../latte/config_file"
-require "../latte/state_format"
+require "../latte/installed_releases"
 
 module Caramel::Frappe
+  # The Caramel releases installed on this Mac (ADR 0016), in
+  # installations.json under Caramel's state root.
   class Installations
-    FORMAT = 1
+    getter root : String
 
     def initialize(root : String? = nil)
       @root = Latte::StateSecurity.canonical_creation_path(root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT)
-      @path = File.join(@root, "installations.json")
+      @path = Latte::InstalledReleases.path(@root)
       @lock_path = @path + ".lock"
     end
 
@@ -19,59 +20,39 @@ module Caramel::Frappe
     end
 
     def list : Hash(String, String)
-      read_entries
+      Latte::InstalledReleases.read(@path)
+    rescue ex : Latte::InstalledReleases::Invalid | Latte::StateFormat::Newer
+      raise Error.new(ex.message)
     end
 
     # The newest registered release and its checkout, by semantic version:
-    # the one whose Latte, relay and launchers serve every project (ADR 0016).
+    # the one whose Latte, relay and launchers serve every project.
     def newest : {String, String}?
-      list.max_by? { |release, _| SemanticVersion.parse(release) }
+      Latte::InstalledReleases.newest(list)
     end
 
     def register(release : String, framework_root : String) : String?
       raise Error.new("Caramel installation root must be absolute") unless Path[framework_root].absolute?
       with_lock do
-        entries = read_entries
+        entries = list
         previous = entries[release]?
         entries[release] = framework_root
-        Latte::ConfigFile.write(@path, {version: FORMAT, installations: entries}.to_json + "\n")
+        write(entries)
         previous
       end
     end
 
     def remove(release : String) : Bool
       with_lock do
-        entries = read_entries
-        if entries.delete(release)
-          Latte::ConfigFile.write(@path, {version: FORMAT, installations: entries}.to_json + "\n")
-          true
-        else
-          false
-        end
+        entries = list
+        next false unless entries.delete(release)
+        write(entries)
+        true
       end
     end
 
-    private def read_entries : Hash(String, String)
-      return {} of String => String unless info = File.info?(@path, follow_symlinks: false)
-      unless Latte::StateSecurity.private_file?(info)
-        raise Error.new("Caramel installation registry must be a private owned file: #{@path}")
-      end
-      begin
-        document = JSON.parse(File.read(@path))
-        Latte::StateFormat.check!(@path, document["version"].as_i, FORMAT)
-        entries = {} of String => String
-        document["installations"].as_h.each do |release, value|
-          SemanticVersion.parse(release)
-          root = value.as_s
-          raise Error.new("installation root must be absolute") unless Path[root].absolute?
-          entries[release] = root
-        end
-        entries
-      rescue ex : Latte::StateFormat::Newer
-        raise Error.new(ex.message)
-      rescue JSON::ParseException | KeyError | TypeCastError | ArgumentError | Error
-        raise Error.new("Caramel installation registry is invalid: #{@path}")
-      end
+    private def write(entries : Hash(String, String)) : Nil
+      Latte::ConfigFile.write(@path, {version: Latte::InstalledReleases::FORMAT, installations: entries}.to_json + "\n")
     end
 
     private def with_lock(& : -> T) : T forall T

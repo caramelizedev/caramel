@@ -14,8 +14,9 @@ module Caramel::Frappe
     getter root : String
 
     # *launcher* is the `latte` that `ready!` starts when no daemon serves the
-    # state root. By default that is the `latte` built beside the running
-    # `frappe`, for the per-user state only: a CARAMEL_HOME somebody set, as
+    # state root. By default that is the newest installed release's `latte`
+    # (ADR 0016), or the one built beside this `frappe` when this release is
+    # the newest. Only for the per-user state: a CARAMEL_HOME somebody set, as
     # checks do, belongs to whoever set it.
     def initialize(root : String? = nil, @launcher : String? = nil)
       selected = root || ENV["CARAMEL_HOME"]? || Latte::Paths::DEFAULT_ROOT
@@ -23,7 +24,8 @@ module Caramel::Frappe
       @runtime = Latte::StateSecurity.runtime_root(@root)
       @socket_path = File.join(@runtime, "latte.sock")
       if @launcher.nil? && root.nil? && !ENV.has_key?("CARAMEL_HOME")
-        @launcher = Process.executable_path.try { |path| File.join(File.dirname(path), "latte") }
+        @launcher = Latte::InstalledReleases.newer_latte(@root, Caramel::VERSION) ||
+                    Process.executable_path.try { |path| File.join(File.dirname(path), "latte") }
       end
     end
 

@@ -44,10 +44,12 @@ Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enq
 
 ## Getting started
 
-On Apple Silicon with Apple's Command Line Tools, from a checkout ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md)):
+Caramel is released as source tags; there are no prebuilt binaries until it has an Apple Developer ID ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). On Apple Silicon with Apple's Command Line Tools, install a release from its tag ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md)):
 
 ```sh
+git clone --branch v0.1.0 https://github.com/caramelizedev/caramel.git caramel && cd caramel
 scripts/install-toolchain                   # pinned Crystal, PostgreSQL, Caddy and CoreDNS; recorded in .caramel-toolchain
+scripts/shards install --frozen --without-development
 scripts/build-frappe && scripts/build-latte
 bin/frappe installations register           # frappe and latte in ~/.local/bin
 frappe services start                       # starts Latte in the background
@@ -56,6 +58,8 @@ sudo scripts/install-local-integration apply /private/tmp/caramel-integration-bu
 latte trust install                         # trusts Latte's local CA in your login keychain
 frappe new demo && cd demo && frappe dev
 ```
+
+Later releases install beside it: `frappe installations install 0.2.0` clones that tag into `~/Library/Application Support/Caramel/releases/`, reuses the toolchain when the release pins the same one, builds and registers it. Each application's `shard.lock` pins its release, and `frappe` runs that release's commands for it, offering to install a missing one. `~/.local/bin/frappe` and `latte`, on-demand Latte and the login item all run the newest installed release. `frappe doctor` names the command that updates a resolver or port relay from an older release.
 
 The integration and trust steps are needed once per machine. `sudo scripts/install-local-integration uninstall` and `latte trust remove` undo them. After that, the last line is the whole workflow:
 
@@ -66,11 +70,13 @@ The integration and trust steps are needed once per machine. `sudo scripts/insta
 
 ## Contributor checks
 
+[CONTRIBUTING.md](CONTRIBUTING.md) covers commits, the rule set, releases, the compatibility contracts and deprecation.
+
 Install the pinned toolchain (Apple Silicon, Apple Command Line Tools required) with `scripts/install-toolchain`. It installs into `~/Library/Application Support/Caramel/toolchains/` and records the location in this checkout's `.caramel-toolchain`, which every Caramel command and check reads; `--root <dir>` installs elsewhere and `CARAMEL_TOOLCHAIN_ROOT` overrides the recorded location. The selection and lockfile live in `tools/toolchain/`. The launchers preserve the caller's working directory and use the pinned Crystal/Shards/OpenSSL tools without shell activation.
 
 ```sh
 scripts/shards install --frozen
-scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm spec/corretto spec/cold_brew
+scripts/crystal spec spec/caramel spec/frappe spec/latte spec/sugar_orm spec/corretto spec/cold_brew spec/release
 scripts/check lint
 scripts/check views
 scripts/check compiler
@@ -96,6 +102,7 @@ scripts/check latte-daemon
 scripts/check native
 scripts/build-frappe
 scripts/check frappe-project
+scripts/check installations
 scripts/check frappe-project --dev
 scripts/check schema-diff
 scripts/check dev-child

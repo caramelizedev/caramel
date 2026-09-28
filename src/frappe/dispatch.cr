@@ -5,6 +5,15 @@ module Caramel::Frappe::Dispatch
   ENVIRONMENT_KEY = "CARAMEL_FRAPPE_DISPATCHED"
   RELEASE         = /\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?\z/
 
+  # A project pins a release that is not installed on this Mac.
+  class NotInstalled < Error
+    getter release : String
+
+    def initialize(@release : String)
+      super("Project requires Caramel #{@release}, but no Caramel installation is registered for it. Install it: frappe installations install #{@release}")
+    end
+  end
+
   # The `frappe` of the release a project pins in its shard.lock, when that
   # is another release than this one.
   def self.target(arguments : Array(String), directory : String = Dir.current, environment : ENV.class | Hash(String, String) = ENV) : String?
@@ -14,9 +23,7 @@ module Caramel::Frappe::Dispatch
     return unless pin && pin.matches?(RELEASE) && pin != Caramel::VERSION
 
     root = Installations.new(environment["CARAMEL_HOME"]?).lookup(pin)
-    unless root
-      raise Error.new("Project requires Caramel #{pin}, but no Caramel installation is registered for it. Run frappe installations register from a Caramel #{pin} checkout.")
-    end
+    raise NotInstalled.new(pin) unless root
     binary = File.join(root, "bin/frappe")
     target = File.info?(binary, follow_symlinks: false)
     unless target && target.file? && File::Info.executable?(binary)

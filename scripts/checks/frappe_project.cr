@@ -137,19 +137,7 @@ module Caramel::Checks
     # git. A repository of this working tree, tagged as this release, stands in
     # for github.com/caramelizedev/caramel.
     def git_source : Nil
-      repository = File.join(@root, "caramel.git")
-      listed = command(["/usr/bin/git", "-C", @repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], echo: false).stdout
-      listed.split('\0', remove_empty: true).each do |relative|
-        source = File.join(@repo, relative)
-        next unless File.file?(source)
-        Dir.mkdir_p(File.dirname(File.join(repository, relative)))
-        File.copy(source, File.join(repository, relative))
-      end
-      git = ["/usr/bin/git", "-C", repository, "-c", "user.name=Caramel checks", "-c", "user.email=checks@caramel.invalid"]
-      [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "Caramel #{Caramel::VERSION}"], ["tag", "v#{Caramel::VERSION}"]].each do |arguments|
-        command(git + arguments, echo: false)
-      end
-      url = "file://#{repository}"
+      url = "file://#{Checks.tagged_repository(File.join(@root, "caramel.git"), Caramel::VERSION)}"
       command([@frappe, "new", "tagged"], chdir: @projects, environment: environment({"CARAMEL_REPOSITORY" => url}))
       tagged = File.join(@projects, "tagged")
       assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(%(  caramel:\n    git: #{url.to_json}\n    version: "~> #{Caramel::VERSION}"\n)))
@@ -171,7 +159,7 @@ module Caramel::Checks
       assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
       assert!(manifest[1]? == "VERSION: #{Caramel::VERSION}", manifest[1]?.to_s)
       Caramel::Frappe::Commands::TABLE.each do |entry|
-        assert!(manifest.includes?("frappe #{entry.syntax}  # #{entry.description}"), "manifest lacks frappe #{entry.syntax}")
+        assert!(manifest.includes?("frappe #{entry.syntax}  # #{entry.summary}"), "manifest lacks frappe #{entry.syntax}")
       end
       ["check [--agent|--human]", "lint [--agent|--human]", "format", "routes [FILTER]", "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]", "expand FILE:LINE:COL"].each do |syntax|
         assert!(manifest.any?(&.starts_with?("frappe #{syntax}")), "manifest lacks frappe #{syntax}")

@@ -37,13 +37,21 @@ describe Caramel::Frappe::Launchers do
     end
   end
 
-  it "repoints its own launchers at the newest registered checkout" do
+  it "points its launchers at the newest installed release, not the one registered last" do
     with_launcher_directory do |base, root|
       launchers = Caramel::Frappe::Launchers.new(File.join(base, "bin"))
-      other = File.join(base, "other")
-      launchers.install(other)
-      launchers.install(root)
+      registry = Caramel::Frappe::Installations.new(File.join(base, "state"))
+      older = File.join(base, "older")
+      registry.register("0.10.0", root)
+      registry.register("0.9.0", older)
+      launchers.follow(registry).should eq(root)
       run_launcher(launchers.path("frappe"), "doctor").should eq("frappe|doctor|")
+      registry.remove("0.10.0")
+      launchers.follow(registry, root).should eq(older)
+      File.read(launchers.path("latte")).should contain("#{older}/bin/latte")
+      registry.remove("0.9.0")
+      launchers.follow(registry, older).should be_nil
+      File.exists?(launchers.path("frappe")).should be_false
     end
   end
 

@@ -11,7 +11,7 @@ describe Caramel::Frappe::CLI do
   it "shows help, per-command usage and the version without touching a toolchain or service" do
     frappe, output, errors = cli
     frappe.run(["--help"]).should eq(0)
-    Caramel::Frappe::Commands::TABLE.each { |command| output.to_s.should contain("  frappe #{command.syntax}\n      #{command.description}\n") }
+    Caramel::Frappe::Commands::TABLE.each { |command| output.to_s.should contain("  frappe #{command.syntax}\n      #{command.summary}\n") }
     errors.to_s.should eq("")
     output.clear
     frappe.run(["db", "branch", "--help"]).should eq(0)
@@ -28,7 +28,7 @@ describe Caramel::Frappe::CLI do
     lines.first.should eq("CARAMEL CLI INTERFACE (STRICT TOKENS)")
     lines[1, 2].should eq(["VERSION: #{Caramel::VERSION}", "DOCS: https://github.com/caramelizedev/caramel/tree/v#{Caramel::VERSION}"])
     commands = lines[3...lines.index!("")]
-    commands.should eq(Caramel::Frappe::Commands::TABLE.map { |command| "frappe #{command.syntax}  # #{command.description}" })
+    commands.should eq(Caramel::Frappe::Commands::TABLE.map { |command| "frappe #{command.syntax}  # #{command.summary}" })
     %w[check routes expand dev corretto].each { |name| commands.any?(&.starts_with?("frappe #{name} ")).should be_true }
     commands.should contain("frappe db branch create NAME  # Clone the development database into branch NAME and print its connection URL.")
     grammar = lines[(commands.size + 4)..]

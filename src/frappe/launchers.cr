@@ -1,4 +1,5 @@
 require "./project"
+require "./installations"
 
 module Caramel::Frappe
   # Small scripts in ~/.local/bin that run a registered checkout's `frappe`
@@ -39,6 +40,19 @@ module Caramel::Frappe
         next unless File.read(destination) == script(root, name)
         File.delete(destination)
         destination
+      end
+    end
+
+    # Points both launchers at the newest registered release (ADR 0016), or,
+    # when none remains, deletes the ones that ran *previous*. Returns the
+    # checkout they run, if any.
+    def follow(installations : Installations, previous : String? = nil) : String?
+      if newest = installations.newest
+        install(newest[1])
+        newest[1]
+      else
+        previous.try { |root| remove(root) }
+        nil
       end
     end
 

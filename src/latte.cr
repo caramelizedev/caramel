@@ -2,6 +2,7 @@ require "./latte/daemon"
 require "./latte/login_item"
 require "./latte/trust"
 require "./latte/control_api"
+require "./latte/installed_releases"
 
 begin
   case ARGV
@@ -15,8 +16,10 @@ begin
     stopped = Caramel::Latte::Daemon.stop(Caramel::Latte::Paths.new)
     puts stopped ? "Latte stopped; its services were left as they were (frappe services stop stops them)." : "Latte is not running."
   when ["service", "install"]
-    latte = Process.executable_path || raise Caramel::Latte::PublicError.new("login_item", "Cannot locate this latte executable")
     paths = Caramel::Latte::Paths.new
+    # The login item runs the newest installed release's Latte (ADR 0016).
+    latte = Caramel::Latte::InstalledReleases.newer_latte(paths.root, Caramel::VERSION) || Process.executable_path ||
+            raise Caramel::Latte::PublicError.new("login_item", "Cannot locate this latte executable")
     item = Caramel::Latte::LoginItem.for_latte(latte)
     # The login item's daemon takes over from one Frappé started.
     Caramel::Latte::Daemon.stop(paths)

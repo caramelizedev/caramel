@@ -45,6 +45,27 @@ module Caramel::Checks
     path
   end
 
+  # A git repository of this working tree, committed and tagged
+  # v<version>, standing in for github.com/caramelizedev/caramel. Its
+  # shard.yml declares *version*.
+  def self.tagged_repository(destination : String, version : String) : String
+    listed = run(["/usr/bin/git", "-C", REPO, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]).stdout
+    listed.split('\0', remove_empty: true).each do |relative|
+      source = File.join(REPO, relative)
+      next unless File.file?(source)
+      Dir.mkdir_p(File.dirname(File.join(destination, relative)))
+      File.copy(source, File.join(destination, relative))
+    end
+    manifest = File.join(destination, "shard.yml")
+    File.write(manifest, File.read_lines(manifest).map { |line| line.starts_with?("version:") ? "version: #{version}" : line }.join('\n') + '\n')
+    git = ["/usr/bin/git", "-C", destination, "-c", "user.name=Caramel checks", "-c", "user.email=checks@caramel.invalid"]
+    [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "Caramel #{version}"], ["tag", "v#{version}"]].each do |arguments|
+      result = run(git + arguments)
+      fail(result.stdout + result.stderr) unless result.success?
+    end
+    destination
+  end
+
   def self.runtime_root(state_root : String) : String
     Caramel::Latte::StateSecurity.runtime_root(File.realpath(state_root))
   end

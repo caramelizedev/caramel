@@ -35,11 +35,14 @@ module Caramel::Frappe
       getter? project : Bool
       # The final repeated positional takes every remaining argument verbatim.
       getter? passthrough : Bool
+      # A command kept for one release before its removal (ADR 0016): what
+      # replaces it. Invoking it warns with this text.
+      getter deprecated : String?
       getter words = [] of String
       getter flags = [] of Flag
       getter positionals = [] of Positional
 
-      def initialize(@syntax : String, @description : String, *, @project : Bool = true, @passthrough : Bool = false)
+      def initialize(@syntax : String, @description : String, *, @project : Bool = true, @passthrough : Bool = false, @deprecated : String? = nil)
         Commands.tokens(@syntax).each do |token|
           optional = token.starts_with?('[')
           text = optional ? token[1...-1] : token
@@ -59,6 +62,11 @@ module Caramel::Frappe
 
       def name : String
         @words.join(' ')
+      end
+
+      # The description help and the agent manifest print.
+      def summary : String
+        @deprecated.try { |replacement| "#{@description} Deprecated: #{replacement}" } || @description
       end
     end
 
@@ -110,9 +118,10 @@ module Caramel::Frappe
       Command.new("services [status|start|stop]", "Show, start or stop Latte's PostgreSQL, DNS and HTTPS services.", project: false),
       Command.new("sites", "List the sites registered with Latte.", project: false),
       Command.new("sites remove NAME", "Unregister site NAME, keeping its files, databases and credentials.", project: false),
-      Command.new("installations [list]", "List registered Caramel installations.", project: false),
-      Command.new("installations register", "Register this Caramel checkout for projects pinned to its version, and run it as frappe and latte from ~/.local/bin.", project: false),
-      Command.new("installations remove VERSION", "Forget the installation registered for VERSION and delete its ~/.local/bin launchers.", project: false),
+      Command.new("installations [list]", "List the Caramel releases installed on this Mac.", project: false),
+      Command.new("installations install VERSION", "Clone, build and register the tagged release VERSION, reusing this toolchain when the release pins the same one.", project: false),
+      Command.new("installations register", "Register this checkout for projects pinned to its version; ~/.local/bin/frappe and latte run the newest installed release.", project: false),
+      Command.new("installations remove VERSION", "Forget the installation registered for VERSION; the launchers move to the newest remaining release.", project: false),
       Command.new("doctor", "Check the toolchain, dependencies, local configuration and Latte services."),
       Command.new("open", "Open the application's HTTPS origin in the browser."),
       Command.new("lsp crystalline|ameba-ls [SERVER_ARGS...]", "Run a pinned language server for this project on stdio.", passthrough: true),
