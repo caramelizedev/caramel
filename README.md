@@ -4,6 +4,8 @@ Caramel is an early Crystal framework and local development environment for comp
 
 The intended workflow combines PostgreSQL, server-rendered HTML with bundled htmx 4, optional one-command authentication, and named local HTTPS projects managed by Latte. Frappé is the developer CLI.
 
+Views are Blueprint classes: markup written as plain Crystal, with typed inputs and escaped text and attributes. They replace both the ECR templates of Caramel 0.1.0 and the Slang templates RFC-0008 first proposed ([ADR 0018](docs/decisions/0018-blueprint-views.md)).
+
 ## Current state
 
 The toolchain feasibility milestone is complete. The runtime has reusable Crystal web primitives: PostgreSQL persistence, escaped Blueprint views, CSRF-protected forms and locally bundled htmx 4. The reference application is the project Frappé generates; `scripts/check frappe-project` builds one with resources, runs its request specs and serves its native binary through Caddy over named HTTPS and a private Unix socket.
