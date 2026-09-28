@@ -36,6 +36,7 @@ Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enq
 - [Latte supervisor verification and limits](docs/research/latte-supervisor.md)
 - [Toolchain decision and remaining gates](docs/decisions/0001-managed-toolchain-provider.md)
 - [Resumable toolchain installer component](docs/research/toolchain-installer.md)
+- [Versioning and releases (ADR 0016)](docs/decisions/0016-versioning-and-releases.md)
 - [Optional Crystal editor tools (Zed)](docs/editor-tools.md)
 - [Incident 2026-09-27: Caddy installed an implicit local CA (cleanup steps)](docs/research/incident-2026-09-27-caddy-local-ca.md)
 
