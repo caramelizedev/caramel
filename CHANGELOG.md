@@ -4,7 +4,19 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-28
+
+### Upgrade notes
+
 - Nothing in a 0.2.0 application has to change. To adopt the layout `frappe new` now generates, pass it the page: `ApplicationAction#layout` calls `Views::Layouts::Application.new(page, csrf_token).to_s`, and `app/views/layouts/application.cr` takes `(@page : Caramel::Page, @csrf_token : String)`, titles the document with `@page.title` and writes the body with `raw @page.html`.
+
+### Features
+
+- **frappe:** build the linter when installing a release (ae4c575)
+- **core:** give layouts the page body as trusted HTML (68dda7e)
+- **core:** build small fragments inline with markup (962db90)
+- **core:** redirect to other sites deliberately with redirect_external (687c270)
+- **frappe:** mark resource fields the server sets with :server (1b4392d)
 
 ## 0.2.0 - 2026-09-28
 
