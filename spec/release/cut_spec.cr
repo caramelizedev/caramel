@@ -61,6 +61,25 @@ describe Caramel::Cut do
     end
   end
 
+  it "reads the framework migrations a release shipped, and refuses one edited since" do
+    release_repository do |repository|
+      output = IO::Memory.new
+      source = File.join(repository, "src/caramel/cold_brew/migrations.cr")
+      Dir.mkdir_p(File.dirname(source))
+      migrations = ->(checksum : String) do
+        "module Caramel::ColdBrew\n  record Migration, version : Int64, name : String, checksum : String\n  MIGRATIONS = [Migration.new(1_i64, \"create_jobs\", #{checksum.to_json})]\nend\n"
+      end
+      File.write(source, migrations.call("aa"))
+      commit(repository, "feat: jobs")
+      Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: output)
+      File.write(source, migrations.call("zz"))
+      commit(repository, "fix: jobs")
+      expect_raises(Caramel::Cut::Refused, "migration 1 create_jobs shipped in v0.1.0 and was edited") do
+        Caramel::Cut.run(repository, check: ["/usr/bin/true"], dry_run: true, output: output)
+      end
+    end
+  end
+
   it "cuts releases from the commits since the last tag, with upgrade notes, and tags only after the checks pass" do
     release_repository do |repository|
       day = Time.utc(2026, 9, 28)

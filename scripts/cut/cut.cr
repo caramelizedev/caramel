@@ -148,8 +148,12 @@ module Caramel::Cut
       end
       source = File.join(tree, "src/caramel/cold_brew/migrations.cr")
       return {} of Int64 => {String, String} unless File.exists?(source)
+      # Crystal resolves a file require only relative to the requiring file,
+      # so the probe names the migrations by their path relative to itself.
       probe = File.join(work, "probe.cr")
-      File.write(probe, %(require #{source.to_json}\nrequire "json"\nputs Caramel::ColdBrew::MIGRATIONS.map { |migration| [migration.version.to_s, migration.name, migration.checksum] }.to_json\n))
+      relative = Path[source].relative_to(work).to_s
+      relative = "./#{relative}" unless relative.starts_with?("../")
+      File.write(probe, %(require #{relative.to_json}\nrequire "json"\nputs Caramel::ColdBrew::MIGRATIONS.map { |migration| [migration.version.to_s, migration.name, migration.checksum] }.to_json\n))
       result = Latte::ProcessRunner.run([File.join(REPO, "scripts/crystal"), "run", probe], chdir: REPO, timeout: 600.seconds, output_limit: 1024 * 1024)
       raise Refused.new("could not read the framework migrations of #{tag || "the working tree"}: #{result.stderr.strip}") unless result.success?
       Array(Array(String)).from_json(result.stdout).to_h { |(version, name, checksum)| {version.to_i64, {name, checksum}} }
