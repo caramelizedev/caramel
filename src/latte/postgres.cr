@@ -788,9 +788,12 @@ module Caramel::Latte
       return unless fields[0].to_i64? == StateSecurity.current_uid
       process_start = Time::Format.new("%a %b %e %T %Y", Time::Location.local).parse(fields[1, 5].join(" ")).to_unix
       return unless (process_start - postmaster_start).abs <= 1
-      command_line = fields[6]
-      expected = "#{@toolchain.postgres} -D #{@data_directory}"
-      return unless command_line == expected || command_line.starts_with?("#{expected} ")
+      # Any toolchain's build of this major may have started it, as before an
+      # upgrade; its private pid file, owner, start time and data directory
+      # identify it.
+      executable, separator, arguments = fields[6].partition(" -D ")
+      return if separator.empty? || !executable.ends_with?("/bin/postgres")
+      return unless arguments == @data_directory || arguments.starts_with?("#{@data_directory} ")
       PostmasterIdentity.new(pid, @data_directory, postmaster_start)
     rescue ex : OwnershipError
       raise ex

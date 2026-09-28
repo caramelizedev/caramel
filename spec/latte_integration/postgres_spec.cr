@@ -136,6 +136,38 @@ describe "Latte managed PostgreSQL" do
     end
   end
 
+  it "adopts a postmaster another toolchain's build of this major started, as after an upgrade" do
+    service.stop
+    data = paths.postgres_data(Caramel::Latte::Postgres::MAJOR)
+    pid_file = File.join(data, "postmaster.pid")
+    # The same PostgreSQL 18 build at another path, as another toolchain release has it.
+    other = File.join(root, "other-toolchain/bin/postgres")
+    Dir.mkdir_p(File.dirname(other), 0o700)
+    File.symlink(toolchain.postgres, other) unless File.symlink?(other)
+    pg_ctl = ->(arguments : Array(String)) do
+      Caramel::Latte::ProcessRunner.run([toolchain.pg_ctl, "-D", data] + arguments, env: toolchain.environment, timeout: 30.seconds)
+    end
+    pg_ctl.call(["-p", other, "-l", File.join(root, "other-toolchain/postgres.log"),
+                 "-o", "-k #{paths.postgres_socket_dir} -c listen_addresses='' -c unix_socket_permissions=0700", "-w", "start"]).success?.should be_true
+    adopted = File.read_lines(pid_file).first
+    begin
+      service.start
+      File.read_lines(pid_file).first.should eq(adopted)
+      db = open_database(credentials.development_runtime, 1)
+      begin
+        db.query_one("SELECT title FROM durability_probe WHERE id = 2", as: String).should eq("runtime write")
+      ensure
+        db.close
+      end
+      service.restart
+      File.read_lines(pid_file).first.should_not eq(adopted)
+      service.ready?.should be_true
+    ensure
+      # A postmaster Latte refused would otherwise outlive the check.
+      pg_ctl.call(["-m", "fast", "-w", "stop"]) unless service.running?
+    end
+  end
+
   it "repairs retained configuration overrides while preserving the running cluster" do
     config = File.join(paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "postgresql.conf")
     original = File.read(config)
