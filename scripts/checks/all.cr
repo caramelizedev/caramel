@@ -2,8 +2,9 @@ require "./support/harness"
 
 # Builds Frappé, Latte and the linter, runs the spec suite, then every
 # pass/fail check one after another (they share one compiler cache), and
-# reports each result. A failed run's full output is kept in a log named on
-# its FAIL line. A release requires every run to pass.
+# reports each result. Once the build step passes, the checks reuse its
+# binaries (Checks::PREBUILT). A failed run's full output is kept in a log
+# named on its FAIL line. A release requires every run to pass.
 #
 #   scripts/check all [--except NAME ...]
 #
@@ -38,6 +39,7 @@ module Caramel::Checks::All
       seconds = (Time.instant - started).total_seconds.round.to_i
       if result.success?
         puts "PASS #{name} (#{seconds} s)"
+        ENV[Checks::PREBUILT] = "1" if name == "build"
       else
         failed << name
         directory = logs ||= Checks.private_temp("caramel-check-all-")

@@ -16,6 +16,15 @@ module Caramel::Checks
     ENV["CARAMEL_TOOLCHAIN_ROOT"] = located[0]
   end
 
+  # scripts/check all sets this once its build step has passed. The checks it
+  # then runs use that step's binaries instead of rebuilding them from the
+  # same tree; a check run on its own builds what it needs.
+  PREBUILT = "CARAMEL_CHECK_ALL_BUILT"
+
+  def self.prebuilt? : Bool
+    ENV[PREBUILT]? == "1"
+  end
+
   def self.run(argv : Array(String), *, chdir : String = REPO, env : Hash(String, String?)? = nil, clear_env : Bool = false, input : String? = nil, timeout : Time::Span = 90.seconds) : Caramel::Latte::ProcessResult
     Caramel::Latte::ProcessRunner.run(argv, chdir: chdir, env: env, clear_env: clear_env, input: input, timeout: timeout, output_limit: 16 * 1024 * 1024)
   end
