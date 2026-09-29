@@ -67,7 +67,7 @@ module Caramel::Latte
   # connection deadline also bounds trickled headers/bodies, independently of
   # the socket's inactivity timeout. IPC responses close the connection.
   class OwnerServer < UNIXServer
-    def initialize(path : String)
+    def initialize(path : String, @idle_timeout : Time::Span)
       StateSecurity.validate_owned_directory(File.dirname(path))
       if File.info?(path, follow_symlinks: false)
         raise ArgumentError.new("Latte control socket already exists")
@@ -86,8 +86,8 @@ module Caramel::Latte
             next
           end
         {% end %}
-        socket.read_timeout = 5.seconds
-        socket.write_timeout = 5.seconds
+        socket.read_timeout = @idle_timeout
+        socket.write_timeout = @idle_timeout
         expire(socket)
         return socket
       end
@@ -106,8 +106,12 @@ module Caramel::Latte
   # HTTP::Server's dispatch hook runs immediately after accept. Carry one budget
   # through header/body parsing and service work in the request's own fiber.
   class DeadlineServer < HTTP::Server
+    def initialize(@request_deadline : Time::Span, &handler : HTTP::Handler::HandlerProc)
+      super(handler)
+    end
+
     protected def dispatch(io)
-      deadline = Time.instant + 12.seconds
+      deadline = Time.instant + @request_deadline
       spawn do
         OperationDeadline.run(deadline - Time.instant) { handle_client(io) }
       end
@@ -119,11 +123,18 @@ module Caramel::Latte
     @http_server : HTTP::Server? = nil
     @stop_requested = false
 
-    def initialize(@registry : Registry, @services : ServiceControl)
+    # A control connection idle for *idle_timeout* is dropped, and each request
+    # must arrive and be answered within *request_deadline*, so a client that
+    # trickles its request cannot hold the daemon. scripts/check latte-ipc
+    # proves this with scaled-down values.
+    getter idle_timeout : Time::Span
+    getter request_deadline : Time::Span
+
+    def initialize(@registry : Registry, @services : ServiceControl, @idle_timeout : Time::Span = 5.seconds, @request_deadline : Time::Span = 12.seconds)
     end
 
     def listen : Nil
-      server = DeadlineServer.new do |context|
+      server = DeadlineServer.new(@request_deadline) do |context|
         response = handle(context.request)
         context.response.status_code = response.status
         response.headers.each { |key, values| context.response.headers[key] = values }
@@ -136,7 +147,7 @@ module Caramel::Latte
       end
       server.max_request_line_size = 2048
       server.max_headers_size = 16 * 1024
-      socket = OwnerServer.new(@registry.paths.control_socket)
+      socket = OwnerServer.new(@registry.paths.control_socket, @idle_timeout)
       server.bind(socket)
       @http_server = server
       server.listen

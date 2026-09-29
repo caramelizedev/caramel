@@ -97,6 +97,22 @@ describe Caramel::Latte::Server do
     end
   end
 
+  # scripts/check latte-ipc proves the trickle cut-off with scaled-down
+  # limits, so this keeps the daemon's own.
+  it "gives the daemon's control connections a 5 s idle timeout and a 12 s request deadline" do
+    root = File.join("/private/tmp", "latte-api-limits-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      server = Caramel::Latte::Server.new(registry, TestServices.new(registry))
+      server.idle_timeout.should eq(5.seconds)
+      server.request_deadline.should eq(12.seconds)
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "shares a versioned site/service API and bounds mutations" do
     root = File.join("/private/tmp", "latte-api-#{Random::Secure.hex(8)}")
     Dir.mkdir(root, 0o700)
