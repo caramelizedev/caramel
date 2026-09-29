@@ -2,7 +2,7 @@
 
 Status: measured on 2026-09-28 at commit `5dcf865` (tag `v0.4.0`) on an Apple M3 Pro (12 CPUs, 36 GiB RAM, macOS 26.6.2) with the managed Crystal 1.21.0 toolchain (LLVM 15.0.7, Apple ld-1230.1, Swift 6.2.4). These numbers supersede the edit-latency, readiness, semantic-check, spec-command, release-build and compiler-profile figures in [development-performance.md](development-performance.md), because that baseline predates the Tier-1 type check, kqueue watching and Blueprint views. The owner skipped the instrumented full-suite run, so suite attribution rests on the 0.4.0 release log's per-run times and suite savings are estimates unless marked measured. Every number below comes from one observation unless a range is given.
 
-Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, and Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2 the same day. The release gates' runs took 548 s (v0.4.1) and 473 s (v0.4.2) against 738 s at 0.4.0, and the whole releases 553.6 s and 481.3 s against 747 s (one observation each). Each implemented opportunity's section starts with its status.
+Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2, and Phase 3 (E3-7, E1-3, E3-5) in v0.4.3, all the same day. The release gates' runs took 548 s (v0.4.1), 473 s (v0.4.2) and 472 s (v0.4.3) against 738 s at 0.4.0, and the whole releases 553.6, 481.3 and 478.4 s against 747 s (one observation each). Each implemented opportunity's section starts with its status.
 
 ## Summary
 
@@ -379,6 +379,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 1. E1-5: Start the compiler with a larger GC heap (`GC_INITIAL_HEAP_SIZE`) in `scripts/crystal`
 
+- **Status.** Measured, not yet implemented. A spike on Crystal 1.21.1 (22-resource app, five interleaved runs) gave a warm dev build of 3.13 s at the default heap, 2.84 s at 1G and 2.83 s at 2G, and a type check of 1.37, 0.97 and 0.99 s: about 0.69 s per compiled save at 1G, for about 250 MB more peak RSS (2G adds nothing). The framework spec suite with the variable exported took 16.67 s against 18.62 s (three runs each). Editing `scripts/crystal` changes the toolchain selection, so it ships in one release with E1-4 and E1-1.
 - **Mechanism.** The compiler's Boehm GC starts small and grows. The default type check of the 22-resource app ran 13 full collections and 48 heap growths (`GC_PRINT_STATS`, fq-Com-7). The same pass with `GC_INITIAL_HEAP_SIZE=2G` took `Semantic (main)` 0.473 s and 1.046 s wall, against 0.741–0.821 s and 1.43–1.554 s with the default heap (m2a-1/2, fq-Com-7). Change: export a GC initial heap size with the other compiler environment in `scripts/crystal` (`scripts/crystal:83-89`), after measuring 1 GB against 2 GB and the peak memory. The CompilerToolchainExpert had rejected GC tuning as "at most ≈0.1 s per compile" before its own follow-up measured this.
 - **Evidence.** fq-Com-7: runs with `GC_PRINT_STATS`, plain and 2 GB, stage sums 1.388 / 1.439 / 0.935 s; `followup-gc-sem.err`: 13 collections. The debug and no-debug full-build GC logs show 15 and 22 collections (fq-Com-1, fq-Com-0).
 - **Savings.**
@@ -448,6 +449,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 6. E3-7: Trim the fixed waits in the dev loop (debounce, dev_child post-exit sleep, 50 ms polls)
 
+- **Status.** Implemented in v0.4.3 (`bf92bd3`) with ADR 0012 amended to the 50 ms debounce; `compile` wakes when the compiler exits and still re-checks for a stop or newer change every 50 ms. Edit benchmark on Crystal 1.21.1, same session: 22-resource Crystal edit median 5643 → 5155 ms and view 5651 → 5173 ms; 2 resources 4782 → 4383 and 4775 → 4375 ms; cached readiness 297 → 166 ms (22) and 267 → 140 ms (2); CSS and JavaScript unchanged. The saving (≈0.4–0.49 s) exceeds the estimate.
 - **Mechanism.** Per compiled save the loop waits a 200 ms debounce (`src/frappe/dev_session.cr:121`), sleeps 50 ms after each compiler exit in the dev child (`src/frappe/dev_child.cr:32-34`, twice per save), and polls compile completion and `/health` every 50 ms (`src/frappe/dev_session.cr:232-234`, `:283`). Change: a ≈50 ms debounce with a precise deadline, no post-exit sleep on a normal exit, waiting on the status fiber instead of polling, and `/health` polled every 10 ms.
 - **Evidence.** `src/frappe/dev_session.cr:121`, `:232-234`, `:283`; `src/frappe/dev_child.cr:32-34`; fq-App-0: 0.062 s per dev-child relaunch, including its 50 ms sleep.
 - **Savings.**
@@ -471,6 +473,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 8. E1-3: Build `Tools#compile` with `-D caramel_development` so one cache dir stops alternating object sets
 
+- **Status.** Implemented in v0.4.3 (`949f9e2`). On the 22-resource app, a command build after dev builds reused 1645/1819 objects (3.23–3.26 s) and the next dev build 1649/1823 (3.21–3.25 s); with the define both reuse every object (2.97 s and 2.94–2.95 s).
 - **Mechanism.** `Tools#compile` builds without the define (`src/frappe/tools.cr:44`) into the same cache dir as dev builds (`src/frappe/dev_session.cr:229`). The define adds `development_error` (`src/caramel/application.cr:9-11`), which shifts type IDs, so about 174 modules recompile at each switch. Change: pass `-D caramel_development` in `Tools#compile`; the error page stays gated by `CARAMEL_ENV == "development"` at runtime (`src/caramel/application.cr:60-61`).
 - **Evidence.** m2b-1 3.27 s (1645/1819 reused) vs m2b-2 2.97 s; m2b-3 3.47 s (1649/1823) vs 3.14 s; `src/caramel/application.cr:9-11`, `:60-61`.
 - **Savings.**
@@ -484,6 +487,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 9. E3-5: Compile each Corretto worker from a stable generated entry file
 
+- **Status.** Implemented in v0.4.3 (`87a508d`). A worker over a different first spec file reused 1775/1785 objects (3.87 s) where the old naming started with none (4.84–4.88 s).
 - **Mechanism.** Corretto compiles `build <group files…>` (`src/frappe/corretto_runner.cr:160`), and Crystal names the cache dir after the first file (`codegen/cache_dir.cr:24-26`), so a subset run or a new first-sorting spec starts cold. Change: generate `.caramel/corretto/w<N>.cr`, which requires the group's files in order, and compile that.
 - **Evidence.** `src/frappe/corretto_runner.cr:160`; `codegen/cache_dir.cr:24-26`; fq-App-4: spec binary 5.17 s cold vs 3.64 s warm.
 - **Savings.**
