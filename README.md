@@ -32,6 +32,7 @@ Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enq
 
 - [Caramel RFCs](docs/rfc.md)
 - [RFC implementation status and ranked gaps](docs/research/rfc-implementation-status.md)
+- [Views: elements, attributes, escaping and trusted HTML](docs/views.md)
 - [SugarORM and request contract APIs, verification and limits](docs/research/typed-application-apis.md)
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
 - [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
