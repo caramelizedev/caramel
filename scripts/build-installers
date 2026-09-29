@@ -8,13 +8,16 @@ case $#:$* in
     *) echo 'usage: scripts/build-installers [--test]' >&2; exit 2 ;;
 esac
 mkdir -p "$CACHE_ROOT" "$OUT"
+. "$ROOT/scripts/lib/jobs.sh"
+# The three installers compile side by side.
 for NAME in install-toolchain install-latte-tools install-local-integration; do
     SOURCE=$(printf '%s' "$NAME" | tr - _)
     # FLAGS is a fixed pair of compiler options, never user-supplied text.
-    /usr/bin/swiftc -parse-as-library $FLAGS -target arm64-apple-macosx11.0 \
+    job "$NAME" /usr/bin/swiftc -parse-as-library $FLAGS -target arm64-apple-macosx11.0 \
         -module-cache-path "$CACHE_ROOT" \
         "$ROOT/tools/installer/support.swift" "$ROOT/tools/installer/$SOURCE.swift" \
         -o "$OUT/$NAME"
-    chmod 755 "$OUT/$NAME"
 done
+finish_jobs
+chmod 755 "$OUT/install-toolchain" "$OUT/install-latte-tools" "$OUT/install-local-integration"
 printf 'Built installers in %s\n' "$OUT"

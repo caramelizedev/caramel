@@ -7,6 +7,10 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 "$ROOT/scripts/shards" install --frozen
+. "$ROOT/scripts/lib/jobs.sh"
+# The linter, the longest build, compiles alongside frappe and then latte:
+# two Crystal builds at a time (CONTRIBUTING.md).
+job lint "$ROOT/scripts/build-lint"
 "$ROOT/scripts/build-frappe"
 "$ROOT/scripts/build-latte"
-"$ROOT/scripts/build-lint"
+finish_jobs
