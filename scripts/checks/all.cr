@@ -56,10 +56,11 @@ module Caramel::Checks::All
     end
   end
 
-  # Every check in scripts/checks, plus frappe-project's --dev phase.
+  # Every check in scripts/checks. frappe-project runs once, with --dev: that
+  # run executes every step of the plain flow as well as its dev phase.
   private def targets : Array({String, Array(String)})
     names = Dir.glob(File.join(Checks::REPO, "scripts/checks/*.cr")).map { |path| File.basename(path, ".cr").tr("_", "-") }.sort!
-    checks = (names - EXEMPT).map { |name| {name, [script("check"), name]} }
+    checks = (names - EXEMPT - ["frappe-project"]).map { |name| {name, [script("check"), name]} }
     checks << {"frappe-project-dev", [script("check"), "frappe-project", "--dev"]}
     checks
   end
