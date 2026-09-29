@@ -531,13 +531,14 @@ RETURNING jobs.id, jobs.class_name, jobs.payload, jobs.attempts;
 
 * **Scheduler:** `Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }` is the charter's in-process scheduler. Each tick takes a database lease (`pg_try_advisory_xact_lock` plus a `caramel_schedules` row), so exactly one process runs each period.
 * **Maintenance fiber:** It releases stale locks whose backend is gone.
+* **Delivery:** A job runs at least once. Its own writes commit exactly once with its completion, but a call to another service from `perform` can repeat. The process can die, or the transaction can fail to commit, after the other service accepted the call; the job then runs again. Pass a stable identifier, such as the record's id, and have the receiver deduplicate it.
 
 #### 2.3. Real-Time PubSub via SSE
 
 Cold Brew eliminates WebSockets for hypermedia updates. It dedicates one listener connection per process to PostgreSQL's `LISTEN / NOTIFY` stream. That connection reconnects with backoff and re-`LISTEN`s. The broker bridges database events directly into Server-Sent Events (SSE) connections running over HTTP/1.1 or HTTP/2.
 
 * **Publish:** `Caramel::ColdBrew.publish(channel, payload)` runs `pg_notify` on the current Repo connection, so it is delivered only if its transaction commits.
-* **Delivery:** Each subscriber has an ordered mailbox, and delivery never blocks the broker.
+* **Delivery:** Each subscriber has an ordered mailbox, and delivery never blocks the broker. Notifications are at most once: one sent while the listener is reconnecting, or that a subscriber does not receive within a second, is dropped. A page that must not miss a change reloads state on reconnect.
 * **Lifetime:** A subscription ends when its owning fiber dies, so the action below does not leak. `subscribe(channel) { |events| … }` unsubscribes explicitly.
 * **Framing:** `Caramel::SSE.write(io, data, event: "BoardUpdated")` frames multi-line data.
 
