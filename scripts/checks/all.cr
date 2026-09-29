@@ -2,7 +2,8 @@ require "./support/harness"
 
 # Builds Frappé, Latte, the linter and the LatteFixture environment daemon,
 # runs the spec suite, then every pass/fail check one after another (they
-# share one compiler cache), and reports each result. Once the build step
+# share one compiler cache; only compiles inside one step run side by side,
+# as CONTRIBUTING.md describes), and reports each result. Once the build step
 # passes, the checks reuse its binaries (Checks::PREBUILT). A failed run's
 # full output is kept in a log named on its FAIL line. A release requires
 # every run to pass.

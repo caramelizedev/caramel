@@ -88,6 +88,22 @@ PKG_CONFIG_LIBDIR=$RUNTIME
 CRYSTAL_CACHE_DIR=$BASE/crystal-cache
 export CRYSTAL_PATH CRYSTAL_LIBRARY_PATH PATH PKG_CONFIG_LIBDIR CRYSTAL_CACHE_DIR
 
+# A build first marks its program's cache directory as recently used, so the
+# keep-10 cleanup that ends every build (codegen/cache_dir.cr) keeps it while
+# another build runs alongside. The directory is named after the source's
+# absolute path, with slashes as dashes.
+if [ "${1:-}" = build ]; then
+    case ${2:-} in
+        /*.cr) PROGRAM=$2 ;;
+        *.cr) PROGRAM=$(pwd -P)/$2 ;;
+        *) PROGRAM= ;;
+    esac
+    if [ -n "$PROGRAM" ]; then
+        PROGRAM_CACHE=$CRYSTAL_CACHE_DIR/$(printf '%s' "${PROGRAM#/}" | tr / -)
+        [ ! -d "$PROGRAM_CACHE" ] || touch "$PROGRAM_CACHE"
+    fi
+fi
+
 if [ "${1:-}" = eval ]; then
     DYLD_LIBRARY_PATH=$OPENSSL/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
     export DYLD_LIBRARY_PATH
