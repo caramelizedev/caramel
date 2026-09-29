@@ -111,7 +111,8 @@ module Caramel::Checks
         assert!(compiler_log.includes?("app/actions/home/show.cr") && compiler_log.includes?("check bookshelf") && compiler_log.includes?("build bookshelf"), compiler_log)
         application_log = p.command([File.join(p.repo, "bin/frappe"), "logs"], chdir: project, echo: false).stdout
         assert!(application_log.includes?("start bookshelf"), application_log)
-        p.command([File.join(p.repo, "scripts/build-latte-menu")])
+        # Under scripts/check all the build step has already built Latte.app.
+        p.command([File.join(p.repo, "scripts/build-latte-menu")]) unless Checks.prebuilt?
         menu = p.command([File.join(p.repo, "bin/Latte.app/Contents/MacOS/Latte"), "--check"], echo: false).stdout
         assert!(menu.includes?("[Build error] · Terminal session"), menu)
         assert!(menu.includes?("/logs/sites/#{site("bookshelf")["id"].as_s}"), menu)

@@ -16,7 +16,8 @@ module Caramel::Checks::LatteIPC
     child : Process? = nil
     begin
       run!([File.join(Checks::REPO, "scripts/crystal"), "build", "spec/fixtures/latte_ipc.cr", "-o", File.join(root, "ipc")], 60.seconds)
-      run!([File.join(Checks::REPO, "scripts/build-latte-menu")], 60.seconds)
+      # Under scripts/check all the build step has already built Latte.app.
+      run!([File.join(Checks::REPO, "scripts/build-latte-menu")], 60.seconds) unless Checks.prebuilt?
       File.open(File.join(root, "server.log"), "a", 0o600) do |log|
         child = Process.new([File.join(root, "ipc"), root], chdir: Checks::REPO, output: log, error: log, input: Process::Redirect::Close)
       end
