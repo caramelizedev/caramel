@@ -98,9 +98,9 @@ module Caramel::ColdBrew
   # Starts a worker per queue in CARAMEL_WORKER_QUEUES (comma-separated,
   # default `default`) with CARAMEL_WORKER_CONCURRENCY fibers each
   # (default 4), the maintenance fiber, the scheduler for every `every`
-  # declaration, and the PubSub broker. Invalid settings raise
-  # ConfigurationError before anything connects.
-  def self.start(database_url : String, env = ENV) : Service
+  # declaration unless `scheduler` is false, and the PubSub broker. Invalid
+  # settings raise ConfigurationError before anything connects.
+  def self.start(database_url : String, env = ENV, *, scheduler : Bool = true) : Service
     queues = (env["CARAMEL_WORKER_QUEUES"]? || "default").split(',').map(&.strip)
     queues.each do |queue|
       unless queue.matches?(QUEUE_NAME)
@@ -117,6 +117,6 @@ module Caramel::ColdBrew
     broker = Broker.new(database_url)
     self.broker = broker
     workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }
-    Service.new(db, workers, Maintenance.new(db).start, Scheduler.new(schedules, db).start, broker)
+    Service.new(db, workers, Maintenance.new(db).start, Scheduler.new(scheduler ? schedules : [] of Schedule, db).start, broker)
   end
 end

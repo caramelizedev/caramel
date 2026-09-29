@@ -130,6 +130,9 @@ module ColdBrewSpec
     get "/boards/:board_id/live", ColdBrewSpec::Boards::Live
   end
 
+  # Ticks in every process whose scheduler is on.
+  Caramel::ColdBrew.every(1.hour, "cold-brew-spec-tick") { }
+
   NAME = "caramel_cold_brew_#{Random::Secure.hex(6)}"
   RUNS = SugarORM::Migration.new(20260927120000_i64, "create_cold_brew_runs", [<<-SQL])
     CREATE TABLE cold_brew_runs (
@@ -751,5 +754,48 @@ describe "Caramel::ColdBrew.start" do
       service.stop
     end
     Brew.broker?.should be_nil
+  end
+
+  it "leaves schedules to other processes when its scheduler is off" do
+    ColdBrewSpec.reset
+    service = Brew.start(ColdBrewSpec.runtime_url, {"CARAMEL_WORKER_QUEUES" => "default"}, scheduler: false)
+    begin
+      sleep 300.milliseconds
+      ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_schedules", as: Int64).should eq(0)
+    ensure
+      service.stop
+    end
+    service = Brew.start(ColdBrewSpec.runtime_url, {"CARAMEL_WORKER_QUEUES" => "default"})
+    begin
+      ColdBrewSpec.eventually { ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_schedules", as: Int64) == 1 }
+    ensure
+      service.stop
+    end
+  end
+end
+
+describe "the work command" do
+  it "runs workers without HTTP until stopped, then lets the in-flight job finish" do
+    ColdBrewSpec.reset
+    running = ColdBrewSpec::Gated.enqueue(label: "worked")
+    stop = Channel(Nil).new
+    output = IO::Memory.new
+    result = Channel(Int32).new(1)
+    options = Caramel::CommandLine::WorkOptions.new("gated", "1", false)
+    spawn { result.send(Caramel::CommandLine.work("Brew", ColdBrewSpec.runtime_url, options, stop, output)) }
+    ColdBrewSpec.eventually { output.to_s.includes?("ready") }
+    output.to_s.should eq("Brew worker is ready: queues gated; concurrency 1; scheduler off\n")
+    ColdBrewSpec.eventually { !ColdBrewSpec.job(running)[:locked_at].nil? }
+    stop.close
+    select
+    when result.receive
+      fail "work returned before its in-flight job finished"
+    when timeout(200.milliseconds)
+    end
+    ColdBrewSpec.gate.send(nil)
+    result.receive.should eq(0)
+    ColdBrewSpec.job(running)[:finished_at].should_not be_nil
+    ColdBrewSpec.labels.should eq(["worked"])
+    ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_schedules", as: Int64).should eq(0)
   end
 end

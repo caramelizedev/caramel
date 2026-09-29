@@ -487,7 +487,7 @@ end
 
 #### 2.2. Worker Fiber Loop
 
-Cold Brew spawns a configurable pool of green execution fibers within the single host binary. The generated application's `serve` starts it, unless `CARAMEL_ENV=test`, with `Caramel::ColdBrew.start(database_url)`. The queues and per-queue concurrency come from `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`. It uses its own connection pool and stops gracefully on SIGTERM:
+Cold Brew spawns a configurable pool of green execution fibers within the single host binary. The generated application's `serve` starts it, unless `CARAMEL_ENV=test`, with `Caramel::ColdBrew.start(database_url)`. The queues and per-queue concurrency come from `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`. It uses its own connection pool and stops gracefully on SIGTERM. The same binary's `work [--queues=NAMES] [--concurrency=N] [--no-scheduler]` command runs Cold Brew without an HTTP server, as a second worker process or one dedicated to some queues:
 
 ```crystal
 # src/caramel/cold_brew/worker.cr (simplified)
