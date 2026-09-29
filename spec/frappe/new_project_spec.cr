@@ -13,7 +13,7 @@ describe Caramel::Frappe::NewProject do
       generator = Caramel::Frappe::NewProject.new(framework)
       project = generator.create("reading-list", target)
       project.origin.should eq("https://reading-list.caramel")
-      %w[app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/.keep app/changesets/.keep app/views/application_view.cr app/views/layouts/application.cr app/views/home/index.cr config/application.cr config/environment.yml config/routes.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .env.example .gitignore .zed/settings.json README.md public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js].each do |name|
+      %w[app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/.keep app/changesets/.keep app/views/application_view.cr app/views/layouts/application.cr app/views/home/index.cr config/application.cr config/environment.yml config/routes.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .env.example .env.test .gitignore .zed/settings.json README.md public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js].each do |name|
         File.file?(File.join(target, name)).should be_true
       end
       %w[.env .caramel-version vendor config/database.yml].each { |name| File.exists?(File.join(target, name)).should be_false }
