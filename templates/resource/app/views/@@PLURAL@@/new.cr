@@ -4,7 +4,7 @@ module App::Views::@@COLLECTION@@
     end
 
     private def blueprint
-      a(class: "back", href: @@PLURAL@@_path) { "← @@COLLECTION_LABEL@@" }
+      a(class: "back", href: @@PLURAL@@_path) { "← @@COLLECTION_LABEL@@" } # frappe:only=index
       section class: "form-page" do
         h1 { "New @@LABEL@@" }
         render @form

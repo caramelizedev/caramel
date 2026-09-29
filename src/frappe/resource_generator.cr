@@ -122,11 +122,29 @@ module Caramel::Frappe
   end
 
   class ResourceGenerator
+    ACTIONS = %w[index show new create edit update destroy]
+    # Template files that belong to one action; every other file is always written.
+    ACTION_FILES = {
+      "app/actions/@@PLURAL@@.cr"         => "new",
+      "app/actions/@@PLURAL@@/index.cr"   => "index",
+      "app/actions/@@PLURAL@@/new.cr"     => "new",
+      "app/actions/@@PLURAL@@/edit.cr"    => "edit",
+      "app/actions/@@PLURAL@@/update.cr"  => "update",
+      "app/actions/@@PLURAL@@/destroy.cr" => "destroy",
+      "app/views/@@PLURAL@@/index.cr"     => "index",
+      "app/views/@@PLURAL@@/new.cr"       => "new",
+      "app/views/@@PLURAL@@/form.cr"      => "new",
+      "app/views/@@PLURAL@@/edit.cr"      => "edit",
+    }
+    # A template line ending in `# frappe:only=a,b` is kept when any of those
+    # actions is generated, and one ending in `# frappe:unless=a,b` when none is.
+    LINE_TAG = /[ \t]+# frappe:(only|unless)=([a-z,]+)\z/
+
     def initialize(@framework_root : String)
     end
 
     # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
-    def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil) : Array(String)
+    def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil, only : String? = nil) : Array(String)
       unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction ApplicationView Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
@@ -135,6 +153,7 @@ module Caramel::Frappe
       unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit views].none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
       end
+      actions = selected_actions(only)
       fields = declarations.map { |item| ResourceField.new(item) }
       raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
       inputs = fields.reject(&.server?)
@@ -171,7 +190,9 @@ module Caramel::Frappe
         "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_CHANGESET@@" => ([assert_presence(name, required_inputs)] + uniques.map { |field| duplicate_probe(name, fields, field) }).reject(&.empty?).join('\n'),
+        "@@ASSERT_CHANGESET@@" => ([assert_presence(name, required_inputs)] + uniques.map { |field| duplicate_probe(name, fields, field, actions.includes?("update")) }).reject(&.empty?).join('\n'),
+        "@@SPEC_TITLE@@" => spec_title(actions),
+        "@@AFTER_DESTROY@@" => actions.includes?("index") ? "/#{collection}" : "/",
         "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
@@ -179,7 +200,8 @@ module Caramel::Frappe
       Dir.glob(File.join(template_root, "**/*")).sort.each do |path|
         next unless File.file?(path)
         relative = Path[path].relative_to(template_root).to_s
-        content = File.read(path)
+        next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
+        content = select_lines(File.read(path), actions)
         tokens.each { |key, value| relative = relative.gsub(key, value); content = content.gsub(key, value) }
         files[relative] = content
       end
@@ -187,16 +209,16 @@ module Caramel::Frappe
       migration = SugarORM::Migration.new(migration_version, "create_#{collection}", create_table(collection, fields))
       files["db/migrations/#{migration.version}_#{migration.name}.cr"] = SchemaDiff.source(migration)
       originals = {} of String => String
-      actions = "App::#{collection.camelcase}"
-      routes = [
-        %(    get "/#{collection}", #{actions}::Index),
-        %(    get "/#{collection}/new", #{actions}::New),
-        %(    post "/#{collection}", #{actions}::Create),
-        %(    get "/#{collection}/:id", #{actions}::Show),
-        %(    get "/#{collection}/:id/edit", #{actions}::Edit),
-        %(    patch "/#{collection}/:id", #{actions}::Update),
-        %(    delete "/#{collection}/:id", #{actions}::Destroy),
-      ]
+      namespace = "App::#{collection.camelcase}"
+      routes = {
+        "index"   => %(    get "/#{collection}", #{namespace}::Index),
+        "new"     => %(    get "/#{collection}/new", #{namespace}::New),
+        "create"  => %(    post "/#{collection}", #{namespace}::Create),
+        "show"    => %(    get "/#{collection}/:id", #{namespace}::Show),
+        "edit"    => %(    get "/#{collection}/:id/edit", #{namespace}::Edit),
+        "update"  => %(    patch "/#{collection}/:id", #{namespace}::Update),
+        "destroy" => %(    delete "/#{collection}/:id", #{namespace}::Destroy),
+      }.select { |action, _| actions.includes?(action) }.values
       {"config/routes.cr" => {"    # Frappé resource routes", routes},
        "config/paths.cr"  => {"  # Frappé resource paths", ["  Caramel.resource_paths :#{collection}, :#{singular}"]}}.each do |relative, insertion|
         validate_path(project.root, relative)
@@ -209,6 +231,46 @@ module Caramel::Frappe
       end
       publish(project, files, originals)
       files.keys.sort!
+    end
+
+    # Every action, or those `--only` names. Create and show are required:
+    # the spec creates a record and reads it back, and edit reuses the new
+    # form and saves through update.
+    private def selected_actions(only : String?) : Array(String)
+      return ACTIONS if only.nil?
+      chosen = only.split(',').map(&.strip)
+      unknown = chosen - ACTIONS
+      raise Error.new("Unknown resource action: #{unknown.join(", ")}; choose from #{ACTIONS.join(",")}") unless unknown.empty?
+      raise Error.new("A resource always has create and show; add them to --only") unless chosen.includes?("create") && chosen.includes?("show")
+      if chosen.includes?("edit") && !(chosen.includes?("new") && chosen.includes?("update"))
+        raise Error.new("edit reuses the new form and saves through update; add new and update to --only")
+      end
+      ACTIONS.select { |action| chosen.includes?(action) }
+    end
+
+    # Drops template lines tagged for actions that are not generated and
+    # removes the tags from the lines that stay.
+    private def select_lines(content : String, actions : Array(String)) : String
+      String.build do |io|
+        content.each_line(chomp: false) do |line|
+          text = line.chomp
+          unless match = text.match(LINE_TAG)
+            io << line
+            next
+          end
+          named = match[2].split(',')
+          keep = match[1] == "only" ? named.any? { |action| actions.includes?(action) } : named.none? { |action| actions.includes?(action) }
+          io << text[0, match.begin] << (line.ends_with?('\n') ? "\n" : "") if keep
+        end
+      end
+    end
+
+    # The generated request spec's description of what it exercises.
+    private def spec_title(actions : Array(String)) : String
+      verbs = ["creates", "reads"]
+      verbs << "updates" if actions.includes?("update")
+      verbs << "deletes" if actions.includes?("destroy")
+      "#{verbs[0...-1].join(", ")} and #{verbs.last} through CSRF-protected #{actions.includes?("new") ? "browser forms" : "requests"}"
     end
 
     private def pluralize(name : String) : String
@@ -250,15 +312,16 @@ module Caramel::Frappe
     # A second row repeating a unique field must fail through the changeset's
     # unique_constraint, not a database error. Every other field takes a value
     # no row holds: an input its first sample, which the row replaced when it
-    # was updated, and a server field its starting value.
-    private def duplicate_probe(model : String, fields : Array(ResourceField), unique : ResourceField) : String
+    # was updated (its updated sample when the resource has no update), and
+    # a server field its starting value.
+    private def duplicate_probe(model : String, fields : Array(ResourceField), unique : ResourceField, updated : Bool) : String
       values = fields.join(", ") do |field|
         value = if field.name == unique.name
                   "persisted.#{field.name}"
                 elsif field.server?
                   field.starting_value
                 else
-                  field.literal(field.sample)
+                  field.literal(updated ? field.sample : field.updated_sample)
                 end
         "#{field.name}: #{value}"
       end

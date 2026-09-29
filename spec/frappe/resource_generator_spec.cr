@@ -120,6 +120,38 @@ describe Caramel::Frappe::ResourceGenerator do
     end
   end
 
+  it "generates only the actions --only names, with the views, routes and spec lines they need" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      {"index,show" => "create and show", "create,show,edit,update" => "add new and update", "create,show,archive" => "Unknown resource action: archive"}.each do |only, message|
+        expect_raises(Caramel::Frappe::Error, message) { generator.generate(project, "Link", ["original_url:string:url"], only: only) }
+      end
+      files = generator.generate(project, "Link", ["original_url:string:url", "code:string:unique"], only: "create,show", version: 20260919000007_i64)
+      files.should eq(%w[
+        app/actions/links/create.cr app/actions/links/show.cr app/changesets/link.cr app/models/link.cr app/views/links/show.cr
+        config/paths.cr config/routes.cr db/migrations/20260919000007_create_links.cr spec/requests/links_spec.cr
+      ])
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+      files.each { |relative| read.call(relative).should_not contain("frappe:") }
+      routes = read.call("config/routes.cr")
+      routes.should contain(%(    post "/links", App::Links::Create\n    get "/links/:id", App::Links::Show\n))
+      routes.should_not contain("App::Links::Index")
+      create = read.call("app/actions/links/create.cr")
+      create.should_not contain("include Form")
+      create.should contain("return render_errors(changes.errors) unless changes.saved?")
+      show = read.call("app/views/links/show.cr")
+      show.should_not contain("links_path")
+      show.should_not contain("actions")
+      spec = read.call("spec/requests/links_spec.cr")
+      spec.should contain(%(it "creates and reads through CSRF-protected requests"))
+      spec.should contain(%("/links", headers: {"X-CSRF-Token" => "forged"}))
+      spec.should contain(%(rejected.should_not render_page("New link")))
+      spec.should_not contain("client.patch")
+      spec.should_not contain("client.delete")
+      spec.should contain(%(App::Link.create(original_url: "https://example.org/original_url?first=2&second=3", code: persisted.code)))
+    end
+  end
+
   it "supports every scalar, nullable values and explicit irregular plurals" do
     resource_project do |project, package|
       Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people", version: 20260919000003_i64)

@@ -71,7 +71,7 @@ Generated source contains:
 
 - a SugarORM schema (`app/models/<singular>.cr`);
 - one changeset, `App::<Name>::Changeset`, aliased as `CreateChangeset` and `UpdateChangeset` so that `App::<Name>.create` and `record.update` both use it (`app/changesets/<singular>.cr`);
-- seven actions (index, show, new, create, edit, update, destroy) with their request contracts, and a shared form module;
+- seven actions (index, show, new, create, edit, update, destroy) with their request contracts, and a shared form module; `--only=create,show,…` keeps just the listed ones, where create and show are required and edit needs new and update, and drops the views, routes, links and spec lines of the others;
 - five views, including the shared form;
 - the `create_<plural>` migration;
 - route and path declarations;
