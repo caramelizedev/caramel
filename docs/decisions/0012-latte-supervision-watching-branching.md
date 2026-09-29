@@ -26,7 +26,7 @@ The implementation has to survive terminal sessions, several projects and daemon
    - Application sockets live in the site's owner-only run directory under the same runtime root, not at the charter's `/tmp/caramel_app.sock`, for the same reason.
 3. **Kernel watching.**
    - `Caramel::Latte::Watcher` registers `EVFILT_VNODE` kqueue filters on every watched directory and file (opened `O_EVTONLY`) and rescans a directory when it changes.
-   - `frappe dev` hashes the tree only after a kernel event, keeping the 200 ms debounce.
+   - `frappe dev` hashes the tree only after a kernel event, then waits out a 50 ms debounce before the type check. It was 200 ms until 2026-09-29; a multi-file save that outlasts the shorter window only cancels a check and costs CPU, since a newer change stops an obsolete check or build.
    - Crystal 1.21's event loop cannot wait on a kqueue descriptor, so the watcher drains with a zero-timeout `kevent` every 25 ms and never blocks the scheduler.
    - There is no `inotify` backend, because Latte is macOS-only.
 4. **Tier-1 feedback first.** Every uncached source change first runs `crystal build --no-codegen` with the development flags.
