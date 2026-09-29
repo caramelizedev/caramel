@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: accepted.
+Status: accepted. For the framework's own code, decisions 4 and 6 are amended by [ADR 0021](0021-line-length.md): it enables `Layout/LineLength` at 100 characters.
 
 ## Context
 
