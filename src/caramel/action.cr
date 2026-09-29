@@ -249,16 +249,36 @@ module Caramel
     end
 
     def contract_failure_page(contract : RequestContract) : Response
-      html = String.build do |io|
+      page("Check your request", errors_html(contract.errors), 422)
+    end
+
+    # Answers errors found after the contract, such as a changeset's, the way
+    # a contract failure is answered: JSON `{"errors": …}` for JSON clients, a
+    # page listing them for browsers, and MRDP text otherwise.
+    def render_errors(errors : Hash(String, Array(String)), status : Int32 = 422) : Response
+      if @context.wants_json?
+        json({errors: errors}, status)
+      elsif @context.browser?
+        page("Check your request", errors_html(errors), status)
+      else
+        text = String.build do |io|
+          io << "ERR INVALID:" << status << " at " << @context.method << ' ' << request.path << '\n'
+          errors.each { |field, messages| messages.each { |message| io << "FIELD " << field << ": " << message << '\n' } }
+        end
+        Response.new(status, text, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
+      end
+    end
+
+    private def errors_html(errors : Hash(String, Array(String))) : String
+      String.build do |io|
         io << %(<section class="contract-errors" role="alert"><h1>Check your request</h1><ul>)
-        contract.errors.each do |field, messages|
+        errors.each do |field, messages|
           messages.each do |message|
             io << "<li><code>" << HTML.escape(field) << "</code>: " << HTML.escape(message) << "</li>"
           end
         end
         io << "</ul></section>"
       end
-      page("Check your request", html, 422)
     end
 
     private def html_headers : HTTP::Headers
