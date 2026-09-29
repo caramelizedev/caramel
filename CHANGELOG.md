@@ -4,6 +4,15 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Routes now bind a JSON object where they answered 415 ([ADR 0020](docs/decisions/0020-action-ingress-and-json-bodies.md)). Each member must have its field's JSON type, and same-origin `fetch` sends the page's CSRF token as `X-CSRF-Token`. An application that reopened `Caramel::RequestInput` to parse JSON, or `Caramel::Application#handle` to receive a webhook, should delete the reopen: bind JSON through the contract, or declare `ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?` on the webhook's action.
+- `Caramel::RequestInput.read(request, max_form_bytes: n)` still works but is deprecated; pass the route's policy instead, as `Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: n))`.
+- A custom `Caramel::Router::Dispatcher` must implement `match(request)` and `dispatch(context, match)`. Routers from `Caramel::Router.draw` already do.
+- A form's `_method` override into a route that declares its own `ingress` answers 405: that route is reached with its real method.
+- Specs never received the development `.env` and still do not. Put test-only settings the application reads itself, such as `WEBHOOK_SECRET`, in a committed `.env.test`. `frappe new` now adds one.
+- Instead of querying `caramel_jobs`, read a job with `Caramel::ColdBrew.status(id)` and learn of retries and failures with `on_retry_scheduled` and `on_failed` ([ADR 0019](docs/decisions/0019-cold-brew-status-hooks-and-work.md)). Jobs run at least once, so a job that calls another service should send it a stable identifier to deduplicate.
+- To run workers without a web server, start the application binary with `work`, optionally with `--queues=`, `--concurrency=` and `--no-scheduler`.
+- If `frappe dev` in an existing project stops on an asset output conflict, delete the public file it names to republish it from `app/assets`.
+
 ## 0.4.0 - 2026-09-28
 
 ### Upgrade notes
