@@ -69,8 +69,8 @@ module Caramel::Frappe
       if streamer = response.streamer
         begin
           streamer.call(context.response)
-        rescue IO::Error
-          # The browser closed the stream.
+        rescue IO::Error | HTTP::Server::ClientError
+          # The browser closed the stream; the server wraps socket errors in ClientError.
         end
       else
         context.response.print(response.body)

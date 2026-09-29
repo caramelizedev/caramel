@@ -75,8 +75,8 @@ module Caramel
       if streamer = response.streamer
         begin
           streamer.call(context.response)
-        rescue IO::Error
-          # The client disconnected.
+        rescue IO::Error | HTTP::Server::ClientError
+          # The client disconnected; the server wraps socket errors in ClientError.
         rescue error
           # The status line has already been sent; only the log can report this.
           Log.error { "request_id=#{UUID.random} error_type=#{error.class} streaming=true" }
