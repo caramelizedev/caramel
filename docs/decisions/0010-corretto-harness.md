@@ -19,7 +19,9 @@ Several pieces were missing before this work: Caramel had no session to sign in 
 ## Decision
 
 1. **Sessions and sign-in.** `Caramel::Session` is an HMAC-SHA256 signed `__Host-caramel_session` cookie (HttpOnly, Secure, SameSite=Lax, at most 4 KB, verified in constant time). Its key is derived from the application secret. Actions read and write `session`, and `sign_out` clears it. `client.sign_in(user)` writes `user_id` into the client's session cookie.
-2. **In-process client.** `Corretto.session { |client, db| … }` yields a client that drives `Caramel::Application#handle` directly. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, encodes form params and follows redirects. It also yields the example's database connection.
+2. **In-process client.** `Corretto.session { |client, db| … }` yields a client that drives `Caramel::Application#handle` directly. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and follows redirects. It also yields the example's database connection.
+   - A request's body is URL-encoded `params:`; `params:` with `files:` of `Corretto::Upload` values, which is multipart; `json:`; or a raw `body:` typed by a `Content-Type` header.
+   - `Corretto.tmpdir` is a private directory for the files an example writes, removed when the example ends, because the rollback does not undo filesystem writes.
 3. **Matchers** assert against observable egress and state: `have_status`, `render_partial(target, swap:)`, `redirect_to`, `have_header`, `render_page` and `have_row(Schema, **conditions)`. `have_row` is a macro, so unknown fields fail compilation.
 4. **Isolation.**
    - **Tier 2.** A global `Spec.around_each` opens a transaction and SAVEPOINT on the worker's single connection and binds it with `SugarORM::Repo.bind(transaction)`. The example, including its in-process requests, runs on that connection, and the savepoint is rolled back afterwards.

@@ -796,7 +796,7 @@ end
 
 ```
 
-* **The client** drives `Caramel::Application#handle` in-process on the example's own connection. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and offers `get`, `post`, `put`, `patch`, `delete` and `follow_redirect`.
+* **The client** drives `Caramel::Application#handle` in-process on the example's own connection. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and offers `get`, `post`, `put`, `patch`, `delete` and `follow_redirect`. A body is form `params:` (multipart with `files:`), `json:` or a raw `body:`.
 * **`sign_in(user)`** writes `user_id` into the signed `Caramel::Session` cookie. Actions read it through `session`.
 * **Matchers:** `have_status`, `render_partial(target, swap:)`, `redirect_to`, `have_header`, `render_page` and `have_row(Schema, **conditions)`.
 
