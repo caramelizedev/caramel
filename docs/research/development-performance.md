@@ -1,6 +1,6 @@
 # Development performance measurements
 
-The numbers below were measured before `frappe dev` switched from polling to kqueue watching and began type-checking before every build ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). They have not been re-measured, because performance work is deferred. Compilation dominates each compiled edit, so the targets are still missed. Re-run the benchmark below to refresh them.
+The numbers below were measured before `frappe dev` switched from polling to kqueue watching and began type-checking before every build ([ADR 0012](../decisions/0012-latte-supervision-watching-branching.md)). [local-performance.md](local-performance.md) re-measured them at v0.4.0, and its edit-latency, readiness, semantic-check, spec-command, release-build and compiler-profile figures supersede the ones here. This page keeps the original baseline and the benchmark's method. Compilation still dominates each compiled edit, so the targets are still missed.
 
 The measurement entry point is:
 
