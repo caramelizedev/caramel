@@ -619,7 +619,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ## Method
 
-All measurements ran one at a time from a Python harness on the machine above, with the owner's Latte running. Each row records wall time (monotonic clock) and child CPU time, and whether another `embedded/bin/crystal` process existed when the row started; none did. `CARAMEL_TOOLCHAIN_ROOT` was unset, so `scripts/crystal` used the checkout's toolchain, except where a row names a private prefix. Raw outputs stayed under `/private/tmp/caramel-perf` on the measuring machine and are not committed.
+All measurements ran one at a time from a Python harness on the machine above, with the owner's Latte running. Each row records wall time (monotonic clock) and child CPU time, and whether another `embedded/bin/crystal` process existed when the row started; none did. `CARAMEL_TOOLCHAIN_ROOT` was unset, so `scripts/crystal` used the checkout's toolchain, except where a row names a private prefix. Raw outputs were written under `/private/tmp/caramel-perf` and are archived outside the repository, on the measuring machine, at `~/Documents/Caramel/performance-runs/2026-09-28-v0.4.0-5dcf865/` (with a SHA-256 manifest). They are not committed.
 
 Commands (Step 2):
 
