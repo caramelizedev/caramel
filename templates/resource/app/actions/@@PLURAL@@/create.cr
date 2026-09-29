@@ -1,15 +1,20 @@
 module App::@@COLLECTION@@
   struct Create < App::ApplicationAction
-    include Form # frappe:only=new
-    # frappe:only=new
+    # frappe:only new
+    include Form
+
+    # frappe:end
     contract do
 @@CONTRACT_FIELDS@@
     end
 
     def handle(contract : Contract)
       changes = App::@@MODEL@@.create(@@CREATE_ATTRIBUTES@@)
-      return render_form(contract.values, changes.errors, nil, 422) unless changes.saved? # frappe:only=new
-      return render_errors(changes.errors) unless changes.saved? # frappe:unless=new
+      # frappe:only new
+      return render_form(contract.values, changes.errors, nil, 422) unless changes.saved?
+      # frappe:else
+      return render_errors(changes.errors) unless changes.saved?
+      # frappe:end
       self.status = 201
       {record: changes.record}
     end

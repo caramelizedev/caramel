@@ -25,6 +25,9 @@ module Caramel::Frappe
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
     ]
     MODIFIERS = %w[server unique url]
+    USAGE     = "Use field:type, optionally followed by :server, :unique or :url, " \
+                "such as title:string, rating:float64?, " \
+                "short_code:string:server:unique or original_url:string:url"
     getter name : String
     getter kind : String
     getter? nullable : Bool
@@ -32,14 +35,14 @@ module Caramel::Frappe
     getter? server : Bool
     # Backed by a unique index; the changeset reports a duplicate as an error on the field.
     getter? unique : Bool
-    # An absolute http or https URL: validated with cs.validate_url and entered in a URL input.
+    # Holds an http or https URL: the changeset validates it, the form asks for one.
     getter? url : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
       modifiers = pieces[2..]? || [] of String
       unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? && modifiers.uniq.size == modifiers.size
-        raise Error.new("Use field:type, optionally followed by :server, :unique or :url, such as title:string, rating:float64?, short_code:string:server:unique or original_url:string:url")
+        raise Error.new(USAGE)
       end
       @server = modifiers.includes?("server")
       @unique = modifiers.includes?("unique")
@@ -54,13 +57,36 @@ module Caramel::Frappe
     end
 
     private def check_modifiers(declaration : String) : Nil
-      raise Error.new("A bool field holds only two values, so it cannot be :unique: #{declaration}") if @unique && @kind == "bool"
-      raise Error.new("Only a string field holds a URL: #{declaration}") if @url && @kind != "string"
-      raise Error.new("A :server field starts with a random token, not a URL, so it cannot be :url: #{declaration}") if @url && @server
+      if @unique && @kind == "bool"
+        raise Error.new("A bool field holds only two values, " \
+                        "so it cannot be :unique: #{declaration}")
+      end
+      if @url && @kind != "string"
+        raise Error.new("Only a string field holds a URL: #{declaration}")
+      end
+      if @url && @server
+        raise Error.new("A :server field starts with a random token, not a URL, " \
+                        "so it cannot be :url: #{declaration}")
+      end
     end
 
     def type : String
       TYPES[@kind][0] + (@nullable ? "?" : "")
+    end
+
+    # The changeset rules this field needs, as the generated `validate` writes them.
+    def presence_rule : String
+      "cs.validate_presence(:#{@name})"
+    end
+
+    # A blank required URL reports only that it is blank.
+    def url_rule : String
+      rule = "cs.validate_url(:#{@name})"
+      @nullable ? rule : "#{rule} unless cs.errors.has_key?(#{@name.to_json})"
+    end
+
+    def unique_rule : String
+      "cs.unique_constraint(:#{@name})"
     end
 
     def column : SugarORM::Catalog::Column
@@ -136,15 +162,20 @@ module Caramel::Frappe
       "app/views/@@PLURAL@@/form.cr"      => "new",
       "app/views/@@PLURAL@@/edit.cr"      => "edit",
     }
-    # A template line ending in `# frappe:only=a,b` is kept when any of those
-    # actions is generated, and one ending in `# frappe:unless=a,b` when none is.
-    LINE_TAG = /[ \t]+# frappe:(only|unless)=([a-z,]+)\z/
+    # Template lines between `# frappe:only a,b` and `# frappe:end` are kept
+    # when any of those actions is generated, and between
+    # `# frappe:unless a,b` and `# frappe:end` when none is; `# frappe:else`
+    # turns a block over. Blocks nest, and the marker lines are dropped.
+    MARKER = /\A\s*# frappe:(only|unless|else|end)(?: ([a-z,]+))?\z/
 
     def initialize(@framework_root : String)
     end
 
     # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
-    def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil, only : String? = nil) : Array(String)
+    def generate(project : Project, name : String, declarations : Array(String), *,
+                 plural : String? = nil,
+                 version : Int64? = nil,
+                 only : String? = nil) : Array(String)
       unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction ApplicationView Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
@@ -170,6 +201,7 @@ module Caramel::Frappe
       end
       required_text = fields.select { |field| field.kind == "string" && !field.nullable? }
       required_inputs = required_text.reject(&.server?)
+      changeset_checks = assert_changeset(name, fields, required_inputs, actions)
       tokens = {
         "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
         "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
@@ -177,7 +209,7 @@ module Caramel::Frappe
         "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => (required_text.map { |field| "      cs.validate_presence(:#{field.name})" } + fields.select(&.url?).map { |field| validate_url(field) } + uniques.map { |field| "      cs.unique_constraint(:#{field.name})" }).join('\n'),
+        "@@VALIDATIONS@@" => validations(required_text, fields),
         "@@INDEXES@@" => uniques.join { |field| "\n      index :#{field.name}, unique: true" },
         "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
@@ -190,9 +222,8 @@ module Caramel::Frappe
         "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_CHANGESET@@" => ([assert_presence(name, required_inputs)] + uniques.map { |field| duplicate_probe(name, fields, field, actions.includes?("update")) }).reject(&.empty?).join('\n'),
+        "@@ASSERT_CHANGESET@@" => changeset_checks,
         "@@SPEC_TITLE@@" => spec_title(actions),
-        "@@AFTER_DESTROY@@" => actions.includes?("index") ? "/#{collection}" : "/",
         "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
@@ -238,31 +269,46 @@ module Caramel::Frappe
     # form and saves through update.
     private def selected_actions(only : String?) : Array(String)
       return ACTIONS if only.nil?
+
       chosen = only.split(',').map(&.strip)
       unknown = chosen - ACTIONS
-      raise Error.new("Unknown resource action: #{unknown.join(", ")}; choose from #{ACTIONS.join(",")}") unless unknown.empty?
-      raise Error.new("A resource always has create and show; add them to --only") unless chosen.includes?("create") && chosen.includes?("show")
-      if chosen.includes?("edit") && !(chosen.includes?("new") && chosen.includes?("update"))
-        raise Error.new("edit reuses the new form and saves through update; add new and update to --only")
+      unless unknown.empty?
+        raise Error.new("Unknown resource action: #{unknown.join(", ")}; " \
+                        "choose from #{ACTIONS.join(",")}")
       end
-      ACTIONS.select { |action| chosen.includes?(action) }
+      unless (%w[create show] - chosen).empty?
+        raise Error.new("A resource always has create and show; add them to --only")
+      end
+      if chosen.includes?("edit") && !(%w[new update] - chosen).empty?
+        raise Error.new("edit reuses the new form and saves through update; " \
+                        "add new and update to --only")
+      end
+      ACTIONS & chosen
     end
 
-    # Drops template lines tagged for actions that are not generated and
-    # removes the tags from the lines that stay.
+    # Keeps the template lines the generated actions need.
     private def select_lines(content : String, actions : Array(String)) : String
+      kept = [] of Bool
       String.build do |io|
         content.each_line(chomp: false) do |line|
-          text = line.chomp
-          unless match = text.match(LINE_TAG)
+          if marker = line.chomp.match(MARKER)
+            case marker[1]
+            when "else" then kept.push(!kept.pop)
+            when "end"  then kept.pop
+            else             kept.push(keep?(marker[1], marker[2], actions))
+            end
+          elsif kept.all?
             io << line
-            next
           end
-          named = match[2].split(',')
-          keep = match[1] == "only" ? named.any? { |action| actions.includes?(action) } : named.none? { |action| actions.includes?(action) }
-          io << text[0, match.begin] << (line.ends_with?('\n') ? "\n" : "") if keep
         end
       end
+    end
+
+    # `only` keeps a block when any action it names is generated; `unless`
+    # keeps it when none is.
+    private def keep?(kind : String, names : String, actions : Array(String)) : Bool
+      named = names.split(',').any? { |action| actions.includes?(action) }
+      kind == "only" ? named : !named
     end
 
     # The generated request spec's description of what it exercises.
@@ -270,7 +316,31 @@ module Caramel::Frappe
       verbs = ["creates", "reads"]
       verbs << "updates" if actions.includes?("update")
       verbs << "deletes" if actions.includes?("destroy")
-      "#{verbs[0...-1].join(", ")} and #{verbs.last} through CSRF-protected #{actions.includes?("new") ? "browser forms" : "requests"}"
+      through = actions.includes?("new") ? "browser forms" : "requests"
+      "#{verbs[0...-1].join(", ")} and #{verbs.last} through CSRF-protected #{through}"
+    end
+
+    # Presence first, so a blank URL reports only that it is blank, then
+    # URLs, then unique constraints.
+    private def validations(required : Array(ResourceField),
+                            fields : Array(ResourceField)) : String
+      rules = required.map(&.presence_rule)
+      rules += fields.select(&.url?).map(&.url_rule)
+      rules += fields.select(&.unique?).map(&.unique_rule)
+      rules.join('\n') { |rule| "      #{rule}" }
+    end
+
+    # Blank required text and repeated unique values must fail through the
+    # generated changeset.
+    private def assert_changeset(model : String,
+                                 fields : Array(ResourceField),
+                                 required : Array(ResourceField),
+                                 actions : Array(String)) : String
+      updated = actions.includes?("update")
+      probes = fields.select(&.unique?).map do |unique|
+        duplicate_probe(model, fields, unique, updated)
+      end
+      ([assert_presence(model, required)] + probes).reject(&.empty?).join('\n')
     end
 
     private def pluralize(name : String) : String
@@ -314,7 +384,8 @@ module Caramel::Frappe
     # no row holds: an input its first sample, which the row replaced when it
     # was updated (its updated sample when the resource has no update), and
     # a server field its starting value.
-    private def duplicate_probe(model : String, fields : Array(ResourceField), unique : ResourceField, updated : Bool) : String
+    private def duplicate_probe(model : String, fields : Array(ResourceField),
+                                unique : ResourceField, updated : Bool) : String
       values = fields.join(", ") do |field|
         value = if field.name == unique.name
                   "persisted.#{field.name}"
@@ -328,12 +399,6 @@ module Caramel::Frappe
       %(      App::#{model}.create(#{values}).errors[#{unique.name.to_json}]?.should eq(["has already been taken"]))
     end
 
-    # A blank required URL reports only that it is blank.
-    private def validate_url(field : ResourceField) : String
-      line = "      cs.validate_url(:#{field.name})"
-      field.nullable? ? line : "#{line} unless cs.errors.has_key?(#{field.name.to_json})"
-    end
-
     # The field's control, inside the generated form view's `labelled` helper.
     private def form_field(field : ResourceField) : String
       name = field.name.to_json
@@ -343,12 +408,18 @@ module Caramel::Frappe
                   choices = options.map { |value| "            option(value: #{value.to_json}, selected: @values[#{name}]? == #{value.to_json}) { #{(value.empty? ? "Unspecified" : value.capitalize).to_json} }" }
                   "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
                 else
-                  type = %w[int32 int64 float64].includes?(field.kind) ? "number" : (field.url? ? "url" : "text")
+                  type = input_type(field)
                   extra = field.kind == "float64" ? ", step: \"any\"" : ""
                   extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
                   "          input type: \"#{type}\", #{attributes}#{extra}, value: @values[#{name}]? || \"\""
                 end
       "        labelled #{name}, #{field.label.to_json} do |id|\n#{control}\n        end"
+    end
+
+    private def input_type(field : ResourceField) : String
+      return "number" if %w[int32 int64 float64].includes?(field.kind)
+
+      field.url? ? "url" : "text"
     end
 
     private def validate_path(root : String, relative : String) : Nil

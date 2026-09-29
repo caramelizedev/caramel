@@ -98,7 +98,10 @@ module Caramel::Frappe
         return expand(invocation["FILE:LINE:COL"])
       when "make resource"
         project = Project.load
-        files = ResourceGenerator.new(@framework_root).generate(project, invocation["NAME"], invocation.list("FIELD:TYPE"), plural: invocation["--plural"]?, only: invocation["--only"]?)
+        files = ResourceGenerator.new(@framework_root).generate(
+          project, invocation["NAME"], invocation.list("FIELD:TYPE"),
+          plural: invocation["--plural"]?, only: invocation["--only"]?,
+        )
         files.each { |path| @output.puts("Generated #{path}") }
         @output.puts("\nRun frappe migrate to apply the new schema. Use frappe routes to see the generated URLs.")
       when "migrate"

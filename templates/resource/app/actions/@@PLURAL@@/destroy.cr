@@ -11,8 +11,11 @@ module App::@@COLLECTION@@
     end
 
     def render(result)
-      redirect_to(@@PLURAL@@_path) # frappe:only=index
-      redirect_to("/") # frappe:unless=index
+      # frappe:only index
+      redirect_to(@@PLURAL@@_path)
+      # frappe:else
+      redirect_to("/")
+      # frappe:end
     end
   end
 end

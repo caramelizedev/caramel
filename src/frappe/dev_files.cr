@@ -65,7 +65,8 @@ module Caramel::Frappe
         validate_path(path)
         if File.exists?(path)
           actual = digest(path)
-          conflict(relative, sources[relative]?) unless actual == previous[relative]? || actual == desired[relative]?
+          ours = actual == previous[relative]? || actual == desired[relative]?
+          conflict(relative, sources[relative]?) unless ours
         end
       end
       published = desired.dup
@@ -88,8 +89,14 @@ module Caramel::Frappe
 
     # A public file Frappé did not write: keep it and name the way forward.
     private def conflict(relative : String, source : String?) : NoReturn
-      remedy = source ? "delete #{relative} to republish it from #{source}, or copy your public edit into #{source} first" : "edit app/assets or preserve your public edit before retrying"
-      raise Error.new("Asset output conflict: #{relative} differs from what Frappé last published; #{remedy}")
+      remedy = if source
+                 "delete #{relative} to republish it from #{source}, " \
+                 "or copy your public edit into #{source} first"
+               else
+                 "edit app/assets or preserve your public edit before retrying"
+               end
+      raise Error.new("Asset output conflict: #{relative} differs from what Frappé " \
+                      "last published; #{remedy}")
     end
 
     # Copies one source asset into place and returns the digest of the bytes

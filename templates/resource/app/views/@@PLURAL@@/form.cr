@@ -11,8 +11,12 @@ module App::Views::@@COLLECTION@@
 @@FORM_FIELDS@@
         div class: "actions" do
           button(class: "button", type: "submit") { "Save @@LABEL@@" }
-          a(class: "cancel", href: @action) { "Cancel" } # frappe:only=index
-          a(class: "cancel", href: @method == "POST" ? "/" : @action) { "Cancel" } # frappe:unless=index
+          # frappe:only index
+          a(class: "cancel", href: @action) { "Cancel" }
+          # frappe:else
+          back = @method == "POST" ? "/" : @action
+          a(class: "cancel", href: back) { "Cancel" }
+          # frappe:end
         end
       end
     end

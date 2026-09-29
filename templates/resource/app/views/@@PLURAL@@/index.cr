@@ -9,7 +9,9 @@ module App::Views::@@COLLECTION@@
           p(class: "eyebrow") { "YOUR COLLECTION" }
           h1 { "@@COLLECTION_LABEL@@" }
         end
-        a(class: "button", href: new_@@SINGULAR@@_path) { "New @@LABEL@@" } # frappe:only=new
+        # frappe:only new
+        a(class: "button", href: new_@@SINGULAR@@_path) { "New @@LABEL@@" }
+        # frappe:end
       end
       if @records.empty?
         section class: "empty-state" do
@@ -37,8 +39,10 @@ module App::Views::@@COLLECTION@@
 @@TABLE_CELLS@@
                 td do
                   a(href: @@SINGULAR@@_path(record.id)) { "View" }
-                  whitespace # frappe:only=edit
-                  a(href: edit_@@SINGULAR@@_path(record.id)) { "Edit" } # frappe:only=edit
+                  # frappe:only edit
+                  whitespace
+                  a(href: edit_@@SINGULAR@@_path(record.id)) { "Edit" }
+                  # frappe:end
                 end
               end
             end

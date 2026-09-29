@@ -4,12 +4,15 @@ module App::@@COLLECTION@@
     private def render_form(values : Hash(String, String), errors : Hash(String, Array(String)), id : Int64? = nil, status : Int32 = 200) : Caramel::Response
       action = id ? @@SINGULAR@@_path(id) : @@PLURAL@@_path
       form = Views::@@COLLECTION@@::Form.new(action, id ? "PATCH" : "POST", csrf_token, values, errors)
-      if id # frappe:only=edit
-        page "Edit @@LABEL@@", Views::@@COLLECTION@@::Edit.new(id, form), status # frappe:only=edit
-      else # frappe:only=edit
-        page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status # frappe:only=edit
-      end # frappe:only=edit
-      page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status # frappe:unless=edit
+      # frappe:only edit
+      if id
+        page "Edit @@LABEL@@", Views::@@COLLECTION@@::Edit.new(id, form), status
+      else
+        page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status
+      end
+      # frappe:else
+      page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status
+      # frappe:end
     end
 
     # Re-renders the submitted form with every contract error.
