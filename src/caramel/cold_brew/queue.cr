@@ -69,6 +69,10 @@ module Caramel::ColdBrew
 
     CLAIMED = {id: Int64, enqueued_at: Time, class_name: String, payload: String, attempts: Int32}
 
+    # What a retry or a failure returns about the row it wrote.
+    RESCHEDULED = {queue: String, run_at: Time}
+    FAILED      = {queue: String, failed_at: Time}
+
     def self.push(queue : String, class_name : String, payload : String, run_at : Time?, priority : Int32) : Int64
       SugarORM.sql(PUSH, queue, class_name, payload, priority, run_at, as: {id: Int64}).first[:id]
     end
@@ -110,19 +114,32 @@ module Caramel::ColdBrew
 
     # Reschedules or fails the job and returns the transition, which is
     # durable once this returns outside a transaction. Nil when the row is gone.
-    def self.record_failure(job : Claim, error : Exception) : (RetryScheduled | JobFailed)?
-      message = describe(error)
+    def self.record_failure(job : Claim, error : Exception) : Transition?
       rule = Retry.rule_for(Job.__cold_brew_lineage(job.class_name), error)
       if error.is_a?(UnknownJob) || job.attempts >= rule.attempts
-        SugarORM.sql(FAIL, job.id, job.enqueued_at, message, as: {queue: String, failed_at: Time}).first?.try do |row|
-          JobFailed.new(job.id, row[:queue], job.class_name, job.attempts, row[:failed_at], error.class.name)
-        end
+        give_up(job, error)
       else
-        delay = rule.delay(job.attempts).total_seconds
-        SugarORM.sql(RETRY, job.id, job.enqueued_at, delay, message, as: {queue: String, run_at: Time}).first?.try do |row|
-          RetryScheduled.new(job.id, row[:queue], job.class_name, job.attempts, row[:run_at], error.class.name)
-        end
+        reschedule(job, error, after: rule.delay(job.attempts))
       end
+    end
+
+    private def self.reschedule(job : Claim, error : Exception,
+                                after delay : Time::Span) : RetryScheduled?
+      values = {job.id, job.enqueued_at, delay.total_seconds, describe(error)}
+      row = SugarORM.sql(RETRY, *values, as: RESCHEDULED).first? || return
+      RetryScheduled.new(
+        id: job.id, queue: row[:queue], class_name: job.class_name,
+        attempts: job.attempts, run_at: row[:run_at], error_class: error.class.name,
+      )
+    end
+
+    private def self.give_up(job : Claim, error : Exception) : JobFailed?
+      values = {job.id, job.enqueued_at, describe(error)}
+      row = SugarORM.sql(FAIL, *values, as: FAILED).first? || return
+      JobFailed.new(
+        id: job.id, queue: row[:queue], class_name: job.class_name,
+        attempts: job.attempts, failed_at: row[:failed_at], error_class: error.class.name,
+      )
     end
 
     # The class, message and the first backtrace lines, within ERROR_LIMIT.

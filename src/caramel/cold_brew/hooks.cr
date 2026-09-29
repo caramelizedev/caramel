@@ -8,14 +8,29 @@ module Caramel::ColdBrew
   # A failed run that Cold Brew rescheduled: the job's row holds the new
   # `run_at` and the run's error. `error_class` names the exception; its
   # message stays in the database.
-  record RetryScheduled, id : Int64, queue : String, class_name : String, attempts : Int32, run_at : Time, error_class : String do
+  record RetryScheduled,
+    id : Int64,
+    queue : String,
+    class_name : String,
+    attempts : Int32,
+    run_at : Time,
+    error_class : String do
     include JSON::Serializable
   end
 
   # A job that will not run again: its row holds `failed_at` and the error.
-  record JobFailed, id : Int64, queue : String, class_name : String, attempts : Int32, failed_at : Time, error_class : String do
+  record JobFailed,
+    id : Int64,
+    queue : String,
+    class_name : String,
+    attempts : Int32,
+    failed_at : Time,
+    error_class : String do
     include JSON::Serializable
   end
+
+  # What becomes of a failed run.
+  alias Transition = RetryScheduled | JobFailed
 
   @@retry_hooks = [] of RetryScheduled ->
   @@failure_hooks = [] of JobFailed ->
@@ -58,6 +73,8 @@ module Caramel::ColdBrew
     SugarORM::Repo.transaction { hook.call(event) }
   rescue error
     # The message may carry connection details; the class is enough to act on.
-    HookLog.error { "hook=#{name} job=#{event.id} class=#{event.class_name} error_type=#{error.class}" }
+    HookLog.error do
+      "hook=#{name} job=#{event.id} class=#{event.class_name} error_type=#{error.class}"
+    end
   end
 end

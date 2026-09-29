@@ -118,6 +118,8 @@ module Caramel::ColdBrew
     broker = Broker.new(database_url)
     self.broker = broker
     workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }
-    Service.new(db, workers, Maintenance.new(db).start, Scheduler.new(scheduler ? schedules : [] of Schedule, db).start, broker)
+    maintenance = Maintenance.new(db).start
+    ticks = Scheduler.new(scheduler ? schedules : [] of Schedule, db).start
+    Service.new(db, workers, maintenance, ticks, broker)
   end
 end

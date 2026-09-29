@@ -33,8 +33,12 @@ module Caramel::Frappe
       relative
     end
 
-    # Keys Corretto, the toolchain or the dynamic loader own; .env.test may not set them.
-    RESERVED_TEST_KEYS     = %w[APP_ORIGIN APP_SECRET DATABASE_URL MIGRATION_DATABASE_URL PATH HOME USER LOGNAME TMPDIR LANG]
+    # Keys Corretto, the toolchain or the dynamic loader own; .env.test may
+    # not set them.
+    RESERVED_TEST_KEYS = %w[
+      APP_ORIGIN APP_SECRET DATABASE_URL MIGRATION_DATABASE_URL
+      PATH HOME USER LOGNAME TMPDIR LANG
+    ]
     RESERVED_TEST_PREFIXES = %w[SPEC_ CARAMEL_ CORRETTO_ CRYSTAL_ LD_ DYLD_]
 
     # The application's own test settings, such as a webhook secret, from the
@@ -42,16 +46,22 @@ module Caramel::Frappe
     # Development `.env` values never reach specs.
     def self.test_environment(root : String) : Hash(String, String)
       path = File.join(root, ".env.test")
-      info = File.info?(path, follow_symlinks: false)
-      return {} of String => String unless info
+      info = File.info?(path, follow_symlinks: false) || return {} of String => String
       raise Error.new(".env.test must be a regular file") unless info.file?
       raise Error.new(".env.test exceeds 64 KiB") if info.size > 65_536
+
       values = LocalEnvironment.parse(File.read(path))
-      reserved = values.keys.select { |key| RESERVED_TEST_KEYS.includes?(key) || RESERVED_TEST_PREFIXES.any? { |prefix| key.starts_with?(prefix) } }
-      unless reserved.empty?
-        raise Error.new(".env.test cannot set #{reserved.join(", ")}; Corretto and the toolchain supply these")
-      end
-      values
+      reserved = values.keys.select { |key| reserved_test_key?(key) }
+      return values if reserved.empty?
+
+      raise Error.new(".env.test cannot set #{reserved.join(", ")}; " +
+                      "Corretto and the toolchain supply these")
+    end
+
+    private def self.reserved_test_key?(key : String) : Bool
+      return true if RESERVED_TEST_KEYS.includes?(key)
+
+      RESERVED_TEST_PREFIXES.any? { |prefix| key.starts_with?(prefix) }
     end
 
     # Deals files to at most `workers` groups like cards, so every group gets work.
