@@ -4,6 +4,14 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.4.3 - 2026-09-29
+
+### Fixes
+
+- **frappe:** trim the dev loop's fixed waits (bf92bd3)
+- **frappe:** build one-shot commands with the dev build's define (949f9e2)
+- **corretto:** compile each worker from a stable entry file (87a508d)
+
 ## 0.4.2 - 2026-09-29
 
 ### Upgrade notes
