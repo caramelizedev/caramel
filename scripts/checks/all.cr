@@ -30,7 +30,10 @@ module Caramel::Checks::All
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
 
     runs = [
-      {"build", [script("build-frappe"), "&&", script("build-latte"), "&&", script("build-lint"), "&&",
+      # The linter, the longest build, compiles alongside the rest: two Crystal
+      # builds at a time (CONTRIBUTING.md).
+      {"build", [script("build-lint"), "&",
+                 script("build-frappe"), "&&", script("build-latte"), "&&",
                  script("crystal"), "build", File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr"), "-o", Checks::PREBUILT_ENVIRONMENT]},
       {"spec", [script("crystal"), "spec"] + SPECS},
     ] + targets.reject { |name, _| skipped.includes?(name) }
@@ -74,8 +77,28 @@ module Caramel::Checks::All
     File.join(Checks::REPO, "scripts", name)
   end
 
-  # A `&&` chain runs its commands in order and stops at the first failure.
+  # A run is `&&` chains joined by `&`. The chains run side by side; the run
+  # passes when every chain does, and its output is theirs, in order.
   private def run(argv : Array(String)) : Caramel::Latte::ProcessResult
+    chains = argv.chunk_while { |_, word| word != "&" }.map(&.reject("&")).reject(&.empty?).to_a
+    finished = Channel({Int32, Caramel::Latte::ProcessResult | Exception}).new(chains.size)
+    chains.each_with_index do |chain, index|
+      spawn do
+        finished.send({index, run_chain(chain)})
+      rescue ex
+        finished.send({index, ex})
+      end
+    end
+    results = Array.new(chains.size) { finished.receive }.sort_by!(&.[0]).map do |(_, outcome)|
+      raise outcome if outcome.is_a?(Exception)
+      outcome
+    end
+    failed = results.find { |result| !result.success? }
+    Caramel::Latte::ProcessResult.new((failed || results.last).status, results.map(&.stdout).join, results.map(&.stderr).join, results.any?(&.timed_out?))
+  end
+
+  # A `&&` chain runs its commands in order and stops at the first failure.
+  private def run_chain(argv : Array(String)) : Caramel::Latte::ProcessResult
     commands = argv.chunk_while { |_, word| word != "&&" }.map(&.reject("&&")).reject(&.empty?)
     result = nil
     commands.each do |command|
