@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Caramel — A little structure. A lot of possibility.</title><meta name="description" content="A Crystal web framework with PostgreSQL, typed HTML, and a clear place for every change."><link rel="canonical" href="https://caramelize.dev/"><meta property="og:title" content="Caramel — A little structure. A lot of possibility."><meta property="og:description" content="A Crystal web framework with PostgreSQL, typed HTML, and a clear place for every change."><meta property="og:url" content="https://caramelize.dev/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script></head><body data-page="home"><div id="caramel-site" class="c-awards c-zed c-scroll" role="region" aria-label="Caramel website. Scroll to explore the latte.">
+  <header class="c-header">
+    <a class="c-brand cursor-interaction" data-page="home" aria-current="page" aria-label="Caramel home" href="/"><span class="c-mark" aria-hidden="true"></span>caramel</a>
+    <nav class="c-nav" aria-label="Main navigation">
+      
+      <a class="cursor-interaction" data-page="map" href="/docs/0.4.0/project-map/">Docs</a>
+      <a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.4.0/">Cookbook</a>
+      <a class="cursor-interaction" data-page="agents" href="/docs/0.4.0/agents/">For agents</a>
+    </nav>
+    <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+  </header>
+  <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
+    <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.4.0 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
+    <div class="c-results" id="c-results" aria-live="polite"></div>
+  </section>
+  <main id="c-main">
+    <div id="c-home">
+      <section id="l-story" data-chapter="0" aria-label="The ingredients of Caramel">
+       <div class="l-sticky">
+        <div class="a-feature l-feature">
+        <div class="a-art l-art">
+          <svg class="l-diagram" viewBox="0 0 360 470" role="img" aria-labelledby="l-title l-desc">
+            <title id="l-title">A caramel latte, layer by layer</title><desc id="l-desc">The assembled drink separates with scrolling: caramel, foam, milk, then espresso, revealing the glass cup.</desc>
+            <defs>
+              <linearGradient id="l-glass" x1="0" x2="1"><stop stop-color="var(--latte-glass)" stop-opacity=".25"/><stop offset=".25" stop-color="var(--latte-glass)" stop-opacity=".04"/><stop offset=".8" stop-color="var(--latte-glass)" stop-opacity=".08"/><stop offset="1" stop-color="var(--latte-glass)" stop-opacity=".25"/></linearGradient>
+              <linearGradient id="l-coffee" x1="0" x2="1"><stop stop-color="#3c2013"/><stop offset=".3" stop-color="#91502a"/><stop offset=".72" stop-color="#623118"/><stop offset="1" stop-color="#321b11"/></linearGradient>
+              <linearGradient id="l-milk" x1="0" x2="1"><stop stop-color="#b98e61"/><stop offset=".25" stop-color="#f1dbb9"/><stop offset=".6" stop-color="#ddbe90"/><stop offset="1" stop-color="#b08a61"/></linearGradient>
+              <linearGradient id="l-foam" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#fff1d6"/><stop offset="1" stop-color="#ddc5a1"/></linearGradient>
+              <linearGradient id="l-syrup" x1="0" x2="1"><stop stop-color="#975024"/><stop offset=".4" stop-color="#e7b564"/><stop offset=".65" stop-color="#c78638"/><stop offset="1" stop-color="#8a411e"/></linearGradient>
+              <radialGradient id="l-shadow"><stop stop-color="var(--latte-shadow)" stop-opacity=".25"/><stop offset="1" stop-color="var(--latte-shadow)" stop-opacity="0"/></radialGradient>
+            </defs>
+            <ellipse cx="183" cy="427" rx="119" ry="23" fill="url(#l-shadow)"/>
+            <ellipse cx="169" cy="419" rx="113" ry="20" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
+            <ellipse cx="169" cy="415" rx="98" ry="14" fill="none" stroke="var(--latte-glass)" stroke-opacity=".25"/>
+            <g class="l-cup-back">
+              <path d="M251 330 C319 305 320 393 260 391" fill="none" stroke="var(--latte-glass)" stroke-width="12" stroke-opacity=".22"/>
+              <path d="M253 330 C311 310 313 385 260 386" fill="none" stroke="var(--latte-glass)" stroke-width="2" stroke-opacity=".5"/>
+              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
+              <ellipse cx="169" cy="307" rx="93" ry="24" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".38"/>
+            </g>
+            <g class="l-piece l-espresso">
+              <path d="M93 380 L96 394 C98 417 240 417 242 394 L245 380Z" fill="url(#l-coffee)"/>
+              <ellipse cx="169" cy="380" rx="76" ry="20" fill="#9c6133"/>
+              <ellipse cx="169" cy="379" rx="70" ry="16" fill="#754326"/>
+              <path d="M112 376 Q166 358 218 377" fill="none" stroke="#dda261" stroke-width="2" opacity=".7"/>
+            </g>
+            <g class="l-piece l-milk">
+              <path d="M85 329 L93 380 C97 402 241 402 245 380 L253 329Z" fill="url(#l-milk)"/>
+              <ellipse cx="169" cy="329" rx="84" ry="22" fill="#eddbbe"/>
+              <ellipse cx="164" cy="328" rx="64" ry="14" fill="#f8e9ce" opacity=".65"/>
+              <path d="M105 342 L109 370" stroke="#fff2d9" stroke-width="7" stroke-linecap="round" opacity=".22"/>
+            </g>
+            <g class="l-piece l-foam">
+              <path d="M82 308 L85 328 C88 353 250 353 253 328 L256 308Z" fill="url(#l-foam)"/>
+              <ellipse cx="169" cy="308" rx="87" ry="23" fill="#f7e8cd"/>
+              <ellipse cx="157" cy="304" rx="65" ry="14" fill="#fff3de" opacity=".75"/>
+              <g fill="#c9ad86" opacity=".5"><circle cx="112" cy="312" r="1.7"/><circle cx="123" cy="306" r="1"/><circle cx="221" cy="314" r="1.6"/><circle cx="207" cy="318" r="1"/><circle cx="135" cy="315" r="1.2"/></g>
+            </g>
+            <g class="l-piece l-caramel" fill="none" stroke-linecap="round">
+              <path d="M107 306 C118 290 219 290 228 303 C239 316 118 318 119 307 C122 300 209 300 212 306 C214 312 142 311 142 306" stroke="#673117" stroke-width="8" opacity=".22" transform="translate(0 3)"/>
+              <path d="M107 306 C118 290 219 290 228 303 C239 316 118 318 119 307 C122 300 209 300 212 306 C214 312 142 311 142 306" stroke="url(#l-syrup)" stroke-width="6"/>
+              <path d="M113 302 C136 292 205 294 219 299" stroke="#f8d595" stroke-width="1.5" opacity=".7"/>
+            </g>
+            <g class="l-cup-front" fill="none" stroke="var(--latte-glass)">
+              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" stroke-opacity=".55"/>
+              <path d="M76 307 C76 338 262 338 262 307" stroke-opacity=".45"/>
+              <path d="M87 321 L98 380 Q99 389 103 393" stroke-width="5" stroke-linecap="round" stroke-opacity=".24"/>
+              <path d="M250 326 L241 377" stroke-width="2" stroke-linecap="round" stroke-opacity=".25"/>
+            </g>
+          </svg>
+        </div>
+        <div class="l-copy">
+          <div class="l-chapters" aria-live="polite" aria-atomic="true">
+            <div class="l-chapter" data-chapter="0"><div class="a-meta">The Crystal web framework</div><h1><span>A little structure.</span><span class="a-word-two">A lot of possibility.</span></h1><p>PostgreSQL, typed HTML, and a clear place for every change.</p></div>
+            <div class="l-chapter" data-chapter="1" hidden><span class="l-kicker">01 / Caramel</span><h2>Blueprint</h2><p>Your ideas, rendered in typed HTML.</p></div>
+            <div class="l-chapter" data-chapter="2" hidden><span class="l-kicker">02 / Foam</span><h2>Corretto</h2><p>Confidence in every layer, through application tests.</p></div>
+            <div class="l-chapter" data-chapter="3" hidden><span class="l-kicker">03 / Milk</span><h2>SugarORM</h2><p>Give your data shape. Make your rules explicit.</p></div>
+            <div class="l-chapter" data-chapter="4" hidden><span class="l-kicker">04 / Espresso</span><h2>Frappé</h2><p>From the first file to the next feature.</p></div>
+            <div class="l-chapter" data-chapter="5" hidden><span class="l-kicker">05 / Cup</span><h2>Latte</h2><p>A local home, with services and named HTTPS.</p></div>
+          </div>
+          <div class="a-cta l-action"><a class="a-start cursor-interaction" data-page="learn" href="/docs/0.4.0/getting-started/">Start building <span aria-hidden="true">↗</span></a></div>
+          <div class="l-chapter-index" aria-hidden="true"><span id="l-current">00</span><span class="l-index-line"></span><span>05</span></div>
+        </div>
+        </div>
+        <div class="l-scroll-hint" aria-hidden="true">Scroll to explore <span>↓</span></div>
+       </div>
+      </section>
+      <section class="a-end"><div class="a-end-word" aria-hidden="true">caramel</div></section>
+    </div>
+  </main>
+  <footer class="c-footer"><span>0.4.0 · Documentation preview</span><span>Apple Silicon macOS · Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+</div>
+</body></html>

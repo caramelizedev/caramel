@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A place for every change. · Caramel 0.4.0</title><meta name="description" content="Start with your intention. Caramel’s conventions give it a home, and its tools help you check the result."><link rel="canonical" href="https://caramelize.dev/docs/0.4.0/project-map/"><meta property="og:title" content="A place for every change. · Caramel 0.4.0"><meta property="og:description" content="Start with your intention. Caramel’s conventions give it a home, and its tools help you check the result."><meta property="og:url" content="https://caramelize.dev/docs/0.4.0/project-map/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script></head><body data-page="map"><div id="caramel-site" class="c-awards c-zed c-scroll" role="region" aria-label="Caramel website. Scroll to explore the latte.">
+  <header class="c-header">
+    <a class="c-brand cursor-interaction" data-page="home" aria-label="Caramel home" href="/"><span class="c-mark" aria-hidden="true"></span>caramel</a>
+    <nav class="c-nav" aria-label="Main navigation">
+      
+      <a class="cursor-interaction" data-page="map" aria-current="page" href="/docs/0.4.0/project-map/">Docs</a>
+      <a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.4.0/">Cookbook</a>
+      <a class="cursor-interaction" data-page="agents" href="/docs/0.4.0/agents/">For agents</a>
+    </nav>
+    <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+  </header>
+  <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
+    <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.4.0 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
+    <div class="c-results" id="c-results" aria-live="polite"></div>
+  </section>
+  <main id="c-main">
+    <div id="c-doc">
+      <div class="c-docbar"><span class="c-version">Caramel 0.4.0</span><span>Release-specific documentation · Documentation preview</span></div>
+      <div class="c-docgrid">
+        <aside class="c-sidebar" aria-label="Documentation navigation">
+          <h3>Start here</h3><a class="cursor-interaction" data-page="learn" href="/docs/0.4.0/getting-started/">Your first application</a><a class="cursor-interaction" data-page="map" aria-current="page" href="/docs/0.4.0/project-map/">Project map</a>
+          <h3>Build something</h3><a class="cursor-interaction" data-page="crud" href="/cookbook/0.4.0/create-a-resource/">Create a resource</a><a class="cursor-interaction" data-page="json" href="/cookbook/0.4.0/return-json/">Return JSON</a><a class="cursor-interaction" data-page="uploads" href="/cookbook/0.4.0/uploads/">Upload a file</a><a class="cursor-interaction" data-page="jobs" href="/cookbook/0.4.0/background-jobs/">Run a background job</a>
+          <h3>Go further</h3><a class="cursor-interaction" data-page="webhooks" href="/cookbook/0.4.0/webhooks/">Receive a webhook</a><a class="cursor-interaction" data-page="agents" href="/docs/0.4.0/agents/">Work with an agent</a><a class="cursor-interaction" data-page="deploy" href="/docs/0.4.0/deployment/">Deployment status</a>
+        </aside>
+        <article class="c-doccontent" id="c-article"><div class="c-eyebrow">Guides / Project structure</div><h1>A place for every change.</h1><p class="c-lede">Start with your intention. Caramel’s conventions give it a home, and its tools help you check the result.</p><h2 id="c-map-task">What are you changing?</h2><div class="c-task-picker" aria-label="Choose a development task"><button class="cursor-interaction" data-task="endpoint">An endpoint</button><button class="cursor-interaction" data-task="data">Stored data</button><button class="cursor-interaction" data-task="view">A page</button><button class="cursor-interaction" data-task="job">A background job</button></div><div id="c-map-result" class="c-route-map" aria-live="polite"><strong>Add or change an endpoint</strong><code>config/routes.cr</code><code>app/actions/</code><p>Declare the route, then its typed contract and behavior. Keep the response and failure cases in a request spec.</p><small>frappe routes · frappe check · frappe corretto</small></div><h2 id="c-map-components">Meet the framework</h2><div class="c-components"><div><strong>Frappé</strong><span>Your developer command line</span></div><div><strong>Latte</strong><span>Local services and named HTTPS</span></div><div><strong>SugarORM</strong><span>Schemas, changesets, and queries</span></div><div><strong>Blueprint views</strong><span>HTML written in typed Crystal</span></div><div><strong>Cold Brew</strong><span>PostgreSQL-backed background work</span></div><div><strong>Corretto</strong><span>Application tests with real data</span></div></div><div class="c-note"><strong>Application code is the extension point</strong><p>Keep changes in your application’s files. When the public API does not support a task, identify the gap before changing framework internals.</p></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.4.0/">← All recipes</a><a class="cursor-interaction" data-page="agents" href="/docs/0.4.0/agents/">The short guide for agents →</a></div></article>
+        <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-map-task">What are you changing?</a><a href="#c-map-components">Meet the framework</a></aside>
+      </div>
+    </div>
+  </main>
+  <footer class="c-footer"><span>0.4.0 · Documentation preview</span><span>Apple Silicon macOS · Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+</div>
+</body></html>
