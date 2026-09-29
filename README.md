@@ -15,7 +15,7 @@ Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configur
 - The macOS resolver/port installer and `latte trust install` are applied on the development machine: `https://<site>.caramel` resolves through `/etc/resolver/caramel`, reaches Caddy on port 443 through the launchd relay, and is trusted by Safari and curl without flags.
 - Sites can instead choose the `.localhost` suffix, which macOS and browsers resolve without a resolver entry ([ADR 0006](docs/decisions/0006-browser-acceptance-and-localhost-sites.md)).
 
-The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts, actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
+The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts that bind forms and JSON objects, per-action ingress for signed webhooks and token APIs ([ADR 0020](docs/decisions/0020-action-ingress-and-json-bodies.md)), actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
 
 - The CLI creates and restores projects, generates typed resources, derives and applies migrations, and runs Corretto specs (`frappe corretto`) in rolled-back savepoints against per-worker Latte databases.
 - Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs.
