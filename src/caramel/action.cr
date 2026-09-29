@@ -67,17 +67,19 @@ module Caramel
       {% site = @caller ? @caller.first : nil %}
       {% where = "" %}
       {% if site && site.filename %}
-        {% where = "\n  --> #{site.filename.id}:#{site.line_number}:#{site.column_number}" %}
+        {% position = "#{site.line_number}:#{site.column_number}" %}
+        {% where = "\n  --> #{site.filename.id}:#{position.id}" %}
       {% end %}
       {% given = options.keys.map(&.id.stringify) %}
       {% keywords = ::Caramel::Ingress::KEYWORDS %}
       {% units = ::Caramel::Ingress::UNITS %}
       {% max = ::Caramel::Ingress::MAX_LIMIT %}
+      {% example = ::Caramel::Ingress::EXAMPLE %}
 
       # Keywords only, once per action.
       {% if !arguments.empty? || options.empty? %}
         {% raise "ingress takes keywords: body:, limit:, csrf: and authenticate:" + where +
-                 "\nRemediation: write, for example, `#{::Caramel::Ingress::EXAMPLE.id}`.\n" %}
+                 "\nRemediation: write, for example, `#{example.id}`.\n" %}
       {% end %}
       {% if @type.constants.map(&.stringify).includes?("CARAMEL_INGRESS") %}
         {% raise "#{@type} declares ingress twice#{where.id}" +
@@ -92,12 +94,11 @@ module Caramel
 
       # body: :form or :raw
       {% body = options[:body] %}
-      {% if given.includes?("body") %}
-        {% unless body.is_a?(SymbolLiteral) && ["form", "raw"].includes?(body.id.stringify) %}
-          {% body.raise "ingress body: must be :form or :raw, got #{body}#{where.id}" %}
-        {% end %}
+      {% kind = body.is_a?(SymbolLiteral) ? body.id.stringify : nil %}
+      {% if given.includes?("body") && !["form", "raw"].includes?(kind) %}
+        {% body.raise "ingress body: must be :form or :raw, got #{body}#{where.id}" %}
       {% end %}
-      {% raw = given.includes?("body") && body.id.stringify == "raw" %}
+      {% raw = kind == "raw" %}
 
       # limit: a whole number of bytes, N.kilobytes or N.megabytes
       {% limit = options[:limit] %}
@@ -108,7 +109,7 @@ module Caramel
           {% count = limit.receiver %}
           {% scale = limit.args.empty? ? units[limit.name.stringify] : nil %}
         {% end %}
-        {% whole = count.is_a?(NumberLiteral) && !count.kind.stringify.starts_with?(":f") %}
+        {% whole = count.is_a?(NumberLiteral) && !count.kind.id.starts_with?("f") %}
         {% bytes = whole && scale && count <= max ? count * scale : 0 %}
         {% unless 1 <= bytes && bytes <= max %}
           {% limit.raise "ingress limit: must be a whole number of bytes, " +
@@ -134,9 +135,10 @@ module Caramel
         {% end %}
       {% end %}
       {% if !csrf && !given.includes?("authenticate") %}
-        {% raise "ingress csrf: false needs authenticate: :method? that verifies a credential " +
-                 "a browser does not attach on its own, such as a signature or a bearer token" +
-                 where + "\nRemediation: add `authenticate: :signed?` " +
+        {% raise "ingress csrf: false needs authenticate: :method? that verifies " +
+                 "a credential a browser does not attach on its own, " +
+                 "such as a signature or a bearer token" + where +
+                 "\nRemediation: add `authenticate: :signed?` " +
                  "and define `private def signed? : Bool`.\n" %}
       {% end %}
 
@@ -281,17 +283,20 @@ module Caramel
     # Answers errors found after the contract, such as a changeset's, the way
     # a contract failure is answered: JSON `{"errors": …}` for JSON clients, a
     # page listing them for browsers, and MRDP text for everyone else.
-    def render_errors(errors : Hash(String, Array(String)), status : Int32 = 422) : Response
+    def render_errors(errors : Hash(String, Array(String)),
+                      status : Int32 = 422) : Response
       return json({errors: errors}, status) if @context.wants_json?
       return page("Check your request", errors_html(errors), status) if @context.browser?
 
       text = String.build do |io|
-        io << "ERR INVALID:" << status << " at " << @context.method << ' ' << request.path << '\n'
+        io << "ERR INVALID:" << status
+        io << " at " << @context.method << ' ' << request.path << '\n'
         errors.each do |field, messages|
           messages.each { |message| io << "FIELD " << field << ": " << message << '\n' }
         end
       end
-      Response.new(status, text, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
+      headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
+      Response.new(status, text, headers)
     end
 
     private def errors_html(errors : Hash(String, Array(String))) : String

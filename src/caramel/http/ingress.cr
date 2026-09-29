@@ -25,7 +25,8 @@ module Caramel
       "kilobyte" => 1_024, "kilobytes" => 1_024,
       "megabyte" => 1_048_576, "megabytes" => 1_048_576,
     }
-    EXAMPLE = "ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?"
+    EXAMPLE = "ingress body: :raw, limit: 256.kilobytes, " \
+              "csrf: false, authenticate: :signed?"
 
     getter body : Body
     getter limit : Int64
