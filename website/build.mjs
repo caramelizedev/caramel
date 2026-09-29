@@ -38,19 +38,31 @@ body{margin:0}button,a{cursor:pointer}a{font:inherit}
 #caramel-site .c-doccontent code,#caramel-site .c-snippet pre{font-size:13px}
 #caramel-site .c-sidebar a[data-page],#caramel-site .c-nav a[data-page]{font-size:14px}
 #caramel-site .c-doccontent h2{scroll-margin-top:110px}
-#caramel-site.c-scroll .l-sticky{height:clamp(540px,calc(100svh - 85px),780px)}
-#caramel-site.c-scroll #l-story{height:calc(clamp(540px,100svh - 85px,780px) + 1200px)}
+#caramel-site.c-scroll{--stage-height:max(500px,calc(100svh - var(--header-height,85px)));--step-travel:clamp(300px,50svh,560px)}
+#caramel-site.c-scroll .l-sticky{height:var(--stage-height)}
+#caramel-site.c-scroll #l-story{height:calc(var(--stage-height) + 5 * var(--step-travel))}
+#caramel-site.c-scroll .l-feature{align-items:center}
+#caramel-site.c-scroll .l-art{height:min(650px,calc(var(--stage-height) - 64px))}
+#caramel-site.c-scroll .l-diagram{width:min(100%,460px,calc((var(--stage-height) - 64px) * .766))}
+#caramel-site.c-scroll .l-copy{min-height:350px}
 #caramel-site.c-scroll .l-chapter[data-chapter="0"] p{font-size:16px}
 #caramel-site .c-recipe{display:flex;text-align:left}
 #caramel-site .c-results a{display:block}
-@container(max-width:700px){#caramel-site.c-scroll .l-sticky{height:clamp(590px,calc(100svh - 120px),700px)}#caramel-site.c-scroll .l-chapter[data-chapter="0"] p{font-size:14px}}
+@container(max-width:700px){
+  #caramel-site.c-scroll .l-feature{height:min(740px,calc(var(--stage-height) - 60px));grid-template-rows:170px minmax(0,1fr) 55px}
+  #caramel-site.c-scroll .l-art{height:100%;min-height:0}
+  #caramel-site.c-scroll .l-diagram{width:min(90%,300px);max-height:100%}
+  #caramel-site.c-scroll .l-copy{min-height:0}
+  #caramel-site.c-scroll .l-chapter[data-chapter="0"] p{font-size:14px}
+  #caramel-site.c-scroll .l-scroll-hint{bottom:12px}
+}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 `;
 fs.writeFileSync(new URL('assets/site.css', out), css);
 
 let client = script
   .replace("let currentPage = 'home';", 'let currentPage = document.body.dataset.page;')
-  .replace('root.scrollTop/', 'window.scrollY/')
+  .replace('root.scrollTop-storyStart', 'window.scrollY-storyStart')
   .replace("root.addEventListener('scroll'", "window.addEventListener('scroll'")
   .replace(/  function persist\(\)\{[^\n]+\}/, '  function persist(){}')
   .replace(/  function showPage\([^\n]+\n/, '')
