@@ -52,7 +52,9 @@ module Caramel
 
     # Reads *request* as its route's *ingress* allows: its limit bounds the
     # body text, and uploads share *max_upload_bytes*.
-    def self.read(request : HTTP::Request, ingress : Ingress = Ingress::DEFAULT, max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
+    def self.read(request : HTTP::Request,
+                  ingress : Ingress = Ingress::DEFAULT,
+                  max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
       input = new({"GET", "HEAD"}.includes?(request.method))
       begin
         input.parse(request, ingress, max_upload_bytes)
@@ -63,38 +65,27 @@ module Caramel
       input
     end
 
-    @[Deprecated("Use `Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: bytes))`")]
-    def self.read(request : HTTP::Request, max_form_bytes : Int32, max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
+    @[Deprecated("Use `RequestInput.read(request, Caramel::Ingress.new(limit: bytes))`")]
+    def self.read(request : HTTP::Request,
+                  max_form_bytes : Int32,
+                  max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
       read(request, Ingress.new(limit: max_form_bytes.to_i64), max_upload_bytes)
     end
 
     protected def initialize(@lenient_query : Bool)
     end
 
-    protected def parse(request : HTTP::Request, ingress : Ingress, max_upload_bytes : Int64) : Nil
+    protected def parse(request : HTTP::Request,
+                        ingress : Ingress,
+                        max_upload_bytes : Int64) : Nil
       request.query.try { |text| parse_pairs(text, @query, controls: false) }
       return unless BODY_METHODS.includes?(request.method)
+
       if ingress.body.raw?
         @raw_body = read_body(request, ingress.limit)
-        return
-      end
-      media_type = request.headers["Content-Type"]?.try(&.split(';', 2).first.strip.downcase)
-      case media_type
-      when "application/x-www-form-urlencoded"
-        parse_pairs(String.new(read_body(request, ingress.limit)), @body, controls: true)
-      when "multipart/form-data"
-        parse_multipart(request, ingress.limit, max_upload_bytes)
-      when "application/json"
-        parse_json(String.new(read_body(request, ingress.limit)))
-      when nil
-        raise UnsupportedMediaType.new(UNSUPPORTED) unless empty_body?(request)
       else
-        raise UnsupportedMediaType.new(UNSUPPORTED)
-      end
-      if request.method == "POST" && (override = @submitted_override)
-        override = override.upcase
-        raise InvalidEncoding.new("Unsupported method override") unless OVERRIDES.includes?(override)
-        @method_override = override
+        parse_body(request, ingress.limit, max_upload_bytes)
+        apply_override(request)
       end
     end
 
@@ -143,13 +134,48 @@ module Caramel
       request.body.try(&.read_byte).nil?
     end
 
+    private def parse_body(request : HTTP::Request,
+                           limit : Int64,
+                           max_upload_bytes : Int64) : Nil
+      case media_type(request)
+      when "application/x-www-form-urlencoded"
+        parse_pairs(read_text(request, limit), @body, controls: true)
+      when "multipart/form-data"
+        parse_multipart(request, limit, max_upload_bytes)
+      when "application/json"
+        parse_json(read_text(request, limit))
+      when nil
+        raise UnsupportedMediaType.new(UNSUPPORTED) unless empty_body?(request)
+      else
+        raise UnsupportedMediaType.new(UNSUPPORTED)
+      end
+    end
+
+    private def media_type(request : HTTP::Request) : String?
+      request.headers["Content-Type"]?.try(&.split(';', 2).first.strip.downcase)
+    end
+
+    # A POST form may ask for PATCH, PUT or DELETE in its `_method` field.
+    private def apply_override(request : HTTP::Request) : Nil
+      return unless request.method == "POST" && (override = @submitted_override)
+
+      override = override.upcase
+      unless OVERRIDES.includes?(override)
+        raise InvalidEncoding.new("Unsupported method override")
+      end
+      @method_override = override
+    end
+
+    private def read_text(request : HTTP::Request, limit : Int64) : String
+      String.new(read_body(request, limit))
+    end
+
     # At most *limit* bytes of the body; a declared or actual excess raises.
     private def read_body(request : HTTP::Request, limit : Int64) : Bytes
-      if (length = request.headers["Content-Length"]?.try(&.to_i64?)) && length > limit
-        raise TooLarge.new("Body exceeds #{limit} bytes")
-      end
-      source = request.body
-      return Bytes.empty unless source
+      declared = request.headers["Content-Length"]?.try(&.to_i64?)
+      raise TooLarge.new("Body exceeds #{limit} bytes") if declared && declared > limit
+
+      source = request.body || return Bytes.empty
       buffer = IO::Memory.new
       copied = IO.copy(source, buffer, limit + 1)
       raise TooLarge.new("Body exceeds #{limit} bytes") if copied > limit
@@ -162,17 +188,10 @@ module Caramel
     private def parse_json(text : String) : Nil
       return if text.empty?
       raise InvalidEncoding.new("Malformed JSON") unless text.valid_encoding?
+
       parser = JSON::PullParser.new(text)
       if parser.kind.begin_object?
-        parser.read_object do |key|
-          check_text(key)
-          if @json_kinds.has_key?(key)
-            add_error("_base", "Duplicate field: #{key}")
-            parser.skip
-          else
-            @json_kinds[key] = read_json_member(parser, key)
-          end
-        end
+        parser.read_object { |key| read_json_member(parser, key) }
       else
         parser.skip
         add_error("_base", "Expected a JSON object")
@@ -182,7 +201,19 @@ module Caramel
       raise InvalidEncoding.new("Malformed JSON")
     end
 
-    private def read_json_member(parser : JSON::PullParser, key : String) : JsonKind
+    # Records one member, and the JSON type it arrived as. The first of two
+    # members with one name wins; the second is an error.
+    private def read_json_member(parser : JSON::PullParser, key : String) : Nil
+      check_text(key)
+      if @json_kinds.has_key?(key)
+        add_error("_base", "Duplicate field: #{key}")
+        parser.skip
+      else
+        @json_kinds[key] = read_json_value(parser, key)
+      end
+    end
+
+    private def read_json_value(parser : JSON::PullParser, key : String) : JsonKind
       case parser.kind
       when .string?
         value = parser.read_string
@@ -220,7 +251,9 @@ module Caramel
       end
     end
 
-    private def parse_multipart(request : HTTP::Request, max_form_bytes : Int64, max_upload_bytes : Int64) : Nil
+    private def parse_multipart(request : HTTP::Request,
+                                max_form_bytes : Int64,
+                                max_upload_bytes : Int64) : Nil
       text_budget = max_form_bytes
       upload_budget = max_upload_bytes
       seen = Set(String).new

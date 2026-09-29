@@ -43,83 +43,109 @@ module Caramel
       true
     end
 
-    # Declares how the route reads this action's request (ADR 0020). Every
-    # keyword is optional:
+    # Declares how the route reads this action's request (ADR 0020):
+    #
+    # ```
+    # ingress body: :raw,
+    #   limit: 256.kilobytes,
+    #   csrf: false,
+    #   authenticate: :signed?
+    # ```
     #
     # * `body: :raw` keeps the bytes exactly as sent, of any content type, for
-    #   `raw_body`; the contract then binds only the route and the query.
-    #   The default, `:form`, binds a URL-encoded or multipart form or a JSON
-    #   object.
-    # * `limit:` caps the body: an integer, `N.kilobytes` or `N.megabytes`,
-    #   up to 64 MiB. The default is 2 MiB.
+    #   `raw_body`; the contract then binds only the route and the query. The
+    #   default, `:form`, binds a form or a JSON object.
+    # * `limit:` caps the body at a whole number of bytes, `N.kilobytes` or
+    #   `N.megabytes`, up to 64 MiB. The default is 2 MiB.
     # * `authenticate: :method?` names an instance method returning `Bool`.
     #   It runs before the contract binds, and false answers 401.
-    # * `csrf: false` skips the browser CSRF check. It requires
-    #   `authenticate:`, and the session reads empty and is never saved,
-    #   since only a credential a browser does not attach on its own, such as
-    #   a signature or a bearer token, can stand in for the check.
-    #
-    # ```
-    # ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?
-    # ```
+    # * `csrf: false` skips the browser CSRF check. It requires an
+    #   authenticator, and the session reads empty and is never saved: only a
+    #   credential a browser does not attach on its own, such as a signature
+    #   or a bearer token, can stand in for the check.
     macro ingress(*arguments, **options)
-      {% call = @caller ? @caller.first : nil %}
-      {% where = call && call.filename ? "\n  --> #{call.filename.id}:#{call.line_number}:#{call.column_number}" : "" %}
-      {% unless arguments.empty? && !options.empty? %}
-        {% raise "ingress takes keywords: body:, limit:, csrf: and authenticate:#{where.id}\nRemediation: write, for example, `ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?`.\n" %}
+      {% site = @caller ? @caller.first : nil %}
+      {% where = "" %}
+      {% if site && site.filename %}
+        {% where = "\n  --> #{site.filename.id}:#{site.line_number}:#{site.column_number}" %}
+      {% end %}
+      {% given = options.keys.map(&.id.stringify) %}
+      {% keywords = ::Caramel::Ingress::KEYWORDS %}
+      {% units = ::Caramel::Ingress::UNITS %}
+      {% max = ::Caramel::Ingress::MAX_LIMIT %}
+
+      # Keywords only, once per action.
+      {% if !arguments.empty? || options.empty? %}
+        {% raise "ingress takes keywords: body:, limit:, csrf: and authenticate:" + where +
+                 "\nRemediation: write, for example, `#{::Caramel::Ingress::EXAMPLE.id}`.\n" %}
       {% end %}
       {% if @type.constants.map(&.stringify).includes?("CARAMEL_INGRESS") %}
-        {% raise "#{@type} declares ingress twice#{where.id}\nRemediation: combine the keywords into one `ingress` declaration.\n" %}
+        {% raise "#{@type} declares ingress twice#{where.id}" +
+                 "\nRemediation: combine the keywords into one `ingress` declaration.\n" %}
       {% end %}
-      {% raw = false %}
-      {% limit = nil %}
-      {% csrf = true %}
-      {% authenticate = nil %}
       {% for key, value in options %}
-        {% if key.id.stringify == "body" %}
-          {% unless value.is_a?(SymbolLiteral) && ["form", "raw"].includes?(value.id.stringify) %}
-            {% value.raise "ingress body: must be :form or :raw, got #{value}#{where.id}" %}
-          {% end %}
-          {% raw = value.id.stringify == "raw" %}
-        {% elsif key.id.stringify == "limit" %}
-          {% bytes = nil %}
-          {% if value.is_a?(NumberLiteral) && !value.kind.stringify.starts_with?(":f") %}
-            {% bytes = value %}
-          {% elsif value.is_a?(Call) && value.receiver.is_a?(NumberLiteral) && value.args.empty? && !value.receiver.kind.stringify.starts_with?(":f") %}
-            {% unit = value.name.stringify %}
-            {% if unit == "kilobyte" || unit == "kilobytes" %}
-              {% bytes = value.receiver <= 65_536 ? value.receiver * 1024 : 67_108_865 %}
-            {% elsif unit == "megabyte" || unit == "megabytes" %}
-              {% bytes = value.receiver <= 64 ? value.receiver * 1_048_576 : 67_108_865 %}
-            {% end %}
-          {% end %}
-          {% unless bytes != nil && bytes >= 1 && bytes <= 67_108_864 %}
-            {% value.raise "ingress limit: must be a whole number of bytes, N.kilobytes or N.megabytes from 1 byte to 64 MiB, got #{value}#{where.id}" %}
-          {% end %}
-          {% limit = value %}
-        {% elsif key.id.stringify == "csrf" %}
-          {% unless value.is_a?(BoolLiteral) %}
-            {% value.raise "ingress csrf: must be true or false, got #{value}#{where.id}" %}
-          {% end %}
-          {% csrf = value %}
-        {% elsif key.id.stringify == "authenticate" %}
-          {% unless value.is_a?(SymbolLiteral) && value.id.stringify =~ /\A[a-z_][A-Za-z0-9_]*[?!]?\z/ %}
-            {% value.raise "ingress authenticate: must name an instance method, as in :signed?, got #{value}#{where.id}" %}
-          {% end %}
-          {% authenticate = value %}
-        {% else %}
-          {% value.raise "unknown ingress keyword '#{key}'; use body:, limit:, csrf: or authenticate:#{where.id}" %}
+        {% unless keywords.includes?(key.id.stringify) %}
+          {% value.raise "unknown ingress keyword '#{key}'; " +
+                         "use body:, limit:, csrf: or authenticate:#{where.id}" %}
         {% end %}
       {% end %}
-      {% if !csrf && authenticate == nil %}
-        {% raise "ingress csrf: false needs authenticate: :method? that verifies a credential a browser does not attach on its own, such as a signature or a bearer token#{where.id}\nRemediation: add `authenticate: :signed?` and define `private def signed? : Bool`.\n" %}
+
+      # body: :form or :raw
+      {% body = options[:body] %}
+      {% if given.includes?("body") %}
+        {% unless body.is_a?(SymbolLiteral) && ["form", "raw"].includes?(body.id.stringify) %}
+          {% body.raise "ingress body: must be :form or :raw, got #{body}#{where.id}" %}
+        {% end %}
+      {% end %}
+      {% raw = given.includes?("body") && body.id.stringify == "raw" %}
+
+      # limit: a whole number of bytes, N.kilobytes or N.megabytes
+      {% limit = options[:limit] %}
+      {% if given.includes?("limit") %}
+        {% count = limit %}
+        {% scale = 1 %}
+        {% if limit.is_a?(Call) %}
+          {% count = limit.receiver %}
+          {% scale = limit.args.empty? ? units[limit.name.stringify] : nil %}
+        {% end %}
+        {% whole = count.is_a?(NumberLiteral) && !count.kind.stringify.starts_with?(":f") %}
+        {% bytes = whole && scale && count <= max ? count * scale : 0 %}
+        {% unless 1 <= bytes && bytes <= max %}
+          {% limit.raise "ingress limit: must be a whole number of bytes, " +
+                         "N.kilobytes or N.megabytes from 1 byte to 64 MiB, " +
+                         "got #{limit}#{where.id}" %}
+        {% end %}
+      {% end %}
+
+      # csrf: true or false
+      {% csrf = options[:csrf] %}
+      {% if given.includes?("csrf") && !csrf.is_a?(BoolLiteral) %}
+        {% csrf.raise "ingress csrf: must be true or false, got #{csrf}#{where.id}" %}
+      {% end %}
+      {% csrf = !given.includes?("csrf") || csrf %}
+
+      # authenticate: :method?, required once csrf is off
+      {% authenticate = options[:authenticate] %}
+      {% if given.includes?("authenticate") %}
+        {% method = authenticate.is_a?(SymbolLiteral) && authenticate.id.stringify %}
+        {% unless method && method =~ /\A[a-z_]\w*[?!]?\z/ %}
+          {% authenticate.raise "ingress authenticate: must name an instance method, " +
+                                "as in :signed?, got #{authenticate}#{where.id}" %}
+        {% end %}
+      {% end %}
+      {% if !csrf && !given.includes?("authenticate") %}
+        {% raise "ingress csrf: false needs authenticate: :method? that verifies a credential " +
+                 "a browser does not attach on its own, such as a signature or a bearer token" +
+                 where + "\nRemediation: add `authenticate: :signed?` " +
+                 "and define `private def signed? : Bool`.\n" %}
       {% end %}
 
       CARAMEL_INGRESS = ::Caramel::Ingress.new(
-        ::Caramel::Ingress::Body::{{ raw ? "Raw".id : "Form".id }},
-        ({{ limit || "::Caramel::Ingress::DEFAULT_LIMIT".id }}).to_i64,
-        {{ csrf }},
-        {{ authenticate ? authenticate.id.stringify : nil }})
+        body: ::Caramel::Ingress::Body::{{ raw ? "Raw".id : "Form".id }},
+        limit: ({{ limit || "::Caramel::Ingress::DEFAULT_LIMIT".id }}).to_i64,
+        csrf: {{ csrf }},
+        authenticate: {{ authenticate ? authenticate.id.stringify : nil }},
+      )
 
       {% if authenticate %}
         # :nodoc:
@@ -254,27 +280,28 @@ module Caramel
 
     # Answers errors found after the contract, such as a changeset's, the way
     # a contract failure is answered: JSON `{"errors": …}` for JSON clients, a
-    # page listing them for browsers, and MRDP text otherwise.
+    # page listing them for browsers, and MRDP text for everyone else.
     def render_errors(errors : Hash(String, Array(String)), status : Int32 = 422) : Response
-      if @context.wants_json?
-        json({errors: errors}, status)
-      elsif @context.browser?
-        page("Check your request", errors_html(errors), status)
-      else
-        text = String.build do |io|
-          io << "ERR INVALID:" << status << " at " << @context.method << ' ' << request.path << '\n'
-          errors.each { |field, messages| messages.each { |message| io << "FIELD " << field << ": " << message << '\n' } }
+      return json({errors: errors}, status) if @context.wants_json?
+      return page("Check your request", errors_html(errors), status) if @context.browser?
+
+      text = String.build do |io|
+        io << "ERR INVALID:" << status << " at " << @context.method << ' ' << request.path << '\n'
+        errors.each do |field, messages|
+          messages.each { |message| io << "FIELD " << field << ": " << message << '\n' }
         end
-        Response.new(status, text, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
       end
+      Response.new(status, text, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
     end
 
     private def errors_html(errors : Hash(String, Array(String))) : String
       String.build do |io|
-        io << %(<section class="contract-errors" role="alert"><h1>Check your request</h1><ul>)
+        io << %(<section class="contract-errors" role="alert">)
+        io << %(<h1>Check your request</h1><ul>)
         errors.each do |field, messages|
           messages.each do |message|
-            io << "<li><code>" << HTML.escape(field) << "</code>: " << HTML.escape(message) << "</li>"
+            io << "<li><code>" << HTML.escape(field) << "</code>: "
+            io << HTML.escape(message) << "</li>"
           end
         end
         io << "</ul></section>"

@@ -15,17 +15,32 @@ module Caramel
     end
 
     DEFAULT_LIMIT = 2_097_152_i64
+
     # Bodies are held in memory, so a route cannot ask for more than uploads get.
     MAX_LIMIT = 67_108_864_i64
+
+    # The vocabulary the `ingress` macro checks at compile time.
+    KEYWORDS = ["body", "limit", "csrf", "authenticate"]
+    UNITS    = {
+      "kilobyte" => 1_024, "kilobytes" => 1_024,
+      "megabyte" => 1_048_576, "megabytes" => 1_048_576,
+    }
+    EXAMPLE = "ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?"
 
     getter body : Body
     getter limit : Int64
     getter? csrf : Bool
+
     # The action method that authenticates the request, when it declares one.
     getter authenticate : String?
 
-    def initialize(@body : Body = Body::Form, @limit : Int64 = DEFAULT_LIMIT, @csrf : Bool = true, @authenticate : String? = nil)
-      raise ArgumentError.new("An ingress limit is 1 byte to 64 MiB, got #{@limit}") unless 1 <= @limit <= MAX_LIMIT
+    def initialize(@body : Body = Body::Form,
+                   @limit : Int64 = DEFAULT_LIMIT,
+                   @csrf : Bool = true,
+                   @authenticate : String? = nil)
+      return if 1 <= @limit <= MAX_LIMIT
+
+      raise ArgumentError.new("An ingress limit is 1 byte to 64 MiB, got #{@limit}")
     end
 
     DEFAULT = new
@@ -33,10 +48,11 @@ module Caramel
     # A `_method` override may reach a route only when that route reads the
     # POST's body the same way, so an override never skips a check.
     def reads_like?(other : Ingress) : Bool
-      @body == other.body && @limit == other.limit && @csrf == other.csrf?
+      {body, limit, csrf?} == {other.body, other.limit, other.csrf?}
     end
 
-    # What `routes` prints after a route; empty for DEFAULT.
+    # What `routes` prints after a route: empty for DEFAULT, otherwise such
+    # as `raw, 256 KiB, csrf off, authenticate signed?`.
     def summary : String
       parts = [] of String
       parts << "raw" if @body.raw?
@@ -47,13 +63,10 @@ module Caramel
     end
 
     def self.size(bytes : Int64) : String
-      if bytes % 1.megabyte == 0
-        "#{bytes // 1.megabyte} MiB"
-      elsif bytes % 1.kilobyte == 0
-        "#{bytes // 1.kilobyte} KiB"
-      else
-        "#{bytes} bytes"
-      end
+      return "#{bytes // 1.megabyte} MiB" if bytes.divisible_by?(1.megabyte)
+      return "#{bytes // 1.kilobyte} KiB" if bytes.divisible_by?(1.kilobyte)
+
+      "#{bytes} bytes"
     end
   end
 end

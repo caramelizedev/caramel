@@ -17,7 +17,11 @@ module Caramel
     @session : Hash(String, String)? = nil
     @loaded_session : Hash(String, String)? = nil
 
-    def initialize(@request : HTTP::Request, @csrf : CSRF, @sessions : Session, @input : RequestInput, @ingress : Ingress = Ingress::DEFAULT)
+    def initialize(@request : HTTP::Request,
+                   @csrf : CSRF,
+                   @sessions : Session,
+                   @input : RequestInput,
+                   @ingress : Ingress = Ingress::DEFAULT)
       cookie = @request.cookies[CSRF::COOKIE_NAME]?.try(&.value)
       @csrf_token = cookie && @csrf.valid_token?(cookie) ? cookie : @csrf.issue
       negotiate(@request.headers["Accept"]?)
@@ -29,8 +33,7 @@ module Caramel
     # the cookie cannot authenticate a request that skipped the CSRF check.
     def session : Hash(String, String)
       @session ||= begin
-        loaded = @request.cookies[Session::COOKIE_NAME]?.try { |cookie| @sessions.decode(cookie.value) } if @ingress.csrf?
-        loaded ||= {} of String => String
+        loaded = saved_session || {} of String => String
         @loaded_session = loaded.dup
         loaded
       end
@@ -40,6 +43,14 @@ module Caramel
     def session_cookie : HTTP::Cookie?
       current = @session
       @sessions.cookie(current) if @ingress.csrf? && current && current != @loaded_session
+    end
+
+    # What the session cookie holds, unless this route skipped the CSRF check.
+    private def saved_session : Hash(String, String)?
+      return unless @ingress.csrf?
+
+      cookie = @request.cookies[Session::COOKIE_NAME]? || return
+      @sessions.decode(cookie.value)
     end
 
     def method : String

@@ -7,6 +7,17 @@ module Caramel
   # Contracts only come from `parse`, and `handle` only ever receives a
   # valid one.
   abstract struct RequestContract
+    # The JSON type a member must have to bind each field type, and its name
+    # in the error when it does not.
+    JSON_TYPES = {
+      "String"  => {"String", "string"},
+      "Time"    => {"String", "string"},
+      "Int32"   => {"Number", "number"},
+      "Int64"   => {"Number", "number"},
+      "Float64" => {"Number", "number"},
+      "Bool"    => {"Bool", "boolean"},
+    }
+
     getter errors = {} of String => Array(String)
     # Submitted text for each declared field, kept to re-render forms.
     getter values = {} of String => String
@@ -144,9 +155,10 @@ module Caramel
             add_error({{ name.stringify }}, "is required")
           {% end %}
         {% else %}
-          {% json = full == "Bool" ? "Bool" : (["Int32", "Int64", "Float64"].includes?(full) ? "Number" : "String") %}
-          if input.json_mismatch?({{ name.stringify }}, ::Caramel::RequestInput::JsonKind::{{ json.id }})
-            add_error({{ name.stringify }}, {{ "must be a JSON #{json == "Bool" ? "boolean".id : json.downcase.id}" }})
+          {% json = ::Caramel::RequestContract::JSON_TYPES[full] %}
+          json = ::Caramel::RequestInput::JsonKind::{{ json[0].id }}
+          if input.json_mismatch?({{ name.stringify }}, json)
+            add_error({{ name.stringify }}, {{ "must be a JSON #{json[1].id}" }})
             return
           end
           raw = input.value?({{ name.stringify }})

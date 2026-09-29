@@ -11,12 +11,22 @@ module Caramel
   module Router
     MAX_SEGMENTS = 32
 
-    record Entry, method : String, path : String, action : String, contract : String, ingress : Ingress = Ingress::DEFAULT
+    record Entry,
+      method : String,
+      path : String,
+      action : String,
+      contract : String,
+      ingress : Ingress = Ingress::DEFAULT
 
     # The route a request's real method and path select. It is found before
     # the body is read, so the route's ingress decides how to read it; an
     # unmatched request reads with DEFAULT, so it still meets the CSRF check.
-    record Match, path : String, segments : Segments?, index : Int32, mask : UInt8, ingress : Ingress
+    record Match,
+      path : String,
+      segments : Segments?,
+      index : Int32,
+      mask : UInt8,
+      ingress : Ingress
 
     METHOD_BITS = {"GET" => 1_u8, "POST" => 2_u8, "PUT" => 4_u8, "PATCH" => 8_u8, "DELETE" => 16_u8}
 
@@ -48,7 +58,17 @@ module Caramel
 
     # A route's authenticator refused the request; it learns nothing more.
     def self.unauthorized : Response
-      Response.new(401, "Unauthorized", HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8", "Cache-Control" => "no-store"})
+      headers = HTTP::Headers{
+        "Content-Type"  => "text/plain; charset=utf-8",
+        "Cache-Control" => "no-store",
+      }
+      Response.new(401, "Unauthorized", headers)
+    end
+
+    # A `_method` override aimed at a route that reads its body differently.
+    def self.override_refused(allowed : UInt8) : Response
+      headers = HTTP::Headers{"Allow" => allow_header(allowed)}
+      Response.new(405, "Method override is not allowed for this route", headers)
     end
 
     module Dispatcher
@@ -175,9 +195,18 @@ module Caramel
       # Matches the request's own method (HEAD as GET), before any override.
       def route(path : String, method : String) : Match
         segments = Segments.parse(path)
-        return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT) if segments.nil? || segments.size > MAX_SEGMENTS
+        unless segments && segments.size <= MAX_SEGMENTS
+          return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT)
+        end
+
         index, mask = match(path, segments, method)
-        Match.new(path, segments, index, mask, index >= 0 ? @entries[index].ingress : Ingress::DEFAULT)
+        ingress = index >= 0 ? @entries[index].ingress : Ingress::DEFAULT
+        Match.new(path, segments, index, mask, ingress)
+      end
+
+      # Every method the routes at this path take, whatever the request's.
+      def allowed(path : String, segments : Segments) : UInt8
+        match(path, segments, "")[1]
       end
 
       private def walk(node : Node, path : String, segments : Segments, depth : Int32, bit : UInt8) : {Int32, UInt8}
@@ -357,7 +386,10 @@ macro __caramel_router_draw(locations, &block)
 
     TREE = ::Caramel::Router::Tree.new([
       {% for route in routes %}
-        ::Caramel::Router::Entry.new({{ route[0] }}, {{ route[1] }}, {{ route[6] }}, {{ route[5] }}, ::{{ route[2] }}::CARAMEL_INGRESS),
+        ::Caramel::Router::Entry.new(
+          {{ route[0] }}, {{ route[1] }}, {{ route[6] }}, {{ route[5] }},
+          ::{{ route[2] }}::CARAMEL_INGRESS,
+        ),
       {% end %}
     ] of ::Caramel::Router::Entry)
 
@@ -369,7 +401,8 @@ macro __caramel_router_draw(locations, &block)
       TREE.route(request.path, request.method)
     end
 
-    def dispatch(context : ::Caramel::RequestContext, match : ::Caramel::Router::Match) : ::Caramel::Response
+    def dispatch(context : ::Caramel::RequestContext,
+                 match : ::Caramel::Router::Match) : ::Caramel::Response
       path = match.path
       segments = match.segments
       return ::Caramel::Response.new(400, "Malformed path") unless segments
@@ -379,8 +412,7 @@ macro __caramel_router_draw(locations, &block)
         index, mask = TREE.match(path, segments, override)
         # The body was read, and CSRF checked, as the POST's route reads it.
         if index >= 0 && !TREE.entries[index].ingress.reads_like?(match.ingress)
-          allowed = ::Caramel::Router.allow_header(TREE.match(path, segments, "")[1])
-          return ::Caramel::Response.new(405, "Method override is not allowed for this route", HTTP::Headers{"Allow" => allowed})
+          return ::Caramel::Router.override_refused(TREE.allowed(path, segments))
         end
       end
       if index < 0
