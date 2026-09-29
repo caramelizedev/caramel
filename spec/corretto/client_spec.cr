@@ -78,7 +78,8 @@ struct CorrettoSpecUpload < CorrettoSpecAction
   def handle(contract : Contract)
     cover = contract.cover
     FileUtils.cp(cover.path, File.join(Corretto.tmpdir, cover.filename.not_nil!))
-    Caramel::Response.new(201, "#{contract.caption}: #{cover.filename} #{cover.content_type} #{cover.size}")
+    summary = "#{cover.filename} #{cover.content_type} #{cover.size}"
+    Caramel::Response.new(201, "#{contract.caption}: #{summary}")
   end
 end
 
@@ -163,37 +164,64 @@ describe Corretto::Client do
     client.get("/").body.should contain("Reader 42")
   end
 
-  it "sends JSON, multipart uploads and raw bodies with the same cookies and CSRF" do
+  it "sends JSON with the same cookies and CSRF as a form" do
     client = corretto_spec_client
-    json = {"Accept" => "application/json"}
-    created = client.post("/api/notes", json: {title: "Tea", copies: 2}, headers: json)
+    accept = {"Accept" => "application/json"}
+    forged = accept.merge({"X-CSRF-Token" => "forged"})
+    note = {title: "Tea", copies: 2}
+
+    created = client.post("/api/notes", json: note, headers: accept)
     created.should have_status(201)
     JSON.parse(created.body).should eq(JSON.parse(%({"title": "Tea", "copies": 2})))
-    client.post("/api/notes", json: {title: "Tea", copies: "2"}, headers: json).body.should contain("must be a JSON number")
-    client.post("/api/notes", json: {title: "Tea", copies: 2}, headers: json.merge({"X-CSRF-Token" => "forged"})).should have_status(403)
 
-    uploaded = client.post("/covers", params: {"caption" => "Front"}, files: {"cover" => Corretto::Upload.new("png bytes", "cover.png", "image/png")})
+    quoted = client.post("/api/notes", json: {title: "Tea", copies: "2"}, headers: accept)
+    quoted.body.should contain("must be a JSON number")
+    client.post("/api/notes", json: note, headers: forged).should have_status(403)
+  end
+
+  it "uploads files beside form params and keeps what the app stores in Corretto.tmpdir" do
+    client = corretto_spec_client
+    cover = {"cover" => Corretto::Upload.new("png bytes", "cover.png", "image/png")}
+    uploaded = client.post("/covers", params: {"caption" => "Front"}, files: cover)
     uploaded.should have_status(201)
     uploaded.body.should eq("Front: cover.png image/png 9")
-    stored = File.join(Corretto.tmpdir, "cover.png")
-    File.read(stored).should eq("png bytes")
-    fixture = Corretto.upload(__FILE__, "text/plain", filename: "spec.cr")
-    client.post("/covers", params: {"caption" => "Source"}, files: {"cover" => fixture}).body.should eq("Source: spec.cr text/plain #{File.size(__FILE__)}")
+    File.read(File.join(Corretto.tmpdir, "cover.png")).should eq("png bytes")
+
+    fixture = {"cover" => Corretto.upload(__FILE__, "text/plain", filename: "spec.cr")}
+    source = client.post("/covers", params: {"caption" => "Source"}, files: fixture)
+    source.body.should eq("Source: spec.cr text/plain #{File.size(__FILE__)}")
+
     directory = Corretto.tmpdir
     Corretto.clean_tmpdir
     Dir.exists?(directory).should be_false
     Corretto.tmpdir.should_not eq(directory)
     Corretto.clean_tmpdir
+  end
 
-    signed = client.post("/hooks", body: %({"id":1}), headers: {"Content-Type" => "application/json", "X-Signature" => "valid"})
-    signed.should have_status(202)
-    signed.body.should eq(%({"id":1}))
-    client.post("/hooks", body: Bytes[0, 255], headers: {"X-Signature" => "valid"}).body.to_slice.should eq(Bytes[0, 255])
-    client.post("/hooks", body: "x", headers: {"X-Signature" => "forged"}).should have_status(401)
+  it "sends a raw body exactly as given, with the headers a webhook signs" do
+    client = corretto_spec_client
+    valid = {"X-Signature" => "valid"}
+    json = valid.merge({"Content-Type" => "application/json"})
+    delivered = client.post("/hooks", body: %({"id":1}), headers: json)
+    delivered.should have_status(202)
+    delivered.body.should eq(%({"id":1}))
 
-    expect_raises(ArgumentError, "Send one body") { client.post("/api/notes", json: {title: "Tea"}, params: {"copies" => 1}) }
+    binary = client.post("/hooks", body: Bytes[0, 255], headers: valid)
+    binary.body.to_slice.should eq(Bytes[0, 255])
+    forged = client.post("/hooks", body: "x", headers: {"X-Signature" => "forged"})
+    forged.should have_status(401)
+  end
+
+  it "refuses a request with two bodies, or a GET with any body" do
+    client = corretto_spec_client
+    fixture = Corretto::Upload.new("png bytes", "cover.png", "image/png")
+    expect_raises(ArgumentError, "Send one body") do
+      client.post("/api/notes", json: {title: "Tea"}, params: {"copies" => 1})
+    end
     expect_raises(ArgumentError, "GET sends params") { client.get("/", json: {page: 1}) }
-    expect_raises(ArgumentError, "GET sends params") { client.get("/", files: {"cover" => fixture}) }
+    expect_raises(ArgumentError, "GET sends params") do
+      client.get("/", files: {"cover" => fixture})
+    end
   end
 
   it "explains failed expectations with the relevant response" do

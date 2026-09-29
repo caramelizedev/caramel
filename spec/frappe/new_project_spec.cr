@@ -33,12 +33,13 @@ describe Caramel::Frappe::NewProject do
     end
   end
 
-  it "records the assets it publishes, so an asset edit before the first frappe dev publishes" do
+  it "records the assets it publishes, so an edit before the first frappe dev publishes" do
     parent = File.tempname("caramel-new-assets-")
     Dir.mkdir(parent)
     target = File.join(parent, "notes")
     begin
-      Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__)).create("notes", target)
+      framework = File.expand_path("../..", __DIR__)
+      Caramel::Frappe::NewProject.new(framework).create("notes", target)
       File.file?(File.join(target, ".caramel/assets.json")).should be_true
       source = File.join(target, "app/assets/javascript/app.js")
       File.write(source, File.read(source) + "\n// an edit before frappe dev\n")

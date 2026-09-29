@@ -145,19 +145,27 @@ describe Caramel::Router do
     tree.match("/teams/new/members", Caramel::Router::Segments.parse("/teams/new/members").not_nil!, "GET")[0].should eq(3)
   end
 
-  it "finds a request's route and ingress by its own method, before any body, without heap allocation" do
+  it "matches a request by its own method before any body, without heap allocation" do
     router = RouterSpecApp::AppRouter.new
-    requests = [{"GET", "/teams/new"}, {"GET", "/teams/7"}, {"HEAD", "/teams/7"}, {"POST", "/teams/7"}, {"GET", "/missing"}, {"GET", "/%zz"}].map do |(method, path)|
-      HTTP::Request.new(method, path)
-    end
+    requests = [
+      HTTP::Request.new("GET", "/teams/new"),
+      HTTP::Request.new("GET", "/teams/7"),
+      HTTP::Request.new("HEAD", "/teams/7"),
+      HTTP::Request.new("POST", "/teams/7"),
+      HTTP::Request.new("GET", "/missing"),
+      HTTP::Request.new("GET", "/%zz"),
+    ]
     requests.each { |request| router.match(request) }
     before = GC.stats.total_bytes
     100.times { requests.each { |request| router.match(request) } }
     (GC.stats.total_bytes - before).should eq(0)
-    requests.map { |request| router.match(request).index }.should eq([0, 1, 1, -1, -1, -1])
-    router.match(requests[3]).mask.should eq(Caramel::Router.method_bit("GET") | Caramel::Router.method_bit("PATCH"))
-    router.match(requests[5]).segments.should be_nil
-    requests.each { |request| router.match(request).ingress.should eq(Caramel::Ingress::DEFAULT) }
+
+    matches = requests.map { |request| router.match(request) }
+    matches.map(&.index).should eq([0, 1, 1, -1, -1, -1])
+    get_or_patch = Caramel::Router.method_bit("GET") | Caramel::Router.method_bit("PATCH")
+    matches[3].mask.should eq(get_or_patch)
+    matches[5].segments.should be_nil
+    matches.map(&.ingress).uniq!.should eq([Caramel::Ingress::DEFAULT])
   end
 
   it "lists routes with their contract summaries" do

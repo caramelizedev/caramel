@@ -82,8 +82,10 @@ describe "Caramel streaming responses" do
   end
 
   it "treats a client that closed its stream as a disconnect, not an error" do
-    request = HTTP::Request.new("GET", "/ticks", HTTP::Headers{"Host" => "bookshelf.caramel"})
-    context = HTTP::Server::Context.new(request, HTTP::Server::Response.new(StreamingSpecClosedSocket.new))
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    request = HTTP::Request.new("GET", "/ticks", host)
+    response = HTTP::Server::Response.new(StreamingSpecClosedSocket.new)
+    context = HTTP::Server::Context.new(request, response)
     Log.capture do |logs|
       streaming_spec_app.call(context)
       logs.empty

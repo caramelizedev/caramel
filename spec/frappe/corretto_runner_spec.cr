@@ -47,21 +47,36 @@ describe Caramel::Frappe::CorrettoRunner do
     end
   end
 
-  it "gives specs the application's test settings from .env.test and refuses the keys Corretto owns" do
+  it "reads .env.test for the app's test settings, refusing keys Corretto owns" do
     corretto_project do |root|
-      Caramel::Frappe::CorrettoRunner.test_environment(root).should be_empty
-      File.write(File.join(root, ".env.test"), "# Test-only values\nWEBHOOK_SECRET=test-webhook-secret\nDELIVERY_TARGET=\"https://receiver.example/hooks\"\n")
-      Caramel::Frappe::CorrettoRunner.test_environment(root).should eq({
-        "WEBHOOK_SECRET" => "test-webhook-secret", "DELIVERY_TARGET" => "https://receiver.example/hooks",
+      settings = File.join(root, ".env.test")
+      read = -> { Caramel::Frappe::CorrettoRunner.test_environment(root) }
+      read.call.should be_empty
+
+      File.write(settings, <<-ENV)
+        # Test-only values
+        WEBHOOK_SECRET=test-webhook-secret
+        DELIVERY_TARGET="https://receiver.example/hooks"
+        ENV
+      read.call.should eq({
+        "WEBHOOK_SECRET"  => "test-webhook-secret",
+        "DELIVERY_TARGET" => "https://receiver.example/hooks",
       })
-      File.write(File.join(root, ".env.test"), "APP_SECRET=x\nSPEC_DATABASE_URL=y\nCRYSTAL_OPTS=z\nWEBHOOK_SECRET=ok\n")
-      expect_raises(Caramel::Frappe::Error, ".env.test cannot set APP_SECRET, SPEC_DATABASE_URL, CRYSTAL_OPTS") do
-        Caramel::Frappe::CorrettoRunner.test_environment(root)
-      end
-      File.delete(File.join(root, ".env.test"))
-      File.write(File.join(root, "elsewhere.env"), "WEBHOOK_SECRET=x\n")
-      File.symlink(File.join(root, "elsewhere.env"), File.join(root, ".env.test"))
-      expect_raises(Caramel::Frappe::Error, "regular file") { Caramel::Frappe::CorrettoRunner.test_environment(root) }
+
+      File.write(settings, <<-ENV)
+        APP_SECRET=x
+        SPEC_DATABASE_URL=y
+        CRYSTAL_OPTS=z
+        WEBHOOK_SECRET=ok
+        ENV
+      owned = ".env.test cannot set APP_SECRET, SPEC_DATABASE_URL, CRYSTAL_OPTS"
+      expect_raises(Caramel::Frappe::Error, owned) { read.call }
+
+      File.delete(settings)
+      elsewhere = File.join(root, "elsewhere.env")
+      File.write(elsewhere, "WEBHOOK_SECRET=x\n")
+      File.symlink(elsewhere, settings)
+      expect_raises(Caramel::Frappe::Error, "regular file") { read.call }
     end
   end
 

@@ -47,22 +47,43 @@ describe "Caramel::ColdBrew.start settings" do
   end
 end
 
-describe Caramel::CommandLine::WorkOptions do
+private alias WorkOptions = Caramel::CommandLine::WorkOptions
+
+describe WorkOptions do
   it "reads work's flags and refuses unknown, repeated or empty ones" do
-    Caramel::CommandLine::WorkOptions.parse([] of String).should eq(Caramel::CommandLine::WorkOptions.new)
-    options = Caramel::CommandLine::WorkOptions.parse(["--queues=mailers,default", "--concurrency=8", "--no-scheduler"]).not_nil!
-    options.should eq(Caramel::CommandLine::WorkOptions.new("mailers,default", "8", false))
-    [%w[--queues=], %w[--queues], %w[--concurrency=], %w[--no-scheduler=yes], %w[--threads=2], %w[--queues=a --queues=b], %w[serve]].each do |arguments|
-      Caramel::CommandLine::WorkOptions.parse(arguments).should be_nil
-    end
+    WorkOptions.parse([] of String).should eq(WorkOptions.new)
+    flags = ["--queues=mailers,default", "--concurrency=8", "--no-scheduler"]
+    WorkOptions.parse(flags).should eq(WorkOptions.new("mailers,default", "8", false))
+
+    refused = [
+      %w[--queues=],
+      %w[--queues],
+      %w[--concurrency=],
+      %w[--no-scheduler=yes],
+      %w[--threads=2],
+      %w[--queues=a --queues=b],
+      %w[serve],
+    ]
+    refused.each { |arguments| WorkOptions.parse(arguments).should be_nil }
   end
 
   it "applies its flags over the worker settings ColdBrew.start validates" do
-    env = {"CARAMEL_WORKER_QUEUES" => "default", "CARAMEL_WORKER_CONCURRENCY" => "4", "APP_SECRET" => "kept"}
-    Caramel::CommandLine::WorkOptions.new.environment(env).should eq(env)
-    applied = Caramel::CommandLine::WorkOptions.new("mailers", "32").environment(env)
-    applied.should eq({"CARAMEL_WORKER_QUEUES" => "mailers", "CARAMEL_WORKER_CONCURRENCY" => "32", "APP_SECRET" => "kept"})
-    expect_raises(Caramel::ColdBrew::ConfigurationError, "from 1 to 31 for 1 queue(s)") { Caramel::ColdBrew.start(UNREACHABLE, applied, scheduler: false) }
+    env = {
+      "CARAMEL_WORKER_QUEUES"      => "default",
+      "CARAMEL_WORKER_CONCURRENCY" => "4",
+      "APP_SECRET"                 => "kept",
+    }
+    WorkOptions.new.environment(env).should eq(env)
+
+    applied = WorkOptions.new("mailers", "32").environment(env)
+    applied.should eq({
+      "CARAMEL_WORKER_QUEUES"      => "mailers",
+      "CARAMEL_WORKER_CONCURRENCY" => "32",
+      "APP_SECRET"                 => "kept",
+    })
+    expect_raises(Caramel::ColdBrew::ConfigurationError, "from 1 to 31 for 1 queue(s)") do
+      Caramel::ColdBrew.start(UNREACHABLE, applied, scheduler: false)
+    end
   end
 end
 

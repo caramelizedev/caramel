@@ -107,7 +107,8 @@ describe Caramel::Frappe::DevGateway do
       gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
       gateway.ready(socket_path)
       headers = HTTP::Headers{"Host" => "bookshelf.caramel"}
-      {"DELETE" => {"/notes/1", 204}, "GET" => {"/cached", 304}}.each do |method, (path, status)|
+      bodiless = {"DELETE" => {"/notes/1", 204}, "GET" => {"/cached", 304}}
+      bodiless.each do |method, (path, status)|
         response = gateway.handle(HTTP::Request.new(method, path, headers))
         response.status.should eq(status)
         response.body.should eq("")

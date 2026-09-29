@@ -25,4 +25,6 @@ module Fixture
   end
 end
 
-Caramel::Application.new(Fixture::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://example.caramel")).handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "example.caramel"}))
+csrf = Caramel::CSRF.new("s" * 64, "https://example.caramel")
+request = HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "example.caramel"})
+Caramel::Application.new(Fixture::AppRouter.new, csrf).handle(request)

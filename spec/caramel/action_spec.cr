@@ -136,14 +136,24 @@ end
 describe Caramel::Action do
   it "answers errors found after the contract as JSON, an escaped page or MRDP text" do
     json = get("/rejected", HTTP::Headers{"Accept" => "application/json"})
-    {json.status, json.body}.should eq({422, %({"errors":{"title":["can't be blank"],"_base":["<b>Closed</b>"]}})})
+    json.status.should eq(422)
+    JSON.parse(json.body).should eq(JSON.parse(<<-JSON))
+      {"errors": {"title": ["can't be blank"], "_base": ["<b>Closed</b>"]}}
+      JSON
+
     page = get("/rejected")
     page.status.should eq(422)
     page.body.should contain("<li><code>title</code>: can&#39;t be blank</li>")
     page.body.should contain("&lt;b&gt;Closed&lt;/b&gt;")
+
     text = get("/rejected", HTTP::Headers{"Accept" => "*/*"})
-    {text.status, text.body}.should eq({422, "ERR INVALID:422 at GET /rejected\nFIELD title: can't be blank\nFIELD _base: <b>Closed</b>\n"})
+    text.status.should eq(422)
     text.headers["Content-Type"].should eq("text/plain; charset=utf-8")
+    text.body.should eq(<<-MRDP + "\n")
+      ERR INVALID:422 at GET /rejected
+      FIELD title: can't be blank
+      FIELD _base: <b>Closed</b>
+      MRDP
   end
 
   it "negotiates a full page, an htmx fragment or JSON from one result" do
