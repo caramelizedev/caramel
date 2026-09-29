@@ -13,6 +13,12 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - To run workers without a web server, start the application binary with `work`, optionally with `--queues=`, `--concurrency=` and `--no-scheduler`.
 - If `frappe dev` in an existing project stops on an asset output conflict, delete the public file it names to republish it from `app/assets`.
 
+## 0.4.1 - 2026-09-29
+
+### Fixes
+
+- **release:** run the two migration probes side by side (061ec9a)
+
 ## 0.4.0 - 2026-09-28
 
 ### Upgrade notes

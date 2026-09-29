@@ -3,6 +3,14 @@ require "./support/unix_http"
 module Caramel::Checks::LatteIPC
   extend self
 
+  # The fixture server's limits, scaled down from the daemon's 5 s idle
+  # timeout and 12 s request deadline. Every trickled header arrives well
+  # inside the idle timeout while the whole request outlasts the deadline, so
+  # only the deadline can refuse it.
+  IDLE_TIMEOUT     = 2.seconds
+  REQUEST_DEADLINE = 2.5.seconds
+  TRICKLE_GAP      = 0.7.seconds
+
   private def run!(command : Array(String), timeout : Time::Span) : Caramel::Latte::ProcessResult
     result = Checks.run(command, timeout: timeout)
     raise result.stdout + result.stderr unless result.success?
@@ -16,9 +24,11 @@ module Caramel::Checks::LatteIPC
     child : Process? = nil
     begin
       run!([File.join(Checks::REPO, "scripts/crystal"), "build", "spec/fixtures/latte_ipc.cr", "-o", File.join(root, "ipc")], 60.seconds)
-      run!([File.join(Checks::REPO, "scripts/build-latte-menu")], 60.seconds)
+      # Under scripts/check all the build step has already built Latte.app.
+      run!([File.join(Checks::REPO, "scripts/build-latte-menu")], 60.seconds) unless Checks.prebuilt?
       File.open(File.join(root, "server.log"), "a", 0o600) do |log|
-        child = Process.new([File.join(root, "ipc"), root], chdir: Checks::REPO, output: log, error: log, input: Process::Redirect::Close)
+        child = Process.new([File.join(root, "ipc"), root, IDLE_TIMEOUT.total_seconds.to_s, REQUEST_DEADLINE.total_seconds.to_s],
+          chdir: Checks::REPO, output: log, error: log, input: Process::Redirect::Close)
       end
       deadline = Time.instant + 5.seconds
       until File.exists?(socket)
@@ -40,7 +50,7 @@ module Caramel::Checks::LatteIPC
         slow.write_timeout = 5.seconds
         slow << "POST /v1/sites HTTP/1.1\r\n"
         4.times do |index|
-          sleep 3.1.seconds
+          sleep TRICKLE_GAP
           slow << "X-Trickle-#{index}: 1\r\n"
         end
         slow << "Content-Type: application/json\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}"

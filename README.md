@@ -115,7 +115,7 @@ scripts/check browser
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
 
-`scripts/check all` builds everything, then runs the spec suite and every check in sequence and reports each one; a release requires all of them. `scripts/check all --except latte-daemon` skips a check, for example while your own Latte holds its ports.
+`scripts/check all` builds everything, then runs the spec suite and every check in sequence and reports each one; a release requires all of them. It runs frappe-project once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow. `scripts/check all --except latte-daemon` skips a check, for example while your own Latte holds its ports.
 
 `scripts/check latte-daemon` runs the real `bin/latte daemon`, which listens on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443. If you use Latte yourself, stop it first: run `frappe services stop`, then `latte stop`.
 

@@ -1,9 +1,11 @@
 require "./support/harness"
 
-# Builds Frappé, Latte and the linter, runs the spec suite, then every
-# pass/fail check one after another (they share one compiler cache), and
-# reports each result. A failed run's full output is kept in a log named on
-# its FAIL line. A release requires every run to pass.
+# Builds Frappé, Latte, the linter and the LatteFixture environment daemon,
+# runs the spec suite, then every pass/fail check one after another (they
+# share one compiler cache), and reports each result. Once the build step
+# passes, the checks reuse its binaries (Checks::PREBUILT). A failed run's
+# full output is kept in a log named on its FAIL line. A release requires
+# every run to pass.
 #
 #   scripts/check all [--except NAME ...]
 #
@@ -27,7 +29,8 @@ module Caramel::Checks::All
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
 
     runs = [
-      {"build", [script("build-frappe"), "&&", script("build-latte"), "&&", script("build-lint")]},
+      {"build", [script("build-frappe"), "&&", script("build-latte"), "&&", script("build-lint"), "&&",
+                 script("crystal"), "build", File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr"), "-o", Checks::PREBUILT_ENVIRONMENT]},
       {"spec", [script("crystal"), "spec"] + SPECS},
     ] + targets.reject { |name, _| skipped.includes?(name) }
     failed = [] of String
@@ -38,6 +41,7 @@ module Caramel::Checks::All
       seconds = (Time.instant - started).total_seconds.round.to_i
       if result.success?
         puts "PASS #{name} (#{seconds} s)"
+        ENV[Checks::PREBUILT] = "1" if name == "build"
       else
         failed << name
         directory = logs ||= Checks.private_temp("caramel-check-all-")
@@ -56,10 +60,11 @@ module Caramel::Checks::All
     end
   end
 
-  # Every check in scripts/checks, plus frappe-project's --dev phase.
+  # Every check in scripts/checks. frappe-project runs once, with --dev: that
+  # run executes every step of the plain flow as well as its dev phase.
   private def targets : Array({String, Array(String)})
     names = Dir.glob(File.join(Checks::REPO, "scripts/checks/*.cr")).map { |path| File.basename(path, ".cr").tr("_", "-") }.sort!
-    checks = (names - EXEMPT).map { |name| {name, [script("check"), name]} }
+    checks = (names - EXEMPT - ["frappe-project"]).map { |name| {name, [script("check"), name]} }
     checks << {"frappe-project-dev", [script("check"), "frappe-project", "--dev"]}
     checks
   end

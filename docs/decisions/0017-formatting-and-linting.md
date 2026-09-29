@@ -70,7 +70,7 @@ Principles followed:
 
 ## Verification
 
-- `scripts/check lint` builds `bin/frappe-lint` and proves on a fixture that `Caramel/ServiceNoun` reports service nouns and not subjects or actions. It then lints the framework, which must pass.
+- `scripts/check lint` builds `bin/frappe-lint` (under `scripts/check all`, the build step builds it) and proves on a fixture that `Caramel/ServiceNoun` reports service nouns and not subjects or actions. It then lints the framework, which must pass.
 - `scripts/check frappe-project` requires a generated application with two resources to print `OK lint`. A planted, misformatted `InvitationService` must yield exactly `ERR LINT_LINT_FORMATTING` with `FIX: frappe format`, then `ERR LINT_CARAMEL_SERVICE_NOUN`; `frappe format` must then fix its layout.
 - `scripts/check editor-tools` runs `ameba-ls` with both rule sets.
 - `spec/frappe/schema_diff_spec.cr` pins when a migration's heredoc is quoted.

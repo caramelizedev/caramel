@@ -1,6 +1,10 @@
 require "./support/harness"
 
-["scripts/build-latte-menu", "scripts/build-latte-relay", "scripts/build-installers"].each do |builder|
+builders = %w[scripts/build-latte-menu scripts/build-latte-relay scripts/build-installers]
+# Under scripts/check all the build step has already built Latte.app and the
+# port relay.
+builders -= %w[scripts/build-latte-menu scripts/build-latte-relay] if Caramel::Checks.prebuilt?
+builders.each do |builder|
   result = Caramel::Checks.run([File.join(Caramel::Checks::REPO, builder)], timeout: 300.seconds)
   STDOUT.print result.stdout
   STDERR.print result.stderr

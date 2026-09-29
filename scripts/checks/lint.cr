@@ -1,15 +1,18 @@
 require "./support/harness"
 
 # Lints the framework with Caramel's RFC-0008 rule set (.ameba.yml, ADR
-# 0017), after proving that bin/frappe-lint carries Caramel's own rule.
+# 0017), after proving that bin/frappe-lint carries Caramel's own rule. Under
+# scripts/check all the build step has just built the linter.
 module Caramel::Checks::Lint
   extend self
 
   LINTER = File.join(Checks::REPO, "bin/frappe-lint")
 
   def main : Int32
-    built = Checks.run([File.join(Checks::REPO, "scripts/build-lint")], timeout: 600.seconds)
-    Checks.fail(built.stdout + built.stderr) unless built.success?
+    unless Checks.prebuilt?
+      built = Checks.run([File.join(Checks::REPO, "scripts/build-lint")], timeout: 600.seconds)
+      Checks.fail(built.stdout + built.stderr) unless built.success?
+    end
     service_nouns
     framework = Checks.run([LINTER, "--format", "flycheck"], timeout: 300.seconds)
     Checks.fail("The framework does not pass its rule set:\n#{framework.stdout}#{framework.stderr}") unless framework.success?

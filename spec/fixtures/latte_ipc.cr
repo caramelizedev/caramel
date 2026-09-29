@@ -29,6 +29,8 @@ end
 
 registry = Caramel::Latte::Registry.new(ARGV[0])
 registry.register("bookshelf", ARGV[0])
-server = Caramel::Latte::Server.new(registry, FixtureServices.new(registry))
+# scripts/check latte-ipc passes the idle timeout and request deadline, in
+# seconds, scaled down from the daemon's.
+server = Caramel::Latte::Server.new(registry, FixtureServices.new(registry), idle_timeout: ARGV[1].to_f.seconds, request_deadline: ARGV[2].to_f.seconds)
 Process.on_terminate { server.close }
 server.listen
