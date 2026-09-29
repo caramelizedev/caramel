@@ -38,10 +38,15 @@ module Caramel::Frappe
       raise Error.new("Locked dependencies are missing or inconsistent; run frappe setup") unless result.success?
     end
 
+    # Builds the application for a one-shot command (ADR 0013 §5) with the
+    # dev build's define, so both reuse one object set in the compiler cache
+    # instead of recompiling about 170 modules at each switch. The
+    # development error page it adds serves only HTTP requests, and only
+    # under `CARAMEL_ENV=development`.
     def compile(project : Project) : String
       directory = Latte::StateSecurity.ensure_owned_directory(File.join(project.root, ".caramel"))
       binary = File.join(directory, "application")
-      run(File.join(@framework_root, "scripts/crystal"), ["build", project.entrypoint, "--error-trace", "-o", binary], project.root)
+      run(File.join(@framework_root, "scripts/crystal"), ["build", project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", binary], project.root)
       binary
     end
 
