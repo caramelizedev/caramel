@@ -125,6 +125,13 @@ for (const [key, route] of Object.entries(routes)) {
       .replace('<div class="c-catalog">', '<div class="c-catalog" id="c-catalog-content" tabindex="-1">');
   }
   body = links(body).replaceAll(`data-page="${key}"`, `data-page="${key}" aria-current="page"`);
+  // Keep the top-level section selected when reading one of its child pages.
+  const navSection = key === 'home' ? null : key === 'agents' ? 'agents'
+    : (key === 'cookbook' || route.startsWith('/cookbook/')) ? 'cookbook' : 'map';
+  body = body.replace(/<nav class="c-nav"[\s\S]*?<\/nav>/, nav => {
+    nav = nav.replace(/ aria-current="[^"]+"/g, '');
+    return navSection ? nav.replace(`data-page="${navSection}"`, `data-page="${navSection}" aria-current="${key === navSection ? 'page' : 'true'}"`) : nav;
+  });
   const canonical = `https://caramelize.dev${route}`;
   const docsAssets = key === 'home' ? '' : '<link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script>';
   const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><meta name="description" content="${escapeAttr(description)}"><link rel="canonical" href="${canonical}"><meta property="og:title" content="${escapeAttr(title)}"><meta property="og:description" content="${escapeAttr(description)}"><meta property="og:url" content="${canonical}"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script></head><body data-page="${key}">${body}</body></html>\n`;
