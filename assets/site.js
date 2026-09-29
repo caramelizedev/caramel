@@ -24,13 +24,18 @@
   function updateScroll(){
     scrollFrame=0;
     if(currentPage!=='home')return;
-    root.style.setProperty('--header-height',root.querySelector('.c-header').offsetHeight+'px');
-    const p=clamp(window.scrollY/Math.max(1,story.offsetHeight-stage.offsetHeight));
-    const thresholds=[.015,.22,.40,.58,.80];
+    const headerHeight=root.querySelector('.c-header').offsetHeight;
+    root.style.setProperty('--header-height',headerHeight+'px');
+    const storyStart=story.offsetTop-headerHeight;
+    const p=clamp((window.scrollY-storyStart)/Math.max(1,story.offsetHeight-stage.offsetHeight));
+    // A little travel at the beginning and after each lift gives every
+    // ingredient time to settle. Scroll stays native in both directions.
+    const starts=[.07,.24,.41,.58], duration=.10;
+    const thresholds=[.075,.245,.415,.585,.80];
     const chapter=thresholds.filter(t=>p>=t).length;
-    const starts=[0,.22,.40,.58], lifts=[235,197,154,116], spreads=[16,-10,8,-8];
-    pieces.forEach((piece,i)=>{const raw=clamp((p-starts[i])/.16);const amount=reducedMotion.matches?(raw>0?1:0):smooth(raw);piece.style.transform=`translate(${spreads[i]*amount}px,${-lifts[i]*amount}px)`;});
-    const framing=reducedMotion.matches?(chapter?1:0):smooth(clamp(p/.16));
+    const lifts=[235,197,154,116], spreads=[16,-10,8,-8];
+    pieces.forEach((piece,i)=>{const raw=clamp((p-starts[i])/duration);const amount=reducedMotion.matches?(raw>0?1:0):smooth(raw);piece.style.transform=`translate(${spreads[i]*amount}px,${-lifts[i]*amount}px)`;});
+    const framing=reducedMotion.matches?(chapter?1:0):smooth(clamp((p-starts[0])/duration));
     const mobile=root.clientWidth<=700, zoom=mobile?1.15:1.35, lift=mobile?80:130;
     diagram.style.transform=`translateY(${-lift*(1-framing)}px) scale(${zoom-(zoom-1)*framing})`;
     if(chapter!==activeChapter){activeChapter=chapter;chapters.forEach((el,i)=>{el.hidden=i!==chapter;});root.querySelector('#l-current').textContent=String(chapter).padStart(2,'0');story.dataset.chapter=String(chapter);}
@@ -38,6 +43,7 @@
   function queueScrollUpdate(){if(!scrollFrame)scrollFrame=requestAnimationFrame(updateScroll);}
   window.addEventListener('scroll',queueScrollUpdate,{passive:true});
   new ResizeObserver(queueScrollUpdate).observe(root);
+  window.addEventListener('resize',queueScrollUpdate,{passive:true});
   reducedMotion.addEventListener('change',queueScrollUpdate);
   const tasks = {
     endpoint:{title:'Add or change an endpoint',files:['config/routes.cr','app/actions/'],detail:'Declare the route, then its typed contract and behavior. Keep the response and failure cases in a request spec.',proof:'frappe routes · frappe check · frappe corretto'},
