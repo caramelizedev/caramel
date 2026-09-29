@@ -19,6 +19,47 @@ scripts/check all
 
 Code follows Caramel's RFC-0008 rule set ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)): `crystal tool format` for layout, and Ameba 1.7.0 plus `Caramel/ServiceNoun` for the rest. `scripts/check lint` builds `bin/frappe-lint` and lints the framework. `bin/frappe-lint --fix` applies Ameba's corrections, but review every one: some change behaviour, and ADR 0017 lists those that are not adopted. An inline `# ameba:disable Rule -- reason` goes on its own line above the code it covers and always names its reason.
 
+## Style
+
+The formatter owns layout, and the linter owns what it can check ([ADR 0017](docs/decisions/0017-formatting-and-linting.md), [ADR 0021](docs/decisions/0021-line-length.md)). The rest is judgment. It is written down here so that people and agents make the same calls. Code reads as short sentences, one thought each.
+
+- **Keep lines short.** The framework's limit is 100 characters, and most lines should be well under it. When a line grows, name its parts instead of nesting them:
+
+  ```crystal
+  # A run-on sentence
+  client.post("/api/notes", json: {title: "Tea", copies: 2}, headers: {"Accept" => "application/json", "X-CSRF-Token" => "forged"}).should have_status(403)
+
+  # Named steps
+  accept = {"Accept" => "application/json"}
+  forged = accept.merge({"X-CSRF-Token" => "forged"})
+  note = {title: "Tea", copies: 2}
+  client.post("/api/notes", json: note, headers: forged).should have_status(403)
+  ```
+
+- **Stack what does not fit.** A long signature or call takes one argument per line, and a record is built with named arguments:
+
+  ```crystal
+  def initialize(@body : Body = Body::Form,
+                 @limit : Int64 = DEFAULT_LIMIT,
+                 @csrf : Bool = true,
+                 @authenticate : String? = nil)
+  ```
+
+- **Return early.** Guard clauses keep the main path at the left margin:
+
+  ```crystal
+  return json({errors: errors}, status) if @context.wants_json?
+  timestamp = request.headers["X-Timestamp"]? || return false
+  ```
+
+- **Name the steps.** A method that does three things calls three private methods named for what they do. Tables, limits and messages are named constants.
+- **Write multi-line text as it reads.** JSON bodies, SQL, `.env` files and expected output are heredocs, not strings joined with `\n`.
+- **Specs:**
+  - name their inputs and expectations;
+  - test one concern per example;
+  - share setup through small helpers named for what they return, such as `signed(body)`.
+- **Leave listed files better.** Under `Layout/LineLength`, `.ameba.yml` lists the files that predate the limit. Add no long line to them. When a change rewrites a listed file's long lines, remove it from the list in the same change.
+
 ## Commits
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): subject`, where the type is one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `chore` or `style`, and the scope names a product such as `frappe`, `latte` or `lint`. Mark a breaking change with `!` after the type or scope, or with a `BREAKING CHANGE:` footer. `scripts/release` reads these to choose the next version and write the changelog.
