@@ -106,18 +106,23 @@ module Caramel::Checks
       process.wait
     end
 
-    # Builds Frappé and the environment daemon, then starts PostgreSQL, DNS
-    # and Caddy on free ports.
+    # Builds Frappé and the environment daemon, unless scripts/check all's
+    # build step already has, then starts PostgreSQL, DNS and Caddy on free
+    # ports.
     def start : Nil
-      command([File.join(@repo, "scripts/build-frappe")])
-      command([File.join(@repo, "scripts/crystal"), "build", "spec/fixtures/frappe_environment.cr", "-o", File.join(@root, "environment")])
+      environment = Checks::PREBUILT_ENVIRONMENT
+      unless Checks.prebuilt?
+        command([File.join(@repo, "scripts/build-frappe")])
+        environment = File.join(@root, "environment")
+        command([File.join(@repo, "scripts/crystal"), "build", "spec/fixtures/frappe_environment.cr", "-o", environment])
+      end
       @ports = [Checks.free_udp_port, Checks.free_tcp_port, Checks.free_tcp_port]
       home = File.join(@root, "home")
       Dir.mkdir(home, 0o700)
       # Trust-store discovery follows HOME (NSS) and JAVA_HOME. Keep both
       # inside the fixture as a second barrier behind the untrusted CAs.
       daemon_env = @env.merge({"HOME" => home, "JAVA_HOME" => nil} of String => String?)
-      @daemon = Process.new(File.join(@root, "environment"), [@state] + @ports.map(&.to_s), env: daemon_env, output: @daemon_log, error: @daemon_log)
+      @daemon = Process.new(environment, [@state] + @ports.map(&.to_s), env: daemon_env, output: @daemon_log, error: @daemon_log)
       wait_state("running")
       trust_guard!
     end

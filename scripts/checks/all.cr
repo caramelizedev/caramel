@@ -1,10 +1,11 @@
 require "./support/harness"
 
-# Builds Frappé, Latte and the linter, runs the spec suite, then every
-# pass/fail check one after another (they share one compiler cache), and
-# reports each result. Once the build step passes, the checks reuse its
-# binaries (Checks::PREBUILT). A failed run's full output is kept in a log
-# named on its FAIL line. A release requires every run to pass.
+# Builds Frappé, Latte, the linter and the LatteFixture environment daemon,
+# runs the spec suite, then every pass/fail check one after another (they
+# share one compiler cache), and reports each result. Once the build step
+# passes, the checks reuse its binaries (Checks::PREBUILT). A failed run's
+# full output is kept in a log named on its FAIL line. A release requires
+# every run to pass.
 #
 #   scripts/check all [--except NAME ...]
 #
@@ -28,7 +29,8 @@ module Caramel::Checks::All
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
 
     runs = [
-      {"build", [script("build-frappe"), "&&", script("build-latte"), "&&", script("build-lint")]},
+      {"build", [script("build-frappe"), "&&", script("build-latte"), "&&", script("build-lint"), "&&",
+                 script("crystal"), "build", File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr"), "-o", Checks::PREBUILT_ENVIRONMENT]},
       {"spec", [script("crystal"), "spec"] + SPECS},
     ] + targets.reject { |name, _| skipped.includes?(name) }
     failed = [] of String

@@ -21,6 +21,10 @@ module Caramel::Checks
   # same tree; a check run on its own builds what it needs.
   PREBUILT = "CARAMEL_CHECK_ALL_BUILT"
 
+  # The LatteFixture environment daemon (spec/fixtures/frappe_environment.cr)
+  # that the build step builds.
+  PREBUILT_ENVIRONMENT = File.join(REPO, "bin/checks/frappe-environment")
+
   def self.prebuilt? : Bool
     ENV[PREBUILT]? == "1"
   end
