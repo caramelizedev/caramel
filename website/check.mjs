@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { Script } from 'node:vm';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -11,6 +12,12 @@ for (const file of files) {
     assert(fs.existsSync(target), `${file}: missing local target ${url}`);
   }
   assert(!html.includes('href="undefined"'), `${file}: unknown page`);
+  for (const [, id] of html.matchAll(/href="#([^"]+)"/g)) {
+    assert(html.includes(`id="${id}"`), `${file}: missing anchor ${id}`);
+  }
+}
+for (const file of fs.readdirSync(path.join(root, 'assets')).filter(file => file.endsWith('.js'))) {
+  new Script(fs.readFileSync(path.join(root, 'assets', file), 'utf8'), {filename:file});
 }
 const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
 assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');

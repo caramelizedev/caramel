@@ -82,6 +82,15 @@ client = client.replace('  const main =', clientLinks + '\n  const main =');
 // Static HTML already contains documentation; omit its duplicate copy from JS.
 client = client.replace(dataSource, dataSource.slice(dataSource.indexOf('  const tasks')));
 fs.writeFileSync(new URL('assets/site.js', out), client);
+for (const asset of ['docs.css', 'docs.js']) {
+  fs.copyFileSync(new URL(`./source/${asset}`, import.meta.url), new URL(`assets/${asset}`, out));
+}
+
+const sidebar = template.match(/<aside class="c-sidebar"[\s\S]*?<\/aside>/)[0]
+  .replace('<aside', '<nav').replace('</aside>', '</nav>')
+  .replace('<h3>Start here</h3>', '<div class="c-sidebar-edition"><strong>Documentation</strong><span>0.4.0 · Preview</span></div><h3>Start here</h3>')
+  .replace('<h3>Build something</h3>', '<h3>Build something</h3><a data-page="cookbook" href="/cookbook/0.4.0/">All recipes</a>');
+const docNavigation = `<details class="c-docnav" open><summary>Browse documentation <span aria-hidden="true">+</span></summary>${sidebar}</details>`;
 
 const escapeAttr = str => str.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 for (const [key, route] of Object.entries(routes)) {
@@ -103,12 +112,25 @@ for (const [key, route] of Object.entries(routes)) {
   else body = body.replace('<div id="c-book" hidden>', '<div id="c-book">').replace('<div class="c-recipe-grid" id="c-recipes"></div>', `<div class="c-recipe-grid" id="c-recipes">${recipeHTML}</div>`);
   if(!pages[key]) body = body.replace(/    <div id="c-doc" hidden>[\s\S]*?(?=  <\/main>)/, '');
   else body = body.replace('<div id="c-doc" hidden>', '<div id="c-doc">');
+  if (key !== 'home') {
+    body = body.replace('class="c-awards c-zed c-scroll"', 'class="c-awards c-zed c-scroll c-documentation"')
+      .replace('aria-label="Caramel website. Scroll to explore the latte."', 'aria-label="Caramel documentation"')
+      .replace(/<div class="c-docbar">[\s\S]*?<\/div>/, '');
+    if (pages[key]) body = body.replace(/<aside class="c-sidebar"[\s\S]*?<\/aside>/, docNavigation);
+    else body = body.replace('<div id="c-book">', `<div id="c-book" class="c-catalog-layout">${docNavigation}<div class="c-catalog">`)
+      .replace('    </div>\n  </main>', '    </div></div>\n  </main>');
+    const contentId = pages[key] ? 'c-article' : 'c-catalog-content';
+    body = body.replace('<main id="c-main">', `<a class="c-skip" href="#${contentId}">Skip to content</a><main id="c-main">`)
+      .replace('id="c-article"', 'id="c-article" tabindex="-1"')
+      .replace('<div class="c-catalog">', '<div class="c-catalog" id="c-catalog-content" tabindex="-1">');
+  }
   body = links(body).replaceAll(`data-page="${key}"`, `data-page="${key}" aria-current="page"`);
   const canonical = `https://caramelize.dev${route}`;
+  const docsAssets = key === 'home' ? '' : '<link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script>';
   const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><meta name="description" content="${escapeAttr(description)}"><link rel="canonical" href="${canonical}"><meta property="og:title" content="${escapeAttr(title)}"><meta property="og:description" content="${escapeAttr(description)}"><meta property="og:url" content="${canonical}"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script></head><body data-page="${key}">${body}</body></html>\n`;
   const dest = new URL('.' + route + 'index.html', out);
   fs.mkdirSync(path.dirname(dest.pathname), {recursive:true});
-  fs.writeFileSync(dest, html);
+  fs.writeFileSync(dest, html.replace('</head>', `${docsAssets}</head>`));
 }
 fs.writeFileSync(new URL('favicon.svg', out), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#201d18"/><text x="16" y="47" font-family="Arial,sans-serif" font-size="52" font-weight="bold" fill="#e9a278">c</text></svg>');
 fs.writeFileSync(new URL('robots.txt', out), 'User-agent: *\nAllow: /\nSitemap: https://caramelize.dev/sitemap.xml\n');

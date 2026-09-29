@@ -3,6 +3,8 @@
 Static marketing site and preview documentation for Caramel 0.4.0.
 The approved design lives in `source/site.html`. `build.mjs` exports that design
 to crawlable HTML pages with native links and ordinary window scrolling.
+The full-window documentation shell uses `source/docs.css` and `source/docs.js`,
+with sticky desktop navigation, a section outline, and a collapsible mobile menu.
 Recipes retain their draft and framework-gap labels; publishing the site does
 not mean the framework examples have been tested.
 
