@@ -531,6 +531,7 @@ RETURNING jobs.id, jobs.class_name, jobs.payload, jobs.attempts;
 
 * **Scheduler:** `Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }` is the charter's in-process scheduler. Each tick takes a database lease (`pg_try_advisory_xact_lock` plus a `caramel_schedules` row), so exactly one process runs each period.
 * **Maintenance fiber:** It releases stale locks whose backend is gone.
+* **Status and hooks:** `Caramel::ColdBrew.status(id)` reads a job's state without querying `caramel_jobs`, and `on_retry_scheduled`/`on_failed` hooks run after a failure's transition is written ([ADR 0019](decisions/0019-cold-brew-status-hooks-and-work.md)).
 * **Delivery:** A job runs at least once. Its own writes commit exactly once with its completion, but a call to another service from `perform` can repeat. The process can die, or the transaction can fail to commit, after the other service accepted the call; the job then runs again. Pass a stable identifier, such as the record's id, and have the receiver deduplicate it.
 
 #### 2.3. Real-Time PubSub via SSE

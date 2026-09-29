@@ -1,4 +1,5 @@
 require "spec"
+require "log/spec"
 require "random/secure"
 require "../../src/caramel"
 
@@ -133,6 +134,40 @@ module ColdBrewSpec
   # Ticks in every process whose scheduler is on.
   Caramel::ColdBrew.every(1.hour, "cold-brew-spec-tick") { }
 
+  # A lifecycle event, and whether another connection already saw the
+  # transition when the hook ran.
+  record Seen, kind : String, id : Int64, queue : String, attempts : Int32, at : Time, error_class : String, committed : Bool
+
+  @@seen = [] of Seen
+  # "publish", "raise" or "sql" changes what the hooks do after recording.
+  @@hook_mode : String? = nil
+
+  def self.seen : Array(Seen)
+    @@seen
+  end
+
+  def self.hook_mode=(@@hook_mode : String?)
+  end
+
+  Caramel::ColdBrew.on_retry_scheduled do |event|
+    ColdBrewSpec.observe("retry", event.id, event.queue, event.attempts, event.run_at, event.error_class)
+  end
+
+  Caramel::ColdBrew.on_failed do |event|
+    ColdBrewSpec.observe("failed", event.id, event.queue, event.attempts, event.failed_at, event.error_class)
+  end
+
+  def self.observe(kind : String, id : Int64, queue : String, attempts : Int32, at : Time, error_class : String) : Nil
+    column = kind == "retry" ? "last_error" : "failed_at"
+    committed = SugarORM.sql(owner, "SELECT #{column} IS NOT NULL AND locked_at IS NULL AS value FROM caramel_jobs WHERE id = $1", id, as: {value: Bool}).first?.try(&.[:value]) || false
+    @@seen << Seen.new(kind, id, queue, attempts, at, error_class, committed)
+    case @@hook_mode
+    when "publish" then Caramel::ColdBrew.publish("job_events", "#{kind} #{id}")
+    when "raise"   then raise "hook broke"
+    when "sql"     then SugarORM.sql_exec("SELECT 1 / 0")
+    end
+  end
+
   NAME = "caramel_cold_brew_#{Random::Secure.hex(6)}"
   RUNS = SugarORM::Migration.new(20260927120000_i64, "create_cold_brew_runs", [<<-SQL])
     CREATE TABLE cold_brew_runs (
@@ -187,6 +222,8 @@ module ColdBrewSpec
   end
 
   def self.reset : DB::Database
+    @@seen.clear
+    @@hook_mode = nil
     owner.exec("TRUNCATE caramel_jobs, caramel_cache, caramel_schedules, cold_brew_runs")
     SugarORM::Repo.database = runtime
   end
@@ -433,6 +470,114 @@ describe "Caramel::ColdBrew retries" do
     row[:attempts].should eq(1)
     row[:failed_at].should_not be_nil
     row[:last_error].not_nil!.should start_with("Caramel::ColdBrew::UnknownJob: No Caramel::ColdBrew::Job named Vanished::Job")
+  end
+end
+
+describe "Caramel::ColdBrew.status" do
+  it "reports each job's state from its durable row, naming only the class of its last error" do
+    ColdBrewSpec.reset
+    scheduled = ColdBrewSpec::Record.enqueue(label: "later", run_at: 1.hour.from_now)
+    queued = ColdBrewSpec::Record.enqueue(label: "now")
+    retrying = ColdBrewSpec::Fragile.enqueue(label: "once")
+    Brew.drain_queue(ColdBrewSpec.runtime, "fragile").should eq(1)
+    statuses = Brew.statuses([scheduled, queued, retrying, 999_999_i64])
+    statuses.keys.sort!.should eq([scheduled, queued, retrying].sort)
+    statuses[scheduled].state.should eq(Brew::JobState::Scheduled)
+    statuses[queued].state.should eq(Brew::JobState::Queued)
+    statuses[queued].attempts.should eq(0)
+    statuses[queued].error_class.should be_nil
+    retried = statuses[retrying]
+    {retried.state, retried.queue, retried.class_name, retried.attempts}.should eq({Brew::JobState::Retrying, "fragile", "ColdBrewSpec::Fragile", 1})
+    retried.error_class.should eq("ColdBrewSpec::Flaky")
+    (retried.run_at - Time.utc).should be_close(30.seconds, 2.seconds)
+    retried.to_json.should_not contain("boom")
+    JSON.parse(retried.to_json)["state"].should eq("retrying")
+    Brew.status(999_999_i64).should be_nil
+    Brew.statuses([] of Int64).should be_empty
+
+    vanished = ColdBrewSpec.scalar("INSERT INTO caramel_jobs (class_name, payload) VALUES ('Vanished::Job', '{}') RETURNING id AS value", as: Int64)
+    Brew.drain_queue(ColdBrewSpec.runtime).should eq(2)
+    finished = Brew.status(ColdBrewSpec.owner, queued).not_nil!
+    {finished.state, finished.attempts, finished.finished_at.nil?}.should eq({Brew::JobState::Finished, 1, false})
+    failed = Brew.status(vanished).not_nil!
+    {failed.state, failed.error_class, failed.failed_at.nil?}.should eq({Brew::JobState::Failed, "Caramel::ColdBrew::UnknownJob", false})
+
+    running = ColdBrewSpec::Gated.enqueue(label: "held")
+    worker = Brew::Worker.new("gated", 1, ColdBrewSpec.runtime).start
+    begin
+      ColdBrewSpec.eventually { Brew.status(running).try(&.state.running?) || false }
+      Brew.status(running).not_nil!.attempts.should eq(1)
+    ensure
+      ColdBrewSpec.gate.send(nil)
+      worker.stop
+    end
+    Brew.status(running).not_nil!.state.should eq(Brew::JobState::Finished)
+  end
+end
+
+describe "Caramel::ColdBrew lifecycle hooks" do
+  it "run after a worker commits a retry or a failure" do
+    ColdBrewSpec.reset
+    retried = ColdBrewSpec::Fragile.enqueue(label: "hooked")
+    vanished = ColdBrewSpec.scalar("INSERT INTO caramel_jobs (queue, class_name, payload) VALUES ('fragile', 'Vanished::Job', '{}') RETURNING id AS value", as: Int64)
+    worker = Brew::Worker.new("fragile", 1, ColdBrewSpec.runtime).start
+    begin
+      ColdBrewSpec.eventually { ColdBrewSpec.seen.size == 2 }
+    ensure
+      worker.stop
+    end
+    retry = ColdBrewSpec.seen.find! { |seen| seen.kind == "retry" }
+    {retry.id, retry.queue, retry.attempts, retry.error_class, retry.committed}.should eq({retried, "fragile", 1, "ColdBrewSpec::Flaky", true})
+    (retry.at - Time.utc).should be_close(30.seconds, 2.seconds)
+    failure = ColdBrewSpec.seen.find! { |seen| seen.kind == "failed" }
+    {failure.id, failure.queue, failure.attempts, failure.error_class, failure.committed}.should eq({vanished, "fragile", 1, "Caramel::ColdBrew::UnknownJob", true})
+  end
+
+  it "can publish what a dashboard needs to hear" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.hook_mode = "publish"
+    ColdBrewSpec.with_broker do
+      Brew.subscribe("job_events") do |updates|
+        id = ColdBrewSpec::Crash.enqueue
+        worker = Brew::Worker.new("fragile", 1, ColdBrewSpec.runtime).start
+        begin
+          ColdBrewSpec.receive?(updates, 5.seconds).should eq("retry #{id}")
+        ensure
+          worker.stop
+        end
+      end
+    end
+  end
+
+  it "keep a failing hook from stopping a worker or aborting a drain's transaction" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.hook_mode = "raise"
+    vanished = ColdBrewSpec.scalar("INSERT INTO caramel_jobs (class_name, payload) VALUES ('Vanished::Job', '{}') RETURNING id AS value", as: Int64)
+    ColdBrewSpec::Record.enqueue(label: "after")
+    Log.capture("cold_brew.hooks") do |logs|
+      worker = Brew::Worker.new("default", 1, ColdBrewSpec.runtime).start
+      begin
+        ColdBrewSpec.eventually { ColdBrewSpec.labels == ["after"] }
+      ensure
+        worker.stop
+      end
+      logs.check(:error, /\Ahook=on_failed job=#{vanished} class=Vanished::Job error_type=Exception\z/)
+    end
+    Brew.status(vanished).not_nil!.state.should eq(Brew::JobState::Failed)
+
+    ColdBrewSpec.hook_mode = "sql"
+    ColdBrewSpec.runtime.using_connection do |connection|
+      connection.transaction do |transaction|
+        SugarORM::Repo.bind(transaction) do
+          crashed = ColdBrewSpec::Crash.enqueue
+          Brew.drain_queue(connection, "fragile").should eq(1)
+          # The hook's error rolled back only its own savepoint.
+          ColdBrewSpec.labels(connection).should eq(["after"])
+          Brew.status(connection, crashed).not_nil!.state.should eq(Brew::JobState::Retrying)
+        end
+        transaction.rollback
+      end
+    end
   end
 end
 

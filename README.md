@@ -28,7 +28,7 @@ Frappé's agent surface (RFC-0005) is one command table: `frappe --help`, `frapp
 
 `frappe lint` checks an application against Caramel's RFC-0008 rule set, Ameba 1.7.0 plus Caramel's service-noun rule, printing Ameba's report on a terminal or MRDP `ERR LINT_<RULE>` lines for agents; `frappe format` runs the pinned formatter ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)). The framework follows the same rule set.
 
-Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`.
+Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`, or from a worker-only `work` process. `Caramel::ColdBrew.status` and hooks that run after a retry or failure is written report jobs without querying Cold Brew's tables ([ADR 0019](docs/decisions/0019-cold-brew-status-hooks-and-work.md)).
 
 - [Caramel RFCs](docs/rfc.md)
 - [RFC implementation status and ranked gaps](docs/research/rfc-implementation-status.md)
