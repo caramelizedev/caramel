@@ -23,7 +23,7 @@ if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
 fi
 
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
-CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
 COMPILER=$CRYSTAL_ROOT/embedded/bin/crystal
 OPENSSL=$BASE/data/installs/conda-openssl/3.6.4
 

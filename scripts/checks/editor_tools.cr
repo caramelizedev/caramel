@@ -6,7 +6,7 @@ module EditorCheck
   POINTER  = File.join(REPO, ".caramel-toolchain")
   Caramel::Checks.fail("run scripts/install-toolchain, scripts/build-frappe and bin/frappe lsp install first") unless File.file?(FRAPPE) && File.file?(POINTER)
   ROOT = File.read(POINTER).lines.first.strip
-  CRYSTAL = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.21.0")
+  CRYSTAL = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.21.1")
   MANIFEST = JSON.parse(File.read(File.join(REPO, "tools/editor-darwin-arm64.json")))
   VERSIONS = {"ameba-ls"    => MANIFEST["ameba-ls"]["version"].as_s,
               "crystalline" => MANIFEST["crystalline"]["reported_version"].as_s}
@@ -59,7 +59,7 @@ module EditorCheck
         puts "PASS: crystalline definition into project source"
         stdlib = File.realpath(File.join(CRYSTAL, "src")) + "/"
         client.definition_until(navigation, Caramel::Checks::LSPClient.position(text, "puts", 1), 180.seconds) { |item| item.starts_with?(stdlib) }
-        puts "PASS: crystalline definition into pinned Crystal 1.21.0 stdlib"
+        puts "PASS: crystalline definition into pinned Crystal 1.21.1 stdlib"
         hover = client.at("textDocument/hover", navigation, Caramel::Checks::LSPClient.position(text, "puts response", 6), 60.seconds)
         client.fail("hover lacks Response: #{hover.to_json}") unless hover.to_json.includes?("Response")
         puts "PASS: crystalline hover"

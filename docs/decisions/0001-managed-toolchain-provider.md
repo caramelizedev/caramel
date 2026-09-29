@@ -8,7 +8,9 @@ Status: accepted for the Caramel development prototype; consumer installer accep
 
 Use pinned mise 2026.9.11 behind an isolated toolchain adapter for the next Caramel prototype. Select explicit backends: GitHub for Crystal, aqua for Caddy, and conda-forge for prebuilt PostgreSQL, OpenSSL, and pkgconf. Do not write a general version manager or compile PostgreSQL during ordinary setup.
 
-The tested set is Crystal 1.21.0 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6, OpenSSL 3.6.4, and pkgconf 3.0.7. Preserve the concrete artifact URLs and SHA-256 checksums in the experiment lockfile, including PostgreSQL's transitive dependency packages. Updating a tool version or backend is a reviewed dependency change.
+The tested set is Crystal 1.21.1 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6, OpenSSL 3.6.4, and pkgconf 3.0.7. Preserve the concrete artifact URLs and SHA-256 checksums in the experiment lockfile, including PostgreSQL's transitive dependency packages. Updating a tool version or backend is a reviewed dependency change.
+
+Crystal moved from 1.21.0 to 1.21.1 on 2026-09-29 as such a change. The archive's size and SHA-256 match the release's published digest, and it bundles the same Shards 0.20.0 and LLVM 15.0.7 ([artifact inventory](../research/toolchain-artifacts.md)). It fixes non-blocking `Socket#connect` on macOS 26.7 and later, `HTTP::Server` request smuggling, and automatic decompression of request bodies ([release notes](https://crystal-lang.org/2026/09/26/1.21.1-released/)).
 
 Frappé remains the application developer's interface. Shards owns Crystal application dependencies. Latte owns database data, roles, lifecycle, project registration, DNS, and certificate/proxy configuration. This decision does not delegate those responsibilities to mise bootstrap or mise daemons.
 

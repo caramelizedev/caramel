@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Caramel now pins Crystal 1.21.1, which fixes `Socket#connect` on macOS 26.7 and later and closes `HTTP::Server` request-smuggling and request-body decompression issues. Installing this release sets up a new toolchain directory, so its first builds start with an empty compiler cache.
+- If you use the editor tools, run `frappe lsp install` again after installing: crystalline rebuilds against the new compiler, which takes up to about 20 minutes.
+- New applications declare `crystal: ">= 1.21.1"` in `shard.yml`.
+
 ## 0.4.1 - 2026-09-29
 
 ### Fixes

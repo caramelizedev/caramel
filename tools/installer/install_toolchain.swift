@@ -8,8 +8,8 @@ private let miseURL = "https://github.com/jdx/mise/releases/download/v2026.9.11/
 private let miseSHA = "bbfd47ef65c2278c4e9ba09b523beb1019365a3c0b9c9fc60f686dc16f358e0f"
 private let releaseCritical = [
     "bin/mise",
-    "data/installs/github-crystal-lang-crystal/1.21.0/embedded/bin/crystal",
-    "data/installs/github-crystal-lang-crystal/1.21.0/embedded/bin/shards",
+    "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/crystal",
+    "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/shards",
     "data/installs/aqua-caddyserver-caddy/2.11.4/caddy",
     "data/installs/conda-postgresql/18.6/bin/postgres",
     "data/installs/conda-postgresql/18.6/bin/initdb",
@@ -22,7 +22,7 @@ private let releaseCritical = [
     "data/installs/github-coredns-coredns/1.14.7/coredns"
 ]
 private let releaseAliases = [
-    "bin/shards": "../data/installs/github-crystal-lang-crystal/1.21.0/embedded/bin/shards",
+    "bin/shards": "../data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/shards",
     "bin/pkg-config": "../data/installs/conda-pkgconf/3.0.7/bin/pkgconf"
 ]
 private let ownedDirectories = [
@@ -391,8 +391,8 @@ private final class ToolchainInstallation {
     private func verifyNativeTools(environment: [String: String]) throws {
         let installs = path(root, "data/installs")
         let probes: [([String], String)] = [
-            ([path(installs, "github-crystal-lang-crystal/1.21.0/embedded/bin/crystal"), "--version"], "Crystal 1.21.0"),
-            ([path(installs, "github-crystal-lang-crystal/1.21.0/embedded/bin/shards"), "--version"], "Shards 0.20.0"),
+            ([path(installs, "github-crystal-lang-crystal/1.21.1/embedded/bin/crystal"), "--version"], "Crystal 1.21.1"),
+            ([path(installs, "github-crystal-lang-crystal/1.21.1/embedded/bin/shards"), "--version"], "Shards 0.20.0"),
             ([path(installs, "aqua-caddyserver-caddy/2.11.4/caddy"), "version"], "v2.11.4"),
             ([path(installs, "conda-postgresql/18.6/bin/postgres"), "--version"], "postgres (PostgreSQL) 18.6"),
             ([path(installs, "conda-postgresql/18.6/bin/initdb"), "--version"], "initdb (PostgreSQL) 18.6"),

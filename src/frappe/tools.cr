@@ -26,9 +26,9 @@ module Caramel::Frappe
     end
 
     def check_compiler : Nil
-      compiler = File.join(@toolchain.root, "data/installs/github-crystal-lang-crystal/1.21.0/embedded/bin/crystal")
+      compiler = File.join(@toolchain.root, "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/crystal")
       result = Latte::ProcessRunner.run([compiler, "--version"], timeout: 5.seconds, output_limit: 4096)
-      raise Error.new("Managed Crystal 1.21.0 is unavailable") unless result.success? && result.stdout.starts_with?("Crystal 1.21.0")
+      raise Error.new("Managed Crystal 1.21.1 is unavailable") unless result.success? && result.stdout.starts_with?("Crystal 1.21.1")
     end
 
     def check_dependencies(project : Project) : Nil
