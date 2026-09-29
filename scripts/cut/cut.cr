@@ -10,6 +10,8 @@ require "../../src/latte/process"
 # full check suite passes. Pushing and publishing stay manual.
 module Caramel::Cut
   REPO = File.expand_path("../..", __DIR__)
+  # The framework migrations, relative to a tree's root.
+  MIGRATIONS_SOURCE = "src/caramel/cold_brew/migrations.cr"
 
   CHANGELOG = <<-MARKDOWN
     # Changelog
@@ -98,7 +100,7 @@ module Caramel::Cut
     # The first release is the version shard.yml already declares.
     version = tag ? next_version(SemanticVersion.parse(tag.lchop('v')), commits) : declared
     raise Refused.new("nothing to release: no features or fixes since #{tag}") unless version
-    check_migrations(migrations(repository, tag), migrations(repository, nil), tag) if tag
+    check_migrations(*shipped_and_current(repository, tag), tag) if tag
     path = File.join(repository, "CHANGELOG.md")
     head, notes, older = split(File.exists?(path) ? File.read(path) : CHANGELOG)
     section = section(version, today, notes, commits)
@@ -132,6 +134,27 @@ module Caramel::Cut
     end
   end
 
+  # The framework migrations *tag* shipped and the working tree's. The two
+  # probes are separate programs, so they compile side by side; when both
+  # fail, the tag's error is raised.
+  private def self.shipped_and_current(repository : String, tag : String) : {Hash(Int64, {String, String}), Hash(Int64, {String, String})}
+    shipped = Channel(Hash(Int64, {String, String}) | Exception).new(1)
+    spawn do
+      shipped.send(migrations(repository, tag))
+    rescue ex
+      shipped.send(ex)
+    end
+    current = begin
+      migrations(repository, nil)
+    rescue ex
+      ex
+    end
+    released = shipped.receive
+    raise released if released.is_a?(Exception)
+    raise current if current.is_a?(Exception)
+    {released, current}
+  end
+
   # The framework migrations in *tag*'s tree, or in the working tree, by
   # compiling a probe against them. A tree without them ships none.
   private def self.migrations(repository : String, tag : String?) : Hash(Int64, {String, String})
@@ -140,15 +163,17 @@ module Caramel::Cut
     begin
       tree = repository
       if tag
+        return {} of Int64 => {String, String} if git(repository, "ls-tree", "--name-only", tag, "--", MIGRATIONS_SOURCE).empty?
         tree = File.join(work, "tree")
         Dir.mkdir(tree)
         archive = File.join(work, "tree.tar")
-        git(repository, "archive", "--output", archive, tag)
+        # The probe reads only src/.
+        git(repository, "archive", "--output", archive, tag, "src")
         # A tree that failed to extract would look like one without migrations.
         extracted = Latte::ProcessRunner.run(["/usr/bin/tar", "-xf", archive, "-C", tree], timeout: 120.seconds)
         raise Refused.new("could not extract #{tag} to read its framework migrations: #{extracted.diagnostic}") unless extracted.success?
       end
-      source = File.join(tree, "src/caramel/cold_brew/migrations.cr")
+      source = File.join(tree, MIGRATIONS_SOURCE)
       return {} of Int64 => {String, String} unless File.exists?(source)
       # Crystal resolves a file require only relative to the requiring file,
       # so the probe names the migrations by their path relative to itself.
@@ -156,7 +181,11 @@ module Caramel::Cut
       relative = Path[source].relative_to(work).to_s
       relative = "./#{relative}" unless relative.starts_with?("../")
       File.write(probe, %(require #{relative.to_json}\nrequire "json"\nputs Caramel::ColdBrew::MIGRATIONS.map { |migration| [migration.version.to_s, migration.name, migration.checksum] }.to_json\n))
-      result = Latte::ProcessRunner.run([File.join(REPO, "scripts/crystal"), "run", probe], chdir: REPO, timeout: 600.seconds, output_limit: 1024 * 1024)
+      # Each probe links its own executable: `crystal run` links every
+      # probe.cr to one temporary file in the shared compiler cache.
+      executable = File.join(work, "probe")
+      result = Latte::ProcessRunner.run([File.join(REPO, "scripts/crystal"), "build", probe, "-o", executable], chdir: REPO, timeout: 600.seconds, output_limit: 1024 * 1024)
+      result = Latte::ProcessRunner.run([executable], chdir: REPO, timeout: 60.seconds, output_limit: 1024 * 1024) if result.success?
       raise Refused.new("could not read the framework migrations of #{tag || "the working tree"}: #{result.stderr.strip}") unless result.success?
       Array(Array(String)).from_json(result.stdout).to_h { |(version, name, checksum)| {version.to_i64, {name, checksum}} }
     ensure
