@@ -1,6 +1,7 @@
 require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
+require "../../src/frappe/dev_files"
 
 describe Caramel::Frappe::NewProject do
   it "creates a portable application that depends on this checkout, with no copied framework or secrets" do
@@ -27,6 +28,22 @@ describe Caramel::Frappe::NewProject do
       Caramel::Frappe::Project.pin(target).should eq(Caramel::VERSION)
       File.read(File.join(target, ".gitignore")).should contain(".env\n")
       File.read(File.join(target, "config/routes.cr")).should contain("Frappé resource routes")
+    ensure
+      FileUtils.rm_rf(parent)
+    end
+  end
+
+  it "records the assets it publishes, so an asset edit before the first frappe dev publishes" do
+    parent = File.tempname("caramel-new-assets-")
+    Dir.mkdir(parent)
+    target = File.join(parent, "notes")
+    begin
+      Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__)).create("notes", target)
+      File.file?(File.join(target, ".caramel/assets.json")).should be_true
+      source = File.join(target, "app/assets/javascript/app.js")
+      File.write(source, File.read(source) + "\n// an edit before frappe dev\n")
+      Caramel::Frappe::DevFiles.new(File.realpath(target)).publish_assets
+      File.read(File.join(target, "public/assets/app.js")).should eq(File.read(source))
     ensure
       FileUtils.rm_rf(parent)
     end

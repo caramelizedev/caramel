@@ -65,8 +65,10 @@ describe Caramel::Frappe::DevFiles do
       File.write(source, "body { color: blue; }")
       assets.publish_assets
       File.read(destination).should eq(File.read(source))
+      manifest = Hash(String, String).from_json(File.read(File.join(root, ".caramel/assets.json")))
+      manifest.should eq({"public/assets/app.css" => Digest::SHA256.hexdigest(File.read(destination))})
       File.write(destination, "a manual public edit")
-      expect_raises(Caramel::Frappe::Error, "conflict") { assets.publish_assets }
+      expect_raises(Caramel::Frappe::Error, "delete public/assets/app.css to republish it from app/assets/stylesheets/app.css") { assets.publish_assets }
       File.read(destination).should eq("a manual public edit")
       File.write(destination, File.read(source))
       File.delete(source)

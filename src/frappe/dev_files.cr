@@ -65,37 +65,51 @@ module Caramel::Frappe
         validate_path(path)
         if File.exists?(path)
           actual = digest(path)
-          unless actual == previous[relative]? || actual == desired[relative]?
-            raise Error.new("Asset output conflict: #{relative}; edit app/assets or preserve your public edit before retrying")
-          end
+          conflict(relative, sources[relative]?) unless actual == previous[relative]? || actual == desired[relative]?
         end
       end
+      published = desired.dup
       desired.each do |relative, hash|
         path = File.join(@root, relative)
         next if File.file?(path) && digest(path) == hash
-        FileUtils.mkdir_p(File.dirname(path))
-        temporary = File.tempfile("asset-", dir: state)
-        begin
-          File.open(File.join(@root, sources[relative])) { |source| IO.copy(source, temporary) }
-          temporary.flush
-          temporary.chmod(0o644)
-          temporary.close
-          File.rename(temporary.path, path)
-        ensure
-          temporary.close
-          File.delete?(temporary.path)
-        end
+        published[relative] = copy_asset(state, File.join(@root, sources[relative]), path)
       end
       (previous.keys - desired.keys).each { |relative| File.delete?(File.join(@root, relative)) }
       temporary = File.tempfile("assets-", dir: state)
       begin
-        temporary << desired.to_json
+        temporary << published.to_json
         temporary.close
         File.rename(temporary.path, manifest_path)
       ensure
         temporary.close
         File.delete?(temporary.path)
       end
+    end
+
+    # A public file Frappé did not write: keep it and name the way forward.
+    private def conflict(relative : String, source : String?) : NoReturn
+      remedy = source ? "delete #{relative} to republish it from #{source}, or copy your public edit into #{source} first" : "edit app/assets or preserve your public edit before retrying"
+      raise Error.new("Asset output conflict: #{relative} differs from what Frappé last published; #{remedy}")
+    end
+
+    # Copies one source asset into place and returns the digest of the bytes
+    # copied, which an editor may have replaced since the tree was hashed.
+    private def copy_asset(state : String, source : String, path : String) : String
+      validate_path(source)
+      content = File.read(source)
+      FileUtils.mkdir_p(File.dirname(path))
+      temporary = File.tempfile("asset-", dir: state)
+      begin
+        temporary.write(content.to_slice)
+        temporary.flush
+        temporary.chmod(0o644)
+        temporary.close
+        File.rename(temporary.path, path)
+      ensure
+        temporary.close
+        File.delete?(temporary.path)
+      end
+      Digest::SHA256.hexdigest(content)
     end
 
     private def tree(relative : String) : Hash(String, String)
