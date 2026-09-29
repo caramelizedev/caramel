@@ -17,6 +17,18 @@ cases = {
   "compile_ambiguous_order"  => {["AMBIGUOUS ROUTE ORDER", %(get "/teams/new", TeamNew)], ["__caramel_router_draw"]},
   "compile_unknown_verb"     => {["accepts only get, post, put, patch and delete", "resources :books"], ["__caramel_router_draw"]},
   "compile_wrong_path_id"    => {["expected argument #1"], [] of String},
+  # ADR 0020: an action's ingress declaration.
+  "compile_ingress_csrf_without_authenticate" => {["ingress csrf: false needs authenticate:", "compile_ingress_csrf_without_authenticate.cr:5:5", "Remediation:"], [] of String},
+  "compile_ingress_unknown_keyword"           => {["unknown ingress keyword 'max'"], [] of String},
+  "compile_ingress_positional"                => {["ingress takes keywords", "Remediation:"], [] of String},
+  "compile_ingress_bad_body"                  => {["ingress body: must be :form or :raw, got :json"], [] of String},
+  "compile_ingress_limit"                     => {["ingress limit:", "64 MiB, got 128.megabytes"], [] of String},
+  "compile_ingress_limit_constant"            => {["ingress limit:", "got LIMIT"], [] of String},
+  "compile_ingress_csrf_not_literal"          => {["ingress csrf: must be true or false, got CHECK"], [] of String},
+  "compile_ingress_twice"                     => {["declares ingress twice", "compile_ingress_twice.cr:6:5"], [] of String},
+  "compile_ingress_raw_body_on_form"          => {["undefined local variable or method 'raw_body'"], [] of String},
+  "compile_ingress_unknown_authenticator"     => {["undefined local variable or method 'signd?'"], [] of String},
+  "compile_ingress_authenticator_nilable"     => {["must return Bool but it is returning (Bool | Nil)"], [] of String},
 }
 cases.each do |name, expectation|
   result = Caramel::Checks.crystal(["build", "spec/fixtures/routes/#{name}.cr", "--no-codegen"], timeout: 90.seconds)

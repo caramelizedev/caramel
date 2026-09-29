@@ -2,6 +2,7 @@ require "http"
 require "../csrf"
 require "../session"
 require "./request_input"
+require "./ingress"
 
 module Caramel
   # Everything one action needs about its request: the parsed input, the CSRF
@@ -10,21 +11,26 @@ module Caramel
     getter request : HTTP::Request
     getter input : RequestInput
     getter csrf_token : String
+    getter ingress : Ingress
     @json_q = 0.0
     @html_q = 0.0
     @session : Hash(String, String)? = nil
     @loaded_session : Hash(String, String)? = nil
 
-    def initialize(@request : HTTP::Request, @csrf : CSRF, @sessions : Session, @input : RequestInput)
+    def initialize(@request : HTTP::Request, @csrf : CSRF, @sessions : Session, @input : RequestInput, @ingress : Ingress = Ingress::DEFAULT)
       cookie = @request.cookies[CSRF::COOKIE_NAME]?.try(&.value)
       @csrf_token = cookie && @csrf.valid_token?(cookie) ? cookie : @csrf.issue
       negotiate(@request.headers["Accept"]?)
     end
 
-    # The signed session, verified on first use; an invalid cookie reads as empty.
+    # The signed session, verified on first use; an invalid cookie reads as
+    # empty. A route whose ingress turns CSRF off reads an empty session and
+    # never saves it: another site's form carries the browser's cookie, so
+    # the cookie cannot authenticate a request that skipped the CSRF check.
     def session : Hash(String, String)
       @session ||= begin
-        loaded = @request.cookies[Session::COOKIE_NAME]?.try { |cookie| @sessions.decode(cookie.value) } || {} of String => String
+        loaded = @request.cookies[Session::COOKIE_NAME]?.try { |cookie| @sessions.decode(cookie.value) } if @ingress.csrf?
+        loaded ||= {} of String => String
         @loaded_session = loaded.dup
         loaded
       end
@@ -33,7 +39,7 @@ module Caramel
     # The Set-Cookie that persists the session, or nil when it did not change.
     def session_cookie : HTTP::Cookie?
       current = @session
-      @sessions.cookie(current) if current && current != @loaded_session
+      @sessions.cookie(current) if @ingress.csrf? && current && current != @loaded_session
     end
 
     def method : String

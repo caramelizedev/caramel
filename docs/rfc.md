@@ -250,9 +250,11 @@ Responses carry `Vary: Accept, HX-Request, HX-Request-Type`. A full page wraps i
 * **Route Collision Overhead:** Deep nesting of dynamic routes can lead to ambiguous path matching.  
   *Mitigation:* The router macro verifies path uniqueness at compile time. It rejects two routes that match the same requests. It also rejects a static route (`/teams/new`) declared after an overlapping dynamic route (`/teams/:id`). Precedence is explicit: declare the static route first, and it wins.
 * **Large Request Body Memory Pressure:** Parsing massive multipart payloads in memory can exceed memory limits.  
-  *Mitigation:* `Caramel::RequestInput` reads every request before its contract binds ([ADR 0003](decisions/0003-core-routing-and-contracts.md)).
-  * It caps URL-encoded bodies and multipart text parts at 2 MiB and answers 413 beyond that.
+  *Mitigation:* `Caramel::RequestInput` reads every request before its contract binds ([ADR 0003](decisions/0003-core-routing-and-contracts.md)), as its route's `ingress` allows ([ADR 0020](decisions/0020-action-ingress-and-json-bodies.md)).
+  * It caps URL-encoded bodies, JSON objects and multipart text parts at 2 MiB, or the route's `limit:`, and answers 413 beyond that.
   * It streams file parts to private request-scoped tempfiles through `HTTP::FormData.parse`, up to 64 MiB in total, and deletes them when the request ends.
+* **Requests that are not browser forms:** JSON clients and signed webhooks need a body other than a form and a credential other than the CSRF token.  
+  *Mitigation:* Form routes also bind JSON objects, and same-origin `fetch` sends `X-CSRF-Token`. An action declares `ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?` to receive the exact bytes and verify them itself ([ADR 0020](decisions/0020-action-ingress-and-json-bodies.md)).
 
 ---
 

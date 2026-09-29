@@ -6,6 +6,10 @@ private def form_request(body : String, method = "POST", path = "/books", header
   HTTP::Request.new(method, path, headers, body)
 end
 
+private def json_request(body : String, path = "/books") : HTTP::Request
+  HTTP::Request.new("POST", path, HTTP::Headers{"Content-Type" => "application/json; charset=utf-8"}, body)
+end
+
 private def multipart_request(& : HTTP::FormData::Builder ->) : HTTP::Request
   io = IO::Memory.new
   builder = HTTP::FormData::Builder.new(io, "caramel-boundary")
@@ -28,12 +32,67 @@ describe Caramel::RequestInput do
     expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request) }
   end
 
-  it "refuses request bodies that are not forms" do
-    json = HTTP::Request.new("POST", "/books", HTTP::Headers{"Content-Type" => "application/json"}, "{}")
-    expect_raises(Caramel::RequestInput::UnsupportedMediaType) { Caramel::RequestInput.read(json) }
+  it "refuses request bodies that are neither forms nor JSON objects" do
+    {"application/xml", "application/vnd.api+json", "text/plain"}.each do |type|
+      request = HTTP::Request.new("POST", "/books", HTTP::Headers{"Content-Type" => type}, "{}")
+      expect_raises(Caramel::RequestInput::UnsupportedMediaType, "Expected a URL-encoded form, multipart form or JSON object") { Caramel::RequestInput.read(request) }
+    end
     untyped = HTTP::Request.new("POST", "/books", HTTP::Headers.new, "a=1")
     expect_raises(Caramel::RequestInput::UnsupportedMediaType) { Caramel::RequestInput.read(untyped) }
     Caramel::RequestInput.read(HTTP::Request.new("POST", "/books")).body.should be_empty
+  end
+
+  it "binds a JSON object's scalar members as fields and records each member's JSON type" do
+    body = %q({"title": "Dune \u00e9", "copies": 3, "price": -1.5e2, "signed": true, "note": null, "tags": ["sf"], "_method": "DELETE"})
+    input = Caramel::RequestInput.read(json_request(body, path: "/books?page=2"))
+    input.body.should eq({"title" => "Dune é", "copies" => "3", "price" => "-1.5e2", "signed" => "true", "_method" => "DELETE"})
+    input.method_override.should be_nil
+    input.errors.should be_empty
+    input.strict_keys.sort.should eq(%w[_method copies note page price signed tags title])
+    input.source_count("note").should eq(1)
+    input.json_mismatch?("title", Caramel::RequestInput::JsonKind::String).should be_false
+    input.json_mismatch?("copies", Caramel::RequestInput::JsonKind::String).should be_true
+    input.json_mismatch?("note", Caramel::RequestInput::JsonKind::Number).should be_false
+    input.json_mismatch?("tags", Caramel::RequestInput::JsonKind::String).should be_true
+    input.json_mismatch?("page", Caramel::RequestInput::JsonKind::Number).should be_false
+    Caramel::RequestInput.read(json_request("")).body.should be_empty
+    Caramel::RequestInput.read(json_request(%({"id": 123456789012345678901234567890}))).body["id"].should eq("123456789012345678901234567890")
+  end
+
+  it "records duplicate JSON members and a body that is not an object as errors" do
+    duplicate = Caramel::RequestInput.read(json_request(%({"title": "a", "title": "b"})))
+    duplicate.body.should eq({"title" => "a"})
+    duplicate.errors["_base"].should eq(["Duplicate field: title"])
+    {"[]", %("text"), "1", "null"}.each do |body|
+      Caramel::RequestInput.read(json_request(body)).errors["_base"].should eq(["Expected a JSON object"])
+    end
+  end
+
+  it "rejects malformed JSON, trailing data, NUL and invalid UTF-8" do
+    [%({"a": ), %({} {}), %({"a": 1} x), %q({"a": "\u0000"}), %q({"a\u0000": 1}), %q({"a": "\udc00"}), "{\"a\": \"\xFF\"}", " "].each do |body|
+      expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(json_request(body)) }
+    end
+  end
+
+  it "bounds a JSON body by the route's ingress limit" do
+    ingress = Caramel::Ingress.new(limit: 15)
+    Caramel::RequestInput.read(json_request(%({"a": "123456"})), ingress).body["a"].should eq("123456")
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(json_request(%({"a": "1234567"})), ingress) }
+  end
+
+  it "keeps a raw ingress's body exactly as sent, whatever its type, and parses no transport controls" do
+    raw = Caramel::Ingress.new(Caramel::Ingress::Body::Raw, 64_i64, false, "signed?")
+    bytes = Bytes[0x7B, 0x00, 0xFF, 0x7D]
+    request = HTTP::Request.new("POST", "/hooks?source=x", HTTP::Headers{"Content-Type" => "application/x-www-form-urlencoded"}, "_method=DELETE&_csrf=t")
+    input = Caramel::RequestInput.read(request, raw)
+    input.raw_body.should eq("_method=DELETE&_csrf=t".to_slice)
+    input.body.should be_empty
+    input.method_override.should be_nil
+    input.csrf_token.should be_nil
+    input.strict_keys.should eq(["source"])
+    Caramel::RequestInput.read(HTTP::Request.new("POST", "/hooks", HTTP::Headers.new, bytes), raw).raw_body.should eq(bytes)
+    Caramel::RequestInput.read(HTTP::Request.new("GET", "/hooks", HTTP::Headers.new, "ignored"), raw).raw_body.should be_empty
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(HTTP::Request.new("POST", "/hooks", HTTP::Headers.new, "x" * 65), raw) }
   end
 
   it "rejects invalid escapes and NUL in the body and the query" do
@@ -95,7 +154,7 @@ describe Caramel::RequestInput do
 
   it "bounds multipart text parts and rejects malformed multipart bodies" do
     request = multipart_request(&.field("note", "x" * 64))
-    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request, max_form_bytes: 32) }
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: 32)) }
     broken = HTTP::Request.new("POST", "/uploads", HTTP::Headers{"Content-Type" => "multipart/form-data"}, "--x\r\n")
     expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(broken) }
   end

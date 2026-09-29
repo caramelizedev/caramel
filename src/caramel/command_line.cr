@@ -97,7 +97,8 @@ module Caramel
     private def self.routes(entries : Array(Router::Entry)) : Int32
       width = entries.max_of?(&.path.size) || 0
       entries.each do |entry|
-        puts "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}#{entry.contract.empty? ? "" : "  " + entry.contract}"
+        ingress = entry.ingress.summary
+        puts "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}#{entry.contract.empty? ? "" : "  " + entry.contract}#{ingress.empty? ? "" : "  [#{ingress}]"}"
       end
       0
     end

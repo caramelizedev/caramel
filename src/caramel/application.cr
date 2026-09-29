@@ -34,12 +34,15 @@ module Caramel
       if static = static_response(request)
         return secure(static)
       end
-      input = RequestInput.read(request)
-      context = RequestContext.new(request, @csrf, @sessions, input)
-      if RequestInput::BODY_METHODS.includes?(request.method)
+      # The route decides how its body is read and whether CSRF guards it;
+      # a request that matches none reads and is checked as a form.
+      match = @router.match(request)
+      input = RequestInput.read(request, match.ingress)
+      context = RequestContext.new(request, @csrf, @sessions, input, match.ingress)
+      if RequestInput::BODY_METHODS.includes?(request.method) && match.ingress.csrf?
         raise Forbidden.new unless @csrf.valid?(request, input.csrf_token || request.headers["X-CSRF-Token"]?)
       end
-      response = @router.dispatch(context)
+      response = @router.dispatch(context, match)
       if cookie = context.session_cookie
         response.headers.add("Set-Cookie", cookie.to_set_cookie_header)
       end
@@ -49,7 +52,7 @@ module Caramel
     rescue RequestInput::TooLarge
       secure(Response.new(413, "Request body is too large"))
     rescue RequestInput::UnsupportedMediaType
-      secure(Response.new(415, "Expected a URL-encoded or multipart form"))
+      secure(Response.new(415, RequestInput::UNSUPPORTED))
     rescue RequestInput::InvalidEncoding
       secure(Response.new(400, "Malformed request"))
     rescue error
