@@ -2,6 +2,8 @@ require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/resource_generator"
+require "../../src/caramel/external_url"
+require "../../src/caramel/html"
 
 private def resource_project(&)
   parent = File.tempname("caramel-resource-")
@@ -52,6 +54,8 @@ describe Caramel::Frappe::ResourceGenerator do
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
       expect_raises(Caramel::Frappe::Error, "cannot be :unique") { generator.generate(project, "Book", ["flag:bool:unique"]) }
+      expect_raises(Caramel::Frappe::Error, "Only a string field holds a URL") { generator.generate(project, "Book", ["link:int32:url"]) }
+      expect_raises(Caramel::Frappe::Error, "cannot be :url") { generator.generate(project, "Book", ["link:string:server:url"]) }
       expect_raises(Caramel::Frappe::Error, "63-byte") { generator.generate(project, "Book", ["#{"a" * 50}:string:unique"]) }
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
       expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
@@ -89,6 +93,30 @@ describe Caramel::Frappe::ResourceGenerator do
       spec = read.call("spec/requests/invites_spec.cr")
       spec.should contain(%(App::Invite.create(email: persisted.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX)).errors["email"]?.should eq(["has already been taken"])))
       spec.should contain(%(App::Invite.create(email: "Example <email>", token: persisted.token, number: Random::Secure.rand(Int32::MAX)).errors["token"]?.should eq(["has already been taken"])))
+    end
+  end
+
+  it "carries a :url field's rule into the changeset, the form and the request spec's samples" do
+    resource_project do |project, package|
+      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Link", ["original_url:string:url:unique", "homepage:string?:url"], version: 20260919000006_i64)
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+      read.call("app/changesets/link.cr").should contain([
+        "      cs.validate_presence(:original_url)",
+        %(      cs.validate_url(:original_url) unless cs.errors.has_key?("original_url")),
+        "      cs.validate_url(:homepage)",
+        "      cs.unique_constraint(:original_url)",
+      ].join('\n'))
+      form = read.call("app/views/links/form.cr")
+      form.should contain(%(input type: "url", id: id, name: "original_url", required: true))
+      form.should contain(%(input type: "url", id: id, name: "homepage", aria_describedby))
+      spec = read.call("spec/requests/links_spec.cr")
+      spec.should contain(%("original_url" => "https://example.com/original_url?first=1&second=2"))
+      spec.should contain(%("homepage" => "https://example.org/homepage?first=2&second=3"))
+      spec.should contain(%(blank.errors["original_url"]?.should eq(["can't be blank"])))
+      ["https://example.com/original_url?first=1&second=2", "https://example.org/homepage?first=2&second=3"].each do |sample|
+        Caramel::ExternalURL.valid?(sample).should be_true
+        Caramel::HTML.escape(sample).should_not eq(sample)
+      end
     end
   end
 

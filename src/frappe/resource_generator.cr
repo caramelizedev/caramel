@@ -24,7 +24,7 @@ module Caramel::Frappe
       return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
     ]
-    MODIFIERS = %w[server unique]
+    MODIFIERS = %w[server unique url]
     getter name : String
     getter kind : String
     getter? nullable : Bool
@@ -32,22 +32,31 @@ module Caramel::Frappe
     getter? server : Bool
     # Backed by a unique index; the changeset reports a duplicate as an error on the field.
     getter? unique : Bool
+    # An absolute http or https URL: validated with cs.validate_url and entered in a URL input.
+    getter? url : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
       modifiers = pieces[2..]? || [] of String
       unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? && modifiers.uniq.size == modifiers.size
-        raise Error.new("Use field:type, optionally followed by :server and :unique, such as title:string, rating:float64? or short_code:string:server:unique")
+        raise Error.new("Use field:type, optionally followed by :server, :unique or :url, such as title:string, rating:float64?, short_code:string:server:unique or original_url:string:url")
       end
       @server = modifiers.includes?("server")
       @unique = modifiers.includes?("unique")
+      @url = modifiers.includes?("url")
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
       unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && RESERVED.none?(@name) && TYPES.has_key?(@kind)
         raise Error.new("Invalid or reserved resource field: #{declaration}")
       end
+      check_modifiers(declaration)
+    end
+
+    private def check_modifiers(declaration : String) : Nil
       raise Error.new("A bool field holds only two values, so it cannot be :unique: #{declaration}") if @unique && @kind == "bool"
+      raise Error.new("Only a string field holds a URL: #{declaration}") if @url && @kind != "string"
+      raise Error.new("A :server field starts with a random token, not a URL, so it cannot be :url: #{declaration}") if @url && @server
     end
 
     def type : String
@@ -63,6 +72,8 @@ module Caramel::Frappe
     end
 
     def sample : String
+      # `&` must be escaped in HTML, so the request spec still proves escaping.
+      return "https://example.com/#{@name}?first=1&second=2" if @url
       case @kind
       when "string"  then "Example <#{@name}>"
       when "int32"   then "12"
@@ -74,6 +85,7 @@ module Caramel::Frappe
     end
 
     def updated_sample : String
+      return "https://example.org/#{@name}?first=2&second=3" if @url
       case @kind
       when "string"  then "Updated <#{@name}>"
       when "int32"   then "24"
@@ -146,7 +158,7 @@ module Caramel::Frappe
         "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => (required_text.map { |field| "      cs.validate_presence(:#{field.name})" } + uniques.map { |field| "      cs.unique_constraint(:#{field.name})" }).join('\n'),
+        "@@VALIDATIONS@@" => (required_text.map { |field| "      cs.validate_presence(:#{field.name})" } + fields.select(&.url?).map { |field| validate_url(field) } + uniques.map { |field| "      cs.unique_constraint(:#{field.name})" }).join('\n'),
         "@@INDEXES@@" => uniques.join { |field| "\n      index :#{field.name}, unique: true" },
         "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
@@ -253,6 +265,12 @@ module Caramel::Frappe
       %(      App::#{model}.create(#{values}).errors[#{unique.name.to_json}]?.should eq(["has already been taken"]))
     end
 
+    # A blank required URL reports only that it is blank.
+    private def validate_url(field : ResourceField) : String
+      line = "      cs.validate_url(:#{field.name})"
+      field.nullable? ? line : "#{line} unless cs.errors.has_key?(#{field.name.to_json})"
+    end
+
     # The field's control, inside the generated form view's `labelled` helper.
     private def form_field(field : ResourceField) : String
       name = field.name.to_json
@@ -262,7 +280,7 @@ module Caramel::Frappe
                   choices = options.map { |value| "            option(value: #{value.to_json}, selected: @values[#{name}]? == #{value.to_json}) { #{(value.empty? ? "Unspecified" : value.capitalize).to_json} }" }
                   "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
                 else
-                  type = %w[int32 int64 float64].includes?(field.kind) ? "number" : "text"
+                  type = %w[int32 int64 float64].includes?(field.kind) ? "number" : (field.url? ? "url" : "text")
                   extra = field.kind == "float64" ? ", step: \"any\"" : ""
                   extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
                   "          input type: \"#{type}\", #{attributes}#{extra}, value: @values[#{name}]? || \"\""

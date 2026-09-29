@@ -104,7 +104,7 @@ module Caramel::Frappe
       Command.new("format", "Format the application's Crystal files with the pinned compiler's formatter."),
       Command.new("routes [FILTER]", "List routes with their contracts; FILTER keeps routes whose method, path or action contains it (any case)."),
       Command.new("expand FILE:LINE:COL", "Print the plain Crystal that the macro call at FILE:LINE:COL expands to."),
-      Command.new("make resource NAME FIELD:TYPE... [--plural=NAME]", "Generate a SugarORM schema, migration, actions, views, routes and specs; FIELD:TYPE:server marks a field the server sets, kept out of forms and contracts, and :unique adds a unique index and changeset constraint."),
+      Command.new("make resource NAME FIELD:TYPE... [--plural=NAME]", "Generate a SugarORM schema, migration, actions, views, routes and specs; FIELD:TYPE:server marks a field the server sets, kept out of forms and contracts, :unique adds a unique index and changeset constraint, and :url validates an http or https URL entered in a URL input."),
       Command.new("migrate [--dev-override] #{MODE}", "Lint and apply pending migrations, then report schema drift read-only."),
       Command.new("seed", "Load db/seeds.cr into the development database."),
       Command.new("corretto [SPEC_PATHS...] [--concurrency=1..#{Latte::Postgres::MAX_TEST_WORKERS}]", "Run specs in isolated Latte test databases with synchronous queue drains."),
