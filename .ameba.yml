@@ -181,7 +181,6 @@ Layout/LineLength:
     - "src/frappe/cli.cr"
     - "src/frappe/commands.cr"
     - "src/frappe/dev_command.cr"
-    - "src/frappe/dev_gateway.cr"
     - "src/frappe/dev_retirement.cr"
     - "src/frappe/dev_session.cr"
     - "src/frappe/diagnostics.cr"

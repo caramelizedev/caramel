@@ -13,6 +13,24 @@ module Caramel::Frappe
     include HTTP::Handler
     COOKIE = "__Host-caramel_dev"
     CLIENT = {{ read_file("#{__DIR__}/dev_client.js") }}
+
+    # The diagnostic page's stylesheet.
+    STYLE = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;" \
+            "background:#faf8f3;color:#332d27}h1{font:44px Georgia}" \
+            "pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:24px;" \
+            "background:#fff;border:1px solid #e5dfd4;border-radius:8px}" \
+            "p{color:#786f65}"
+
+    CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; " \
+                              "style-src 'self'; base-uri 'none'; " \
+                              "frame-ancestors 'none'; object-src 'none'"
+
+    # Connection-level headers a proxy must not pass on.
+    HOP_HEADERS = %w[
+      Connection Keep-Alive Proxy-Authenticate Proxy-Authorization
+      TE Trailer Transfer-Encoding Upgrade
+    ]
+
     getter generation : Int64 = 0_i64
     getter owner_token : String = Random::Secure.hex(32)
     getter state : String = "building"
@@ -23,7 +41,8 @@ module Caramel::Frappe
 
     def initialize(@origin : String, @secrets : Array(String) = [] of String)
       uri = URI.parse(@origin)
-      raise Error.new("Development requires an HTTPS origin") unless uri.scheme == "https" && uri.host && uri.path.empty?
+      https = uri.scheme == "https" && uri.host && uri.path.empty?
+      raise Error.new("Development requires an HTTPS origin") unless https
       @authority = uri.authority || raise Error.new("Development requires an HTTPS origin")
     end
 
@@ -51,7 +70,9 @@ module Caramel::Frappe
     end
 
     def handle(request : HTTP::Request) : Caramel::Response
-      return secure(Caramel::Response.new(421, "Unknown project host")) unless request.headers["Host"]? == @authority
+      unless request.headers["Host"]? == @authority
+        return secure(Caramel::Response.new(421, "Unknown project host"))
+      end
       if request.path.starts_with?("/__caramel/dev/")
         return endpoint(request)
       end
@@ -79,34 +100,64 @@ module Caramel::Frappe
 
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per development endpoint
     private def endpoint(request : HTTP::Request) : Caramel::Response
-      return secure(Caramel::Response.new(405, "Method not allowed")) unless request.method == "GET"
+      unless request.method == "GET"
+        return secure(Caramel::Response.new(405, "Method not allowed"))
+      end
       case request.path
       when "/__caramel/dev/client.js"
-        secure(Caramel::Response.new(200, CLIENT, HTTP::Headers{"Content-Type" => "text/javascript; charset=utf-8"}))
+        ok(CLIENT, "text/javascript; charset=utf-8")
       when "/__caramel/dev/style.css"
-        css = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;background:#faf8f3;color:#332d27}h1{font:44px Georgia}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:24px;background:#fff;border:1px solid #e5dfd4;border-radius:8px}p{color:#786f65}"
-        secure(Caramel::Response.new(200, css, HTTP::Headers{"Content-Type" => "text/css; charset=utf-8"}))
+        ok(STYLE, "text/css; charset=utf-8")
       when "/__caramel/dev/status"
         if token = request.headers["X-Caramel-Owner-Token"]?
-          if token.bytesize == @owner_token.bytesize && Crypto::Subtle.constant_time_compare(token, @owner_token)
-            return secure(Caramel::Response.new(200, {generation: @generation, state: @state}.to_json, HTTP::Headers{"Content-Type" => "application/json"}))
+          if token.bytesize == @owner_token.bytesize &&
+             Crypto::Subtle.constant_time_compare(token, @owner_token)
+            return status_response
           end
         end
         cookie = request.cookies[COOKIE]?.try(&.value)
         origin = request.headers["Origin"]?
-        unless cookie && cookie.bytesize == @token.bytesize && Crypto::Subtle.constant_time_compare(cookie, @token) && request.headers["X-Caramel-Dev"]? == "1" && (origin.nil? || origin == @origin)
-          return secure(Caramel::Response.new(403, "Refresh requires this project's development session"))
+        unless cookie && cookie.bytesize == @token.bytesize &&
+               Crypto::Subtle.constant_time_compare(cookie, @token) &&
+               request.headers["X-Caramel-Dev"]? == "1" &&
+               (origin.nil? || origin == @origin)
+          refused = "Refresh requires this project's development session"
+          return secure(Caramel::Response.new(403, refused))
         end
-        secure(Caramel::Response.new(200, {generation: @generation, state: @state}.to_json, HTTP::Headers{"Content-Type" => "application/json"}))
+        status_response
       else
         secure(Caramel::Response.new(404, "Not found"))
       end
     end
 
-    private def diagnostic(request : HTTP::Request, generation : Int64 = @generation) : Caramel::Response
-      title = @state == "building" ? "Building your application" : "Your application needs attention"
-      body = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>#{title} · Frappé</title><link rel=\"stylesheet\" href=\"/__caramel/dev/style.css\"></head><body><main><p>FRAPPÉ DEVELOPMENT</p><h1>#{title}</h1><pre>#{Caramel::HTML.escape(@message)}</pre><p>Save your changes to rebuild. This page refreshes when the application is ready.</p></main>#{script(generation)}</body></html>"
-      response = secure(Caramel::Response.new(503, body, HTTP::Headers{"Content-Type" => "text/html; charset=utf-8"}))
+    private def ok(body : String, content_type : String) : Caramel::Response
+      headers = HTTP::Headers{"Content-Type" => content_type}
+      secure(Caramel::Response.new(200, body, headers))
+    end
+
+    # The generation and state the refresh script polls for.
+    private def status_response : Caramel::Response
+      ok({generation: @generation, state: @state}.to_json, "application/json")
+    end
+
+    private def diagnostic(request : HTTP::Request,
+                           generation : Int64 = @generation) : Caramel::Response
+      title = if @state == "building"
+                "Building your application"
+              else
+                "Your application needs attention"
+              end
+      body = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" \
+             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" \
+             "<title>#{title} · Frappé</title>" \
+             "<link rel=\"stylesheet\" href=\"/__caramel/dev/style.css\"></head>" \
+             "<body><main><p>FRAPPÉ DEVELOPMENT</p><h1>#{title}</h1>" \
+             "<pre>#{Caramel::HTML.escape(@message)}</pre>" \
+             "<p>Save your changes to rebuild. " \
+             "This page refreshes when the application is ready.</p></main>" \
+             "#{script(generation)}</body></html>"
+      headers = HTTP::Headers{"Content-Type" => "text/html; charset=utf-8"}
+      response = secure(Caramel::Response.new(503, body, headers))
       add_cookie(response)
       response
     end
@@ -128,7 +179,9 @@ module Caramel::Frappe
     # response is never consumed. Open streams are not tied to the refresh
     # generation: they stay on the process that accepted them.
     # ameba:disable Metrics/CyclomaticComplexity -- the proxy's streaming and failure paths
-    private def forward(request : HTTP::Request, path : String, generation : Int64) : Caramel::Response
+    private def forward(request : HTTP::Request,
+                        path : String,
+                        generation : Int64) : Caramel::Response
       # ameba:disable Lint/UselessAssign -- read by the ensure below when forwarding fails early
       spawned = false
       socket = Socket.unix
@@ -182,8 +235,8 @@ module Caramel::Frappe
             socket.close
           else
             body = upstream.body_io?.try(&.gets_to_end) || ""
-            if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
-              body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
+            if full_page?(request, returned)
+              body = with_script(body, generation)
               returned.delete("ETag")
               returned["Cache-Control"] = "no-store"
             end
@@ -204,7 +257,8 @@ module Caramel::Frappe
       result
     rescue IO::Error
       if generation == @generation && @state == "ready"
-        failed("The application stopped responding. Check the terminal output; Frappé will retry after your next source change.")
+        failed("The application stopped responding. Check the terminal output; " \
+               "Frappé will retry after your next source change.")
         diagnostic(request)
       else
         diagnostic(request, generation)
@@ -217,32 +271,51 @@ module Caramel::Frappe
       request.method == "HEAD" || status < 200 || status == 204 || status == 304
     end
 
+    # A whole, uncompressed HTML page, which gets the refresh script.
+    private def full_page?(request : HTTP::Request, headers : HTTP::Headers) : Bool
+      return false unless headers["Content-Type"]?.try(&.starts_with?("text/html"))
+      return false if headers.has_key?("Content-Encoding")
+      request.headers["HX-Request-Type"]? != "partial"
+    end
+
+    # *body* with the refresh script before its `</body>`, or at its end.
+    private def with_script(body : String, generation : Int64) : String
+      return body + script(generation) unless body.includes?("</body>")
+      body.sub("</body>", script(generation) + "</body>")
+    end
+
     private def script(generation : Int64) : String
       "<script src=\"/__caramel/dev/client.js\" data-generation=\"#{generation}\" defer></script>"
     end
 
     private def add_cookie(response : Caramel::Response) : Nil
-      response.headers.add("Set-Cookie", HTTP::Cookie.new(COOKIE, @token, path: "/", secure: true, http_only: true, samesite: HTTP::Cookie::SameSite::Strict).to_set_cookie_header)
+      cookie = HTTP::Cookie.new(COOKIE, @token,
+        path: "/",
+        secure: true,
+        http_only: true,
+        samesite: HTTP::Cookie::SameSite::Strict)
+      response.headers.add("Set-Cookie", cookie.to_set_cookie_header)
     end
 
     private def secure(response : Caramel::Response) : Caramel::Response
       response.headers["Cache-Control"] = "no-store"
       response.headers["X-Content-Type-Options"] = "nosniff"
-      response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
+      response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
       response.headers["Referrer-Policy"] = "same-origin"
       response
     end
 
     private def redact(message : String) : String
       result = message.scrub
-      @secrets.reject(&.empty?).sort_by!(&.bytesize).reverse_each { |secret| result = result.gsub(secret, "[redacted]") }
+      secrets = @secrets.reject(&.empty?).sort_by!(&.bytesize)
+      secrets.reverse_each { |secret| result = result.gsub(secret, "[redacted]") }
       result = result.gsub(/postgres(?:ql)?:\/\/[^\s"'<>]+/, "[database URL redacted]")
       result.byte_slice(0, Math.min(result.bytesize, 32_768)).scrub
     end
 
     private def remove_hop_headers(headers : HTTP::Headers) : Nil
       headers["Connection"]?.try(&.split(',').each { |name| headers.delete(name.strip) })
-      %w[Connection Keep-Alive Proxy-Authenticate Proxy-Authorization TE Trailer Transfer-Encoding Upgrade].each { |name| headers.delete(name) }
+      HOP_HEADERS.each { |name| headers.delete(name) }
     end
   end
 end
