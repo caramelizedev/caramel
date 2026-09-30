@@ -3,7 +3,9 @@ require "file_utils"
 require "../../src/latte/watcher"
 
 private def with_tree(&)
-  root = File.realpath(File.tempname("caramel-watcher-", dir: "/private/tmp").tap { |path| Dir.mkdir(path) })
+  created = File.tempname("caramel-watcher-", dir: "/private/tmp")
+  Dir.mkdir(created)
+  root = File.realpath(created)
   FileUtils.mkdir_p(File.join(root, "src/models"))
   File.write(File.join(root, "src/app.cr"), "puts 1\n")
   File.write(File.join(root, "src/models/book.cr"), "class Book; end\n")
@@ -83,9 +85,10 @@ describe Caramel::Latte::Watcher do
 
       FileUtils.mkdir_p(File.join(root, "vendor/caramel/src"))
       reports!(watcher)
-      File.write(File.join(root, "vendor/caramel/src/caramel.cr"), "module Caramel; end\n")
+      framework = File.join(root, "vendor/caramel/src/caramel.cr")
+      File.write(framework, "module Caramel; end\n")
       reports!(watcher)
-      File.write(File.join(root, "vendor/caramel/src/caramel.cr"), "module Caramel; VERSION = 1; end\n")
+      File.write(framework, "module Caramel; VERSION = 1; end\n")
       reports!(watcher)
 
       FileUtils.rm_rf(File.join(root, "src/deep"))

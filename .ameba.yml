@@ -131,7 +131,6 @@ Layout/LineLength:
     - "spec/latte/registry_spec.cr"
     - "spec/latte/server_spec.cr"
     - "spec/latte/toolchain_spec.cr"
-    - "spec/latte/watcher_spec.cr"
     - "spec/latte_integration/postgres_spec.cr"
     - "spec/latte_integration/supervisor_spec.cr"
     - "spec/native/latte_tools_installer_spec.cr"
