@@ -17,25 +17,31 @@ module Caramel::Checks::All
 
   # Performance measurements, not pass/fail checks.
   EXEMPT = %w[all compiler-profile]
-  SPECS  = %w[spec/caramel spec/frappe spec/latte spec/sugar_orm spec/cold_brew spec/corretto spec/release]
+  SPECS  = %w[
+    spec/caramel spec/frappe spec/latte spec/sugar_orm
+    spec/cold_brew spec/corretto spec/release
+  ]
+  USAGE = "usage: scripts/check all [--except NAME ...]"
 
   def main(args : Array(String)) : Int32
     skipped = [] of String
     rest = args.dup
     while flag = rest.shift?
-      Checks.fail("usage: scripts/check all [--except NAME ...]") unless flag == "--except" && (skip = rest.shift?)
+      Checks.fail(USAGE) unless flag == "--except" && (skip = rest.shift?)
       skipped << skip
     end
     unknown = skipped - targets.map(&.first)
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
     prune_program_caches
 
+    environment = File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr")
     runs = [
       # The linter, the longest build, compiles alongside the rest: two Crystal
       # builds at a time (CONTRIBUTING.md).
       {"build", [script("build-lint"), "&",
                  script("build-frappe"), "&&", script("build-latte"), "&&",
-                 script("crystal"), "build", File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr"), "-o", Checks::PREBUILT_ENVIRONMENT]},
+                 script("crystal"), "build", environment,
+                 "-o", Checks::PREBUILT_ENVIRONMENT]},
       {"spec", [script("crystal"), "spec"] + SPECS},
     ] + targets.reject { |name, _| skipped.includes?(name) }
     failed = [] of String
@@ -83,8 +89,10 @@ module Caramel::Checks::All
   # Every check in scripts/checks. frappe-project runs once, with --dev: that
   # run executes every step of the plain flow as well as its dev phase.
   private def targets : Array({String, Array(String)})
-    names = Dir.glob(File.join(Checks::REPO, "scripts/checks/*.cr")).map { |path| File.basename(path, ".cr").tr("_", "-") }.sort!
-    checks = (names - EXEMPT - ["frappe-project"]).map { |name| {name, [script("check"), name]} }
+    paths = Dir.glob(File.join(Checks::REPO, "scripts/checks/*.cr"))
+    names = paths.map { |path| File.basename(path, ".cr").tr("_", "-") }.sort!
+    plain = names - EXEMPT - ["frappe-project"]
+    checks = plain.map { |name| {name, [script("check"), name]} }
     checks << {"frappe-project-dev", [script("check"), "frappe-project", "--dev"]}
     checks
   end
@@ -105,12 +113,16 @@ module Caramel::Checks::All
         finished.send({index, ex})
       end
     end
-    results = Array.new(chains.size) { finished.receive }.sort_by!(&.[0]).map do |(_, outcome)|
+    received = Array.new(chains.size) { finished.receive }.sort_by!(&.[0])
+    results = received.map do |(_, outcome)|
       raise outcome if outcome.is_a?(Exception)
       outcome
     end
     failed = results.find { |result| !result.success? }
-    Caramel::Latte::ProcessResult.new((failed || results.last).status, results.map(&.stdout).join, results.map(&.stderr).join, results.any?(&.timed_out?))
+    status = (failed || results.last).status
+    stdout = results.map(&.stdout).join
+    stderr = results.map(&.stderr).join
+    Caramel::Latte::ProcessResult.new(status, stdout, stderr, results.any?(&.timed_out?))
   end
 
   # A `&&` chain runs its commands in order and stops at the first failure.

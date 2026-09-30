@@ -17,7 +17,8 @@ module Ameba::Rule::Caramel
       prefixes %w[Abstract]
     end
 
-    MSG = "`%s` is a service noun; put the verb on its subject instead (RFC-0008 §2.1), e.g. a method on the model, a changeset or a job"
+    MSG = "`%s` is a service noun; put the verb on its subject instead " \
+          "(RFC-0008 §2.1), e.g. a method on the model, a changeset or a job"
 
     def test(source, node : Crystal::ClassDef | Crystal::ModuleDef)
       name = node.name.names.last
@@ -28,7 +29,13 @@ module Ameba::Rule::Caramel
 
     private def noun?(name : String) : Bool
       suffixes.any? { |suffix| name != suffix && name.ends_with?(suffix) } ||
-        prefixes.any? { |prefix| name.size > prefix.size && name.starts_with?(prefix) && name[prefix.size].uppercase? }
+        prefixes.any? { |prefix| prefixed?(name, prefix) }
+    end
+
+    # Whether *name* is *prefix* followed by a capitalized word, as in
+    # `AbstractDataTransformerFactory`.
+    private def prefixed?(name : String, prefix : String) : Bool
+      name.size > prefix.size && name.starts_with?(prefix) && name[prefix.size].uppercase?
     end
   end
 end

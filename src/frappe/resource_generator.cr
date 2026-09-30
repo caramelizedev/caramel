@@ -8,7 +8,14 @@ require "file_utils"
 
 module Caramel::Frappe
   struct ResourceField
-    TYPES = {"string" => {"String", "text"}, "int32" => {"Int32", "integer"}, "int64" => {"Int64", "bigint"}, "bool" => {"Bool", "boolean"}, "float64" => {"Float64", "double precision"}, "time" => {"Time", "timestamp with time zone"}}
+    TYPES = {
+      "string"  => {"String", "text"},
+      "int32"   => {"Int32", "integer"},
+      "int64"   => {"Int64", "bigint"},
+      "bool"    => {"Bool", "boolean"},
+      "float64" => {"Float64", "double precision"},
+      "time"    => {"Time", "timestamp with time zone"},
+    }
     # A field becomes a schema getter, a changeset param, a facade keyword and
     # a request contract getter, so it must not collide with system columns,
     # the SugarORM schema DSL, facade or changeset API, the request contract
@@ -19,9 +26,12 @@ module Caramel::Frappe
       query with create update delete db from_row to_json record
       param changes errors valid saved insert validate add_error error_messages unique_constraint
       values contract route_error to_mrdp parse
-      initialize class self nil true false end def module require property getter setter abstract private protected macro
-      new to_s inspect hash clone dup object_id if else elsif unless until while for do then case when in begin rescue ensure
-      return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
+      initialize class self nil true false end def module require
+      property getter setter abstract private protected macro
+      new to_s inspect hash clone dup object_id
+      if else elsif unless until while for do then case when in begin rescue ensure
+      return break next yield include extend enum struct alias lib fun out
+      as is_a responds_to sizeof typeof instance_sizeof
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
     ]
     MODIFIERS = %w[server unique url]
@@ -41,7 +51,8 @@ module Caramel::Frappe
     def initialize(declaration : String)
       pieces = declaration.split(':')
       modifiers = pieces[2..]? || [] of String
-      unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? && modifiers.uniq.size == modifiers.size
+      unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? &&
+             modifiers.uniq.size == modifiers.size
         raise Error.new(USAGE)
       end
       @server = modifiers.includes?("server")
@@ -50,7 +61,8 @@ module Caramel::Frappe
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
-      unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && RESERVED.none?(@name) && TYPES.has_key?(@kind)
+      unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 &&
+             RESERVED.none?(@name) && TYPES.has_key?(@kind)
         raise Error.new("Invalid or reserved resource field: #{declaration}")
       end
       check_modifiers(declaration)
@@ -167,35 +179,53 @@ module Caramel::Frappe
     # `# frappe:unless a,b` and `# frappe:end` when none is; `# frappe:else`
     # turns a block over. Blocks nest, and the marker lines are dropped.
     MARKER = /\A\s*# frappe:(only|unless|else|end)(?: ([a-z,]+))?\z/
+    # Class names the application and the framework already use.
+    RESERVED_NAMES = %w[
+      App ApplicationAction ApplicationView Home Health Caramel SugarORM
+      Object String Time Int32 Int64 Bool Float64
+    ]
+    # Plurals that would take a path or directory the application already has.
+    RESERVED_PLURALS = %w[assets health home new edit views]
 
     def initialize(@framework_root : String)
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
+    # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing
     def generate(project : Project, name : String, declarations : Array(String), *,
                  plural : String? = nil,
                  version : Int64? = nil,
                  only : String? = nil) : Array(String)
-      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction ApplicationView Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
-        raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
+      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 &&
+             RESERVED_NAMES.none?(name)
+        raise Error.new("Use a singular class name such as Book; " \
+                        "application and framework names are reserved")
       end
       singular = name.underscore
       collection = plural || pluralize(singular)
-      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit views].none?(collection)
+      unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 &&
+             collection != singular && RESERVED_PLURALS.none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
       end
       actions = selected_actions(only)
       fields = declarations.map { |item| ResourceField.new(item) }
-      raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
+      if fields.empty? || fields.map(&.name).uniq!.size != fields.size
+        raise Error.new("Declare at least one field and use each name only once")
+      end
       inputs = fields.reject(&.server?)
-      raise Error.new("Leave at least one field without :server; the form needs one") if inputs.empty?
+      if inputs.empty?
+        raise Error.new("Leave at least one field without :server; the form needs one")
+      end
       uniques = fields.select(&.unique?)
       if long = uniques.find { |field| index_name(collection, field).bytesize > 63 }
-        raise Error.new("The unique index #{index_name(collection, long)} would exceed PostgreSQL's 63-byte names; shorten the field or the plural")
+        raise Error.new("The unique index #{index_name(collection, long)} " \
+                        "would exceed PostgreSQL's 63-byte names; " \
+                        "shorten the field or the plural")
       end
-      used_versions = Dir.glob(File.join(project.root, "db/migrations/*.cr")).compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
+      used_versions = migration_versions(project.root)
       migration_version = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
-      raise Error.new("Migration version must be positive and unused") if migration_version <= 0 || (version && used_versions.includes?(migration_version))
+      if migration_version <= 0 || (version && used_versions.includes?(migration_version))
+        raise Error.new("Migration version must be positive and unused")
+      end
       while used_versions.includes?(migration_version)
         migration_version += 1
       end
@@ -203,28 +233,31 @@ module Caramel::Frappe
       required_inputs = required_text.reject(&.server?)
       changeset_checks = assert_changeset(name, fields, required_inputs, actions)
       tokens = {
-        "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
-        "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
-        "@@COLLECTION_LABEL@@" => collection.tr("_", " ").capitalize,
-        "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
-        "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
-        "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => validations(required_text, fields),
-        "@@INDEXES@@" => uniques.join { |field| "\n      index :#{field.name}, unique: true" },
-        "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
-        "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
-        "@@VALUES@@" => inputs.map { |field| "#{field.name.to_json} => record.#{field.name}.try(&.#{field.kind == "time" ? "to_rfc3339" : "to_s"}) || \"\"" }.join(", "),
-        "@@FORM_FIELDS@@" => inputs.map { |field| form_field(field) }.join('\n'),
-        "@@TABLE_HEADERS@@" => fields.map { |field| "              th(scope: \"col\") { #{field.label.to_json} }" }.join('\n'),
-        "@@TABLE_CELLS@@" => fields.map { |field| "                td { record.#{field.name} }" }.join('\n'),
-        "@@SHOW_FIELDS@@" => fields.map { |field| "          dt { #{field.label.to_json} }\n          dd { @record.#{field.name} }" }.join('\n'),
-        "@@SAMPLE_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", "),
-        "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
-        "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
-        "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_CHANGESET@@" => changeset_checks,
-        "@@SPEC_TITLE@@" => spec_title(actions),
-        "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
+        "@@MODEL@@"             => name,
+        "@@SINGULAR@@"          => singular,
+        "@@PLURAL@@"            => collection,
+        "@@COLLECTION@@"        => collection.camelcase,
+        "@@LABEL@@"             => name.underscore.tr("_", " "),
+        "@@COLLECTION_LABEL@@"  => collection.tr("_", " ").capitalize,
+        "@@MODEL_FIELDS@@"      => field_declarations(fields, "      field"),
+        "@@CONTRACT_FIELDS@@"   => field_declarations(inputs, "      field"),
+        "@@PARAMS@@"            => field_declarations(fields, "    param"),
+        "@@VALIDATIONS@@"       => validations(required_text, fields),
+        "@@INDEXES@@"           => unique_indexes(uniques),
+        "@@CREATE_ATTRIBUTES@@" => create_attributes(fields),
+        "@@UPDATE_ATTRIBUTES@@" => update_attributes(inputs),
+        "@@VALUES@@"            => form_values(inputs),
+        "@@FORM_FIELDS@@"       => inputs.map { |field| form_field(field) }.join('\n'),
+        "@@TABLE_HEADERS@@"     => table_headers(fields),
+        "@@TABLE_CELLS@@"       => table_cells(fields),
+        "@@SHOW_FIELDS@@"       => show_fields(fields),
+        "@@SAMPLE_FIELDS@@"     => sample_fields(inputs),
+        "@@SAMPLE_CONDITIONS@@" => sample_conditions(inputs),
+        "@@UPDATED_FIELDS@@"    => updated_fields(inputs),
+        "@@ASSERT_FIELDS@@"     => assert_fields(inputs),
+        "@@ASSERT_CHANGESET@@"  => changeset_checks,
+        "@@SPEC_TITLE@@"        => spec_title(actions),
+        "@@ASSERT_ESCAPING@@"   => assert_escaping(inputs),
       }
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")
@@ -233,13 +266,18 @@ module Caramel::Frappe
         relative = Path[path].relative_to(template_root).to_s
         next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
         content = select_lines(File.read(path), actions)
-        tokens.each { |key, value| relative = relative.gsub(key, value); content = content.gsub(key, value) }
+        tokens.each do |key, value|
+          relative = relative.gsub(key, value)
+          content = content.gsub(key, value)
+        end
         content = without_unread_row(content) if relative.starts_with?("spec/requests/")
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
-      migration = SugarORM::Migration.new(migration_version, "create_#{collection}", create_table(collection, fields))
-      files["db/migrations/#{migration.version}_#{migration.name}.cr"] = SchemaDiff.source(migration)
+      ddl = create_table(collection, fields)
+      migration = SugarORM::Migration.new(migration_version, "create_#{collection}", ddl)
+      migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
+      files[migration_path] = SchemaDiff.source(migration)
       originals = {} of String => String
       namespace = "App::#{collection.camelcase}"
       routes = {
@@ -251,13 +289,22 @@ module Caramel::Frappe
         "update"  => %(    patch "/#{collection}/:id", #{namespace}::Update),
         "destroy" => %(    delete "/#{collection}/:id", #{namespace}::Destroy),
       }.select { |action, _| actions.includes?(action) }.values
-      {"config/routes.cr" => {"    # Frappé resource routes", routes},
-       "config/paths.cr"  => {"  # Frappé resource paths", ["  Caramel.resource_paths :#{collection}, :#{singular}"]}}.each do |relative, insertion|
+      path_helpers = ["  Caramel.resource_paths :#{collection}, :#{singular}"]
+      insertions = {
+        "config/routes.cr" => {"    # Frappé resource routes", routes},
+        "config/paths.cr"  => {"  # Frappé resource paths", path_helpers},
+      }
+      insertions.each do |relative, insertion|
         validate_path(project.root, relative)
         original = File.read(File.join(project.root, relative))
         marker, lines = insertion
-        raise Error.new("Expected exactly one generation marker in #{relative}; source was preserved") unless original.lines.count(marker) == 1
-        raise Error.new("Resource route or helper already exists") if lines.any? { |line| original.includes?(line) }
+        unless original.lines.count(marker) == 1
+          raise Error.new("Expected exactly one generation marker in #{relative}; " \
+                          "source was preserved")
+        end
+        if lines.any? { |line| original.includes?(line) }
+          raise Error.new("Resource route or helper already exists")
+        end
         originals[relative] = original
         files[relative] = original.sub(marker, "#{lines.join('\n')}\n#{marker}")
       end
@@ -285,6 +332,100 @@ module Caramel::Frappe
                         "add new and update to --only")
       end
       ACTIONS & chosen
+    end
+
+    # The versions of the project's existing migrations.
+    private def migration_versions(root : String) : Array(Int64)
+      paths = Dir.glob(File.join(root, "db/migrations/*.cr"))
+      paths.compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
+    end
+
+    # One line per field, such as `      field title : String` for a *keyword* of
+    # `      field`.
+    private def field_declarations(fields : Array(ResourceField),
+                                   keyword : String) : String
+      fields.map { |field| "#{keyword} #{field.name} : #{field.type}" }.join('\n')
+    end
+
+    private def unique_indexes(uniques : Array(ResourceField)) : String
+      uniques.join { |field| "\n      index :#{field.name}, unique: true" }
+    end
+
+    # Each input from the contract, and each required :server field's
+    # starting value.
+    private def create_attributes(fields : Array(ResourceField)) : String
+      attributes = fields.compact_map do |field|
+        next "#{field.name}: contract.#{field.name}" unless field.server?
+        "#{field.name}: #{field.starting_value}" unless field.nullable?
+      end
+      attributes.join(", ")
+    end
+
+    private def update_attributes(inputs : Array(ResourceField)) : String
+      inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", ")
+    end
+
+    # The form view's values: each input as the text its control shows.
+    private def form_values(inputs : Array(ResourceField)) : String
+      values = inputs.map do |field|
+        text = field.kind == "time" ? "to_rfc3339" : "to_s"
+        "#{field.name.to_json} => record.#{field.name}.try(&.#{text}) || \"\""
+      end
+      values.join(", ")
+    end
+
+    private def table_headers(fields : Array(ResourceField)) : String
+      headers = fields.map do |field|
+        "              th(scope: \"col\") { #{field.label.to_json} }"
+      end
+      headers.join('\n')
+    end
+
+    private def table_cells(fields : Array(ResourceField)) : String
+      fields.map { |field| "                td { record.#{field.name} }" }.join('\n')
+    end
+
+    private def show_fields(fields : Array(ResourceField)) : String
+      terms = fields.map do |field|
+        "          dt { #{field.label.to_json} }\n          dd { @record.#{field.name} }"
+      end
+      terms.join('\n')
+    end
+
+    private def sample_fields(inputs : Array(ResourceField)) : String
+      inputs.map { |field| "#{field.name.to_json} => #{field.sample.to_json}" }.join(", ")
+    end
+
+    private def sample_conditions(inputs : Array(ResourceField)) : String
+      inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", ")
+    end
+
+    private def updated_fields(inputs : Array(ResourceField)) : String
+      updated = inputs.map do |field|
+        "#{field.name.to_json} => #{field.updated_sample.to_json}"
+      end
+      updated.join(", ")
+    end
+
+    # The request spec's checks that each input saved its updated sample.
+    private def assert_fields(inputs : Array(ResourceField)) : String
+      checks = inputs.map do |field|
+        sample = field.updated_sample.to_json
+        type = ResourceField::TYPES[field.kind][0]
+        "      persisted.#{field.name}.should eq(" \
+        "Caramel::RequestContract.convert(#{sample}, #{type}))"
+      end
+      checks.join('\n')
+    end
+
+    # The request spec's checks that each text input's sample shows escaped.
+    private def assert_escaping(inputs : Array(ResourceField)) : String
+      checks = inputs.select { |field| field.kind == "string" }.map do |field|
+        sample = field.sample.to_json
+        "      shown.body.should contain(Caramel::HTML.escape(#{sample}))\n" \
+        "      shown.body.should_not contain(#{sample})"
+      end
+      checks.join('\n')
     end
 
     # Keeps the template lines the generated actions need.
@@ -363,11 +504,27 @@ module Caramel::Frappe
     # `frappe db diff --name create_<plural>` would: id identity key, the
     # fields in order, the timestamps, then the unique indexes.
     private def create_table(table : String, fields : Array(ResourceField)) : Array(String)
-      columns = [SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)]
+      id = SugarORM::Catalog::Column.new(
+        name: "id",
+        sql_type: "bigint",
+        nullable: false,
+        default: nil,
+        primary: true,
+        identity: true)
+      columns = [id]
       columns.concat(fields.map(&.column))
-      %w[created_at updated_at].each { |stamp| columns << SugarORM::Catalog::Column.new(stamp, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
-      indexes = fields.select(&.unique?).map { |field| SugarORM::Catalog::Index.new(index_name(table, field), [field.name], unique: true) }
-      plan = SugarORM::Differ.diff([SugarORM::Catalog::Table.new(table, columns, indexes)], [] of SugarORM::Catalog::Table)
+      %w[created_at updated_at].each do |stamp|
+        columns << SugarORM::Catalog::Column.new(
+          name: stamp,
+          sql_type: "timestamp with time zone",
+          nullable: false,
+          default: "CURRENT_TIMESTAMP")
+      end
+      indexes = fields.select(&.unique?).map do |field|
+        SugarORM::Catalog::Index.new(index_name(table, field), [field.name], unique: true)
+      end
+      schema = [SugarORM::Catalog::Table.new(table, columns, indexes)]
+      plan = SugarORM::Differ.diff(schema, [] of SugarORM::Catalog::Table)
       SugarORM::DDL.statements(plan.transactional)
     end
 
@@ -382,9 +539,13 @@ module Caramel::Frappe
       return "" if fields.empty?
       blanks = fields.join(", ") { |field| "#{field.name}: \" \"" }
       String.build do |io|
-        io << "      [App::" << model << ".create(" << blanks << "), persisted.update(" << blanks << ")].each do |blank|\n"
+        io << "      [App::" << model << ".create(" << blanks << "), "
+        io << "persisted.update(" << blanks << ")].each do |blank|\n"
         io << "        blank.saved?.should be_false\n"
-        fields.each { |field| io << "        blank.errors[" << field.name.to_json << "]?.should eq([\"can't be blank\"])\n" }
+        fields.each do |field|
+          io << "        blank.errors[" << field.name.to_json
+          io << "]?.should eq([\"can't be blank\"])\n"
+        end
         io << "      end"
       end
     end
@@ -406,24 +567,48 @@ module Caramel::Frappe
                 end
         "#{field.name}: #{value}"
       end
-      %(      App::#{model}.create(#{values}).errors[#{unique.name.to_json}]?.should eq(["has already been taken"]))
+      errors = "App::#{model}.create(#{values}).errors[#{unique.name.to_json}]?"
+      %(      #{errors}.should eq(["has already been taken"]))
     end
 
     # The field's control, inside the generated form view's `labelled` helper.
     private def form_field(field : ResourceField) : String
       name = field.name.to_json
-      attributes = "id: id, name: #{name}#{field.nullable? ? "" : ", required: true"}, aria_describedby: \"\#{id}_errors\", aria_invalid: @errors.has_key?(#{name}).to_s"
+      required = field.nullable? ? "" : ", required: true"
+      attributes = "id: id, name: #{name}#{required}, " \
+                   "aria_describedby: \"\#{id}_errors\", " \
+                   "aria_invalid: @errors.has_key?(#{name}).to_s"
       control = if field.kind == "bool"
-                  options = field.nullable? ? ["", "true", "false"] : ["true", "false"]
-                  choices = options.map { |value| "            option(value: #{value.to_json}, selected: @values[#{name}]? == #{value.to_json}) { #{(value.empty? ? "Unspecified" : value.capitalize).to_json} }" }
-                  "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
+                  select_control(field, name, attributes)
                 else
-                  type = input_type(field)
-                  extra = field.kind == "float64" ? ", step: \"any\"" : ""
-                  extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
-                  "          input type: \"#{type}\", #{attributes}#{extra}, value: @values[#{name}]? || \"\""
+                  input_control(field, name, attributes)
                 end
       "        labelled #{name}, #{field.label.to_json} do |id|\n#{control}\n        end"
+    end
+
+    # A bool field's select, with an empty choice when it is nilable.
+    private def select_control(field : ResourceField,
+                               name : String,
+                               attributes : String) : String
+      options = field.nullable? ? ["", "true", "false"] : ["true", "false"]
+      choices = options.map { |value| option_tag(name, value) }
+      "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
+    end
+
+    private def option_tag(name : String, value : String) : String
+      label = (value.empty? ? "Unspecified" : value.capitalize).to_json
+      "            option(value: #{value.to_json}, " \
+      "selected: @values[#{name}]? == #{value.to_json}) { #{label} }"
+    end
+
+    private def input_control(field : ResourceField,
+                              name : String,
+                              attributes : String) : String
+      type = input_type(field)
+      extra = field.kind == "float64" ? ", step: \"any\"" : ""
+      extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
+      "          input type: \"#{type}\", #{attributes}#{extra}, " \
+      "value: @values[#{name}]? || \"\""
     end
 
     private def input_type(field : ResourceField) : String
@@ -442,7 +627,9 @@ module Caramel::Frappe
       end
     end
 
-    private def preflight(root : String, files : Hash(String, String), originals : Hash(String, String)) : Nil
+    private def preflight(root : String,
+                          files : Hash(String, String),
+                          originals : Hash(String, String)) : Nil
       # Repeat the version check while holding the publication lock: another
       # generator may have planned a different resource in the same second.
       files.each_key do |relative|
@@ -456,14 +643,18 @@ module Caramel::Frappe
         validate_path(root, relative)
         path = File.join(root, relative)
         if original = originals[relative]?
-          raise Error.new("Source changed while planning generation: #{relative}") unless File.file?(path) && File.read(path) == original
+          unless File.file?(path) && File.read(path) == original
+            raise Error.new("Source changed while planning generation: #{relative}")
+          end
         elsif File.info?(path, follow_symlinks: false)
           raise Error.new("File already exists: #{relative}; source was preserved")
         end
       end
     end
 
-    private def publish(project : Project, files : Hash(String, String), originals : Hash(String, String)) : Nil
+    private def publish(project : Project,
+                        files : Hash(String, String),
+                        originals : Hash(String, String)) : Nil
       preflight(project.root, files, originals)
       directory = Latte::StateSecurity.ensure_owned_directory(File.join(project.root, ".caramel"))
       lock_path = File.join(directory, "generation.lock")
@@ -484,7 +675,9 @@ module Caramel::Frappe
               path = File.join(project.root, relative)
               FileUtils.mkdir_p(File.dirname(path))
               if originals.has_key?(relative)
-                raise Error.new("Source changed while generating: #{relative}") unless File.read(path) == originals[relative]
+                unless File.read(path) == originals[relative]
+                  raise Error.new("Source changed while generating: #{relative}")
+                end
                 File.rename(File.join(stage, relative), path)
               else
                 File.link(File.join(stage, relative), path)

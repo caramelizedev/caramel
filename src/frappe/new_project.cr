@@ -50,7 +50,14 @@ module Caramel::Frappe
       shard_name = name.tr("-", "_")
       title = name.split('-').map(&.capitalize).join(' ')
       source = dependency
-      substitutions = {"@@NAME@@" => name, "@@SHARD@@" => shard_name, "@@TITLE@@" => title, "@@VERSION@@" => Caramel::VERSION, "@@SUFFIX@@" => suffix, "@@CARAMEL@@" => source.shard}
+      substitutions = {
+        "@@NAME@@"    => name,
+        "@@SHARD@@"   => shard_name,
+        "@@TITLE@@"   => title,
+        "@@VERSION@@" => Caramel::VERSION,
+        "@@SUFFIX@@"  => suffix,
+        "@@CARAMEL@@" => source.shard,
+      }
       result = {} of String => String
       tree(File.join(@framework_root, "templates/application")).each do |path, content|
         substitutions.each do |token, value|
@@ -60,10 +67,12 @@ module Caramel::Frappe
         result[path] = content
       end
       result["shard.lock"] = shard_lock(source)
-      result["public/assets/htmx-4.0.0.min.js"] = File.read(File.join(@framework_root, "vendor/htmx/htmx-4.0.0.min.js"))
-      result["app/assets/vendor/htmx-4.0.0.min.js"] = result["public/assets/htmx-4.0.0.min.js"]
-      result["public/assets/caramel-islands.js"] = File.read(File.join(@framework_root, "src/caramel/islands.js"))
-      result["app/assets/vendor/caramel-islands.js"] = result["public/assets/caramel-islands.js"]
+      htmx = File.read(File.join(@framework_root, "vendor/htmx/htmx-4.0.0.min.js"))
+      result["public/assets/htmx-4.0.0.min.js"] = htmx
+      result["app/assets/vendor/htmx-4.0.0.min.js"] = htmx
+      islands = File.read(File.join(@framework_root, "src/caramel/islands.js"))
+      result["public/assets/caramel-islands.js"] = islands
+      result["app/assets/vendor/caramel-islands.js"] = islands
       result["public/assets/app.css"] = result["app/assets/stylesheets/app.css"]
       result["public/assets/app.js"] = result["app/assets/javascript/app.js"]
       result
@@ -73,32 +82,43 @@ module Caramel::Frappe
     # and forks; or, from a checkout that is not exactly its clean release
     # tag, the checkout itself.
     def dependency : Dependency
+      pin = "\n    version: \"~> #{Caramel::VERSION}\""
       if repository = ENV["CARAMEL_REPOSITORY"]?
-        Dependency.new("git: #{repository.to_json}\n    version: \"~> #{Caramel::VERSION}\"", "git: #{repository.to_json}")
+        source = "git: #{repository.to_json}"
+        Dependency.new(shard: source + pin, lock: source)
       elsif released?
-        Dependency.new("github: caramelizedev/caramel\n    version: \"~> #{Caramel::VERSION}\"", "git: #{"#{Caramel::REPOSITORY}.git".to_json}")
+        release = "git: #{"#{Caramel::REPOSITORY}.git".to_json}"
+        Dependency.new(shard: "github: caramelizedev/caramel" + pin, lock: release)
       else
-        Dependency.new("path: #{@framework_root.to_json}", "path: #{@framework_root.to_json}")
+        source = "path: #{@framework_root.to_json}"
+        Dependency.new(shard: source, lock: source)
       end
     end
 
     private def released? : Bool
       return false unless File.exists?(File.join(@framework_root, ".git"))
-      tag = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "describe", "--exact-match", "--tags", "HEAD"], timeout: 10.seconds)
+      tag = git("describe", "--exact-match", "--tags", "HEAD")
       return false unless tag.success? && tag.stdout.strip == "v#{Caramel::VERSION}"
       # Untracked files, such as an app generated inside the clone, change nothing.
-      status = Latte::ProcessRunner.run(["/usr/bin/git", "-C", @framework_root, "status", "--porcelain", "--untracked-files=no"], timeout: 10.seconds)
+      status = git("status", "--porcelain", "--untracked-files=no")
       status.success? && status.stdout.empty?
+    end
+
+    private def git(*arguments : String) : Latte::ProcessResult
+      command = ["/usr/bin/git", "-C", @framework_root] + arguments.to_a
+      Latte::ProcessRunner.run(command, timeout: 10.seconds)
     end
 
     # The framework at this release, then its runtime dependencies exactly as
     # the framework locks them.
     private def shard_lock(source : Dependency) : String
       framework = YAML.parse(File.read(File.join(@framework_root, "shard.yml")))
-      development = framework["development_dependencies"]?.try(&.as_h.keys.map(&.as_s)) || [] of String
+      development_shards = framework["development_dependencies"]?
+      development = development_shards.try(&.as_h.keys.map(&.as_s)) || [] of String
       locked = YAML.parse(File.read(File.join(@framework_root, "shard.lock")))["shards"].as_h
       String.build do |io|
-        io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock << "\n    version: " << Caramel::VERSION << '\n'
+        io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock
+        io << "\n    version: " << Caramel::VERSION << '\n'
         locked.each do |name, entry|
           next if development.includes?(name.as_s)
           io << "\n  " << name.as_s << ":\n"
@@ -110,7 +130,8 @@ module Caramel::Frappe
     private def preflight_destination(path : String) : Nil
       if info = File.info?(path, follow_symlinks: false)
         unless info.directory? && Dir.children(path).empty?
-          raise Error.new("Project destination must be an empty directory; existing files were preserved")
+          raise Error.new("Project destination must be an empty directory; " \
+                          "existing files were preserved")
         end
       end
     end

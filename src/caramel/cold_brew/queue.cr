@@ -4,7 +4,12 @@ require "./hooks"
 
 module Caramel::ColdBrew
   # A job row a worker has locked for one run; `attempts` includes this run.
-  record Claim, id : Int64, enqueued_at : Time, class_name : String, payload : String, attempts : Int32
+  record Claim,
+    id : Int64,
+    enqueued_at : Time,
+    class_name : String,
+    payload : String,
+    attempts : Int32
 
   # :nodoc:
   # The SQL shared by workers and drains. Every statement runs on
@@ -35,7 +40,8 @@ module Caramel::ColdBrew
         SET locked_at = now(), locked_by = pg_backend_pid()::text, attempts = jobs.attempts + 1
         FROM selected
         WHERE jobs.id = selected.id AND jobs.enqueued_at = selected.enqueued_at
-        RETURNING jobs.id, jobs.enqueued_at, jobs.class_name, jobs.payload::text AS payload, jobs.attempts
+        RETURNING jobs.id, jobs.enqueued_at, jobs.class_name, \
+                  jobs.payload::text AS payload, jobs.attempts
         SQL
     end
 
@@ -55,7 +61,8 @@ module Caramel::ColdBrew
 
     RETRY = <<-SQL
       UPDATE caramel_jobs
-      SET run_at = now() + make_interval(secs => $3), locked_at = NULL, locked_by = NULL, last_error = $4
+      SET run_at = now() + make_interval(secs => $3), \
+          locked_at = NULL, locked_by = NULL, last_error = $4
       WHERE id = $1 AND enqueued_at = $2
       RETURNING queue, run_at
       SQL
@@ -73,7 +80,11 @@ module Caramel::ColdBrew
     RESCHEDULED = {queue: String, run_at: Time}
     FAILED      = {queue: String, failed_at: Time}
 
-    def self.push(queue : String, class_name : String, payload : String, run_at : Time?, priority : Int32) : Int64
+    def self.push(queue : String,
+                  class_name : String,
+                  payload : String,
+                  run_at : Time?,
+                  priority : Int32) : Int64
       SugarORM.sql(PUSH, queue, class_name, payload, priority, run_at, as: {id: Int64}).first[:id]
     end
 
@@ -83,11 +94,16 @@ module Caramel::ColdBrew
     end
 
     # A drain's next job: never one that already failed during this drain.
-    def self.claim(queue : String, include_scheduled : Bool, excluding failed : Array(Int64)) : Claim?
-      SugarORM.sql(include_scheduled ? DRAIN_ANY : DRAIN_DUE, queue, failed, as: CLAIMED).first?.try { |row| Claim.new(**row) }
+    def self.claim(queue : String,
+                   include_scheduled : Bool,
+                   excluding failed : Array(Int64)) : Claim?
+      sql = include_scheduled ? DRAIN_ANY : DRAIN_DUE
+      SugarORM.sql(sql, queue, failed, as: CLAIMED).first?.try { |row| Claim.new(**row) }
     end
 
-    def self.pending?(queue : String, include_scheduled : Bool, excluding failed : Array(Int64)) : Bool
+    def self.pending?(queue : String,
+                      include_scheduled : Bool,
+                      excluding failed : Array(Int64)) : Bool
       SugarORM.sql(PENDING, queue, include_scheduled, failed, as: {pending: Bool}).first[:pending]
     end
 

@@ -18,6 +18,14 @@ module Caramel
       "Bool"    => {"Bool", "boolean"},
     }
 
+    # An RFC 3339 timestamp with seconds and a zone, such as
+    # `2026-09-30T08:00:00Z` or `2026-09-30T10:00:00.5+02:00`.
+    RFC3339_TIME = /\A
+      [0-9]{4}-[0-9]{2}-[0-9]{2}
+      T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?
+      (?:Z|[+-][0-9]{2}:[0-9]{2})
+    \z/x
+
     getter errors = {} of String => Array(String)
     # Submitted text for each declared field, kept to re-render forms.
     getter values = {} of String => String
@@ -72,7 +80,7 @@ module Caramel
     end
 
     def self.convert(text : String, type : Time.class) : Time?
-      return unless text.matches?(/\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\z/)
+      return unless text.matches?(RFC3339_TIME)
       Time.parse_rfc3339(text).to_utc
     rescue Time::Format::Error | ArgumentError
       nil
@@ -90,26 +98,39 @@ module Caramel
       {% has_default = !default.is_a?(NilLiteral) %}
       # Crystal reports a raise inside a type body at the enclosing type's
       # name, so each message carries the declaration and its location.
-      {% source = "field #{decl}#{has_min ? ", min: #{min}".id : "".id}#{has_max ? ", max: #{max}".id : "".id}#{has_default ? ", default: #{default}".id : "".id}" %}
-      {% where = decl.filename ? "\n  --> #{decl.filename.id}:#{decl.line_number}:#{decl.column_number}\n      #{source.id}" : "\n      #{source.id}" %}
+      {% min_text = has_min ? ", min: #{min}" : "" %}
+      {% max_text = has_max ? ", max: #{max}" : "" %}
+      {% default_text = has_default ? ", default: #{default}" : "" %}
+      {% source = "field #{decl}#{min_text.id}#{max_text.id}#{default_text.id}" %}
+      {% where = "\n      #{source.id}" %}
+      {% if decl.filename %}
+        {% position = "#{decl.line_number}:#{decl.column_number}" %}
+        {% where = "\n  --> #{decl.filename.id}:#{position.id}" + where %}
+      {% end %}
+      {% unsupported = "unsupported Caramel::RequestContract field type: " +
+                       "#{decl.type}#{where.id}" %}
       {% type = decl.type.resolve %}
       {% scalar = type %}
       {% nilable = false %}
       {% if type.union? %}
         {% members = type.union_types.reject { |member| member.id.stringify == "Nil" } %}
         {% if members.size != 1 || type.union_types.size != 2 %}
-          {% decl.raise "unsupported Caramel::RequestContract field type: #{decl.type}#{where.id}" %}
+          {% decl.raise unsupported %}
         {% end %}
         {% scalar = members.first %}
         {% nilable = true %}
       {% end %}
       {% full = scalar.id.stringify %}
-      {% unless ["String", "Int32", "Int64", "Float64", "Bool", "Time", "Caramel::UploadedFile"].includes?(full) %}
-        {% decl.raise "unsupported Caramel::RequestContract field type: #{decl.type}#{where.id}" %}
+      {% supported = ["String", "Int32", "Int64", "Float64", "Bool", "Time",
+                      "Caramel::UploadedFile"] %}
+      {% unless supported.includes?(full) %}
+        {% decl.raise unsupported %}
       {% end %}
       {% short = full.split("::").last %}
-      {% if (has_min || has_max) && !["String", "Int32", "Int64", "Float64"].includes?(full) %}
-        {% decl.raise "min/max apply only to String, Int32, Int64 and Float64 fields: #{name}#{where.id}" %}
+      {% bounded = ["String", "Int32", "Int64", "Float64"] %}
+      {% if (has_min || has_max) && !bounded.includes?(full) %}
+        {% decl.raise "min/max apply only to String, Int32, Int64 and Float64 fields: " +
+                      "#{name}#{where.id}" %}
       {% end %}
       {% if has_default && full == "Caramel::UploadedFile" %}
         {% decl.raise "UploadedFile fields cannot declare defaults: #{name}#{where.id}" %}
@@ -124,7 +145,9 @@ module Caramel
       {% end %}
       {% unit = full == "String" ? " characters" : "" %}
 
-      CARAMEL_FIELD_{{ name.upcase }} = { {{ name.stringify }}, {{ short }}, {{ nilable }}, {{ has_default }}, {{ summary }} }
+      CARAMEL_FIELD_{{ name.upcase }} = {
+        {{ name.stringify }}, {{ short }}, {{ nilable }}, {{ has_default }}, {{ summary }},
+      }
 
       @{{ name }} : {{ scalar }}? = nil
 

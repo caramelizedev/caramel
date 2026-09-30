@@ -52,8 +52,13 @@ module Caramel::Checks
           rss = parts[3].to_i64?
           processes[pid] = {parent, cpu, rss} if pid && parent && cpu && rss
         end
-        row = JSON.parse({phase: @phase, monotonic_seconds: Time.monotonic.total_seconds, services: usage(processes, @daemon_pid), development: usage(processes, @dev_pid)}.to_json)
-        @rows << row
+        row = {
+          phase:             @phase,
+          monotonic_seconds: Time.monotonic.total_seconds,
+          services:          usage(processes, @daemon_pid),
+          development:       usage(processes, @dev_pid),
+        }
+        @rows << JSON.parse(row.to_json)
       end
 
       private def usage(processes : Hash(Int64, {Int64, Float64, Int64}), root : Int64?)
@@ -66,9 +71,28 @@ module Caramel::Checks
           fresh.each { |pid| owned << pid }
         end
         values = processes.select { |pid, _values| owned.includes?(pid) }.values
-        {processes: values.size, summed_rss_kib: values.sum(0_i64) { |value| value[2] }, summed_ps_cpu_percent: values.sum(0.0) { |value| value[1] }}
+        {
+          processes:             values.size,
+          summed_rss_kib:        values.sum(0_i64) { |value| value[2] },
+          summed_ps_cpu_percent: values.sum(0.0) { |value| value[1] },
+        }
       end
     end
+
+    ROOT_CERTIFICATE = "state/services/caddy/storage/pki/authorities/caramel/root.crt"
+    INDEX            = %(Views::Home::Index.new)
+    GRID             = %(section class: "welcome-grid")
+
+    # What the measurements do not capture, recorded in every report.
+    LIMITATIONS = [
+      "HTTP-visible changes, not browser paint or browser refresh execution",
+      "50 ms polling plus a new curl process per observation",
+      "Managed compiler cache and dependencies warmed by fixture setup",
+      "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average",
+      "Resource sampling every 500 ms can miss short-lived processes",
+      "Private HTTPS ports and explicitly supplied fixture CA; " \
+      "no system DNS/trust acceptance",
+    ]
 
     @process : Process?
     @log : File?
@@ -77,7 +101,7 @@ module Caramel::Checks
       @process = nil
       @log = nil
       @executable = File.join(@fixture.root, "dev-benchmark-fixture")
-      @certificate = File.join(@fixture.root, "state/services/caddy/storage/pki/authorities/caramel/root.crt")
+      @certificate = File.join(@fixture.root, ROOT_CERTIFICATE)
       @sampler = ProcessSampler.new(@fixture.daemon.not_nil!.pid.to_i64)
     end
 
@@ -97,7 +121,15 @@ module Caramel::Checks
 
     private def request(path : String) : {Int32, String}
       p = @fixture
-      result = p.attempt(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "5", "--noproxy", "*", "--cacert", @certificate, "--resolve", "bookshelf.caramel:#{p.ports[2]}:127.0.0.1", "-H", "Host: bookshelf.caramel", "--write-out", "\n%{http_code}", "https://bookshelf.caramel:#{p.ports[2]}#{path}"], timeout: 8.seconds)
+      port = p.ports[2]
+      curl = ["/usr/bin/curl", "--silent", "--show-error",
+              "--max-time", "5", "--noproxy", "*",
+              "--cacert", @certificate,
+              "--resolve", "bookshelf.caramel:#{port}:127.0.0.1",
+              "-H", "Host: bookshelf.caramel",
+              "--write-out", "\n%{http_code}",
+              "https://bookshelf.caramel:#{port}#{path}"]
+      result = p.attempt(curl, timeout: 8.seconds)
       index = result.stdout.rindex('\n')
       return {0, result.stdout} unless index
       {result.stdout[(index + 1)..].strip.to_i? || 0, result.stdout[0...index]}
@@ -116,8 +148,10 @@ module Caramel::Checks
     end
 
     private def start(scenario : String) : Nil
-      @log = File.open(File.join(@fixture.root, "#{scenario}-benchmark.log"), "a")
-      @process = Process.new(@executable, [@fixture.project], chdir: @fixture.project, env: @fixture.env, output: @log.not_nil!, error: @log.not_nil!)
+      log = File.open(File.join(@fixture.root, "#{scenario}-benchmark.log"), "a")
+      @log = log
+      @process = Process.new(@executable, [@fixture.project],
+        chdir: @fixture.project, env: @fixture.env, output: log, error: log)
       @sampler.dev_pid = @process.not_nil!.pid.to_i64
     end
 
@@ -136,7 +170,31 @@ module Caramel::Checks
     private def distribution(samples : Array(Float64)) : JSON::Any
       ordered = samples.sort
       midpoint = samples.size // 2
-      json({samples_ms: samples, count: samples.size, median_ms: (ordered[midpoint - 1] + ordered[midpoint]) / 2, p95_ms: ordered[(samples.size * 0.95).ceil.to_i - 1], min_ms: ordered.first, max_ms: ordered.last})
+      json({
+        samples_ms: samples,
+        count:      samples.size,
+        median_ms:  (ordered[midpoint - 1] + ordered[midpoint]) / 2,
+        p95_ms:     ordered[(samples.size * 0.95).ceil.to_i - 1],
+        min_ms:     ordered.first,
+        max_ms:     ordered.last,
+      })
+    end
+
+    # The file an edit of *kind* writes: *marker* in the controller's response,
+    # in the view, or appended to a stylesheet or script.
+    private def edited(kind : String,
+                       marker : String,
+                       controller : String,
+                       view : String,
+                       before : String) : String
+      case kind
+      when "crystal"
+        controller.sub(INDEX, %(Views::Home::Index.new.to_s + "<!-- #{marker} -->"))
+      when "view"
+        view.sub(GRID, %(comment #{marker.to_json}\n      section class: "welcome-grid"))
+      else
+        before + "\n/* #{marker} */\n"
+      end
     end
 
     private def persist(output : IO::FileDescriptor, report : JSON::Any) : Nil
@@ -150,17 +208,32 @@ module Caramel::Checks
 
     def check : Nil
       p = @fixture
-      destination = ENV["CARAMEL_BENCHMARK_OUTPUT"]? || "/private/tmp/caramel-dev-benchmark-#{Time.utc.to_unix_ns}.json"
-      fd = LibC.open(destination, LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL | LibC::O_NOFOLLOW, 0o600)
-      raise "Could not create benchmark report (destination exists or unavailable): #{destination}" if fd < 0
+      crystal = File.join(p.repo, "scripts/crystal")
+      frappe = File.join(p.repo, "bin/frappe")
+      default = "/private/tmp/caramel-dev-benchmark-#{Time.utc.to_unix_ns}.json"
+      destination = ENV["CARAMEL_BENCHMARK_OUTPUT"]? || default
+      flags = LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL | LibC::O_NOFOLLOW
+      fd = LibC.open(destination, flags, 0o600)
+      if fd < 0
+        raise "Could not create benchmark report " \
+              "(destination exists or unavailable): #{destination}"
+      end
       output = IO::FileDescriptor.new(fd)
       version = File.read(File.join(p.repo, "tools/toolchain/caramel-toolchain.toml"))
       release = p.attempt(["/usr/bin/sw_vers", "-productVersion"]).stdout.strip
       arch = p.attempt(["/usr/bin/uname", "-m"]).stdout.strip
       platform = "macOS-#{release}-#{arch}-#{arch == "arm64" ? "arm-64bit" : "64bit"}"
-      report = json({complete: false, mode: @edit_only ? "edit-only" : "full", scenarios: {} of String => JSON::Any, hardware: {} of String => JSON::Any, resource_samples: @sampler.rows,
-                     limitations: ["HTTP-visible changes, not browser paint or browser refresh execution", "50 ms polling plus a new curl process per observation", "Managed compiler cache and dependencies warmed by fixture setup", "Summed RSS double-counts shared pages; ps CPU is a process-lifetime average", "Resource sampling every 500 ms can miss short-lived processes", "Private HTTPS ports and explicitly supplied fixture CA; no system DNS/trust acceptance"],
-                     versions_manifest: version, platform: platform, sample_count_per_edit_kind: 20})
+      report = json({
+        complete:                   false,
+        mode:                       @edit_only ? "edit-only" : "full",
+        scenarios:                  {} of String => JSON::Any,
+        hardware:                   {} of String => JSON::Any,
+        resource_samples:           @sampler.rows,
+        limitations:                LIMITATIONS,
+        versions_manifest:          version,
+        platform:                   platform,
+        sample_count_per_edit_kind: 20,
+      })
       # ameba:disable Lint/UselessAssign -- read by the ensure below
       sampler_started = false
       begin
@@ -168,55 +241,67 @@ module Caramel::Checks
           result = p.attempt(["/usr/sbin/sysctl", "-n", key])
           report["hardware"].as_h[key] = json(result.success? ? result.stdout.strip : "unavailable")
         end
-        report.as_h["revision"] = json(p.command(["git", "rev-parse", "HEAD"], echo: false).stdout.strip)
-        p.command([File.join(p.repo, "scripts/crystal"), "build", "spec/fixtures/frappe_dev.cr", "-o", @executable])
+        revision = p.command(["git", "rev-parse", "HEAD"], echo: false).stdout.strip
+        report.as_h["revision"] = json(revision)
+        p.command([crystal, "build", "spec/fixtures/frappe_dev.cr", "-o", @executable])
         @sampler.start
         sampler_started = true
         controller = File.join(p.project, "app/actions/home/show.cr")
         original_controller = File.read(controller)
         view = File.join(p.project, "app/views/home/index.cr")
         original_view = File.read(view)
+        stylesheet = File.join(p.project, "app/assets/stylesheets/app.css")
+        script = File.join(p.project, "app/assets/javascript/app.js")
         {"bookshelf" => 2, "larger" => 22}.each do |scenario, resources|
           metrics = json({generated_resources: resources, edits: {} of String => JSON::Any})
           report["scenarios"].as_h[scenario] = metrics
           if scenario == "larger"
             @sampler.phase = "larger/generation"
             "ABCDEFGHIJKLMNOPQRST".each_char do |letter|
-              p.command([File.join(p.repo, "bin/frappe"), "make", "resource", "Benchmark#{letter}", "title:string", "description:string"], chdir: p.project)
+              make = [frappe, "make", "resource", "Benchmark#{letter}"]
+              p.command(make + ["title:string", "description:string"], chdir: p.project)
             end
-            metrics.as_h["migration_command_ms"] = json(elapsed { p.command([File.join(p.repo, "bin/frappe"), "migrate"], chdir: p.project) })
+            migration = elapsed { p.command([frappe, "migrate"], chdir: p.project) }
+            metrics.as_h["migration_command_ms"] = json(migration)
           end
           @sampler.phase = "#{scenario}/first-dev-build"
-          metrics.as_h["first_dev_ready_ms"] = json(elapsed { start(scenario); visible("/", "A little less setup.") })
-          {"css" => {File.join(p.project, "app/assets/stylesheets/app.css"), "/assets/app.css"},
-           "javascript" => {File.join(p.project, "app/assets/javascript/app.js"), "/assets/app.js"},
-           "view" => {view, "/"}, "crystal" => {controller, "/"}}.each do |kind, pair|
+          first_ready = elapsed do
+            start(scenario)
+            visible("/", "A little less setup.")
+          end
+          metrics.as_h["first_dev_ready_ms"] = json(first_ready)
+          edits = {
+            "css"        => {stylesheet, "/assets/app.css"},
+            "javascript" => {script, "/assets/app.js"},
+            "view"       => {view, "/"},
+            "crystal"    => {controller, "/"},
+          }
+          edits.each do |kind, pair|
             path, url = pair
             @sampler.phase = "#{scenario}/#{kind}"
             before = File.read(path)
             samples = [] of Float64
             20.times do |index|
               marker = "benchmark-#{scenario}-#{kind}-#{index}"
-              updated = case kind
-                        when "crystal"
-                          original_controller.sub(%(Views::Home::Index.new), %(Views::Home::Index.new.to_s + "<!-- #{marker} -->"))
-                        when "view"
-                          original_view.sub(%(section class: "welcome-grid"), %(comment #{marker.to_json}\n      section class: "welcome-grid"))
-                        else
-                          before + "\n/* #{marker} */\n"
-                        end
+              updated = edited(kind, marker, original_controller, original_view, before)
               assert!(updated != original_controller) if kind == "crystal"
               assert!(updated != original_view) if kind == "view"
               samples << elapsed { File.write(path, updated); visible(url, marker) }
             end
             data = distribution(samples)
             metrics["edits"].as_h[kind] = data
-            puts "MEASURED #{scenario} #{kind}: median=#{data["median_ms"].as_f.round.to_i} ms p95=#{data["p95_ms"].as_f.round.to_i} ms"
+            median = data["median_ms"].as_f.round.to_i
+            p95 = data["p95_ms"].as_f.round.to_i
+            puts "MEASURED #{scenario} #{kind}: median=#{median} ms p95=#{p95} ms"
             persist(output, report)
           end
           stop
           @sampler.phase = "#{scenario}/cached-start"
-          metrics.as_h["cached_dev_ready_ms"] = json(elapsed { start(scenario); visible("/", "benchmark-#{scenario}-crystal-19") })
+          cached_ready = elapsed do
+            start(scenario)
+            visible("/", "benchmark-#{scenario}-crystal-19")
+          end
+          metrics.as_h["cached_dev_ready_ms"] = json(cached_ready)
           stop
           artifacts = {} of String => Int64
           Dir.glob(File.join(p.project, ".caramel/dev/application-*")).each do |item|
@@ -229,12 +314,20 @@ module Caramel::Checks
             next
           end
           @sampler.phase = "#{scenario}/semantic-check"
-          metrics.as_h["semantic_check_ms"] = json(elapsed { p.command([File.join(p.repo, "scripts/crystal"), "build", "src/bookshelf.cr", "--no-codegen"], chdir: p.project) })
+          check_build = [crystal, "build", "src/bookshelf.cr", "--no-codegen"]
+          semantic_check = elapsed { p.command(check_build, chdir: p.project) }
+          metrics.as_h["semantic_check_ms"] = json(semantic_check)
           @sampler.phase = "#{scenario}/specs"
-          metrics.as_h["spec_command_ms"] = json(elapsed { p.command([File.join(p.repo, "bin/frappe"), "corretto"], chdir: p.project, timeout: 600.seconds) })
+          specs = elapsed do
+            p.command([frappe, "corretto"], chdir: p.project, timeout: 600.seconds)
+          end
+          metrics.as_h["spec_command_ms"] = json(specs)
           @sampler.phase = "#{scenario}/release-build"
           release_binary = File.join(p.root, "#{scenario}-release")
-          metrics.as_h["release_build_ms"] = json(elapsed { p.command([File.join(p.repo, "scripts/crystal"), "build", "src/bookshelf.cr", "--release", "-o", release_binary], chdir: p.project) })
+          release_build = [crystal, "build", "src/bookshelf.cr", "--release",
+                           "-o", release_binary]
+          release_ms = elapsed { p.command(release_build, chdir: p.project) }
+          metrics.as_h["release_build_ms"] = json(release_ms)
           metrics.as_h["release_binary_bytes"] = json(File.size(release_binary))
           persist(output, report)
         end

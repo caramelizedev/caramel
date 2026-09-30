@@ -15,6 +15,11 @@ module Caramel::Frappe
   class CorrettoRunner
     MOCKING = /(?<![\w.:@$])(?:allow|receive|double|instance_double|mock)\(|\.stub\(/
 
+    # What a suite that mocks does instead.
+    MOCKS_REMEDIATION = "  Remediation: assert on observable ingress, database rows " \
+                        "and rendered hypermedia; fake third-party HTTP at the wire " \
+                        "with Corretto.stub_wire."
+
     record Violation, path : String, line : Int32, call : String
 
     # Every spec file the paths name (directories contribute their `*_spec.cr`
@@ -22,7 +27,8 @@ module Caramel::Frappe
     def self.spec_files(root : String, paths : Array(String)) : Array(String)
       files = paths.flat_map do |path|
         full = File.expand_path(path, root)
-        raise Error.new("Spec paths must be inside the project: #{path}") unless full == root || full.starts_with?(root + "/")
+        inside = full == root || full.starts_with?(root + "/")
+        raise Error.new("Spec paths must be inside the project: #{path}") unless inside
         if File.directory?(full)
           Dir.glob(File.join(full, "**/*_spec.cr"))
         elsif File.file?(full) && full.ends_with?(".cr")
@@ -101,6 +107,9 @@ module Caramel::Frappe
       id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
       template = verified_template(client, id)
       tools = Tools.new(@framework_root, @output, @error)
+      spec_url = template["SPEC_DATABASE_URL"]
+      spec_database = Caramel::Database::Config.parse(spec_url).database
+      migration_url = template["SPEC_MIGRATION_DATABASE_URL"]
       groups = self.class.split(files, concurrency)
       # Spec binaries need no database, so they build while the application
       # builds and migrates the template and Latte clones the workers.
@@ -109,9 +118,11 @@ module Caramel::Frappe
       created = [] of Int32
       results = begin
         tools.app_command(@project, ["migrate"], settings.merge({
-          "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => Caramel::Database::Config.parse(template["SPEC_DATABASE_URL"]).database,
-          "SPEC_DATABASE_URL" => template["SPEC_DATABASE_URL"], "SPEC_MIGRATION_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
-          "CARAMEL_EXPECTED_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
+          "CARAMEL_ENV"                   => "test",
+          "CARAMEL_SPEC_DATABASE"         => spec_database,
+          "SPEC_DATABASE_URL"             => spec_url,
+          "SPEC_MIGRATION_DATABASE_URL"   => migration_url,
+          "CARAMEL_EXPECTED_DATABASE_URL" => migration_url,
         }))
         environments = groups.map_with_index do |_, offset|
           index = offset + 1
@@ -119,7 +130,9 @@ module Caramel::Frappe
           created << index
           settings.merge(worker_environment(client, id, index, worker, secret))
         end
-        @output.puts("Corretto: #{files.size} spec file#{files.size == 1 ? "" : "s"} across #{groups.size} worker#{groups.size == 1 ? "" : "s"}")
+        file_count = pluralize(files.size, "spec file")
+        worker_count = pluralize(groups.size, "worker")
+        @output.puts("Corretto: #{file_count} across #{worker_count}")
         run_workers(tools, builds, environments)
       ensure
         # A failed migration or clone still waits for the builds it started.
@@ -130,17 +143,32 @@ module Caramel::Frappe
           @error.puts("Could not drop test worker #{index}: #{ex.message}")
         end
       end
-      failed = results.each_with_index.reject { |passed, _| passed }.map { |_, offset| "w#{offset + 1}" }.to_a
+      failed = results.each_with_index
+        .reject { |passed, _| passed }
+        .map { |_, offset| "w#{offset + 1}" }
+        .to_a
       @output.puts("Corretto: #{results.size - failed.size} of #{results.size} workers passed")
-      raise Error.new("Specs failed in #{failed.join(", ")}; see the prefixed output above") unless failed.empty?
+      return if failed.empty?
+
+      raise Error.new("Specs failed in #{failed.join(", ")}; " \
+                      "see the prefixed output above")
+    end
+
+    # *number* of *noun*, as in `1 worker` or `3 workers`.
+    private def pluralize(number : Int32, noun : String) : String
+      "#{number} #{noun}#{number == 1 ? "" : "s"}"
     end
 
     private def refuse_mocks : Nil
       violations = self.class.scan(@project.root)
       return if violations.empty?
-      violations.each { |violation| @error.puts("#{violation.path}:#{violation.line}: `#{violation.call}` is a mocking API; Corretto forbids mocks") }
-      @error.puts("  Remediation: assert on observable ingress, database rows and rendered hypermedia; fake third-party HTTP at the wire with Corretto.stub_wire.")
-      raise Error.new("Specs refused: #{violations.size} mocking call#{violations.size == 1 ? "" : "s"} under spec/")
+      violations.each do |violation|
+        @error.puts("#{violation.path}:#{violation.line}: `#{violation.call}` " \
+                    "is a mocking API; Corretto forbids mocks")
+      end
+      @error.puts(MOCKS_REMEDIATION)
+      calls = pluralize(violations.size, "mocking call")
+      raise Error.new("Specs refused: #{calls} under spec/")
     end
 
     # The spec template URLs, verified to be this project's isolated spec database.
@@ -148,18 +176,24 @@ module Caramel::Frappe
       authoritative = client.environment(id, @project.root)
       local = @project.local_environment
       %w[SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL].each do |key|
-        raise Error.new("#{key} differs from this project's Latte credentials; specs refused") unless local[key]? == authoritative[key]?
+        next if local[key]? == authoritative[key]?
+        raise Error.new("#{key} differs from this project's Latte credentials; " \
+                        "specs refused")
       end
       config = Caramel::Database::Config.parse(authoritative["SPEC_DATABASE_URL"])
       migration = Caramel::Database::Config.parse(authoritative["SPEC_MIGRATION_DATABASE_URL"])
       development = Caramel::Database::Config.parse(authoritative["DATABASE_URL"])
-      unless config.database == Latte::Postgres.database_names(id).spec && config.database != development.database &&
-             migration.database == config.database && migration.host == config.host && migration.port == config.port
-        raise Error.new("Spec database identity is not isolated from development; specs refused")
+      unless config.database == Latte::Postgres.database_names(id).spec &&
+             config.database != development.database &&
+             migration.database == config.database &&
+             migration.host == config.host && migration.port == config.port
+        raise Error.new("Spec database identity is not isolated from development; " \
+                        "specs refused")
       end
       db = Caramel::Database.open(authoritative["SPEC_DATABASE_URL"], 1)
       begin
-        unless db.query_one("SELECT current_database()", as: String) == config.database && db.query_one("SELECT current_user", as: String) == config.user
+        unless db.query_one("SELECT current_database()", as: String) == config.database &&
+               db.query_one("SELECT current_user", as: String) == config.user
           raise Error.new("Connected spec database identity differs; specs refused")
         end
       ensure
@@ -168,19 +202,31 @@ module Caramel::Frappe
       authoritative
     end
 
-    private def worker_environment(client : LatteClient, id : String, index : Int32, worker : JSON::Any, secret : String) : Hash(String, String)
+    private def worker_environment(client : LatteClient,
+                                   id : String,
+                                   index : Int32,
+                                   worker : JSON::Any,
+                                   secret : String) : Hash(String, String)
       database = Latte::Postgres.test_worker_database(id, index)
       runtime, migration = worker["runtime_url"].as_s, worker["migration_url"].as_s
-      unless worker["database"].as_s == database && Caramel::Database::Config.parse(runtime).database == database && Caramel::Database::Config.parse(migration).database == database
+      unless worker["database"].as_s == database &&
+             Caramel::Database::Config.parse(runtime).database == database &&
+             Caramel::Database::Config.parse(migration).database == database
         raise Error.new("Latte returned a different test worker database; specs refused")
       end
       {
-        "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => database,
-        "APP_ORIGIN" => @project.origin, "APP_SECRET" => secret,
-        "DATABASE_URL" => runtime, "MIGRATION_DATABASE_URL" => migration,
-        "SPEC_DATABASE_URL" => runtime, "SPEC_MIGRATION_DATABASE_URL" => migration,
+        "CARAMEL_ENV"                   => "test",
+        "CARAMEL_SPEC_DATABASE"         => database,
+        "APP_ORIGIN"                    => @project.origin,
+        "APP_SECRET"                    => secret,
+        "DATABASE_URL"                  => runtime,
+        "MIGRATION_DATABASE_URL"        => migration,
+        "SPEC_DATABASE_URL"             => runtime,
+        "SPEC_MIGRATION_DATABASE_URL"   => migration,
         "CARAMEL_EXPECTED_DATABASE_URL" => runtime,
-        "CORRETTO_WORKER" => index.to_s, "CORRETTO_SITE" => id, "CORRETTO_LATTE_SOCKET" => client.socket_path,
+        "CORRETTO_WORKER"               => index.to_s,
+        "CORRETTO_SITE"                 => id,
+        "CORRETTO_LATTE_SOCKET"         => client.socket_path,
       }
     end
 
@@ -195,10 +241,11 @@ module Caramel::Frappe
     # `.caramel/corretto/` and runs again while the application's sources,
     # spec/, the group's files, the toolchain and the framework are unchanged.
     # It builds in the development build's environment; the worker's
-    # database settings apply only when it runs.
+    # settings apply only when it runs.
     private def start_builds(tools : Tools, groups : Array(Array(String))) : Array(Channel(String?))
       Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
-      entries = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel/corretto"))
+      corretto = File.join(@project.root, ".caramel/corretto")
+      entries = Latte::StateSecurity.ensure_owned_directory(corretto)
       remove_idle_workers(entries, groups.size)
       signature = source_signature
       groups.map_with_index do |group, offset|
@@ -220,14 +267,17 @@ module Caramel::Frappe
 
     # Runs each worker's spec binary once it is built, in parallel, prefixing
     # every line of output with its worker, and returns whether each passed.
-    private def run_workers(tools : Tools, builds : Array(Channel(String?)), environments : Array(Hash(String, String))) : Array(Bool)
+    private def run_workers(tools : Tools,
+                            builds : Array(Channel(String?)),
+                            environments : Array(Hash(String, String))) : Array(Bool)
       finished = Channel({Int32, Bool}).new
       builds.each_with_index do |build, offset|
         spawn do
           prefix = "[w#{offset + 1}] "
+          env = tools.environment(environments[offset])
           passed = begin
             binary = build.receive?
-            binary ? relayed(binary, [] of String, tools.environment(environments[offset]), prefix) : false
+            binary ? relayed(binary, [] of String, env, prefix) : false
           rescue ex : IO::Error | File::Error | Error
             @error.puts("#{prefix}#{ex.message}")
             false
@@ -254,17 +304,25 @@ module Caramel::Frappe
 
     # Worker *index*'s spec binary: the one it kept when that was built from
     # the same sources and files, or a new build. Nil when the build fails.
-    private def worker_binary(tools : Tools, entries : String, index : Int32, group : Array(String), signature : String?, prefix : String) : String?
+    private def worker_binary(tools : Tools,
+                              entries : String,
+                              index : Int32,
+                              group : Array(String),
+                              signature : String?,
+                              prefix : String) : String?
       name = "w#{index}"
       entry = File.join(entries, "#{name}.cr")
-      requires = group.join { |file| "require #{("../../" + file.rchop(".cr")).inspect}\n" }
+      requires = entry_source(group)
       File.write(entry, requires)
-      slot = BuildSlot.new(File.join(entries, name), File.join(entries, "#{name}.json"), tools.toolchain.root, "corretto")
+      record = File.join(entries, "#{name}.json")
+      slot = BuildSlot.new(File.join(entries, name), record, tools.toolchain.root, "corretto")
       fingerprint = signature.try { |value| Digest::SHA256.hexdigest("#{value}\n#{requires}") }
       return slot.binary if fingerprint && slot.holds?(fingerprint)
       temporary = File.join(entries, "building-#{name}-#{Random::Secure.hex(4)}")
       begin
-        return unless relayed(File.join(@framework_root, "scripts/crystal"), ["build", entry, "-o", temporary], tools.environment, prefix)
+        compiler = File.join(@framework_root, "scripts/crystal")
+        arguments = ["build", entry, "-o", temporary]
+        return unless relayed(compiler, arguments, tools.environment, prefix)
         slot.install(temporary, fingerprint)
         slot.binary
       ensure
@@ -282,9 +340,21 @@ module Caramel::Frappe
       end
     end
 
-    private def relayed(command : String, args : Array(String), env : Hash(String, String), prefix : String) : Bool
-      process = Process.new(command, args, chdir: @project.root, env: env, clear_env: true,
-        input: Process::Redirect::Close, output: Process::Redirect::Pipe, error: Process::Redirect::Pipe)
+    # A program, in .caramel/corretto/, that requires the group's spec files
+    # in order.
+    private def entry_source(group : Array(String)) : String
+      group.join { |file| "require #{("../../" + file.rchop(".cr")).inspect}\n" }
+    end
+
+    private def relayed(command : String,
+                        args : Array(String),
+                        env : Hash(String, String),
+                        prefix : String) : Bool
+      process = Process.new(command, args,
+        chdir: @project.root, env: env, clear_env: true,
+        input: Process::Redirect::Close,
+        output: Process::Redirect::Pipe,
+        error: Process::Redirect::Pipe)
       done = Channel(Nil).new(2)
       spawn { relay(process.output, @output, prefix); done.send(nil) }
       spawn { relay(process.error, @error, prefix); done.send(nil) }

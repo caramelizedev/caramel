@@ -31,15 +31,57 @@ module Caramel::Latte
       config = String.build do |io|
         Site::SUFFIXES.each do |suffix|
           zone = File.join(@paths.dns_dir, "#{suffix}.zone")
-          ConfigFile.write(zone, "$ORIGIN #{suffix}.\n$TTL 1\n@ IN SOA localhost. hostmaster.#{suffix}. (1 60 60 60 1)\n  IN NS localhost.\n")
-          io << "#{suffix}:#{@port} {\n    bind 127.0.0.1\n"
-          io << "    hosts #{hosts_file.to_json} {\n        ttl 1\n        reload 1s\n        no_reverse\n        fallthrough\n    }\n"
-          io << "    file #{zone.to_json} #{suffix}\n}\n\n"
+          ConfigFile.write(zone, zone_file(suffix))
+          io << suffix_server(suffix, zone) << "\n"
         end
-        io << ".:#{@port} {\n    bind 127.0.0.1\n    template ANY ANY {\n        rcode REFUSED\n    }\n}\n"
+        io << refusing_server
       end
-      ConfigFile.write(hosts_file, sites.sort_by(&.domain).map { |site| "127.0.0.1 #{site.domain}\n" }.join)
+      ConfigFile.write(hosts_file, hosts(sites))
       ConfigFile.write(config_file, config)
+    end
+
+    private def zone_file(suffix : String) : String
+      <<-ZONE
+        $ORIGIN #{suffix}.
+        $TTL 1
+        @ IN SOA localhost. hostmaster.#{suffix}. (1 60 60 60 1)
+          IN NS localhost.
+
+        ZONE
+    end
+
+    # Answers a suffix's names from the hosts file, then from its zone.
+    private def suffix_server(suffix : String, zone : String) : String
+      <<-COREFILE
+        #{suffix}:#{@port} {
+            bind 127.0.0.1
+            hosts #{hosts_file.to_json} {
+                ttl 1
+                reload 1s
+                no_reverse
+                fallthrough
+            }
+            file #{zone.to_json} #{suffix}
+        }
+
+        COREFILE
+    end
+
+    # Refuses every other name, so no query leaves this Mac.
+    private def refusing_server : String
+      <<-COREFILE
+        .:#{@port} {
+            bind 127.0.0.1
+            template ANY ANY {
+                rcode REFUSED
+            }
+        }
+
+        COREFILE
+    end
+
+    private def hosts(sites : Array(Site)) : String
+      sites.sort_by(&.domain).map { |site| "127.0.0.1 #{site.domain}\n" }.join
     end
   end
 end

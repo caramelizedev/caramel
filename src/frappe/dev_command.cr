@@ -37,7 +37,8 @@ module Caramel::Frappe
     # the last semantic stage completes: the type check passed and code
     # generation starts.
     class Stages < IO
-      STAGE   = /\A(?:Parse|Semantic \([^)]*\)|Codegen \([^)]*\)|dsymutil):\s*(?:\d+:\d\d:\d\d(?:\.\d+)? \(\s*[\d.]+MB\))?\z/
+      STAGE   = /\A(?:Parse|Semantic \([^)]*\)|Codegen \([^)]*\)|dsymutil):\s*/
+      TIMING  = /\A\d+:\d\d:\d\d(?:\.\d+)? \(\s*[\d.]+MB\)\z/
       CHECKED = /\ASemantic \(recursive struct check\):\s+\d/
       REPORTS = ["Macro runs:", "Codegen (bc+obj):", "These modules were not reused:"]
 
@@ -67,12 +68,20 @@ module Caramel::Frappe
         end
         @report = false
         kept = line.split('\r').reject do |segment|
-          stage = segment.matches?(STAGE)
+          stage = stage?(segment)
           notify if stage && segment.matches?(CHECKED)
           stage
         end
         text = kept.join('\r')
         @output.write("#{text}\n".to_slice) unless text.strip.empty?
+      end
+
+      # A stage's padded name, alone as the stage starts or with its time and
+      # memory once it completes.
+      private def stage?(segment : String) : Bool
+        name = segment.match(STAGE) || return false
+        rest = segment[name.end..]
+        rest.empty? || rest.matches?(TIMING)
       end
 
       private def notify : Nil
@@ -94,12 +103,23 @@ module Caramel::Frappe
 
     # With *stages*, the command is a `--stats` build whose stage lines are
     # read, not shown.
-    def initialize(command : Array(String), environment : Hash(String, String), directory : String, forward : IO? = nil, log : IO? = nil, *, stages : Bool = false)
+    def initialize(command : Array(String),
+                   environment : Hash(String, String),
+                   directory : String,
+                   forward : IO? = nil,
+                   log : IO? = nil,
+                   *,
+                   stages : Bool = false)
       @output = Output.new(forward, log)
       output = stages ? Stages.new(@output, @checked).tap { |filter| @stages = filter } : @output
       launcher = Process.executable_path || raise Error.new("Cannot locate Frappé")
-      @process = Process.new(launcher, ["__caramel_dev_child", *command], env: environment, clear_env: true,
-        chdir: directory, input: Process::Redirect::Pipe, output: output, error: @output)
+      @process = Process.new(launcher, ["__caramel_dev_child", *command],
+        env: environment,
+        clear_env: true,
+        chdir: directory,
+        input: Process::Redirect::Pipe,
+        output: output,
+        error: @output)
       @pid = @process.pid.to_i64
       spawn do
         @status = @process.wait

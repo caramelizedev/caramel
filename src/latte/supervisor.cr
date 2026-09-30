@@ -10,6 +10,11 @@ module Caramel::Latte
   # One owner for shared services. Slow lifecycle operations run behind the IPC
   # response; status always remains available to the menu application.
   class Supervisor < ServiceControl
+    BUSY            = "A service operation is already in progress"
+    NOT_READY       = "Start Latte services and wait for them to be ready"
+    NOT_PROVISIONED = "Project has no provisioned database; run frappe setup"
+    WORKER_FAILED   = "Test worker database operation failed"
+
     getter postgres : Postgres
     getter dns : DNS
     getter proxy : Proxy
@@ -24,22 +29,43 @@ module Caramel::Latte
     @dns_child : ManagedChild
     @proxy_child : ManagedChild
 
-    def initialize(@registry : Registry, @toolchain : Toolchain = Toolchain.for_checkout,
-                   dns_port : Int32 = 15353, http_port : Int32 = 18080, https_port : Int32 = 18443)
+    def initialize(@registry : Registry,
+                   @toolchain : Toolchain = Toolchain.for_checkout,
+                   dns_port : Int32 = 15353,
+                   http_port : Int32 = 18080,
+                   https_port : Int32 = 18443)
       paths = @registry.paths
       @postgres = Postgres.new(paths, @toolchain)
       @dns = DNS.new(paths, dns_port)
       @proxy = Proxy.new(@registry, https_port, http_port, public_https_port: 443)
-      @dns_child = ManagedChild.new("dns", @toolchain.coredns, ["-conf", @dns.config_file],
-        File.join(paths.dns_dir, "process.json"), File.join(paths.logs_dir, "dns.log"), @toolchain.environment)
+      @dns_child = ManagedChild.new(
+        name: "dns",
+        executable: @toolchain.coredns,
+        args: ["-conf", @dns.config_file],
+        record_path: File.join(paths.dns_dir, "process.json"),
+        log_path: File.join(paths.logs_dir, "dns.log"),
+        environment: @toolchain.environment,
+      )
       environment = @toolchain.environment
       @proxy.environment.each { |key, value| environment[key] = value }
-      @proxy_child = ManagedChild.new("proxy", @toolchain.caddy, ["run", "--config", @proxy.config_file],
-        File.join(paths.caddy_dir, "process.json"), File.join(paths.logs_dir, "proxy.log"), environment)
+      @proxy_child = ManagedChild.new(
+        name: "proxy",
+        executable: @toolchain.caddy,
+        args: ["run", "--config", @proxy.config_file],
+        record_path: File.join(paths.caddy_dir, "process.json"),
+        log_path: File.join(paths.logs_dir, "proxy.log"),
+        environment: environment,
+      )
     end
 
     def status_json : String
-      {version: 1, latte: Caramel::VERSION, api: ControlAPI::VERSIONS, services: @states.transform_values { |state| {state: state} }, error: @error}.to_json
+      {
+        version:  1,
+        latte:    Caramel::VERSION,
+        api:      ControlAPI::VERSIONS,
+        services: @states.transform_values { |state| {state: state} },
+        error:    @error,
+      }.to_json
     end
 
     def start_services : Nil
@@ -49,7 +75,11 @@ module Caramel::Latte
 
     private def begin_start : Nil
       schedule("starting") do
-        previous = {"postgres" => @postgres.running?, "dns" => @dns_child.running?, "proxy" => @proxy_child.running?}
+        previous = {
+          "postgres" => @postgres.running?,
+          "dns"      => @dns_child.running?,
+          "proxy"    => @proxy_child.running?,
+        }
         begin
           @dns.write(@registry.list)
           @proxy.write
@@ -60,7 +90,9 @@ module Caramel::Latte
           wait_ready("DNS", 5.seconds) { child_ready?(@dns_child) { dns_ready? } }
           @states["dns"] = "running"
           @proxy_child.start
-          wait_ready("HTTPS proxy control", 10.seconds) { child_ready?(@proxy_child) { admin_available? } }
+          wait_ready("HTTPS proxy control", 10.seconds) do
+            child_ready?(@proxy_child) { admin_available? }
+          end
           reconcile
           wait_ready("HTTPS proxy", 10.seconds) { proxy_ready? }
           @states["proxy"] = "running"
@@ -103,14 +135,17 @@ module Caramel::Latte
           @states["postgres"] = "failed"
           errors = true
         end
-        raise PublicError.new("stop_failed", "A managed service could not stop; check Latte logs") if errors
+        message = "A managed service could not stop; check Latte logs"
+        raise PublicError.new("stop_failed", message) if errors
       end
     end
 
     def await_idle(timeout : Time::Span = 90.seconds) : Nil
       deadline = Time.instant + timeout
       while @busy
-        raise PublicError.new("service_timeout", "Managed services exceeded their deadline") if Time.instant >= deadline
+        if Time.instant >= deadline
+          raise PublicError.new("service_timeout", "Managed services exceeded their deadline")
+        end
         sleep 20.milliseconds
       end
     end
@@ -170,12 +205,18 @@ module Caramel::Latte
       @lock.synchronize do
         OperationDeadline.check!
         branch = @postgres.create_branch(registered(id), name)
-        {version: 1, branch: {name: branch.name, database: branch.database, migration_url: branch.migration_url, runtime_url: branch.runtime_url}}.to_json
+        created = {
+          name:          branch.name,
+          database:      branch.database,
+          migration_url: branch.migration_url,
+          runtime_url:   branch.runtime_url,
+        }
+        {version: 1, branch: created}.to_json
       end
     rescue Postgres::BranchExists
       raise PublicError.new("branch_exists", "Branch #{name} already exists; delete it first", 409)
     rescue Postgres::SecretMissing
-      raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
+      raise PublicError.new("not_provisioned", NOT_PROVISIONED, 409)
     rescue ex : Postgres::Error
       raise PublicError.new("branch_failed", ex.message || "Database branch operation failed")
     end
@@ -185,7 +226,10 @@ module Caramel::Latte
       @lock.synchronize do
         OperationDeadline.check!
         names = @postgres.list_branches(registered(id))
-        {version: 1, branches: names.map { |name| {name: name, database: Postgres.branch_database(id, name)} }}.to_json
+        branches = names.map do |name|
+          {name: name, database: Postgres.branch_database(id, name)}
+        end
+        {version: 1, branches: branches}.to_json
       end
     end
 
@@ -206,12 +250,18 @@ module Caramel::Latte
       @lock.synchronize do
         OperationDeadline.check!
         worker = @postgres.reset_test_worker(registered(id), index)
-        {version: 1, worker: {index: index, database: worker.database, migration_url: worker.migration_url, runtime_url: worker.runtime_url}}.to_json
+        reset = {
+          index:         index,
+          database:      worker.database,
+          migration_url: worker.migration_url,
+          runtime_url:   worker.runtime_url,
+        }
+        {version: 1, worker: reset}.to_json
       end
     rescue Postgres::SecretMissing
-      raise PublicError.new("not_provisioned", "Project has no provisioned database; run frappe setup", 409)
+      raise PublicError.new("not_provisioned", NOT_PROVISIONED, 409)
     rescue ex : Postgres::Error
-      raise PublicError.new("test_worker_failed", ex.message || "Test worker database operation failed")
+      raise PublicError.new("test_worker_failed", ex.message || WORKER_FAILED)
     end
 
     def drop_test_worker(id : String, index : Int32) : Bool
@@ -221,7 +271,7 @@ module Caramel::Latte
         @postgres.drop_test_worker(registered(id), index)
       end
     rescue ex : Postgres::Error
-      raise PublicError.new("test_worker_failed", ex.message || "Test worker database operation failed")
+      raise PublicError.new("test_worker_failed", ex.message || WORKER_FAILED)
     end
 
     private def registered(id : String) : Site
@@ -250,11 +300,15 @@ module Caramel::Latte
         raise ex
       end
       @proxy.write
-      result = @toolchain.run(:caddy, ["reload", "--config", @proxy.config_file, "--address", "unix/#{@proxy.admin_socket}"], timeout: 5.seconds)
+      config = @proxy.config_file
+      address = "unix/#{@proxy.admin_socket}"
+      reload = ["reload", "--config", config, "--address", address]
+      result = @toolchain.run(:caddy, reload, timeout: 5.seconds)
       unless result.success?
         @states["proxy"] = "failed"
-        @error = "HTTPS routing could not reload; retry after checking Latte services"
-        raise PublicError.new("proxy_reload_failed", "HTTPS routing could not reload; retry after checking Latte services")
+        message = "HTTPS routing could not reload; retry after checking Latte services"
+        @error = message
+        raise PublicError.new("proxy_reload_failed", message)
       end
       @configuration = File.read(@proxy.config_file)
     end
@@ -289,12 +343,12 @@ module Caramel::Latte
               @states["postgres"] = "failed"
               crashed = true
             end
-            if @states["dns"] == "running" && (!@dns_child.running? || readiness_failed?("dns", dns_ready?))
+            if @states["dns"] == "running" && dns_down?
               @states["dns"] = "failed"
               crashed = true
             end
             if @states["proxy"] == "running"
-              if !@proxy_child.running? || readiness_failed?("proxy", proxy_ready?)
+              if proxy_down?
                 @states["proxy"] = "failed"
                 crashed = true
               else
@@ -308,7 +362,8 @@ module Caramel::Latte
           end
           if crashed
             if @recovery_attempted
-              @error = "A managed service failed after automatic recovery; use Start Services to retry"
+              @error = "A managed service failed after automatic recovery; " \
+                       "use Start Services to retry"
             else
               @recovery_attempted = true
               begin_start
@@ -322,8 +377,16 @@ module Caramel::Latte
       @monitoring = false
     end
 
+    private def dns_down? : Bool
+      !@dns_child.running? || readiness_failed?("dns", dns_ready?)
+    end
+
+    private def proxy_down? : Bool
+      !@proxy_child.running? || readiness_failed?("proxy", proxy_ready?)
+    end
+
     private def schedule(state : String, &block : -> Nil) : Nil
-      raise PublicError.new("services_busy", "A service operation is already in progress", 409) if @busy
+      raise PublicError.new("services_busy", BUSY, 409) if @busy
       @busy = true
       @error = nil
       @readiness_misses.keys.each { |key| @readiness_misses[key] = 0 }
@@ -333,7 +396,8 @@ module Caramel::Latte
           OperationDeadline.run(state == "starting" ? 90.seconds : 60.seconds) { block.call }
         rescue ex
           @error = case ex
-                   when PublicError, DeadlineExceeded, Postgres::Error, Toolchain::Unavailable, Toolchain::VersionMismatch
+                   when PublicError, DeadlineExceeded, Postgres::Error,
+                        Toolchain::Unavailable, Toolchain::VersionMismatch
                      ex.message || "Managed service operation failed"
                    else
                      "Managed service operation failed; check Latte logs"
@@ -348,7 +412,7 @@ module Caramel::Latte
 
     private def require_ready! : Nil
       if @busy || @states.values.any? { |state| state != "running" }
-        raise PublicError.new("services_not_ready", "Start Latte services and wait for them to be ready", 409)
+        raise PublicError.new("services_not_ready", NOT_READY, 409)
       end
     end
 
@@ -356,14 +420,17 @@ module Caramel::Latte
       deadline = Time.instant + OperationDeadline.limit(timeout)
       until probe.call
         OperationDeadline.check!
-        raise PublicError.new("service_timeout", "#{name} did not become ready") if Time.instant >= deadline
+        if Time.instant >= deadline
+          raise PublicError.new("service_timeout", "#{name} did not become ready")
+        end
         sleep 50.milliseconds
       end
     end
 
     private def child_ready?(child : ManagedChild, &probe : -> Bool) : Bool
       unless child.running?
-        raise PublicError.new("service_exited", "#{child.name} exited during startup; check Latte logs")
+        message = "#{child.name} exited during startup; check Latte logs"
+        raise PublicError.new("service_exited", message)
       end
       probe.call
     end
@@ -396,17 +463,31 @@ module Caramel::Latte
       socket.send(query.to_slice)
       bytes = Bytes.new(512)
       count, _ = socket.receive(bytes)
-      valid = count > 12 && bytes[0] == 0x43 && bytes[1] == 0x41 && (bytes[2] & 0x80) != 0 && (bytes[3] & 0x0f) == 0
-      valid && (!site || ((bytes[6] != 0 || bytes[7] != 0) && bytes[count - 4, 4] == Bytes[127, 0, 0, 1]))
+      valid = count > 12 && dns_reply?(bytes)
+      valid && (!site || loopback_answer?(bytes, count))
     rescue IO::Error
       false
     ensure
       socket.try(&.close)
     end
 
+    # A response (QR set) without error (RCODE 0) to the query with id 0x4341.
+    private def dns_reply?(bytes : Bytes) : Bool
+      ours = bytes[0] == 0x43 && bytes[1] == 0x41
+      ours && (bytes[2] & 0x80) != 0 && (bytes[3] & 0x0f) == 0
+    end
+
+    # At least one answer, and the reply ends with the address 127.0.0.1.
+    private def loopback_answer?(bytes : Bytes, count : Int32) : Bool
+      (bytes[6] != 0 || bytes[7] != 0) && bytes[count - 4, 4] == Bytes[127, 0, 0, 1]
+    end
+
     private def proxy_ready? : Bool
       expected = File.read(@proxy.config_file)
-      result = ProcessRunner.run(["/usr/bin/curl", "--silent", "--fail", "--max-time", "1", "--noproxy", "*", "--unix-socket", @proxy.admin_socket, "http://localhost/config/"], timeout: 2.seconds, output_limit: expected.bytesize + 4096)
+      command = ["/usr/bin/curl", "--silent", "--fail", "--max-time", "1", "--noproxy", "*",
+                 "--unix-socket", @proxy.admin_socket, "http://localhost/config/"]
+      limit = expected.bytesize + 4096
+      result = ProcessRunner.run(command, timeout: 2.seconds, output_limit: limit)
       return false unless result.success? && JSON.parse(result.stdout) == JSON.parse(expected)
       if site = @registry.list.first?
         return tls_ready?(site)
@@ -420,13 +501,19 @@ module Caramel::Latte
       # Service health must not depend on the application's response time or
       # execute application routes. Check Caddy's certificate handshake only.
       timeout = OperationDeadline.limit(1.second)
-      socket = TCPSocket.new("127.0.0.1", @proxy.https_port, timeout.total_seconds, timeout.total_seconds)
+      seconds = timeout.total_seconds
+      socket = TCPSocket.new("127.0.0.1", @proxy.https_port, seconds, seconds)
       socket.read_timeout = timeout
       socket.write_timeout = timeout
       context = OpenSSL::SSL::Context::Client.new
       context.verify_mode = OpenSSL::SSL::VerifyMode::PEER
       context.ca_certificates = @proxy.root_certificate
-      tls = OpenSSL::SSL::Socket::Client.new(socket, context: context, hostname: site.domain, sync_close: true)
+      tls = OpenSSL::SSL::Socket::Client.new(
+        socket,
+        context: context,
+        hostname: site.domain,
+        sync_close: true,
+      )
       true
     rescue IO::Error | OpenSSL::SSL::Error
       false
@@ -437,7 +524,8 @@ module Caramel::Latte
 
     private def admin_available? : Bool
       socket = Socket.unix
-      socket.connect(Socket::UNIXAddress.new(@proxy.admin_socket), timeout: OperationDeadline.limit(200.milliseconds))
+      address = Socket::UNIXAddress.new(@proxy.admin_socket)
+      socket.connect(address, timeout: OperationDeadline.limit(200.milliseconds))
       true
     rescue IO::Error
       false

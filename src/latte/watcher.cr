@@ -28,8 +28,8 @@ module Caramel::Latte
   # `#changed?` therefore drains it with a zero timeout and sleeps between
   # checks; the calling fiber never blocks the scheduler.
   class Watcher
-    NOTES    = LibC::NOTE_WRITE | LibC::NOTE_EXTEND | LibC::NOTE_ATTRIB | LibC::NOTE_DELETE | LibC::NOTE_RENAME | LibC::NOTE_REVOKE
     GONE     = LibC::NOTE_DELETE | LibC::NOTE_RENAME | LibC::NOTE_REVOKE
+    NOTES    = LibC::NOTE_WRITE | LibC::NOTE_EXTEND | LibC::NOTE_ATTRIB | GONE
     INTERVAL = 25.milliseconds
 
     class Error < Exception
@@ -41,7 +41,13 @@ module Caramel::Latte
       File
     end
 
-    private record Watch, id : UInt64, path : String, kind : Kind, fd : Int32, device : Int32, inode : UInt64
+    private record Watch,
+      id : UInt64,
+      path : String,
+      kind : Kind,
+      fd : Int32,
+      device : Int32,
+      inode : UInt64
 
     @watches = {} of UInt64 => Watch
     @paths = {} of String => UInt64
@@ -140,9 +146,16 @@ module Caramel::Latte
         [] of String
       end
       prefix = directory + "/"
-      stale = @paths.keys.select { |path| path.starts_with?(prefix) && !path.index('/', prefix.size) && !names.includes?(path[prefix.size..]) }
+      stale = @paths.keys.select do |path|
+        child?(path, prefix) && !names.includes?(path[prefix.size..])
+      end
       stale.each { |path| @paths[path]?.try { |id| remove(@watches[id]) } }
       names.each { |name| watch(prefix + name, anchor: false) }
+    end
+
+    # Whether *path* is an entry directly inside the directory at *prefix*.
+    private def child?(path : String, prefix : String) : Bool
+      path.starts_with?(prefix) && !path.index('/', prefix.size)
     end
 
     # Opens *path* before listing a directory's entries, so an entry created
@@ -159,7 +172,9 @@ module Caramel::Latte
       remove(existing) if existing
       fd = LibC.open(path, LibC::O_EVTONLY | LibC::O_CLOEXEC | LibC::O_NOFOLLOW)
       if fd == -1
-        raise Error.new("Too many files to watch under #{@root}: #{Errno.value.message}") if Errno.value.in?(Errno::EMFILE, Errno::ENFILE)
+        if Errno.value.in?(Errno::EMFILE, Errno::ENFILE)
+          raise Error.new("Too many files to watch under #{@root}: #{Errno.value.message}")
+        end
         return # vanished or replaced by a symlink; the parent reports it
       end
       unless LibC.fstat(fd, pointerof(status)) == 0 && watchable?(status, anchor)
@@ -168,7 +183,14 @@ module Caramel::Latte
       end
       kind = directory?(status) ? (anchor ? Kind::Anchor : Kind::Directory) : Kind::File
       id = @next_id += 1
-      event = LibC::Kevent.new(ident: fd.to_u64, filter: LibC::EVFILT_VNODE, flags: LibC::EV_ADD | LibC::EV_CLEAR, fflags: NOTES, data: 0, udata: Pointer(Void).new(id))
+      event = LibC::Kevent.new(
+        ident: fd.to_u64,
+        filter: LibC::EVFILT_VNODE,
+        flags: LibC::EV_ADD | LibC::EV_CLEAR,
+        fflags: NOTES,
+        data: 0,
+        udata: Pointer(Void).new(id),
+      )
       if LibC.kevent(@kq, pointerof(event), 1, nil, 0, nil) == -1
         message = Errno.value.message
         LibC.close(fd)

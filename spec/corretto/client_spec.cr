@@ -4,7 +4,9 @@ require "../../src/caramel/corretto"
 
 abstract struct CorrettoSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
-    %(<!DOCTYPE html><html><head><title>#{Caramel::HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>)
+    title = Caramel::HTML.escape(title_for(page))
+    head = %(<head><title>#{title}</title></head>)
+    %(<!DOCTYPE html><html>#{head}<body>#{page.body}</body></html>)
   end
 end
 
@@ -13,7 +15,8 @@ struct CorrettoSpecHome < CorrettoSpecAction
   end
 
   def handle(contract : Contract)
-    page "Tom & Jerry's shelf", "<p>Reader #{Caramel::HTML.escape(session["user_id"]? || "guest")}</p>"
+    reader = Caramel::HTML.escape(session["user_id"]? || "guest")
+    page "Tom & Jerry's shelf", "<p>Reader #{reader}</p>"
   end
 end
 
@@ -34,7 +37,8 @@ struct CorrettoSpecCreate < CorrettoSpecAction
   end
 
   def handle(contract : Contract)
-    morph("#note-list", Caramel::HTML.escape("#{contract.title} ×#{contract.copies}"), swap: "beforeend")
+    item = Caramel::HTML.escape("#{contract.title} ×#{contract.copies}")
+    morph("#note-list", item, swap: "beforeend")
   end
 end
 
@@ -114,7 +118,9 @@ end
 private record CorrettoSpecUser, id : Int64
 
 private def corretto_spec_client : Corretto::Client
-  Corretto::Client.new(Caramel::Application.new(CorrettoSpecApp::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")))
+  router = CorrettoSpecApp::AppRouter.new
+  csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+  Corretto::Client.new(Caramel::Application.new(router, csrf))
 end
 
 describe Corretto::Client do
@@ -127,15 +133,20 @@ describe Corretto::Client do
     home.should_not render_partial("#note-list")
     client.cookies.has_key?(Caramel::CSRF::COOKIE_NAME).should be_true
 
-    created = client.post("/notes", headers: {"HX-Request" => "true"}, params: {"title" => "<b>Milk</b>", "copies" => 2})
+    milk = {"title" => "<b>Milk</b>", "copies" => 2}
+    created = client.post("/notes", headers: {"HX-Request" => "true"}, params: milk)
     created.should have_status(200)
     created.should render_partial("#note-list", swap: "beforeend")
     created.should_not render_partial("#note-list", swap: "innerMorph")
     created.should_not render_page("Milk")
     created.body.should contain("&lt;b&gt;Milk&lt;/b&gt; ×2")
 
-    client.post("/notes", headers: {"X-CSRF-Token" => "forged"}, params: {"title" => "Forged", "copies" => 1}).should have_status(403)
-    client.post("/notes", headers: {"Origin" => "https://evil.example"}, params: {"title" => "Cross-site", "copies" => 1}).should have_status(403)
+    forged = {"X-CSRF-Token" => "forged"}
+    forged_note = {"title" => "Forged", "copies" => 1}
+    client.post("/notes", headers: forged, params: forged_note).should have_status(403)
+    cross_site = {"Origin" => "https://evil.example"}
+    cross_site_note = {"title" => "Cross-site", "copies" => 1}
+    client.post("/notes", headers: cross_site, params: cross_site_note).should have_status(403)
     client.get("/", headers: {"Host" => "evil.example"}).should have_status(421)
   end
 
@@ -227,12 +238,22 @@ describe Corretto::Client do
   it "explains failed expectations with the relevant response" do
     client = corretto_spec_client
     home = client.get("/")
-    expect_raises(Spec::AssertionFailed, /Expected status 201, got 200\nResponse status 200\n.*Body: <!DOCTYPE html>/m) { home.should have_status(201) }
-    expect_raises(Spec::AssertionFailed, /Expected a full HTML page titled "Kitchen"; got "Tom & Jerry's shelf"/) { home.should render_page("Kitchen") }
-    expect_raises(Spec::AssertionFailed, /Expected a redirect \(Location or HX-Location\) to \/notes\/1/) { home.should redirect_to("/notes/1") }
-    expect_raises(Spec::AssertionFailed, /Expected header HX-Location: \/notes\/1/) { home.should have_header("HX-Location", "/notes/1") }
-    created = client.post("/notes", headers: {"HX-Request" => "true"}, params: {"title" => "Tea", "copies" => 1})
-    expect_raises(Spec::AssertionFailed, /Expected an <hx-partial> for #shelf swapped with innerMorph; found #note-list \(beforeend\)/) do
+    status = /Expected status 201, got 200\nResponse status 200\n.*Body: <!DOCTYPE html>/m
+    expect_raises(Spec::AssertionFailed, status) { home.should have_status(201) }
+    titled = /Expected a full HTML page titled "Kitchen"; got "Tom & Jerry's shelf"/
+    expect_raises(Spec::AssertionFailed, titled) { home.should render_page("Kitchen") }
+    redirected = /Expected a redirect \(Location or HX-Location\) to \/notes\/1/
+    expect_raises(Spec::AssertionFailed, redirected) { home.should redirect_to("/notes/1") }
+    header = /Expected header HX-Location: \/notes\/1/
+    expect_raises(Spec::AssertionFailed, header) do
+      home.should have_header("HX-Location", "/notes/1")
+    end
+
+    tea = {"title" => "Tea", "copies" => 1}
+    created = client.post("/notes", headers: {"HX-Request" => "true"}, params: tea)
+    target = "#shelf swapped with innerMorph"
+    partial = /Expected an <hx-partial> for #{target}; found #note-list \(beforeend\)/
+    expect_raises(Spec::AssertionFailed, partial) do
       created.should render_partial("#shelf", swap: "innerMorph")
     end
     expect_raises(Spec::AssertionFailed, /got no <title>/) { created.should render_page("Tea") }

@@ -57,15 +57,19 @@ module Caramel::Frappe
       deadline = Time.instant + timeout
       current = status
       states = service_states(current)
-      start_services unless states.all? { |state| state == "running" } || states.any? { |state| state == "starting" }
+      running = states.all? { |state| state == "running" }
+      start_services unless running || states.any? { |state| state == "starting" }
       loop do
         current = status
         states = service_states(current)
         return if states.all? { |state| state == "running" }
-        if current["error"]?.try(&.as_s?) || states.any? { |state| state == "failed" }
-          raise Error.new(current["error"]?.try(&.as_s?) || "Latte services failed; inspect frappe services")
+        error = current["error"]?.try(&.as_s?)
+        if error || states.any? { |state| state == "failed" }
+          raise Error.new(error || "Latte services failed; inspect frappe services")
         end
-        raise Error.new("Latte services did not become ready; inspect frappe services") if Time.instant >= deadline
+        if Time.instant >= deadline
+          raise Error.new("Latte services did not become ready; inspect frappe services")
+        end
         sleep 200.milliseconds
       end
     end
@@ -129,7 +133,12 @@ module Caramel::Frappe
     end
 
     def register(project : Project) : JSON::Any
-      request("POST", "/v1/sites", {name: project.name, directory: project.root, suffix: project.metadata.domain_suffix}.to_json)["site"]
+      site = {
+        name:      project.name,
+        directory: project.root,
+        suffix:    project.metadata.domain_suffix,
+      }
+      request("POST", "/v1/sites", site.to_json)["site"]
     end
 
     def unregister(id : String) : Nil
@@ -140,7 +149,9 @@ module Caramel::Frappe
 
     def environment(id : String, directory : String) : Hash(String, String)
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/environment", {directory: directory}.to_json)["environment"].as_h.transform_values(&.as_s)
+      body = {directory: directory}.to_json
+      values = request("POST", "/v1/sites/#{id}/environment", body)["environment"]
+      values.as_h.transform_values(&.as_s)
     end
 
     def set_upstream(id : String, socket : String) : JSON::Any
@@ -234,7 +245,8 @@ module Caramel::Frappe
     end
 
     private def validate_id(id : String) : Nil
-      raise Error.new("Invalid Latte site identifier") unless Latte::StateSecurity.valid_site_id?(id)
+      return if Latte::StateSecurity.valid_site_id?(id)
+      raise Error.new("Invalid Latte site identifier")
     end
 
     private def service_states(document : JSON::Any) : Array(String)
@@ -249,7 +261,11 @@ module Caramel::Frappe
         Latte::StateSecurity.validate_owned_directory(@runtime)
         Latte::StateSecurity.validate_socket_entry(@socket_path, require_socket: true)
       rescue ex : ArgumentError
-        hint = @launcher ? "Run frappe services start." : "Start latte daemon with CARAMEL_HOME=#{@root} and try again."
+        hint = if @launcher
+                 "Run frappe services start."
+               else
+                 "Start latte daemon with CARAMEL_HOME=#{@root} and try again."
+               end
         raise Error.new("Latte is unavailable: #{ex.message}. #{hint}")
       end
       socket = Socket.unix
@@ -271,7 +287,8 @@ module Caramel::Frappe
         document = JSON.parse(String.new(bytes[0, size]))
         code = document["error"]?.try(&.as_h?).try(&.["code"]?).try(&.as_s?)
         raise Error.new(unsupported_api(document)) if code == "unsupported_api"
-        raise Error.new("Unsupported Latte API version") unless document["version"].as_i == API_VERSION
+        version = document["version"].as_i
+        raise Error.new("Unsupported Latte API version") unless version == API_VERSION
         if response.status_code >= 400
           raise Error.new(document["error"]["message"].as_s)
         end
@@ -292,9 +309,13 @@ module Caramel::Frappe
       latte = document["latte"]?.try(&.as_s?) || "of an unknown release"
       served = document["api"]?.try(&.as_a?).try(&.compact_map(&.as_i?)) || [] of Int32
       if served.empty? || served.max < API_VERSION
-        "Latte #{latte} is running, but Frappé #{Caramel::VERSION} needs control API #{API_VERSION}, from Caramel #{Caramel::VERSION} or newer. Run latte stop so the next command starts the newest installed Latte, or install this release: frappe installations install #{Caramel::VERSION}"
+        "Latte #{latte} is running, but Frappé #{Caramel::VERSION} needs control API " \
+        "#{API_VERSION}, from Caramel #{Caramel::VERSION} or newer. Run latte stop so " \
+        "the next command starts the newest installed Latte, or install this release: " \
+        "frappe installations install #{Caramel::VERSION}"
       else
-        "Latte #{latte} no longer serves control API #{API_VERSION}, which Frappé #{Caramel::VERSION} uses. Upgrade this project to Caramel #{latte}."
+        "Latte #{latte} no longer serves control API #{API_VERSION}, which Frappé " \
+        "#{Caramel::VERSION} uses. Upgrade this project to Caramel #{latte}."
       end
     end
   end

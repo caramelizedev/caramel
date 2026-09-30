@@ -3,11 +3,33 @@ require "file_utils"
 require "http/server"
 require "../../src/frappe/latte_client"
 
+# The services of Latte's status document, every one running.
+private def all_running
+  running = {state: "running"}
+  {postgres: running, dns: running, proxy: running}
+end
+
+# Latte's reply to a client whose control API version, 1, it does not serve.
+private def unsupported_api(version : Int32, latte : String, api : Array(Int32)) : String
+  message = "Latte #{latte} serves control API #{api.join(", ")}, not 1"
+  error = {code: "unsupported_api", message: message}
+  {version: version, latte: latte, api: api, error: error}.to_json
+end
+
+# Expects a GET of *path* to fail with an error that includes *message*.
+private def expect_refused(client : Caramel::Frappe::LatteClient,
+                           path : String,
+                           message : String) : Nil
+  expect_raises(Caramel::Frappe::Error, message) { client.request("GET", path) }
+end
+
 describe Caramel::Frappe::LatteClient do
   it "uses private HTTP IPC and rejects incompatible, malformed and oversized responses" do
     root = "/private/tmp/caramel-client-live-#{Random::Secure.hex(8)}"
     paths = Caramel::Latte::Paths.new(root)
     removed = Channel(String).new(1)
+    status = {version: 1, latte: "0.1.0", api: [1], services: all_running, error: nil}
+    conflict = {version: 1, error: {message: "Project is already registered"}}
     server = HTTP::Server.new do |context|
       context.response.headers["Content-Type"] = "application/json"
       context.response.headers["Connection"] = "close"
@@ -16,24 +38,31 @@ describe Caramel::Frappe::LatteClient do
         removed.send("#{context.request.method} #{context.request.path}")
         context.response.print(%({"version":1}))
       when "/v1/status"
-        context.response.print(%({"version":1,"latte":"0.1.0","api":[1],"services":{"postgres":{"state":"running"},"dns":{"state":"running"},"proxy":{"state":"running"}},"error":null}))
+        context.response.print(status.to_json)
       when "/old"
         context.response.print(%({"version":2}))
       when "/newer-latte"
         context.response.status_code = 404
-        context.response.print(%({"version":3,"latte":"0.9.0","api":[2,3],"error":{"code":"unsupported_api","message":"Latte 0.9.0 serves control API 2, 3, not 1"}}))
+        context.response.print(unsupported_api(3, "0.9.0", [2, 3]))
       when "/older-latte"
         context.response.status_code = 404
-        context.response.print(%({"version":0,"latte":"0.0.9","api":[0],"error":{"code":"unsupported_api","message":"Latte 0.0.9 serves control API 0, not 1"}}))
+        context.response.print(unsupported_api(0, "0.0.9", [0]))
       when "/large"
         context.response.print(" " * (Caramel::Frappe::LatteClient::MAX_RESPONSE + 1))
       when "/invalid"
         context.response.print("not json")
       else
         context.response.status_code = 409
-        context.response.print(%({"version":1,"error":{"message":"Project is already registered"}}))
+        context.response.print(conflict.to_json)
       end
     end
+    newer = "Latte 0.9.0 no longer serves control API 1, " \
+            "which Frappé #{Caramel::VERSION} uses. " \
+            "Upgrade this project to Caramel 0.9.0."
+    older = "Latte 0.0.9 is running, but Frappé #{Caramel::VERSION} needs " \
+            "control API 1, from Caramel #{Caramel::VERSION} or newer. " \
+            "Run latte stop so the next command starts the newest installed Latte, " \
+            "or install this release: frappe installations install #{Caramel::VERSION}"
     begin
       server.bind_unix(paths.control_socket)
       File.chmod(paths.control_socket, 0o600)
@@ -41,12 +70,14 @@ describe Caramel::Frappe::LatteClient do
       client = Caramel::Frappe::LatteClient.new(root)
       client.ready!(1.second)
       client.status["services"]["postgres"]["state"].as_s.should eq("running")
-      expect_raises(Caramel::Frappe::Error, "API version") { client.request("GET", "/old") }
-      expect_raises(Caramel::Frappe::Error, "Latte 0.9.0 no longer serves control API 1, which Frappé #{Caramel::VERSION} uses. Upgrade this project to Caramel 0.9.0.") { client.request("GET", "/newer-latte") }
-      expect_raises(Caramel::Frappe::Error, "Latte 0.0.9 is running, but Frappé #{Caramel::VERSION} needs control API 1, from Caramel #{Caramel::VERSION} or newer. Run latte stop so the next command starts the newest installed Latte, or install this release: frappe installations install #{Caramel::VERSION}") { client.request("GET", "/older-latte") }
-      expect_raises(Caramel::Frappe::Error, "1 MiB") { client.request("GET", "/large") }
-      expect_raises(Caramel::Frappe::Error, "invalid response") { client.request("GET", "/invalid") }
-      expect_raises(Caramel::Frappe::Error, "already registered") { client.request("POST", "/conflict", "{}") }
+      expect_refused(client, "/old", "API version")
+      expect_refused(client, "/newer-latte", newer)
+      expect_refused(client, "/older-latte", older)
+      expect_refused(client, "/large", "1 MiB")
+      expect_refused(client, "/invalid", "invalid response")
+      expect_raises(Caramel::Frappe::Error, "already registered") do
+        client.request("POST", "/conflict", "{}")
+      end
       client.unregister("0123456789abcdef")
       removed.receive.should eq("DELETE /v1/sites/0123456789abcdef")
     ensure
@@ -71,7 +102,7 @@ describe Caramel::Frappe::LatteClient do
     File.write(launcher, "#!/bin/sh\necho \"$@\" > '#{launched}'\n", perm: 0o700)
     server = HTTP::Server.new do |context|
       context.response.headers["Content-Type"] = "application/json"
-      context.response.print(%({"version":1,"services":{"postgres":{"state":"running"},"dns":{"state":"running"},"proxy":{"state":"running"}}}))
+      context.response.print({version: 1, services: all_running}.to_json)
     end
     # Plays the daemon the launcher started.
     spawn do
@@ -97,9 +128,16 @@ describe Caramel::Frappe::LatteClient do
     paths = Caramel::Latte::Paths.new(root)
     log = File.join(paths.logs_dir, "latte.log")
     launcher = File.join(root, "latte")
-    File.write(launcher, "#!/bin/sh\necho 'No Caramel toolchain is installed. Run scripts/install-toolchain.' >> '#{log}'\nexit 1\n", perm: 0o700)
+    script = <<-SH
+      #!/bin/sh
+      echo 'No Caramel toolchain is installed. Run scripts/install-toolchain.' >> '#{log}'
+      exit 1\n
+      SH
+    File.write(launcher, script, perm: 0o700)
+    reason = "Latte did not start: No Caramel toolchain is installed. " \
+             "Run scripts/install-toolchain. Log: #{log}"
     begin
-      expect_raises(Caramel::Frappe::Error, "Latte did not start: No Caramel toolchain is installed. Run scripts/install-toolchain. Log: #{log}") do
+      expect_raises(Caramel::Frappe::Error, reason) do
         Caramel::Frappe::LatteClient.new(root, launcher).ready!(5.seconds)
       end
     ensure
@@ -127,10 +165,11 @@ describe Caramel::Frappe::LatteClient do
     paths = Caramel::Latte::Paths.new(root)
     client = Caramel::Frappe::LatteClient.new(root)
     id = "0123456789abcdef"
+    running = "A development session is already running for bookshelf"
     begin
       client.site_log_directory(id, create: false).should be_nil
       client.with_site_lock(id, "bookshelf") do
-        expect_raises(Caramel::Frappe::Error, "A development session is already running for bookshelf") do
+        expect_raises(Caramel::Frappe::Error, running) do
           client.with_site_lock(id, "bookshelf") { }
         end
       end
@@ -143,9 +182,10 @@ describe Caramel::Frappe::LatteClient do
   it "derives a branch URL exactly as Latte builds one for the same role" do
     socket = "/private/tmp/latte state/run"
     password = "0f" * 32
-    development = Caramel::Latte::Postgres.connection_url("caramel_dev_0123456789abcdef", password, "caramel_dev_0123456789abcdef", socket)
+    role = "caramel_dev_0123456789abcdef"
+    development = Caramel::Latte::Postgres.connection_url(role, password, role, socket)
     branch = Caramel::Latte::Postgres.branch_database("0123456789abcdef", "feature_x")
-    expected = Caramel::Latte::Postgres.connection_url("caramel_dev_0123456789abcdef", password, branch, socket)
+    expected = Caramel::Latte::Postgres.connection_url(role, password, branch, socket)
     Caramel::Frappe::LatteClient.branch_url(development, branch).should eq(expected)
   end
 end

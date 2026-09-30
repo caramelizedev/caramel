@@ -28,16 +28,33 @@ module Caramel
       mask : UInt8,
       ingress : Ingress
 
-    METHOD_BITS = {"GET" => 1_u8, "POST" => 2_u8, "PUT" => 4_u8, "PATCH" => 8_u8, "DELETE" => 16_u8}
+    METHOD_BITS = {
+      "GET"    => 1_u8,
+      "POST"   => 2_u8,
+      "PUT"    => 4_u8,
+      "PATCH"  => 8_u8,
+      "DELETE" => 16_u8,
+    }
 
     def self.method_bit(method : String) : UInt8
       METHOD_BITS[method == "HEAD" ? "GET" : method]? || 0_u8
     end
 
+    # The methods an Allow header lists, in order, with their bits; HEAD
+    # shares GET's.
+    ALLOW_BITS = {
+      "GET"    => 1_u8,
+      "HEAD"   => 1_u8,
+      "POST"   => 2_u8,
+      "PUT"    => 4_u8,
+      "PATCH"  => 8_u8,
+      "DELETE" => 16_u8,
+    }
+
     def self.allow_header(mask : UInt8) : String
       String.build do |io|
         first = true
-        {"GET" => 1_u8, "HEAD" => 1_u8, "POST" => 2_u8, "PUT" => 4_u8, "PATCH" => 8_u8, "DELETE" => 16_u8}.each do |method, bit|
+        ALLOW_BITS.each do |method, bit|
           next if mask & bit == 0
           io << ", " unless first
           io << method
@@ -209,7 +226,11 @@ module Caramel
         match(path, segments, "")[1]
       end
 
-      private def walk(node : Node, path : String, segments : Segments, depth : Int32, bit : UInt8) : {Int32, UInt8}
+      private def walk(node : Node,
+                       path : String,
+                       segments : Segments,
+                       depth : Int32,
+                       bit : UInt8) : {Int32, UInt8}
         mask = 0_u8
         if depth == segments.size
           node.terminals.each do |(route_bit, index)|
@@ -249,27 +270,32 @@ module Caramel
       {% end %}
       {% routes = [] of Nil %}
       {% locations = [] of Nil %}
+      {% verbs = ["get", "post", "put", "patch", "delete"] %}
       {% for stmt in statements %}
         {% ok = false %}
         {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.block.is_a?(Nop) %}
-          {% if ["get", "post", "put", "patch", "delete"].includes?(stmt.name.stringify) && stmt.args.size == 2 %}
+          {% if verbs.includes?(stmt.name.stringify) && stmt.args.size == 2 %}
             {% ok = stmt.args[0].is_a?(StringLiteral) && stmt.args[1].is_a?(Path) %}
           {% end %}
         {% end %}
         {% unless ok %}
-          {% stmt.raise "Caramel::Router.draw accepts only get, post, put, patch and delete declarations with a string path and an Action constant: #{stmt}" %}
+          {% stmt.raise "Caramel::Router.draw accepts only get, post, put, patch " +
+                        "and delete declarations with a string path " +
+                        "and an Action constant: #{stmt}" %}
         {% end %}
         {% method = stmt.name.stringify.upcase %}
         {% path = stmt.args[0] %}
+        {% invalid = "Invalid route path '#{path.id}': static segments use " +
+                     "[A-Za-z0-9._~-] and parameters use :snake_case" %}
         {% unless path.starts_with?("/") %}
-          {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+          {% path.raise invalid %}
         {% end %}
         {% segments = path == "/" ? [] of Nil : path[1..-1].split("/") %}
         {% names = [] of Nil %}
         {% for segment in segments %}
           {% if segment.starts_with?(":") %}
             {% unless segment =~ /\A:[a-z_][a-z0-9_]*\z/ %}
-              {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+              {% path.raise invalid %}
             {% end %}
             {% name = segment[1..-1] %}
             {% if names.includes?(name) %}
@@ -278,7 +304,7 @@ module Caramel
             {% names << name %}
           {% else %}
             {% unless segment =~ /\A[A-Za-z0-9._~-]+\z/ %}
-              {% path.raise "Invalid route path '#{path.id}': static segments use [A-Za-z0-9._~-] and parameters use :snake_case" %}
+              {% path.raise invalid %}
             {% end %}
           {% end %}
         {% end %}
@@ -305,15 +331,20 @@ module Caramel
               {% end %}
             {% end %}
             {% if overlap && identical %}
-              {% stmt.raise "\n\n❌ DUPLICATE ROUTE\n'#{method.id} #{earlier[1].id}' and '#{method.id} #{path.id}' match the same requests\n" %}
+              {% stmt.raise "\n\n❌ DUPLICATE ROUTE\n" +
+                            "'#{method.id} #{earlier[1].id}' and " +
+                            "'#{method.id} #{path.id}' match the same requests\n" %}
             {% end %}
             {% if overlap && mixed == "later" %}
-              {% stmt.raise "\n\n❌ AMBIGUOUS ROUTE ORDER\n'#{method.id} #{path.id}' must be declared before '#{method.id} #{earlier[1].id}'\n" %}
+              {% stmt.raise "\n\n❌ AMBIGUOUS ROUTE ORDER\n" +
+                            "'#{method.id} #{path.id}' must be declared before " +
+                            "'#{method.id} #{earlier[1].id}'\n" %}
             {% end %}
           {% end %}
         {% end %}
         {% routes << {method, path, segments} %}
-        {% locations << (stmt.filename ? "#{stmt.filename.id}:#{stmt.line_number}:#{stmt.column_number}" : "") %}
+        {% line_column = "#{stmt.line_number}:#{stmt.column_number}" %}
+        {% locations << (stmt.filename ? "#{stmt.filename.id}:#{line_column.id}" : "") %}
       {% end %}
       __caramel_router_draw({{ locations }}) do
         {{ block.body }}
@@ -349,14 +380,24 @@ macro __caramel_router_draw(locations, &block)
     {% end %}
     {% type = action.resolve? %}
     {% unless type %}
-      {% raise "Compile Error: Action '#{action}' is undefined.\n#{where.id}Remediation: define `struct #{action} < Caramel::Action` or correct the route's action constant.\n" %}
+      {% raise "Compile Error: Action '#{action}' is undefined.\n" +
+               where +
+               "Remediation: define `struct #{action} < Caramel::Action` " +
+               "or correct the route's action constant.\n" %}
     {% end %}
     {% unless type < ::Caramel::Action %}
-      {% raise "Compile Error: '#{action}' must inherit from Caramel::Action.\n#{where.id}Remediation: declare it as `struct #{action} < Caramel::Action` (or your application's base action).\n" %}
+      {% raise "Compile Error: '#{action}' must inherit from Caramel::Action.\n" +
+               where +
+               "Remediation: declare it as `struct #{action} < Caramel::Action` " +
+               "(or your application's base action).\n" %}
     {% end %}
     {% contract = type.constant("Contract") %}
     {% unless contract %}
-      {% raise "Compile Error: '#{action}' must define an explicit `contract do ... end` block.\n#{where.id}Remediation: add `contract do ... end` inside #{action}; it may be empty.\n" %}
+      {% raise "Compile Error: '#{action}' must define an explicit " +
+               "`contract do ... end` block.\n" +
+               where +
+               "Remediation: add `contract do ... end` inside #{action}; " +
+               "it may be empty.\n" %}
     {% end %}
     {% contract_location = contract.constant("CARAMEL_CONTRACT_LOCATION") %}
     {% contract_where = contract_location ? "Contract: #{contract_location.id}\n" : "" %}
@@ -365,11 +406,24 @@ macro __caramel_router_draw(locations, &block)
       {% suggest = (t == "id" || t.ends_with?("_id")) ? "Int64" : "String" %}
       {% field = contract.constant("CARAMEL_FIELD_#{t.upcase.id}") %}
       {% unless field %}
-        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\nRoute: '#{path.id}' defines parameter ':#{t.id}'\nAction: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n#{where.id}#{contract_where.id}Remediation: add `field #{t.id} : #{suggest.id}` to the contract block of #{action.id}.\n" %}
+        {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\n" +
+                 "Route: '#{path.id}' defines parameter ':#{t.id}'\n" +
+                 "Action: '#{action.id}::Contract' is missing 'field #{t.id} : Type'\n" +
+                 where + contract_where +
+                 "Remediation: add `field #{t.id} : #{suggest.id}` " +
+                 "to the contract block of #{action.id}.\n" %}
       {% end %}
       {% scalar = field[1] %}
       {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
-        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\nRoute: '#{path.id}' parameter ':#{t.id}' binds to '#{action.id}::Contract' field '#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}'\nPath parameters must be non-nilable String, Int32 or Int64 fields without defaults\n#{where.id}#{contract_where.id}Remediation: declare `field #{t.id} : #{suggest.id}` (String, Int32 or Int64; no `?` and no `default:`).\n" %}
+        {% declared = "#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}" %}
+        {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\n" +
+                 "Route: '#{path.id}' parameter ':#{t.id}' binds to " +
+                 "'#{action.id}::Contract' field '#{declared.id}'\n" +
+                 "Path parameters must be non-nilable String, Int32 or Int64 fields " +
+                 "without defaults\n" +
+                 where + contract_where +
+                 "Remediation: declare `field #{t.id} : #{suggest.id}` " +
+                 "(String, Int32 or Int64; no `?` and no `default:`).\n" %}
       {% end %}
     {% end %}
     {% summaries = [] of Nil %}
@@ -406,7 +460,9 @@ macro __caramel_router_draw(locations, &block)
       path = match.path
       segments = match.segments
       return ::Caramel::Response.new(400, "Malformed path") unless segments
-      return ::Caramel::Response.new(404, "Not found") if segments.size > ::Caramel::Router::MAX_SEGMENTS
+      if segments.size > ::Caramel::Router::MAX_SEGMENTS
+        return ::Caramel::Response.new(404, "Not found")
+      end
       index, mask = match.index, match.mask
       if override = context.input.method_override
         index, mask = TREE.match(path, segments, override)
@@ -417,7 +473,8 @@ macro __caramel_router_draw(locations, &block)
       end
       if index < 0
         return ::Caramel::Response.new(404, "Not found") if mask == 0
-        return ::Caramel::Response.new(405, "Method not allowed", HTTP::Headers{"Allow" => ::Caramel::Router.allow_header(mask)})
+        headers = HTTP::Headers{"Allow" => ::Caramel::Router.allow_header(mask)}
+        return ::Caramel::Response.new(405, "Method not allowed", headers)
       end
       {% if routes.empty? %}
         response = ::Caramel::Response.new(404, "Not found")
@@ -434,19 +491,30 @@ macro __caramel_router_draw(locations, &block)
     end
 
     {% for route, index in routes %}
-      private def __caramel_route_{{ index }}(context : ::Caramel::RequestContext, path : String, segments : ::Caramel::Router::Segments) : ::Caramel::Response
+      private def __caramel_route_{{ index }}(
+        context : ::Caramel::RequestContext,
+        path : String,
+        segments : ::Caramel::Router::Segments,
+      ) : ::Caramel::Response
         {% if route[4].empty? %}
           context.input.route_params = {} of String => String
         {% else %}
-          context.input.route_params = { {% for param in route[4] %}{{ param[0] }} => segments.decode(path, {{ param[1] }}), {% end %} }
+          context.input.route_params = {
+            {% for param in route[4] %}
+              {{ param[0] }} => segments.decode(path, {{ param[1] }}),
+            {% end %}
+          }
         {% end %}
         action = ::{{ route[2] }}.new(context)
         return ::Caramel::Router.unauthorized unless action.__caramel_authenticated?
         contract = ::{{ route[2] }}::Contract.parse(context.input)
         {% unless route[4].empty? %}
-          return ::Caramel::Response.new(404, "Not found") if contract.route_error?([{% for param in route[4] %}{{ param[0] }}, {% end %}])
+          if contract.route_error?({{ route[4].map { |param| param[0] } }})
+            return ::Caramel::Response.new(404, "Not found")
+          end
         {% end %}
-        contract.valid? ? action.respond(action.handle(contract)) : action.render_contract_failure(contract)
+        return action.render_contract_failure(contract) unless contract.valid?
+        action.respond(action.handle(contract))
       end
     {% end %}
   end

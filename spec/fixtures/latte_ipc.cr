@@ -5,7 +5,8 @@ class FixtureServices < Caramel::Latte::ServiceControl
   end
 
   def status_json : String
-    %({"version":1,"services":{"postgres":{"state":"stopped"},"dns":{"state":"stopped"},"proxy":{"state":"stopped"}}})
+    %({"version":1,"services":{"postgres":{"state":"stopped"},) \
+    %("dns":{"state":"stopped"},"proxy":{"state":"stopped"}}})
   end
 
   def start_services : Nil
@@ -31,6 +32,11 @@ registry = Caramel::Latte::Registry.new(ARGV[0])
 registry.register("bookshelf", ARGV[0])
 # scripts/check latte-ipc passes the idle timeout and request deadline, in
 # seconds, scaled down from the daemon's.
-server = Caramel::Latte::Server.new(registry, FixtureServices.new(registry), idle_timeout: ARGV[1].to_f.seconds, request_deadline: ARGV[2].to_f.seconds)
+server = Caramel::Latte::Server.new(
+  registry,
+  FixtureServices.new(registry),
+  idle_timeout: ARGV[1].to_f.seconds,
+  request_deadline: ARGV[2].to_f.seconds,
+)
 Process.on_terminate { server.close }
 server.listen

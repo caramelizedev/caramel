@@ -27,14 +27,20 @@ module Caramel::ColdBrew
       getter channel : Channel(String)
       getter owner : Fiber
 
-      def initialize(@broker : Broker, @name : String, @channel : Channel(String), @owner : Fiber)
+      def initialize(@broker : Broker,
+                     @name : String,
+                     @channel : Channel(String),
+                     @owner : Fiber)
         @mailbox = Deque(String).new
         @delivering = false
       end
 
       def offer(payload : String) : Nil
         if @mailbox.size >= MAILBOX_LIMIT
-          Log.warn { "channel=#{@name} dropped a notification: #{MAILBOX_LIMIT} already wait for this subscriber" }
+          Log.warn do
+            "channel=#{@name} dropped a notification: " \
+            "#{MAILBOX_LIMIT} already wait for this subscriber"
+          end
           return
         end
         @mailbox << payload
@@ -48,7 +54,10 @@ module Caramel::ColdBrew
           select
           when @channel.send(payload)
           when timeout(DELIVERY_TIMEOUT)
-            Log.warn { "channel=#{@name} dropped a notification its subscriber did not receive within #{DELIVERY_TIMEOUT.total_seconds.to_i} s" }
+            Log.warn do
+              "channel=#{@name} dropped a notification its subscriber did not " \
+              "receive within #{DELIVERY_TIMEOUT.total_seconds.to_i} s"
+            end
           end
         end
       rescue Channel::ClosedError
@@ -77,7 +86,10 @@ module Caramel::ColdBrew
         end
       end
 
-      def initialize(@connection : PG::Connection, @pq : PQ::Connection, @pid : Int32, @broker : Broker)
+      def initialize(@connection : PG::Connection,
+                     @pq : PQ::Connection,
+                     @pid : Int32,
+                     @broker : Broker)
         @acks = Deque(Channel(Exception?)).new
         @listening = Set(String).new
         @writes = Mutex.new
@@ -111,7 +123,8 @@ module Caramel::ColdBrew
       def read : Nil
         failure = nil.as(PQ::PQError?)
         loop do
-          type = @pq.soc.read_char || raise IO::EOFError.new("PostgreSQL closed the LISTEN connection")
+          type = @pq.soc.read_char
+          raise IO::EOFError.new("PostgreSQL closed the LISTEN connection") unless type
           frame = PQ::Frame.new(type, @pq.read_bytes(@pq.read_i32 - 4))
           case frame
           when PQ::Frame::NotificationResponse
@@ -153,7 +166,8 @@ module Caramel::ColdBrew
           raise error if error
         when timeout(ACK_TIMEOUT)
           drop_connection
-          raise IO::TimeoutError.new("PostgreSQL did not acknowledge #{sql} within #{ACK_TIMEOUT.total_seconds.to_i} s")
+          raise IO::TimeoutError.new("PostgreSQL did not acknowledge #{sql} " \
+                                     "within #{ACK_TIMEOUT.total_seconds.to_i} s")
         end
       end
 
@@ -193,7 +207,9 @@ module Caramel::ColdBrew
     def unsubscribe(name : String, channel : Channel(String)) : Nil
       @lock.synchronize do
         subscribers = @subscribers[name]? || return
-        subscribers.reject! { |subscriber| subscriber.channel.same?(channel) || subscriber.owner.dead? }
+        subscribers.reject! do |subscriber|
+          subscriber.channel.same?(channel) || subscriber.owner.dead?
+        end
         return unless subscribers.empty?
         @subscribers.delete(name)
         if (link = @link) && link.open?
@@ -249,7 +265,10 @@ module Caramel::ColdBrew
         end
         return
       rescue error
-        Log.warn { "LISTEN reconnect failed error_type=#{error.class}; retrying in #{delay.total_milliseconds.to_i} ms" }
+        Log.warn do
+          "LISTEN reconnect failed error_type=#{error.class}; " \
+          "retrying in #{delay.total_milliseconds.to_i} ms"
+        end
         sleep delay
         delay = {delay * 2, MAX_RECONNECT_DELAY}.min
       end

@@ -47,17 +47,27 @@ end
 
 private SESSION_SPEC_CSRF = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
 
-private def session_spec_request(method : String, path : String, session : String? = nil, body : String? = nil) : Caramel::Response
+private def session_spec_request(method : String,
+                                 path : String,
+                                 session : String? = nil,
+                                 body : String? = nil) : Caramel::Response
   token = SESSION_SPEC_CSRF.issue
   cookies = ["#{Caramel::CSRF::COOKIE_NAME}=#{token}"]
   cookies << "#{Caramel::Session::COOKIE_NAME}=#{session}" if session
-  headers = HTTP::Headers{"Host" => "bookshelf.caramel", "Origin" => "https://bookshelf.caramel", "X-CSRF-Token" => token, "Cookie" => cookies.join("; ")}
+  headers = HTTP::Headers{
+    "Host"         => "bookshelf.caramel",
+    "Origin"       => "https://bookshelf.caramel",
+    "X-CSRF-Token" => token,
+    "Cookie"       => cookies.join("; "),
+  }
   headers["Content-Type"] = "application/x-www-form-urlencoded" if body
-  Caramel::Application.new(SessionSpecApp::AppRouter.new, SESSION_SPEC_CSRF).handle(HTTP::Request.new(method, path, headers, body))
+  application = Caramel::Application.new(SessionSpecApp::AppRouter.new, SESSION_SPEC_CSRF)
+  application.handle(HTTP::Request.new(method, path, headers, body))
 end
 
 private def session_set_cookie(response : Caramel::Response) : String?
-  response.headers.get?("Set-Cookie").try &.find(&.starts_with?("#{Caramel::Session::COOKIE_NAME}="))
+  prefix = "#{Caramel::Session::COOKIE_NAME}="
+  response.headers.get?("Set-Cookie").try &.find(&.starts_with?(prefix))
 end
 
 describe Caramel::Session do
@@ -69,12 +79,16 @@ describe Caramel::Session do
     payload, _, signature = value.rpartition('.')
     forged = Base64.urlsafe_encode({"user_id" => "1", "locale" => "en"}.to_json, padding: false)
     session.decode("#{forged}.#{signature}").should be_nil
-    session.decode("#{payload}.#{signature.sub(signature[0], signature[0] == 'A' ? 'B' : 'A')}").should be_nil
-    other = Caramel::Session.new(Caramel::CSRF.new("x" * 64, "https://bookshelf.caramel").derive_key("session"))
+    flipped = signature.sub(signature[0], signature[0] == 'A' ? 'B' : 'A')
+    session.decode("#{payload}.#{flipped}").should be_nil
+    foreign = Caramel::CSRF.new("x" * 64, "https://bookshelf.caramel")
+    other = Caramel::Session.new(foreign.derive_key("session"))
     session.decode(other.encode({"user_id" => "42", "locale" => "en"})).should be_nil
     # A key derived for another purpose cannot sign sessions.
-    session.decode(Caramel::Session.new(SESSION_SPEC_CSRF.derive_key("other")).encode({"user_id" => "42"})).should be_nil
-    ["", ".", payload, "#{payload}.", ".#{signature}", "not base64.#{signature}"].each do |malformed|
+    misused = Caramel::Session.new(SESSION_SPEC_CSRF.derive_key("other"))
+    session.decode(misused.encode({"user_id" => "42"})).should be_nil
+    malformed_values = ["", ".", payload, "#{payload}.", ".#{signature}", "not base64.#{signature}"]
+    malformed_values.each do |malformed|
       session.decode(malformed).should be_nil
     end
   end
@@ -84,7 +98,9 @@ describe Caramel::Session do
     fits = session.encode({"note" => "x" * 2900})
     (Caramel::Session::COOKIE_NAME.bytesize + 1 + fits.bytesize).should be <= 4096
     session.decode(fits).should eq({"note" => "x" * 2900})
-    expect_raises(Caramel::Session::Overflow, "exceeds 4096 bytes") { session.encode({"note" => "x" * 3100}) }
+    expect_raises(Caramel::Session::Overflow, "exceeds 4096 bytes") do
+      session.encode({"note" => "x" * 3100})
+    end
     session.decode("#{fits}#{"x" * 4096}").should be_nil
   end
 
@@ -109,11 +125,14 @@ describe Caramel::Session do
     known = session_spec_request("GET", "/whoami", value)
     known.body.should eq("42")
     session_set_cookie(known).should be_nil
-    session_spec_request("POST", "/sign-in", value, "user_id=42").try { |same| session_set_cookie(same) }.should be_nil
-    session_spec_request("GET", "/whoami", value.sub(/\.[^.]+\z/, ".forged")).body.should eq("anonymous")
+    same = session_spec_request("POST", "/sign-in", value, "user_id=42")
+    session_set_cookie(same).should be_nil
+    forged = value.sub(/\.[^.]+\z/, ".forged")
+    session_spec_request("GET", "/whoami", forged).body.should eq("anonymous")
 
     signed_out = session_spec_request("POST", "/sign-out", value)
-    cleared = HTTP::Cookie::Parser.parse_set_cookie(session_set_cookie(signed_out).not_nil!).not_nil!
+    cleared_header = session_set_cookie(signed_out).not_nil!
+    cleared = HTTP::Cookie::Parser.parse_set_cookie(cleared_header).not_nil!
     cleared.value.should eq("")
     cleared.expired?.should be_true
   end

@@ -35,7 +35,8 @@ describe Caramel::Frappe::EditorTools do
         tools.toolchain_root({} of String => String)
       end
       File.write(File.join(framework, ".caramel-toolchain"), root_b + "\n")
-      tools.toolchain_root({"CARAMEL_TOOLCHAIN_ROOT" => root_a}).should eq({root_a, "CARAMEL_TOOLCHAIN_ROOT"})
+      from_env = {"CARAMEL_TOOLCHAIN_ROOT" => root_a}
+      tools.toolchain_root(from_env).should eq({root_a, "CARAMEL_TOOLCHAIN_ROOT"})
       tools.toolchain_root({} of String => String).should eq({root_b, ".caramel-toolchain"})
     end
   end
@@ -44,13 +45,16 @@ describe Caramel::Frappe::EditorTools do
     with_editor_fixture do |framework, root, _|
       tools = Caramel::Frappe::EditorTools.new(framework)
       env = {"CARAMEL_TOOLCHAIN_ROOT" => root}
-      expect_raises(Caramel::Frappe::Error, "ameba-ls 0.2.0 is not installed in #{root} for Caramel at #{framework}") do
+      missing = "ameba-ls 0.2.0 is not installed in #{root} for Caramel at #{framework}"
+      expect_raises(Caramel::Frappe::Error, missing) do
         tools.server("ameba-ls", env)
       end
       directory = File.join(root, "editor/ameba-ls/0.2.0")
       Dir.mkdir_p(directory)
       File.write(File.join(directory, "ameba-ls"), "not the pinned binary")
-      expect_raises(Caramel::Frappe::Error, "failed verification") { tools.server("ameba-ls", env) }
+      expect_raises(Caramel::Frappe::Error, "failed verification") do
+        tools.server("ameba-ls", env)
+      end
     end
   end
 
@@ -58,7 +62,8 @@ describe Caramel::Frappe::EditorTools do
     with_editor_fixture do |framework, root, _|
       tools = Caramel::Frappe::EditorTools.new(framework)
       env = {"CARAMEL_TOOLCHAIN_ROOT" => root}
-      directory = File.join(root, "editor/crystalline/0.20.0+a5f6f1b-#{tools.crystalline_fingerprint}")
+      build = "0.20.0+a5f6f1b-#{tools.crystalline_fingerprint}"
+      directory = File.join(root, "editor/crystalline", build)
       Dir.mkdir_p(directory)
       binary = File.join(directory, "crystalline")
       File.write(binary, "fake crystalline")
@@ -77,11 +82,16 @@ describe Caramel::Frappe::EditorTools do
       outside = File.join(framework, "identical-crystalline")
       File.rename(binary, outside)
       File.symlink(outside, binary)
-      expect_raises(Caramel::Frappe::Error, "failed verification") { tools.server("crystalline", env) }
+      expect_raises(Caramel::Frappe::Error, "failed verification") do
+        tools.server("crystalline", env)
+      end
       File.delete(binary)
       File.rename(outside, binary)
-      File.write(File.join(directory, "receipt.json"), receipt.merge({"llvmdev_sha256" => "0" * 64}).to_json)
-      expect_raises(Caramel::Frappe::Error, "failed verification") { tools.server("crystalline", env) }
+      stale = receipt.merge({"llvmdev_sha256" => "0" * 64})
+      File.write(File.join(directory, "receipt.json"), stale.to_json)
+      expect_raises(Caramel::Frappe::Error, "failed verification") do
+        tools.server("crystalline", env)
+      end
     end
   end
 
@@ -89,14 +99,22 @@ describe Caramel::Frappe::EditorTools do
     with_editor_fixture do |framework, root, _|
       tools = Caramel::Frappe::EditorTools.new(framework)
       crystal = File.join(root, "data/installs/github-crystal-lang-crystal/1.21.1")
-      server = Caramel::Frappe::EditorTools::Server.new("ameba-ls", "0.2.0", "/bin/true", root, "CARAMEL_TOOLCHAIN_ROOT", crystal)
+      server = Caramel::Frappe::EditorTools::Server.new(
+        name: "ameba-ls",
+        version: "0.2.0",
+        binary: "/bin/true",
+        root: root,
+        source: "CARAMEL_TOOLCHAIN_ROOT",
+        crystal: crystal)
       env = tools.environment(server)
       env["CRYSTAL_PATH"].should eq("lib:#{crystal}/src")
       env["PATH"].should eq("#{crystal}/embedded/bin:#{root}/bin:/usr/bin:/bin:/usr/sbin:/sbin")
       env["DYLD_INSERT_LIBRARIES"]?.should be_nil
       env.has_key?("DYLD_INSERT_LIBRARIES").should be_true
       env["PKG_CONFIG_PATH"]?.should be_nil
-      env["PKG_CONFIG_LIBDIR"].should eq(File.join(root, "data/installs/conda-openssl", Caramel::Latte::Toolchain::OPENSSL_VERSION, "lib/pkgconfig"))
+      version = Caramel::Latte::Toolchain::OPENSSL_VERSION
+      pkgconfig = File.join(root, "data/installs/conda-openssl", version, "lib/pkgconfig")
+      env["PKG_CONFIG_LIBDIR"].should eq(pkgconfig)
       env["XDG_CACHE_HOME"].should eq(File.join(root, "editor/cache"))
       Dir.exists?(File.join(root, "editor/cache")).should be_true
     end

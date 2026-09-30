@@ -11,6 +11,8 @@ module Caramel
       # its names without a system resolver entry.
       LOCALHOST_SUFFIX = "localhost"
       SUFFIXES         = {DEFAULT_SUFFIX, TEST_SUFFIX, LOCALHOST_SUFFIX}
+      NAME_RULE        = "site name must be lowercase ASCII, start with a letter, " \
+                         "and end with a letter or digit"
 
       getter id : String
       getter name : String
@@ -18,9 +20,18 @@ module Caramel
       getter suffix : String
       getter upstream : String?
 
-      def initialize(name : String, directory : String, suffix : String = DEFAULT_SUFFIX, id : String? = nil, upstream : String? = nil, validate_directory : Bool = true)
+      def initialize(name : String,
+                     directory : String,
+                     suffix : String = DEFAULT_SUFFIX,
+                     id : String? = nil,
+                     upstream : String? = nil,
+                     validate_directory : Bool = true)
         normalized_name = self.class.validate_name(name)
-        canonical_directory = validate_directory ? self.class.canonical_directory(directory) : self.class.stored_directory(directory)
+        canonical_directory = if validate_directory
+                                self.class.canonical_directory(directory)
+                              else
+                                self.class.stored_directory(directory)
+                              end
         normalized_suffix = self.class.normalize_suffix(suffix)
         generated_id = self.class.id_for(normalized_name, canonical_directory, normalized_suffix)
         if id && id != generated_id
@@ -34,7 +45,11 @@ module Caramel
         @upstream = upstream
       end
 
-      def self.from_stored(id : String, name : String, directory : String, suffix : String, upstream : String? = nil) : self
+      def self.from_stored(id : String,
+                           name : String,
+                           directory : String,
+                           suffix : String,
+                           upstream : String? = nil) : self
         normalized_name = validate_name(name)
         normalized_suffix = normalize_suffix(suffix)
         normalized_directory = stored_directory(directory)
@@ -45,7 +60,14 @@ module Caramel
         unless id == generated_id
           raise ArgumentError.new("registry site id does not match site metadata")
         end
-        new(normalized_name, normalized_directory, normalized_suffix, id, upstream, validate_directory: false)
+        new(
+          name: normalized_name,
+          directory: normalized_directory,
+          suffix: normalized_suffix,
+          id: id,
+          upstream: upstream,
+          validate_directory: false,
+        )
       end
 
       def with_upstream(socket : String) : Site
@@ -78,10 +100,14 @@ module Caramel
 
       def self.validate_name(name : String) : String
         StateSecurity.reject_controls!(name, "site name")
-        if !(1..63).includes?(name.bytesize) || name !~ /\A[a-z][a-z0-9-]*\z/ || name.ends_with?('-')
-          raise ArgumentError.new("site name must be lowercase ASCII, start with a letter, and end with a letter or digit")
-        end
+        raise ArgumentError.new(NAME_RULE) unless valid_name?(name)
         name
+      end
+
+      private def self.valid_name?(name : String) : Bool
+        return false unless (1..63).includes?(name.bytesize)
+        return false if name !~ /\A[a-z][a-z0-9-]*\z/
+        !name.ends_with?('-')
       end
 
       def self.normalize_suffix(suffix : String) : String
@@ -102,7 +128,9 @@ module Caramel
           raise ArgumentError.new("project directory must exist")
         end
         info = File.info?(canonical, follow_symlinks: false)
-        raise ArgumentError.new("project directory must be a directory") unless info && info.directory?
+        unless info && info.directory?
+          raise ArgumentError.new("project directory must be a directory")
+        end
         StateSecurity.reject_controls!(canonical, "project directory")
         canonical
       end
@@ -118,13 +146,17 @@ module Caramel
         candidate = Path[directory].expand(home: Path.home).normalize.to_s
         if info = File.info?(candidate, follow_symlinks: false)
           raise ArgumentError.new("registry project directory contains a symlink") if info.symlink?
-          raise ArgumentError.new("registry project directory is not a directory") unless info.directory?
+          unless info.directory?
+            raise ArgumentError.new("registry project directory is not a directory")
+          end
           begin
             canonical = File.realpath(candidate)
           rescue File::Error
             raise ArgumentError.new("registry project directory is invalid")
           end
-          raise ArgumentError.new("registry project directory is not canonical") unless canonical == candidate
+          unless canonical == candidate
+            raise ArgumentError.new("registry project directory is not canonical")
+          end
         end
         candidate
       end
