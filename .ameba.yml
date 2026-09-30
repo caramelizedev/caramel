@@ -228,6 +228,5 @@ Layout/LineLength:
     - "src/latte/watcher.cr"
     - "src/sugar_orm/changeset.cr"
     - "src/sugar_orm/differ.cr"
-    - "src/sugar_orm/introspection.cr"
     - "src/sugar_orm/linter.cr"
     - "src/sugar_orm/schema.cr"
