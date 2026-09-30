@@ -10,13 +10,19 @@ module Caramel
   # a framework upgrade upgrades the commands Frappé runs on the application
   # binary. Call it from the project's src/ directory: its __DIR__ locates
   # the project's public/ files.
-  def self.run(app : T.class, arguments : Array(String) = ARGV, source : String = __DIR__) : NoReturn forall T
+  def self.run(app : T.class,
+               arguments : Array(String) = ARGV,
+               source : String = __DIR__) : NoReturn forall T
     exit CommandLine.run(app, arguments, File.expand_path("..", source))
   end
 
   # The application's HTTP handler on a database pool: its router behind
   # CSRF protection, serving *root*/public.
-  def self.build(app : T.class, db : DB::Database, secret : String, origin : String, root : String) : Application forall T
+  def self.build(app : T.class,
+                 db : DB::Database,
+                 secret : String,
+                 origin : String,
+                 root : String) : Application forall T
     SugarORM::Repo.database = db
     Application.new(T::AppRouter.new, CSRF.new(secret, origin), File.join(root, "public"))
   end
@@ -84,7 +90,9 @@ module Caramel
         puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
         0
       when "serve", "seed", "migrate", "lint", "drift"
-        with_database(command == "migrate") { |db, url| database_command(app, command, db, url, dev_override, root) }
+        with_database(command == "migrate") do |db, url|
+          database_command(app, command, db, url, dev_override, root)
+        end
       else
         puts usage
         command == "help" ? 0 : 2
@@ -157,7 +165,9 @@ module Caramel
     private def self.with_database(migration : Bool, & : DB::Database, String -> Int32) : Int32
       url = Database.url(migration: migration)
       if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
-        abort("Database connection differs from the verified launcher configuration") unless url == expected
+        unless url == expected
+          abort("Database connection differs from the verified launcher configuration")
+        end
       elsif ENV["CARAMEL_ENV"]? == "test"
         abort("Run specs through frappe corretto")
       end
@@ -169,7 +179,10 @@ module Caramel
         # frappe migrate sets CARAMEL_DIAGNOSTICS=mrdp for coding agents.
         STDERR.print(ENV["CARAMEL_DIAGNOSTICS"]? == "mrdp" ? ex.to_mrdp : "#{ex.message}\n")
         1
-      rescue ex : SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed | ColdBrew::ConfigurationError
+      rescue ex : SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed
+        STDERR.puts(ex.message)
+        1
+      rescue ex : ColdBrew::ConfigurationError
         STDERR.puts(ex.message)
         1
       ensure
@@ -177,7 +190,12 @@ module Caramel
       end
     end
 
-    private def self.database_command(app : T.class, command : String, db : DB::Database, url : String, dev_override : Bool, root : String) : Int32 forall T
+    private def self.database_command(app : T.class,
+                                      command : String,
+                                      db : DB::Database,
+                                      url : String,
+                                      dev_override : Bool,
+                                      root : String) : Int32 forall T
       migrator = SugarORM::Migrator.new(db, T::MIGRATIONS)
       case command
       when "migrate"
@@ -202,7 +220,8 @@ module Caramel
     end
 
     private def self.drift(db : DB::Database) : Int32
-      difference = SugarORM::Differ.diff(SugarORM::Catalog.declared, SugarORM::Introspection.read(db))
+      declared = SugarORM::Catalog.declared
+      difference = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
       if difference.clean?
         puts "The database matches the declared schema."
         return 0
@@ -215,15 +234,17 @@ module Caramel
 
     # Serves on the private socket `frappe dev` names, with Cold Brew's
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
-    private def self.serve(app : T.class, db : DB::Database, url : String, root : String) : Nil forall T
+    private def self.serve(app : T.class,
+                           db : DB::Database,
+                           url : String,
+                           root : String) : Nil forall T
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
       parent = File.info?(File.dirname(socket_path), follow_symlinks: false)
-      if parent.nil? || !parent.directory? || parent.owner_id != LibC.getuid.to_s || (parent.permissions.value & 0o077) != 0
-        abort("CARAMEL_SOCKET must be in a private owned directory")
-      end
-      abort("Application socket is already occupied") if File.info?(socket_path, follow_symlinks: false)
+      abort("CARAMEL_SOCKET must be in a private owned directory") if exposed?(parent)
+      occupied = File.info?(socket_path, follow_symlinks: false)
+      abort("Application socket is already occupied") if occupied
       server = HTTP::Server.new([Caramel.build(app, db, secret, origin, root)])
       # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
       bound = false
@@ -243,6 +264,13 @@ module Caramel
         # In-flight jobs finish; no new ones start.
         cold_brew.try(&.stop)
       end
+    end
+
+    # True unless *info* is a directory that the current user owns and that
+    # no one else can reach.
+    private def self.exposed?(info : File::Info?) : Bool
+      return true if info.nil? || !info.directory?
+      info.owner_id != LibC.getuid.to_s || (info.permissions.value & 0o077) != 0
     end
   end
 end
