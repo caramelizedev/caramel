@@ -99,7 +99,6 @@ Layout/LineLength:
     - "spec/fixtures/latte_ipc.cr"
     - "spec/fixtures/latte_network.cr"
     - "spec/frappe/cli_spec.cr"
-    - "spec/frappe/dev_gateway_spec.cr"
     - "spec/frappe/diagnostics_spec.cr"
     - "spec/frappe/dispatch_spec.cr"
     - "spec/frappe/editor_tools_spec.cr"
