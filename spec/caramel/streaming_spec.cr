@@ -15,7 +15,12 @@ struct StreamingSpecEvents < StreamingSpecAction
   end
 
   def handle(contract : Contract)
-    stream("text/event-stream") { |io| io << "data: one\n\n"; io.flush; STREAM_GATE.receive; io << "data: two\n\n" }
+    stream("text/event-stream") do |io|
+      io << "data: one\n\n"
+      io.flush
+      STREAM_GATE.receive
+      io << "data: two\n\n"
+    end
   end
 end
 
@@ -47,7 +52,9 @@ private class StreamingSpecClosedSocket < IO
 end
 
 private def streaming_spec_app : Caramel::Application
-  Caramel::Application.new(StreamingSpecApp::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel"))
+  router = StreamingSpecApp::AppRouter.new
+  csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+  Caramel::Application.new(router, csrf)
 end
 
 private def streaming_spec_line(io : IO) : String?
@@ -93,7 +100,8 @@ describe "Caramel streaming responses" do
   end
 
   it "answers HEAD without running the stream or claiming a length" do
-    response = streaming_spec_app.handle(HTTP::Request.new("HEAD", "/events", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    response = streaming_spec_app.handle(HTTP::Request.new("HEAD", "/events", host))
     response.status.should eq(200)
     response.body.should eq("")
     response.streamer.should be_nil

@@ -38,11 +38,20 @@ module Caramel::Frappe
     getter pid : Int64
     @process : Process
 
-    def initialize(command : Array(String), environment : Hash(String, String), directory : String, forward : IO? = nil, log : IO? = nil)
+    def initialize(command : Array(String),
+                   environment : Hash(String, String),
+                   directory : String,
+                   forward : IO? = nil,
+                   log : IO? = nil)
       @output = Output.new(forward, log)
       launcher = Process.executable_path || raise Error.new("Cannot locate Frappé")
-      @process = Process.new(launcher, ["__caramel_dev_child", *command], env: environment, clear_env: true,
-        chdir: directory, input: Process::Redirect::Pipe, output: @output, error: @output)
+      @process = Process.new(launcher, ["__caramel_dev_child", *command],
+        env: environment,
+        clear_env: true,
+        chdir: directory,
+        input: Process::Redirect::Pipe,
+        output: @output,
+        error: @output)
       @pid = @process.pid.to_i64
       spawn do
         @status = @process.wait

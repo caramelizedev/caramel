@@ -26,8 +26,12 @@ end
 describe "SugarORM::Changeset#validate_url" do
   it "accepts exactly the URLs redirect_external redirects to" do
     request = HTTP::Request.new("GET", "/go")
-    ["https://example.com/a?b=1", "http://example.com", "/local", "//example.com", "javascript:alert(1)", "ftp://example.com/x",
-     "https://", "https://user:pass@example.com/", "https://example.com/a b", "https://example.com/\r\nX: y"].each do |url|
+    urls = [
+      "https://example.com/a?b=1", "http://example.com", "/local", "//example.com",
+      "javascript:alert(1)", "ftp://example.com/x", "https://",
+      "https://user:pass@example.com/", "https://example.com/a b", "https://example.com/\r\nX: y",
+    ]
+    urls.each do |url|
       redirects = begin
         Caramel::Response.redirect_external(request, url)
         true
@@ -39,8 +43,12 @@ describe "SugarORM::Changeset#validate_url" do
   end
 
   it "reports a changed value that is not an external URL on its field, and skips nil" do
-    ValidateURLSpec::LinkChangeset.new(destination: "/local").errors.should eq({"destination" => ["must be an absolute http or https URL"]})
-    ValidateURLSpec::LinkChangeset.new(destination: "https://example.com", note: "nope").errors.should eq({"note" => ["is not a link"]})
-    ValidateURLSpec::LinkChangeset.new(destination: "https://example.com", note: nil).valid?.should be_true
+    site = "https://example.com"
+    local = ValidateURLSpec::LinkChangeset.new(destination: "/local")
+    local.errors.should eq({"destination" => ["must be an absolute http or https URL"]})
+    not_a_link = ValidateURLSpec::LinkChangeset.new(destination: site, note: "nope")
+    not_a_link.errors.should eq({"note" => ["is not a link"]})
+    no_note = ValidateURLSpec::LinkChangeset.new(destination: site, note: nil)
+    no_note.valid?.should be_true
   end
 end

@@ -4,6 +4,11 @@ require "socket"
 require "../../src/latte/dns"
 require "../../src/latte/proxy"
 
+# The HTTPS server's routes in *proxy*'s configuration now.
+private def https_routes(proxy : Caramel::Latte::Proxy) : Array(JSON::Any)
+  JSON.parse(proxy.configuration)["apps"]["http"]["servers"]["https"]["routes"].as_a
+end
+
 describe "Latte network configuration" do
   it "registers exact hosts and produces isolated local HTTPS configuration" do
     root = File.join("/private/tmp", "latte-network-config-#{Random::Secure.hex(8)}")
@@ -20,7 +25,8 @@ describe "Latte network configuration" do
       end
       dns = Caramel::Latte::DNS.new(paths)
       dns.write(registry.list)
-      File.read(dns.hosts_file).lines.sort!.should eq(["127.0.0.1 bookshelf.caramel", "127.0.0.1 notes.caramel"])
+      hosts = ["127.0.0.1 bookshelf.caramel", "127.0.0.1 notes.caramel"]
+      File.read(dns.hosts_file).lines.sort!.should eq(hosts)
       corefile = File.read(dns.config_file)
       corefile.should contain("bind 127.0.0.1")
       corefile.should contain("rcode REFUSED")
@@ -49,18 +55,18 @@ describe "Latte network configuration" do
       listener = UNIXServer.new(socket_path)
       File.chmod(socket_path, 0o600)
       registry.set_upstream(site.id, socket_path)
-      JSON.parse(proxy.configuration)["apps"]["http"]["servers"]["https"]["routes"][0]["handle"][0]["handler"].as_s.should eq("reverse_proxy")
+      https_routes(proxy)[0]["handle"][0]["handler"].as_s.should eq("reverse_proxy")
       listener.close
       # Recreate a filesystem socket with no listener, as after a crashed app.
       stale = Socket.unix
       stale.bind(Socket::UNIXAddress.new(socket_path))
       File.chmod(socket_path, 0o600)
       stale.close
-      JSON.parse(proxy.configuration)["apps"]["http"]["servers"]["https"]["routes"][0]["handle"][0]["status_code"].as_i.should eq(503)
+      https_routes(proxy)[0]["handle"][0]["status_code"].as_i.should eq(503)
       proxy.write
       File.info(proxy.config_file).permissions.value.should eq(0o600)
       registry.unregister(registry.list.first.id)
-      JSON.parse(proxy.configuration)["apps"]["http"]["servers"]["https"]["routes"].as_a.size.should eq(2)
+      https_routes(proxy).size.should eq(2)
     ensure
       FileUtils.rm_rf(paths.run_dir) if paths
       FileUtils.rm_rf(root)

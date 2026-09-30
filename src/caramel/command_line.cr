@@ -43,7 +43,11 @@ module Caramel
     record WorkOptions,
       queues : String? = nil,
       concurrency : String? = nil,
-      scheduler : Bool = true do
+      scheduler : Bool = true
+
+    # Reopened rather than given as `record`'s block: `crystal tool expand`
+    # cannot re-read a `protected def` inside that block.
+    struct WorkOptions
       # Nil for an unknown or repeated flag, or a flag missing its value.
       def self.parse(arguments : Array(String)) : WorkOptions?
         names = arguments.map(&.partition('=')[0])

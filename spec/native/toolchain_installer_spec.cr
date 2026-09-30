@@ -3,7 +3,9 @@ require "../../scripts/checks/support/harness"
 
 TOOLCHAIN_INSTALLER      = File.join(Caramel::Checks::REPO, "bin/install-toolchain")
 TOOLCHAIN_TEST_INSTALLER = File.join(Caramel::Checks::REPO, "bin/test/install-toolchain")
-raise "Run scripts/check native" unless File.file?(TOOLCHAIN_INSTALLER) && File.file?(TOOLCHAIN_TEST_INSTALLER)
+unless File.file?(TOOLCHAIN_INSTALLER) && File.file?(TOOLCHAIN_TEST_INSTALLER)
+  raise "Run scripts/check native"
+end
 
 private class NativeToolchainFixture
   getter base : String
@@ -31,7 +33,8 @@ private class NativeToolchainFixture
     }.to_json)
   end
 
-  def invoke(args : Array(String) = [] of String, production : Bool = false) : Caramel::Latte::ProcessResult
+  def invoke(args : Array(String) = [] of String,
+             production : Bool = false) : Caramel::Latte::ProcessResult
     command = production ? TOOLCHAIN_INSTALLER : TOOLCHAIN_TEST_INSTALLER
     Caramel::Checks.run([command, "--root", @root] + args,
       env: {"CARAMEL_INSTALLER_FIXTURE" => (production ? nil : @config)}, timeout: 35.seconds)
@@ -66,13 +69,28 @@ private def expect_toolchain_error(result : Caramel::Latte::ProcessResult, expec
   result.stderr.should contain("install-toolchain: #{expected}")
 end
 
-private def toolchain_probe(fixture : NativeToolchainFixture, stdout : String, stderr : String, expected : String) : Caramel::Latte::ProcessResult
+private def toolchain_probe(fixture : NativeToolchainFixture,
+                            stdout : String,
+                            stderr : String,
+                            expected : String) : Caramel::Latte::ProcessResult
   output = File.join(fixture.base, "stdout.txt")
   errors = File.join(fixture.base, "stderr.txt")
   File.write(output, stdout)
   File.write(errors, stderr)
-  Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "test-probe", "--root", fixture.root,
-                       "--expected", expected, "--stdout", output, "--stderr", errors], timeout: 20.seconds)
+  command = [TOOLCHAIN_TEST_INSTALLER, "test-probe", "--root", fixture.root,
+             "--expected", expected, "--stdout", output, "--stderr", errors]
+  Caramel::Checks.run(command, timeout: 20.seconds)
+end
+
+# Runs the test installer without a root, as a checkout does, with `home` as
+# CARAMEL_HOME.
+private def install_in_home(fixture : NativeToolchainFixture,
+                            home : String,
+                            offline : Bool = false) : Caramel::Latte::ProcessResult
+  env = {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}
+  command = [TOOLCHAIN_TEST_INSTALLER]
+  command << "--offline" if offline
+  Caramel::Checks.run(command, env: env, timeout: 35.seconds)
 end
 
 describe "Swift toolchain installer" do
@@ -81,7 +99,8 @@ describe "Swift toolchain installer" do
       Dir.mkdir(fixture.root, 0o700)
       note = File.join(fixture.root, "notes.txt")
       File.write(note, "keep me")
-      expect_toolchain_error(fixture.invoke(production: true), "refusing a nonempty directory without a Caramel receipt")
+      refusal = "refusing a nonempty directory without a Caramel receipt"
+      expect_toolchain_error(fixture.invoke(production: true), refusal)
       File.read(note).should eq("keep me")
       Dir.children(fixture.root).sort.should eq(["notes.txt"])
     end
@@ -92,7 +111,8 @@ describe "Swift toolchain installer" do
       Dir.mkdir(fixture.root, 0o700)
       File.open(File.join(fixture.root, ".install.lock"), "a", perm: 0o600) do |lock|
         lock.flock_exclusive do
-          expect_toolchain_error(fixture.invoke(production: true), "another Caramel toolchain installer is already running")
+          running = "another Caramel toolchain installer is already running"
+          expect_toolchain_error(fixture.invoke(production: true), running)
         end
       end
     end
@@ -100,7 +120,8 @@ describe "Swift toolchain installer" do
 
   it "fails offline before creating an absent root" do
     with_toolchain_fixture do |fixture|
-      expect_toolchain_error(fixture.invoke(["--offline"], production: true), "offline use requires a completed verified installation")
+      result = fixture.invoke(["--offline"], production: true)
+      expect_toolchain_error(result, "offline use requires a completed verified installation")
       File.exists?(fixture.root).should be_false
     end
   end
@@ -111,7 +132,8 @@ describe "Swift toolchain installer" do
       expect_toolchain_error(fixture.invoke, "fixture provider failed")
       authored = File.join(fixture.root, "project/caramel-toolchain.toml")
       File.write(authored, "[tasks.unreviewed]\n")
-      expect_toolchain_error(fixture.invoke, "authored toolchain file differs; preserved: project/caramel-toolchain.toml")
+      differs = "authored toolchain file differs; preserved: project/caramel-toolchain.toml"
+      expect_toolchain_error(fixture.invoke, differs)
       File.read(authored).should eq("[tasks.unreviewed]\n")
     end
   end
@@ -144,16 +166,14 @@ describe "Swift toolchain installer" do
   it "installs into Caramel's toolchains directory when no root is given" do
     with_toolchain_fixture do |fixture|
       home = File.join(fixture.base, "Caramel Home")
-      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
-        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result = install_in_home(fixture, home)
       result.success?.should be_true
       root = File.read(fixture.pointer).chomp
       File.dirname(root).should eq(File.join(home, "toolchains"))
       File.basename(root).should match(/\A[0-9a-f]{12}\z/)
       result.stdout.should contain("Installed and verified Caramel toolchain: #{root}")
       (File.info(home).permissions.value & 0o777).should eq(0o700)
-      again = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "--offline"],
-        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      again = install_in_home(fixture, home, offline: true)
       again.stdout.should contain("Verified installed Caramel toolchain: #{root}")
     end
   end
@@ -163,8 +183,7 @@ describe "Swift toolchain installer" do
       fixture.complete
       fixture.configure("fail")
       home = File.join(fixture.base, "Caramel Home")
-      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
-        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result = install_in_home(fixture, home)
       result.success?.should be_true
       result.stdout.should contain("Verified installed Caramel toolchain: #{fixture.root}")
       File.exists?(home).should be_false
@@ -176,9 +195,9 @@ describe "Swift toolchain installer" do
       fixture.complete
       File.chmod(fixture.pointer, 0o666)
       home = File.join(fixture.base, "Caramel Home")
-      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
-        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
-      expect_toolchain_error(result, "#{fixture.pointer} must be a regular file you own that no one else can write")
+      result = install_in_home(fixture, home)
+      expect_toolchain_error(result, "#{fixture.pointer} must be a regular file " \
+                                     "you own that no one else can write")
       File.exists?(home).should be_false
     end
   end
@@ -188,8 +207,7 @@ describe "Swift toolchain installer" do
       fixture.complete
       fixture.configure("create-critical", "version = 2\n")
       home = File.join(fixture.base, "Caramel Home")
-      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER],
-        env: {"CARAMEL_INSTALLER_FIXTURE" => fixture.config, "CARAMEL_HOME" => home}, timeout: 35.seconds)
+      result = install_in_home(fixture, home)
       result.success?.should be_true
       root = File.read(fixture.pointer).chomp
       File.dirname(root).should eq(File.join(home, "toolchains"))
@@ -203,7 +221,9 @@ describe "Swift toolchain installer" do
       fixture.complete
       binary = File.join(fixture.root, fixture.critical.last)
       File.write(binary, "changed")
-      expect_toolchain_error(fixture.invoke(["--offline"]), "toolchain artifact verification failed; preserve this prefix for inspection")
+      result = fixture.invoke(["--offline"])
+      expect_toolchain_error(result, "toolchain artifact verification failed; " \
+                                     "preserve this prefix for inspection")
       File.read(binary).should eq("changed")
     end
   end
@@ -215,7 +235,8 @@ describe "Swift toolchain installer" do
       receipt = fixture.receipt
       receipt["artifacts"].as_h.delete(fixture.critical.last)
       File.write(receipt_path, receipt.to_json)
-      expect_toolchain_error(fixture.invoke(["--offline"]), "toolchain artifact inventory verification failed")
+      result = fixture.invoke(["--offline"])
+      expect_toolchain_error(result, "toolchain artifact inventory verification failed")
     end
   end
 
@@ -259,19 +280,24 @@ describe "Swift toolchain installer" do
 
   it "rejects native libraries loaded from other package managers" do
     with_toolchain_fixture do |fixture|
-      result = toolchain_probe(fixture, "Crystal 1.21.0\n", "dyld[123]: <ABCD> /opt/homebrew/lib/libssl.3.dylib\n", "Crystal 1.21.0")
+      loaded = "dyld[123]: <ABCD> /opt/homebrew/lib/libssl.3.dylib\n"
+      result = toolchain_probe(fixture, "Crystal 1.21.0\n", loaded, "Crystal 1.21.0")
       expect_toolchain_error(result, "native tool loaded a library outside Caramel or macOS:")
     end
   end
 
   it "accepts only observed permitted libraries with the expected native version" do
     with_toolchain_fixture do |fixture|
-      stderr = "dyld[123]: <ABCD> #{fixture.root}/bin/compiler\ndyld[123]: <1234> /usr/lib/libSystem.B.dylib\n"
+      stderr = "dyld[123]: <ABCD> #{fixture.root}/bin/compiler\n" \
+               "dyld[123]: <1234> /usr/lib/libSystem.B.dylib\n"
       result = toolchain_probe(fixture, "Crystal 1.21.0\n", stderr, "Crystal 1.21.0")
       result.success?.should be_true
-      JSON.parse(result.stdout).as_a.map(&.as_s).should eq(["#{fixture.root}/bin/compiler", "/usr/lib/libSystem.B.dylib"])
-      expect_toolchain_error(toolchain_probe(fixture, "Crystal 1.21.0\n", stderr, "Crystal 1.20.0"), "native tool version/output differs")
-      expect_toolchain_error(toolchain_probe(fixture, "Crystal 1.21.0\n", "", "Crystal 1.21.0"), "native library evidence is unavailable")
+      libraries = ["#{fixture.root}/bin/compiler", "/usr/lib/libSystem.B.dylib"]
+      JSON.parse(result.stdout).as_a.map(&.as_s).should eq(libraries)
+      older = toolchain_probe(fixture, "Crystal 1.21.0\n", stderr, "Crystal 1.20.0")
+      expect_toolchain_error(older, "native tool version/output differs")
+      silent = toolchain_probe(fixture, "Crystal 1.21.0\n", "", "Crystal 1.21.0")
+      expect_toolchain_error(silent, "native library evidence is unavailable")
     end
   end
 
@@ -279,8 +305,9 @@ describe "Swift toolchain installer" do
     with_toolchain_fixture do |fixture|
       Dir.mkdir(fixture.root, 0o700)
       File.write(File.join(fixture.base, "mise.toml"), "[tasks.sentinel]\nrun = 'false'\n")
-      result = Caramel::Checks.run([TOOLCHAIN_TEST_INSTALLER, "test-environment", "--root", fixture.root],
-        env: {"SECRET_SHOULD_NOT_CROSS" => "redacted"}, timeout: 20.seconds)
+      command = [TOOLCHAIN_TEST_INSTALLER, "test-environment", "--root", fixture.root]
+      secret = {"SECRET_SHOULD_NOT_CROSS" => "redacted"}
+      result = Caramel::Checks.run(command, env: secret, timeout: 20.seconds)
       result.success?.should be_true
       env = JSON.parse(result.stdout).as_h
       env.has_key?("SECRET_SHOULD_NOT_CROSS").should be_false
@@ -292,7 +319,8 @@ describe "Swift toolchain installer" do
         "MISE_AUTO_INSTALL" => "0", "MISE_PARANOID" => "1",
       }
       expected.each { |name, value| env[name].as_s.should eq(value) }
-      directories = %w[data cache state config system-config system-data xdg-cache xdg-config xdg-data xdg-state mamba crystal-cache]
+      directories = %w[data cache state config system-config system-data
+        xdg-cache xdg-config xdg-data xdg-state mamba crystal-cache]
       directories.each { |name| Dir.exists?(File.join(fixture.root, name)).should be_true }
       File.file?(File.join(fixture.root, "config/empty.toml")).should be_true
       File.file?(File.join(fixture.root, "system-config/empty.toml")).should be_true

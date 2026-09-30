@@ -26,7 +26,8 @@ describe Caramel::Frappe::CorrettoRunner do
             checker = instance_double(Checker)
             Clock.stub(:now)
             fake = mock(Stripe)
-            Corretto.stub_wire("https://api.stripe.com/v1/customers").to_return(status: 200, body: "{}")
+            Corretto.stub_wire("https://api.stripe.com/v1/customers")\
+            .to_return(status: 200, body: "{}")
             price.to_double(2)
             ledger.double(2)
             expect(Mailer).to receive(:deliver)
@@ -86,15 +87,22 @@ describe Caramel::Frappe::CorrettoRunner do
       File.write(File.join(root, "spec/spec_helper.cr"), "")
       files = Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec"])
       files.should eq(%w[a b c d e].map { |name| "spec/requests/#{name}_spec.cr" })
-      Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/requests/c_spec.cr", "spec/requests"]).size.should eq(5)
+      overlapping = ["spec/requests/c_spec.cr", "spec/requests"]
+      Caramel::Frappe::CorrettoRunner.spec_files(root, overlapping).size.should eq(5)
       Caramel::Frappe::CorrettoRunner.split(files, 2).should eq([
         %w[spec/requests/a_spec.cr spec/requests/c_spec.cr spec/requests/e_spec.cr],
         %w[spec/requests/b_spec.cr spec/requests/d_spec.cr],
       ])
       Caramel::Frappe::CorrettoRunner.split(files[0, 2], 8).size.should eq(2)
-      expect_raises(Caramel::Frappe::Error, "inside the project") { Caramel::Frappe::CorrettoRunner.spec_files(root, ["../"]) }
-      expect_raises(Caramel::Frappe::Error, "No spec file") { Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/missing_spec.cr"]) }
-      expect_raises(Caramel::Frappe::Error, "No *_spec.cr files") { Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/support"]) }
+      expect_raises(Caramel::Frappe::Error, "inside the project") do
+        Caramel::Frappe::CorrettoRunner.spec_files(root, ["../"])
+      end
+      expect_raises(Caramel::Frappe::Error, "No spec file") do
+        Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/missing_spec.cr"])
+      end
+      expect_raises(Caramel::Frappe::Error, "No *_spec.cr files") do
+        Caramel::Frappe::CorrettoRunner.spec_files(root, ["spec/support"])
+      end
     end
   end
 end

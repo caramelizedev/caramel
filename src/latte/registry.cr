@@ -116,7 +116,9 @@ module Caramel
           unless info.owner_id.to_i64? == StateSecurity.current_uid
             raise Error.new("registry lock path has foreign ownership")
           end
-          File.chmod(@lock_file, StateSecurity::FILE_MODE) if info.permissions.value != StateSecurity::FILE_MODE
+          unless info.permissions.value == StateSecurity::FILE_MODE
+            File.chmod(@lock_file, StateSecurity::FILE_MODE)
+          end
         else
           File.open(@lock_file, "a", StateSecurity::FILE_MODE) { }
           File.chmod(@lock_file, StateSecurity::FILE_MODE)
@@ -124,7 +126,9 @@ module Caramel
         info = File.info?(@lock_file, follow_symlinks: false)
         raise Error.new("registry lock path is unavailable") unless info
         raise Error.new("registry lock path contains a symlink") if info.symlink?
-        raise Error.new("registry lock path is not private") unless info.permissions.value == StateSecurity::FILE_MODE
+        unless info.permissions.value == StateSecurity::FILE_MODE
+          raise Error.new("registry lock path is not private")
+        end
       rescue File::Error
         raise Error.new("unable to create registry lock")
       end
@@ -195,7 +199,7 @@ module Caramel
             value.raw.nil? ? nil : value.as_s
           end
           site = Site.from_stored(id, name, directory, suffix, upstream)
-          if sites.any? { |existing| existing.id == site.id || existing.name == site.name || existing.directory == site.directory }
+          if sites.any? { |existing| duplicate?(existing, site) }
             raise Error.new("registry contains duplicate site metadata")
           end
           if socket = site.upstream
@@ -206,7 +210,13 @@ module Caramel
         sites
       end
 
-      private def reject_unknown_keys(object : Hash(String, JSON::Any), allowed : Array(String)) : Nil
+      # Two sites are duplicates when they share an id, a name or a directory.
+      private def duplicate?(one : Site, other : Site) : Bool
+        one.id == other.id || one.name == other.name || one.directory == other.directory
+      end
+
+      private def reject_unknown_keys(object : Hash(String, JSON::Any),
+                                      allowed : Array(String)) : Nil
         object.each_key do |key|
           raise Error.new("registry contains unsupported metadata") unless allowed.includes?(key)
         end
@@ -243,7 +253,8 @@ module Caramel
         raise Error.new("unable to atomically update registry")
       end
 
-      private def validate_upstream_path(site : Site, socket : String, *, require_existing : Bool) : String
+      private def validate_upstream_path(site : Site, socket : String, *,
+                                         require_existing : Bool) : String
         StateSecurity.reject_controls!(socket, "upstream socket")
         path = Path[socket]
         raise Error.new("upstream socket must be absolute") unless path.absolute?
@@ -258,7 +269,9 @@ module Caramel
           raise Error.new("upstream socket must be inside the site's private runtime directory")
         end
         basename = File.basename(candidate)
-        raise Error.new("upstream socket name is invalid") if basename.empty? || basename == "." || basename == ".."
+        if basename.empty? || basename == "." || basename == ".."
+          raise Error.new("upstream socket name is invalid")
+        end
         unless require_existing
           if File.info?(candidate, follow_symlinks: false)
             StateSecurity.validate_socket_entry(candidate, require_socket: true)

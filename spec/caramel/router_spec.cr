@@ -72,12 +72,16 @@ private module BookPaths
   extend self
 end
 
+private alias Entry = Caramel::Router::Entry
+
 private def route(method : String, path : String, body : String? = nil) : Caramel::Response
   headers = HTTP::Headers.new
   headers["Content-Type"] = "application/x-www-form-urlencoded" if body
   request = HTTP::Request.new(method, path, headers, body)
   csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
-  context = Caramel::RequestContext.new(request, csrf, Caramel::Session.new(csrf.derive_key("session")), Caramel::RequestInput.read(request))
+  session = Caramel::Session.new(csrf.derive_key("session"))
+  input = Caramel::RequestInput.read(request)
+  context = Caramel::RequestContext.new(request, csrf, session, input)
   RouterSpecApp::AppRouter.new.dispatch(context)
 end
 
@@ -142,7 +146,9 @@ describe Caramel::Router do
     before = GC.stats.total_bytes
     100.times { paths.each { |path| match.call(path) } }
     (GC.stats.total_bytes - before).should eq(0)
-    tree.match("/teams/new/members", Caramel::Router::Segments.parse("/teams/new/members").not_nil!, "GET")[0].should eq(3)
+    members = "/teams/new/members"
+    parsed = Caramel::Router::Segments.parse(members).not_nil!
+    tree.match(members, parsed, "GET")[0].should eq(3)
   end
 
   it "matches a request by its own method before any body, without heap allocation" do
@@ -170,11 +176,11 @@ describe Caramel::Router do
 
   it "lists routes with their contract summaries" do
     RouterSpecApp::AppRouter.routes.should eq([
-      Caramel::Router::Entry.new("GET", "/teams/new", "TeamNew", ""),
-      Caramel::Router::Entry.new("GET", "/teams/:team_id", "TeamShow", "team_id:Int64(min=1)"),
-      Caramel::Router::Entry.new("PATCH", "/teams/:team_id", "TeamUpdate", "team_id:Int64(min=1) name:String?"),
-      Caramel::Router::Entry.new("GET", "/teams/:team_id/members", "TeamMembers", "team_id:String"),
-      Caramel::Router::Entry.new("GET", "/files/:name", "FileShow", "name:String"),
+      Entry.new("GET", "/teams/new", "TeamNew", ""),
+      Entry.new("GET", "/teams/:team_id", "TeamShow", "team_id:Int64(min=1)"),
+      Entry.new("PATCH", "/teams/:team_id", "TeamUpdate", "team_id:Int64(min=1) name:String?"),
+      Entry.new("GET", "/teams/:team_id/members", "TeamMembers", "team_id:String"),
+      Entry.new("GET", "/files/:name", "FileShow", "name:String"),
     ])
   end
 

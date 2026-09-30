@@ -16,12 +16,22 @@ module Corretto
   # `catalog` examples run unwrapped on a migration-role connection, so they
   # may run DDL, and always reset afterwards.
   class Worker
-    FINGERPRINT_SQL = <<-'SQL'
-      SELECT md5(coalesce(string_agg(entry, E'\n' ORDER BY entry), '')) FROM (
+    OUTSIDE_EXAMPLE = "Corretto.session runs inside an example (`it`), " \
+                      "whose connection Corretto binds and rolls back."
+
+    # What the fingerprint records of a column besides its table and name.
+    COLUMN_DETAILS = "format_type(a.atttypid, a.atttypmod), a.attnotnull::text, " \
+                     "a.attisdropped::text, a.attidentity::text, " \
+                     "pg_get_expr(d.adbin, d.adrelid)"
+
+    # Escapes are interpreted: PostgreSQL receives `E'\\n'` as E'\n', and a
+    # trailing backslash joins a long line to the next.
+    FINGERPRINT_SQL = <<-SQL
+      SELECT md5(coalesce(string_agg(entry, E'\\n' ORDER BY entry), '')) FROM (
         SELECT concat_ws(' ', 'class', c.relname, c.relkind::text, c.relpersistence::text) AS entry
           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
         UNION ALL
-        SELECT concat_ws(' ', 'attribute', c.relname, a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull::text, a.attisdropped::text, a.attidentity::text, pg_get_expr(d.adbin, d.adrelid))
+        SELECT concat_ws(' ', 'attribute', c.relname, a.attname, #{COLUMN_DETAILS})
           FROM pg_attribute a
           JOIN pg_class c ON c.oid = a.attrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -29,11 +39,13 @@ module Corretto
           WHERE n.nspname = 'public' AND a.attnum > 0
         UNION ALL
         SELECT concat_ws(' ', 'index', pg_get_indexdef(i.indexrelid))
-          FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+          FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid \
+            JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE n.nspname = 'public'
         UNION ALL
         SELECT concat_ws(' ', 'constraint', con.conname, c.relname, pg_get_constraintdef(con.oid))
-          FROM pg_constraint con JOIN pg_namespace n ON n.oid = con.connamespace LEFT JOIN pg_class c ON c.oid = con.conrelid
+          FROM pg_constraint con JOIN pg_namespace n ON n.oid = con.connamespace \
+            LEFT JOIN pg_class c ON c.oid = con.conrelid
           WHERE n.nspname = 'public'
       ) catalog
       SQL
@@ -53,7 +65,7 @@ module Corretto
 
     # The running example's connection; `Corretto.session` yields it.
     def connection : DB::Connection
-      @connection || raise Error.new("Corretto.session runs inside an example (`it`), whose connection Corretto binds and rolls back.")
+      @connection || raise Error.new(OUTSIDE_EXAMPLE)
     end
 
     # Runs one example isolated. Returns true when the example changed the
@@ -61,7 +73,9 @@ module Corretto
     def run(catalog : Bool = false, &) : Bool
       if catalog
         begin
-          migration.using_connection { |connection| within(connection) { SugarORM::Repo.bind(connection) { yield } } }
+          migration.using_connection do |connection|
+            within(connection) { SugarORM::Repo.bind(connection) { yield } }
+          end
         ensure
           reset!
         end

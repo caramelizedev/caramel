@@ -36,7 +36,10 @@ module Caramel::Checks
       process = Process.new(@executable, ["--port", @port.to_s], output: @log, error: @log)
       @process = process
       ready = Checks.wait_until(15.seconds, 100.milliseconds) { process.terminated? || ready? }
-      raise Error.new("safaridriver did not become ready on port #{@port}; run safaridriver --enable once") if !ready || process.terminated?
+      return if ready && !process.terminated?
+
+      raise Error.new("safaridriver did not become ready on port #{@port}; " \
+                      "run safaridriver --enable once")
     end
 
     def create_session(capabilities) : String
@@ -92,7 +95,10 @@ module Caramel::Checks
     end
 
     private def element(value : JSON::Any) : Element
-      Element.new(value[ELEMENT_KEY]?.try(&.as_s?) || raise Error.new("WebDriver returned no element reference: #{value.to_json}"))
+      id = value[ELEMENT_KEY]?.try(&.as_s?)
+      return Element.new(id) if id
+
+      raise Error.new("WebDriver returned no element reference: #{value.to_json}")
     end
 
     private def session_command(method : String, path : String, body = nil) : JSON::Any
@@ -118,7 +124,10 @@ module Caramel::Checks
       value
     end
 
-    private def exchange(method : String, path : String, body, timeout : Time::Span) : {Int32, JSON::Any}
+    private def exchange(method : String,
+                         path : String,
+                         body,
+                         timeout : Time::Span) : {Int32, JSON::Any}
       client = HTTP::Client.new("127.0.0.1", @port)
       client.connect_timeout = 2.seconds
       client.read_timeout = timeout

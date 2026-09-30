@@ -11,6 +11,8 @@ module Corretto
   # the network.
   class Wire
     FIXTURES = "spec/fixtures/wire"
+    STUB_URL = "stub_wire takes the absolute URL the application requests, " \
+               "such as https://api.stripe.com/v1/customers"
 
     record Request, method : String, url : String, headers : HTTP::Headers, body : String
 
@@ -26,7 +28,11 @@ module Corretto
 
       # `fixture` names a file under spec/fixtures/wire/; its extension sets
       # the default Content-Type.
-      def to_return(*, status : Int32 = 200, fixture : String? = nil, body : String? = nil, headers : Hash(String, String) = {} of String => String) : self
+      def to_return(*,
+                    status : Int32 = 200,
+                    fixture : String? = nil,
+                    body : String? = nil,
+                    headers : Hash(String, String) = {} of String => String) : self
         raise ArgumentError.new("to_return takes fixture: or body:, not both") if fixture && body
         @status = status
         @headers = HTTP::Headers.new
@@ -59,7 +65,7 @@ module Corretto
     # matching stub answers.
     def stub(url : String, method : String? = nil) : Stub
       unless url.starts_with?("http://") || url.starts_with?("https://")
-        raise ArgumentError.new("stub_wire takes the absolute URL the application requests, such as https://api.stripe.com/v1/customers")
+        raise ArgumentError.new(STUB_URL)
       end
       Stub.new(url, method.try(&.upcase)).tap { |stub| @stubs << stub }
     end
@@ -75,10 +81,14 @@ module Corretto
 
     def self.fixture(name : String) : String
       if name.starts_with?('/') || name.split('/').any?(&.in?("", ".", ".."))
-        raise ArgumentError.new("Wire fixtures are relative paths under #{FIXTURES}/: #{name.inspect}")
+        raise ArgumentError.new("Wire fixtures are relative paths under #{FIXTURES}/: " \
+                                "#{name.inspect}")
       end
       path = File.join(FIXTURES, name)
-      raise Error.new("Wire fixture #{path} does not exist; record the third party's response there.") unless File.file?(path)
+      unless File.file?(path)
+        raise Error.new("Wire fixture #{path} does not exist; " \
+                        "record the third party's response there.")
+      end
       File.read(path)
     end
 
@@ -87,7 +97,12 @@ module Corretto
     def self.read(io : IO) : Request?
       request = HTTP::Request.from_io(io)
       return unless request.is_a?(HTTP::Request)
-      Request.new(request.method, request.resource, request.headers, request.body.try(&.gets_to_end) || "")
+      Request.new(
+        method: request.method,
+        url: request.resource,
+        headers: request.headers,
+        body: request.body.try(&.gets_to_end) || "",
+      )
     end
 
     # Records `request` and returns the response the proxy sends for it.
@@ -96,7 +111,9 @@ module Corretto
       if stub = @stubs.reverse_each.find(&.matches?(request))
         HTTP::Client::Response.new(stub.status, stub.body, stub.headers.dup)
       else
-        HTTP::Client::Response.new(502, "Unstubbed outbound request: #{request.method} #{request.url}", HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
+        body = "Unstubbed outbound request: #{request.method} #{request.url}"
+        headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
+        HTTP::Client::Response.new(502, body, headers)
       end
     end
 
@@ -114,7 +131,9 @@ module Corretto
         response.to_io(socket)
         socket.flush
       else
-        HTTP::Client::Response.new(400, "Corretto's wire proxy expects one HTTP/1.1 request", HTTP::Headers{"Connection" => "close"}).to_io(socket)
+        body = "Corretto's wire proxy expects one HTTP/1.1 request"
+        headers = HTTP::Headers{"Connection" => "close"}
+        HTTP::Client::Response.new(400, body, headers).to_io(socket)
       end
     rescue IO::Error
     ensure

@@ -25,12 +25,26 @@ module Caramel::Checks
   # that the build step builds.
   PREBUILT_ENVIRONMENT = File.join(REPO, "bin/checks/frappe-environment")
 
+  # A command's stdout and stderr are each captured up to 16 MiB.
+  OUTPUT_LIMIT = 16 * 1024 * 1024
+
   def self.prebuilt? : Bool
     ENV[PREBUILT]? == "1"
   end
 
-  def self.run(argv : Array(String), *, chdir : String = REPO, env : Hash(String, String?)? = nil, clear_env : Bool = false, input : String? = nil, timeout : Time::Span = 90.seconds) : Caramel::Latte::ProcessResult
-    Caramel::Latte::ProcessRunner.run(argv, chdir: chdir, env: env, clear_env: clear_env, input: input, timeout: timeout, output_limit: 16 * 1024 * 1024)
+  def self.run(argv : Array(String), *,
+               chdir : String = REPO,
+               env : Hash(String, String?)? = nil,
+               clear_env : Bool = false,
+               input : String? = nil,
+               timeout : Time::Span = 90.seconds) : Caramel::Latte::ProcessResult
+    Caramel::Latte::ProcessRunner.run(argv,
+      chdir: chdir,
+      env: env,
+      clear_env: clear_env,
+      input: input,
+      timeout: timeout,
+      output_limit: OUTPUT_LIMIT)
   end
 
   def self.crystal(args : Array(String), **options)
@@ -42,7 +56,8 @@ module Caramel::Checks
   # helper that the others then reuse; the rest run *workers* at a time. Type
   # checks create no program cache directory and run no cache cleanup, so
   # they may overlap (CONTRIBUTING.md).
-  def self.type_check(sources : Array(String), workers : Int32 = 4) : Array(Caramel::Latte::ProcessResult)
+  def self.type_check(sources : Array(String),
+                      workers : Int32 = 4) : Array(Caramel::Latte::ProcessResult)
     check = ->(source : String) { crystal(["build", source, "--no-codegen"], timeout: 90.seconds) }
     return sources.map { |source| check.call(source) } if sources.size < 2
     results = Array(Caramel::Latte::ProcessResult?).new(sources.size, nil)
@@ -91,7 +106,8 @@ module Caramel::Checks
   # v<version>, standing in for github.com/caramelizedev/caramel. Its
   # shard.yml declares *version*.
   def self.tagged_repository(destination : String, version : String) : String
-    listed = run(["/usr/bin/git", "-C", REPO, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]).stdout
+    listing = %w[ls-files -z --cached --others --exclude-standard]
+    listed = run(["/usr/bin/git", "-C", REPO] + listing).stdout
     listed.split('\0', remove_empty: true).each do |relative|
       source = File.join(REPO, relative)
       next unless File.file?(source)
@@ -99,9 +115,20 @@ module Caramel::Checks
       File.copy(source, File.join(destination, relative))
     end
     manifest = File.join(destination, "shard.yml")
-    File.write(manifest, File.read_lines(manifest).map { |line| line.starts_with?("version:") ? "version: #{version}" : line }.join('\n') + '\n')
-    git = ["/usr/bin/git", "-C", destination, "-c", "user.name=Caramel checks", "-c", "user.email=checks@caramel.invalid"]
-    [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "Caramel #{version}"], ["tag", "v#{version}"]].each do |arguments|
+    lines = File.read_lines(manifest).map do |line|
+      line.starts_with?("version:") ? "version: #{version}" : line
+    end
+    File.write(manifest, lines.join('\n') + '\n')
+    git = ["/usr/bin/git", "-C", destination,
+           "-c", "user.name=Caramel checks",
+           "-c", "user.email=checks@caramel.invalid"]
+    steps = [
+      ["init", "--quiet"],
+      ["add", "--all"],
+      ["commit", "--quiet", "--message", "Caramel #{version}"],
+      ["tag", "v#{version}"],
+    ]
+    steps.each do |arguments|
       result = run(git + arguments)
       fail(result.stdout + result.stderr) unless result.success?
     end

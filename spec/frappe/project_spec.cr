@@ -6,7 +6,13 @@ private def project_fixture(&)
   root = File.tempname("caramel-project-")
   Dir.mkdir(root)
   Dir.mkdir(File.join(root, "config"))
-  File.write(File.join(root, "shard.lock"), "version: 2.0\nshards:\n  caramel:\n    path: /private/tmp/caramel\n    version: #{Caramel::VERSION}\n")
+  File.write(File.join(root, "shard.lock"), <<-YAML)
+    version: 2.0
+    shards:
+      caramel:
+        path: /private/tmp/caramel
+        version: #{Caramel::VERSION}\n
+    YAML
   File.write(File.join(root, "config/environment.yml"), <<-YAML)
     version: 1
     name: bookshelf
@@ -17,6 +23,12 @@ private def project_fixture(&)
   yield root
 ensure
   FileUtils.rm_rf(root) if root
+end
+
+# Expects loading the project at *root* to fail with an error that
+# includes *message*.
+private def expect_load_error(root : String, message : String) : Nil
+  expect_raises(Caramel::Frappe::Error, message) { Caramel::Frappe::Project.load(root) }
 end
 
 describe Caramel::Frappe::Project do
@@ -39,12 +51,19 @@ describe Caramel::Frappe::Project do
       lock = File.join(root, "shard.lock")
       original = File.read(lock)
       File.write(lock, original.sub("version: #{Caramel::VERSION}", "version: 9.0.0"))
-      expect_raises(Caramel::Frappe::Error, "This project uses Caramel 9.0.0, not #{Caramel::VERSION}") { Caramel::Frappe::Project.load(root) }
-      File.write(lock, "version: 2.0\nshards:\n  db:\n    git: https://github.com/crystal-lang/crystal-db.git\n    version: 0.14.0\n")
-      expect_raises(Caramel::Frappe::Error, "shard.lock does not pin caramel") { Caramel::Frappe::Project.load(root) }
+      expect_load_error(root, "This project uses Caramel 9.0.0, not #{Caramel::VERSION}")
+      File.write(lock, <<-YAML)
+        version: 2.0
+        shards:
+          db:
+            git: https://github.com/crystal-lang/crystal-db.git
+            version: 0.14.0\n
+        YAML
+      expect_load_error(root, "shard.lock does not pin caramel")
       File.write(lock, original)
-      File.open(File.join(root, "config/environment.yml"), "a") { |io| io.puts("secret: do-not-accept-here") }
-      expect_raises(Caramel::Frappe::Error, "environment.yml") { Caramel::Frappe::Project.load(root) }
+      manifest = File.join(root, "config/environment.yml")
+      File.open(manifest, "a") { |io| io.puts("secret: do-not-accept-here") }
+      expect_load_error(root, "environment.yml")
     end
   end
 
@@ -59,7 +78,12 @@ describe Caramel::Frappe::Project do
       project.shard_name.should eq("reading_list")
       File.write(path, original.gsub("caramel", ".test"))
       Caramel::Frappe::Project.load(root).origin.should eq("https://bookshelf.test")
-      [original.gsub("18", "17"), original.gsub("caramel", "com"), original.gsub("bookshelf", "../../outside")].each do |invalid|
+      invalid_manifests = [
+        original.gsub("18", "17"),
+        original.gsub("caramel", "com"),
+        original.gsub("bookshelf", "../../outside"),
+      ]
+      invalid_manifests.each do |invalid|
         File.write(path, invalid)
         expect_raises(Caramel::Frappe::Error) { Caramel::Frappe::Project.load(root) }
       end
@@ -69,7 +93,11 @@ describe Caramel::Frappe::Project do
   it "writes local values privately, preserves existing secrets and regenerates them for a clone" do
     project_fixture do |root|
       project = Caramel::Frappe::Project.load(root)
-      connections = {"DATABASE_URL" => "postgresql://runtime:password@/development?host=%2Ftmp%2Fpg", "SPEC_DATABASE_URL" => "postgresql://spec:password@/bookshelf_spec?host=%2Ftmp%2Fpg"}
+      socket = "host=%2Ftmp%2Fpg"
+      connections = {
+        "DATABASE_URL"      => "postgresql://runtime:password@/development?#{socket}",
+        "SPEC_DATABASE_URL" => "postgresql://spec:password@/bookshelf_spec?#{socket}",
+      }
       first = project.ensure_local_environment(connections)
       first["APP_SECRET"].bytesize.should eq(64)
       first["APP_ORIGIN"].should eq(project.origin)
@@ -89,7 +117,10 @@ describe Caramel::Frappe::Project do
       project = Caramel::Frappe::Project.load(root)
       project.ensure_local_environment({"DATABASE_URL" => "original"})
       original = File.read(File.join(root, ".env"))
-      expect_raises(Caramel::Frappe::Error, "differs") { project.ensure_local_environment({"DATABASE_URL" => "replacement"}) }
+      replacement = {"DATABASE_URL" => "replacement"}
+      expect_raises(Caramel::Frappe::Error, "differs") do
+        project.ensure_local_environment(replacement)
+      end
       File.read(File.join(root, ".env")).should eq(original)
       File.chmod(File.join(root, ".env"), 0o644)
       expect_raises(Caramel::Frappe::Error, "0600") { project.local_environment }
@@ -102,7 +133,9 @@ describe Caramel::Frappe::Project do
       File.write(target, "APP_SECRET=keep\n")
       File.chmod(target, 0o600)
       File.symlink(target, File.join(root, ".env"))
-      expect_raises(Caramel::Frappe::Error, "regular") { Caramel::Frappe::Project.load(root).local_environment }
+      expect_raises(Caramel::Frappe::Error, "regular") do
+        Caramel::Frappe::Project.load(root).local_environment
+      end
       File.read(target).should eq("APP_SECRET=keep\n")
     end
   end
@@ -110,9 +143,20 @@ end
 
 describe Caramel::Frappe::LocalEnvironment do
   it "roundtrips values literally without shell interpolation" do
-    values = {"APP_SECRET" => "s" * 64, "SPECIAL" => "$(touch /tmp/never-run) ${HOME} `whoami` # literal\nsecond line", "URL" => "https://bookshelf.caramel?a=b&c=d"}
-    Caramel::Frappe::LocalEnvironment.parse(Caramel::Frappe::LocalEnvironment.dump(values)).should eq(values)
-    Caramel::Frappe::LocalEnvironment.parse("# comment\nA=plain\nB='literal value'\n\n").should eq({"A" => "plain", "B" => "literal value"})
+    values = {
+      "APP_SECRET" => "s" * 64,
+      "SPECIAL"    => "$(touch /tmp/never-run) ${HOME} `whoami` # literal\nsecond line",
+      "URL"        => "https://bookshelf.caramel?a=b&c=d",
+    }
+    dumped = Caramel::Frappe::LocalEnvironment.dump(values)
+    Caramel::Frappe::LocalEnvironment.parse(dumped).should eq(values)
+    env = <<-ENV
+      # comment
+      A=plain
+      B='literal value'\n\n
+      ENV
+    expected = {"A" => "plain", "B" => "literal value"}
+    Caramel::Frappe::LocalEnvironment.parse(env).should eq(expected)
   end
 
   it "rejects duplicate keys, malformed quoting and invalid names" do

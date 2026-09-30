@@ -7,11 +7,16 @@ module Caramel
   # credentials, whitespace, control characters or backslashes.
   module ExternalURL
     def self.valid?(url : String) : Bool
-      return false if url.each_char.any? { |char| char.ascii_whitespace? || char.ord < 32 || char.ord == 127 || char == '\\' }
+      return false if url.each_char.any? { |char| forbidden?(char) }
       uri = URI.parse(url)
       {"http", "https"}.includes?(uri.scheme) && !uri.host.to_s.empty? && uri.user.nil?
     rescue URI::Error
       false
+    end
+
+    # Whitespace, a control character or a backslash.
+    private def self.forbidden?(char : Char) : Bool
+      char.ascii_whitespace? || char.ord < 32 || char.ord == 127 || char == '\\'
     end
   end
 end

@@ -12,8 +12,12 @@ module Caramel::Latte
 
     def self.write_session(directory : String, socket : String, token : String) : Nil
       StateSecurity.validate_owned_directory(directory)
-      raise ArgumentError.new("Invalid development session socket") unless File.dirname(socket) == directory
-      raise ArgumentError.new("Invalid development session token") unless token.matches?(/\A[0-9a-f]{64}\z/)
+      unless File.dirname(socket) == directory
+        raise ArgumentError.new("Invalid development session socket")
+      end
+      unless token.matches?(/\A[0-9a-f]{64}\z/)
+        raise ArgumentError.new("Invalid development session token")
+      end
       path = File.join(directory, FILE_NAME)
       validate_file(path) if File.info?(path, follow_symlinks: false)
       temporary = File.tempfile("session-", dir: directory)
@@ -63,7 +67,11 @@ module Caramel::Latte
       rescue IO::Error
       end
       client = HTTP::Client.new(socket, site.domain)
-      headers = HTTP::Headers{"Host" => site.domain, "X-Caramel-Owner-Token" => token, "Connection" => "close"}
+      headers = HTTP::Headers{
+        "Host"                  => site.domain,
+        "X-Caramel-Owner-Token" => token,
+        "Connection"            => "close",
+      }
       client.get("/__caramel/dev/status", headers) do |response|
         bytes = Bytes.new(4097)
         size = response.body_io.read_greedy(bytes)
@@ -77,7 +85,8 @@ module Caramel::Latte
         end
       end
     rescue ex : Socket::ConnectError
-      result(ex.os_error == Errno::ECONNREFUSED || ex.os_error == Errno::ENOENT ? "stopped" : "unavailable")
+      stopped = ex.os_error == Errno::ECONNREFUSED || ex.os_error == Errno::ENOENT
+      result(stopped ? "stopped" : "unavailable")
     rescue IO::Error
       result("unavailable")
     rescue ArgumentError | JSON::ParseException | KeyError | TypeCastError

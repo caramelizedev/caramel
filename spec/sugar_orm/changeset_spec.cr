@@ -1,74 +1,97 @@
 require "spec"
 require "./support/unit_schemas"
 
+private alias Default = SugarUnit::Team::DefaultChangeset
+private alias Update = SugarUnit::Team::UpdateChangeset
+private alias Profile = SugarUnit::Team::ProfileChangeset
+
 describe SugarORM::Changeset do
   it "runs validate(cs) on construction exactly as the RFC writes it" do
-    changeset = SugarUnit::Team::UpdateChangeset.new(SugarUnit.team, seats: 0, billing_email: "not-an-address")
+    changeset = Update.new(SugarUnit.team, seats: 0, billing_email: "not-an-address")
     changeset.valid?.should be_false
-    changeset.errors.should eq({"seats" => ["must be greater than 0"], "billing_email" => ["has invalid format"]})
-    SugarUnit::Team::UpdateChangeset.new(SugarUnit.team, seats: 10, billing_email: "billing@acme.com").valid?.should be_true
+    changeset.errors.should eq({
+      "seats"         => ["must be greater than 0"],
+      "billing_email" => ["has invalid format"],
+    })
+    valid = Update.new(SugarUnit.team, seats: 10, billing_email: "billing@acme.com")
+    valid.valid?.should be_true
   end
 
   it "keeps only the changes that differ from the record" do
     team = SugarUnit.team(seats: 10)
-    changeset = SugarUnit::Team::UpdateChangeset.new(team, seats: 10, billing_email: "billing@acme.com")
-    changeset.changes.should eq({"billing_email" => "billing@acme.com"} of String => SugarORM::Value)
-    SugarUnit::Team::UpdateChangeset.new(team, seats: 10).changes.should be_empty
-    SugarUnit::Team::UpdateChangeset.new(team.with(billing_email: "a@b.c"), billing_email: nil).changes.should eq({"billing_email" => nil} of String => SugarORM::Value)
+    changeset = Update.new(team, seats: 10, billing_email: "billing@acme.com")
+    expected = {"billing_email" => "billing@acme.com"} of String => SugarORM::Value
+    changeset.changes.should eq(expected)
+    Update.new(team, seats: 10).changes.should be_empty
+    billed = team.with(billing_email: "a@b.c")
+    cleared = {"billing_email" => nil} of String => SugarORM::Value
+    Update.new(billed, billing_email: nil).changes.should eq(cleared)
   end
 
   it "validates only changed values, so an unchanged invalid value is not re-reported" do
     team = SugarUnit.team(seats: 0)
-    SugarUnit::Team::UpdateChangeset.new(team, billing_email: "a@b.c").valid?.should be_true
+    Update.new(team, billing_email: "a@b.c").valid?.should be_true
   end
 
-  it "requires every NOT NULL column without a default on insert, and rejects nil for NOT NULL columns" do
-    SugarUnit::Team::DefaultChangeset.new(seats: 3).errors.should eq({"name" => ["is required"]})
-    SugarUnit::Team::DefaultChangeset.new(name: "Acme").valid?.should be_true
-    SugarUnit::Team::DefaultChangeset.new(name: "Acme", seats: nil).errors.should eq({"seats" => ["is required"]})
-    SugarUnit::Team::UpdateChangeset.new(SugarUnit.team, seats: nil).errors.should eq({"seats" => ["is required"]})
-    SugarUnit::Member::DefaultChangeset.new(email: "a@b.c").errors.should eq({"team_id" => ["is required"]})
+  it "requires every NOT NULL column without a default on insert, " \
+     "and rejects nil for NOT NULL columns" do
+    Default.new(seats: 3).errors.should eq({"name" => ["is required"]})
+    Default.new(name: "Acme").valid?.should be_true
+    Default.new(name: "Acme", seats: nil).errors.should eq({"seats" => ["is required"]})
+    Update.new(SugarUnit.team, seats: nil).errors.should eq({"seats" => ["is required"]})
+    member = SugarUnit::Member::DefaultChangeset.new(email: "a@b.c")
+    member.errors.should eq({"team_id" => ["is required"]})
   end
 
   it "applies presence, length, inclusion, less_than and required validations" do
     team = SugarUnit.team
-    errors = SugarUnit::Team::ProfileChangeset.new(team, name: " ", motto: "nope", seats: 100).errors
+    errors = Profile.new(team, name: " ", motto: "nope", seats: 100).errors
     errors.should eq({
       "name"          => ["can't be blank", "should be at least 2 character(s)"],
       "motto"         => ["is invalid"],
       "seats"         => ["must be less than 100"],
       "billing_email" => ["needs an address"],
     })
-    SugarUnit::Team::ProfileChangeset.new(team, name: "A very long name").errors["name"].should eq(["should be at most 10 character(s)"])
-    SugarUnit::Team::ProfileChangeset.new(team, name: "Go", motto: "go", billing_email: "x@y.z").valid?.should be_true
-    SugarUnit::Team::ProfileChangeset.new(team.with(billing_email: "x@y.z"), name: "Go").valid?.should be_true
+    long = Profile.new(team, name: "A very long name")
+    long.errors["name"].should eq(["should be at most 10 character(s)"])
+    complete = Profile.new(team, name: "Go", motto: "go", billing_email: "x@y.z")
+    complete.valid?.should be_true
+    Profile.new(team.with(billing_email: "x@y.z"), name: "Go").valid?.should be_true
   end
 
   it "exposes the original record for an update and refuses one for an unsaved insert" do
     team = SugarUnit.team
-    update = SugarUnit::Team::UpdateChangeset.new(team, seats: 11)
+    update = Update.new(team, seats: 11)
     update.record.should eq(team)
     update.saved?.should be_false
-    insert = SugarUnit::Team::DefaultChangeset.new(name: "New")
+    insert = Default.new(name: "New")
     insert.insert?.should be_true
     expect_raises(SugarORM::Error, /has not been inserted/) { insert.record }
   end
 
   it "accepts errors added by callers and reports them through Invalid" do
-    changeset = SugarUnit::Team::UpdateChangeset.new(SugarUnit.team, seats: 3)
+    changeset = Update.new(SugarUnit.team, seats: 3)
     changeset.add_error(:seats, "exceeds the plan")
     changeset.add_error("_base", "Team is locked")
     changeset.valid?.should be_false
-    SugarORM::Invalid.new(changeset).message.should eq("SugarUnit::Team::UpdateChangeset is invalid: seats exceeds the plan; Team is locked")
+    expected = "SugarUnit::Team::UpdateChangeset is invalid: " \
+               "seats exceeds the plan; Team is locked"
+    SugarORM::Invalid.new(changeset).message.should eq(expected)
   end
 
   it "rejects the wrong kind of Repo operation before touching a database" do
-    expect_raises(ArgumentError, /use SugarORM::Repo.insert/) { SugarORM::Repo.update(SugarUnit::Team::DefaultChangeset.new(name: "New")) }
-    expect_raises(ArgumentError, /use SugarORM::Repo.update/) { SugarORM::Repo.insert(SugarUnit::Team::UpdateChangeset.new(SugarUnit.team, seats: 3)) }
+    insert = Default.new(name: "New")
+    update = Update.new(SugarUnit.team, seats: 3)
+    expect_raises(ArgumentError, /use SugarORM::Repo.insert/) do
+      SugarORM::Repo.update(insert)
+    end
+    expect_raises(ArgumentError, /use SugarORM::Repo.update/) do
+      SugarORM::Repo.insert(update)
+    end
   end
 
   it "does not write an invalid changeset" do
-    changeset = SugarUnit::Team::DefaultChangeset.new(seats: 3)
+    changeset = Default.new(seats: 3)
     before = SugarORM::Repo.statements_executed
     SugarORM::Repo.insert(changeset).saved?.should be_false
     SugarORM::Repo.statements_executed.should eq(before)

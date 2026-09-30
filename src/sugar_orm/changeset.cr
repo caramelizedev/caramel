@@ -15,7 +15,9 @@ module SugarORM
     end
 
     def error_messages : Array(String)
-      @errors.flat_map { |field, messages| messages.map { |message| field == "_base" ? message : "#{field} #{message}" } }
+      @errors.flat_map do |field, messages|
+        messages.map { |message| field == "_base" ? message : "#{field} #{message}" }
+      end
     end
   end
 
@@ -51,8 +53,12 @@ module SugarORM
     # Declares a permitted param; it must name a non-system field of `T` with a
     # compatible type.
     macro param(declaration)
+      {% location = "\n  --> #{declaration.filename.id}:" +
+                    "#{declaration.line_number}:#{declaration.column_number}" %}
       {% unless declaration.is_a?(TypeDeclaration) && declaration.value.is_a?(Nop) %}
-        {% declaration.raise "param expects `param name : Type` (no default).\nRemediation: write it like `param seats : Int32`, naming a field of the schema." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% declaration.raise "param expects `param name : Type` (no default).\n" +
+                             "Remediation: write it like `param seats : Int32`, " +
+                             "naming a field of the schema." + location %}
       {% end %}
       {% schema = nil %}
       {% for ancestor in @type.ancestors %}
@@ -62,53 +68,78 @@ module SugarORM
       {% end %}
       {% fields = schema.constant(:SUGAR_FIELDS) %}
       {% unless fields %}
-        {% declaration.raise "#{schema} has no `schema` block yet, so #{@type} cannot declare params.\nRemediation: define #{@type} after `schema \"table\" do ... end` in #{schema}." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% declaration.raise "#{schema} has no `schema` block yet, " +
+                             "so #{@type} cannot declare params.\n" +
+                             "Remediation: define #{@type} after " +
+                             "`schema \"table\" do ... end` in #{schema}." + location %}
       {% end %}
       {% name = declaration.var.id.stringify %}
       {% field = fields[name] %}
       {% unless field %}
-        {% declaration.raise "param '#{name.id}' is not a field of #{schema}.\nFields: #{fields.keys.join(", ").id}\nRemediation: rename the param to one of these fields, or add `field #{name.id} : Type` to #{schema}'s schema block." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% declaration.raise "param '#{name.id}' is not a field of #{schema}.\n" +
+                             "Fields: #{fields.keys.join(", ").id}\n" +
+                             "Remediation: rename the param to one of these fields, " +
+                             "or add `field #{name.id} : Type` " +
+                             "to #{schema}'s schema block." + location %}
       {% end %}
       {% if field[:system] %}
-        {% declaration.raise "param '#{name.id}' names #{schema}'s system-managed column '#{name.id}' (primary key or timestamp), which changesets never write.\nRemediation: remove `param #{name.id}`." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% declaration.raise "param '#{name.id}' names #{schema}'s " +
+                             "system-managed column '#{name.id}' " +
+                             "(primary key or timestamp), " +
+                             "which changesets never write.\n" +
+                             "Remediation: remove `param #{name.id}`." + location %}
       {% end %}
       {% declared = declaration.type.resolve %}
       {% column = parse_type(field[:type]).resolve %}
       {% unless declared <= column %}
-        {% declaration.raise "param '#{name.id} : #{declaration.type}' does not match #{schema} field '#{name.id} : #{column}'.\nRemediation: declare `param #{name.id} : #{field[:declared].id}`#{field[:nullable] ? " (or its non-nil form)".id : "".id}." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% hint = field[:nullable] ? " (or its non-nil form)" : "" %}
+        {% declaration.raise "param '#{name.id} : #{declaration.type}' " +
+                             "does not match #{schema} field '#{name.id} : #{column}'.\n" +
+                             "Remediation: declare " +
+                             "`param #{name.id} : #{field[:declared].id}`#{hint.id}." +
+                             location %}
       {% end %}
       {% constant = "SUGAR_PARAM_#{name.upcase.id}".id %}
       {% if @type.has_constant?(constant) %}
-        {% declaration.raise "param '#{name.id}' is declared twice in #{@type}.\nRemediation: remove the duplicate `param #{name.id}`." + "\n  --> #{declaration.filename.id}:#{declaration.line_number}:#{declaration.column_number}" %}
+        {% declaration.raise "param '#{name.id}' is declared twice in #{@type}.\n" +
+                             "Remediation: remove the duplicate `param #{name.id}`." +
+                             location %}
       {% end %}
+      {% accepted = declared.union_types.map { |member| "::#{member}" }.join(" | ") %}
       # {name, accepted value type}
-      {{ constant }} = { {{ name }}, {{ declared.union_types.map { |member| "::#{member}" }.join(" | ") }} }
+      {{ constant }} = { {{ name }}, {{ accepted }} }
     end
 
     macro inherited
       # The typed constructors are generated once every `param` is known, so an
       # unknown keyword or a mistyped value fails at the caller's line.
       macro finished
-        \{% params = @type.constants.select(&.starts_with?("SUGAR_PARAM_")).map { |name| @type.constant(name) } %}
+        \{% names = @type.constants.select(&.starts_with?("SUGAR_PARAM_")) %}
+        \{% params = names.map { |name| @type.constant(name) } %}
         \{% schema = nil %}
         \{% for ancestor in @type.ancestors %}
           \{% if ancestor.name(generic_args: false).stringify == "SugarORM::Changeset" %}
             \{% schema = ancestor.type_vars[0] %}
           \{% end %}
         \{% end %}
-        \{% keywords = params.map { |param| "#{param[0].id} : #{param[1].id} | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET" }.join(", ") %}
+        \{% unset = " | ::Nil | ::SugarORM::Unset = ::SugarORM::UNSET" %}
+        \{% declared = params.map { |param| "#{param[0].id} : #{param[1].id}" + unset } %}
+        \{% keywords = declared.join(", ") %}
+        \{% after_record = params.empty? ? "" : ", *, #{keywords.id}" %}
 
-        def initialize(record : ::\{{schema}}\{% unless params.empty? %}, *, \{{keywords.id}}\{% end %})
+        def initialize(record : ::\{{schema}}\{{after_record.id}})
           @original = record
           \{% for param in params %}
-            __sugar_put(\{{param[0]}}, \{{param[0].id}}) unless \{{param[0].id}}.is_a?(::SugarORM::Unset)
+            \{% name = param[0].id %}
+            __sugar_put(\{{param[0]}}, \{{name}}) unless \{{name}}.is_a?(::SugarORM::Unset)
           \{% end %}
           __sugar_prepare
         end
 
         def initialize\{% unless params.empty? %}(*, \{{keywords.id}})\{% end %}
           \{% for param in params %}
-            __sugar_put(\{{param[0]}}, \{{param[0].id}}) unless \{{param[0].id}}.is_a?(::SugarORM::Unset)
+            \{% name = param[0].id %}
+            __sugar_put(\{{param[0]}}, \{{name}}) unless \{{name}}.is_a?(::SugarORM::Unset)
           \{% end %}
           __sugar_prepare
         end
@@ -135,7 +166,9 @@ module SugarORM
 
     # The stored row after a save; for an update the original before it.
     def record : T
-      @record || @original || raise Error.new("#{self.class} has not been inserted, so it has no record yet")
+      @record || @original || raise Error.new(
+        "#{self.class} has not been inserted, so it has no record yet"
+      )
     end
 
     def add_error(field : T::Field, message : String) : Nil
@@ -158,11 +191,15 @@ module SugarORM
       add_error(column, message) if value.nil? || (value.is_a?(String) && value.blank?)
     end
 
-    def validate_greater_than(field : T::Field, than : Number, message : String = "must be greater than #{than}") : Nil
+    def validate_greater_than(field : T::Field,
+                              than : Number,
+                              message : String = "must be greater than #{than}") : Nil
       number(field) { |value| add_error(field, message) unless value > than }
     end
 
-    def validate_less_than(field : T::Field, than : Number, message : String = "must be less than #{than}") : Nil
+    def validate_less_than(field : T::Field,
+                           than : Number,
+                           message : String = "must be less than #{than}") : Nil
       number(field) { |value| add_error(field, message) unless value < than }
     end
 
@@ -176,11 +213,15 @@ module SugarORM
       end
     end
 
-    def validate_format(field : T::Field, format : Regex, message : String = "has invalid format") : Nil
+    def validate_format(field : T::Field,
+                        format : Regex,
+                        message : String = "has invalid format") : Nil
       string(field) { |value| add_error(field, message) unless format.matches?(value) }
     end
 
-    def validate_inclusion(field : T::Field, in values : Enumerable, message : String = "is invalid") : Nil
+    def validate_inclusion(field : T::Field,
+                           in values : Enumerable,
+                           message : String = "is invalid") : Nil
       column = T.__sugar_column(field)
       return unless @changes.has_key?(column)
       value = @changes[column]
@@ -189,13 +230,18 @@ module SugarORM
 
     # Maps a unique violation (SQLSTATE 23505) of the index that leads with
     # `field` to an error on it, instead of raising, when this changeset saves.
-    def unique_constraint(field : T::Field, message : String = "has already been taken") : Nil
+    def unique_constraint(field : T::Field,
+                          message : String = "has already been taken") : Nil
       @unique_constraints << {T.__sugar_column(field), message}
     end
 
     # :nodoc:
     def __sugar_insert : Nil
-      raise ArgumentError.new("#{self.class} was built from a record; use SugarORM::Repo.update") unless insert?
+      unless insert?
+        raise ArgumentError.new(
+          "#{self.class} was built from a record; use SugarORM::Repo.update"
+        )
+      end
       return if @saved || !valid?
       columns = @changes.keys
       sql = String.build do |io|
@@ -213,16 +259,22 @@ module SugarORM
 
     # :nodoc:
     def __sugar_update : Nil
-      original = @original || raise ArgumentError.new("#{self.class} was built without a record; use SugarORM::Repo.insert")
+      original = @original || raise ArgumentError.new(
+        "#{self.class} was built without a record; use SugarORM::Repo.insert"
+      )
       return if @saved || !valid?
       if @changes.empty?
         @record = original
         @saved = true
         return
       end
-      assignments = @changes.keys.map_with_index { |column, index| %("#{column}" = $#{index + 1}) }
+      assignments = @changes.keys.map_with_index do |column, index|
+        %("#{column}" = $#{index + 1})
+      end
       assignments << %("updated_at" = CURRENT_TIMESTAMP) if T.__sugar_timestamps?
-      sql = "UPDATE #{T.__sugar_quoted_table} SET #{assignments.join(", ")} WHERE \"#{T.__sugar_primary_key}\" = $#{@changes.size + 1} RETURNING #{T.__sugar_select_list}"
+      sql = "UPDATE #{T.__sugar_quoted_table} SET #{assignments.join(", ")} " \
+            "WHERE \"#{T.__sugar_primary_key}\" = $#{@changes.size + 1} " \
+            "RETURNING #{T.__sugar_select_list}"
       args = @changes.values
       args << original.__sugar_primary_value
       write { Repo.query_one?(sql, args) { |rows| T.from_row(rows) } }
@@ -230,7 +282,9 @@ module SugarORM
 
     # :nodoc:
     def __sugar_delete : Nil
-      original = @original || raise ArgumentError.new("#{self.class} was built without a record; there is nothing to delete")
+      original = @original || raise ArgumentError.new(
+        "#{self.class} was built without a record; there is nothing to delete"
+      )
       if Repo.delete(original)
         @record = original
         @saved = true
@@ -249,7 +303,11 @@ module SugarORM
     # then the user's `validate(cs)`.
     private def __sugar_prepare : Nil
       T.__sugar_not_null_columns.each do |column|
-        missing = @changes.has_key?(column) ? @changes[column].nil? : insert? && T.__sugar_required_columns.includes?(column)
+        missing = if @changes.has_key?(column)
+                    @changes[column].nil?
+                  else
+                    insert? && T.__sugar_required_columns.includes?(column)
+                  end
         add_error(column, "is required") if missing
       end
       validate(self)
@@ -264,7 +322,7 @@ module SugarORM
                  begin
                    Repo.in_transaction? ? Repo.transaction { yield } : yield
                  rescue ex : UniqueViolation
-                   constraint = @unique_constraints.find { |(column, _)| ex.on?(T.__sugar_table_name, column) }
+                   constraint = constraint_for(ex)
                    raise ex unless constraint
                    add_error(constraint[0], constraint[1])
                    return
@@ -276,6 +334,12 @@ module SugarORM
       else
         add_error("_base", "Record no longer exists")
       end
+    end
+
+    # The declared unique constraint whose column leads the violated index.
+    private def constraint_for(violation : UniqueViolation) : {String, String}?
+      table = T.__sugar_table_name
+      @unique_constraints.find { |(column, _)| violation.on?(table, column) }
     end
 
     private def current(field : T::Field) : Value
@@ -291,7 +355,8 @@ module SugarORM
       when Int32, Int64, Float64 then yield value
       when Nil
       else
-        raise ArgumentError.new("#{self.class}: '#{column}' is not numeric, so it cannot take a numeric validation")
+        raise ArgumentError.new("#{self.class}: '#{column}' is not numeric, " \
+                                "so it cannot take a numeric validation")
       end
     end
 
@@ -302,7 +367,8 @@ module SugarORM
       when String then yield value
       when Nil
       else
-        raise ArgumentError.new("#{self.class}: '#{column}' is not a String, so it cannot take a string validation")
+        raise ArgumentError.new("#{self.class}: '#{column}' is not a String, " \
+                                "so it cannot take a string validation")
       end
     end
   end
