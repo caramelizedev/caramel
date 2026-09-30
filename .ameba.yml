@@ -156,7 +156,6 @@ Layout/LineLength:
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
     - "src/caramel/cold_brew.cr"
-    - "src/caramel/cold_brew/broker.cr"
     - "src/caramel/cold_brew/drain.cr"
     - "src/caramel/cold_brew/job.cr"
     - "src/caramel/cold_brew/maintenance.cr"
