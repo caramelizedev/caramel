@@ -20,7 +20,7 @@ Status: accepted. Amends [ADR 0017](0017-formatting-and-linting.md) decisions 4 
    - `scripts/checks/lint.cr` left the list in this change.
 3. **Applications are unchanged.** `templates/application/.ameba.yml` keeps the rule off, because generated resources still write lines that grow with their fields.
 4. **What a linter cannot check is written down**: in the Style section of `CONTRIBUTING.md` for people, and in `CLAUDE.md` for agents. This covers named steps, early returns, stacked arguments, heredocs for multi-line text, and specs that name their inputs.
-5. **`scripts/check lint` proves the limit is on.** Under the framework's configuration, a 101-character line must be reported and a 100-character line must not.
+5. **`scripts/check lint` proves the limit is on and the list is honest.** Under the framework's configuration, a 101-character line must be reported and a 100-character line must not. Every listed file must still have a line to rewrite, so a cleaned file cannot stay on the list.
 
 ## Reasons
 
@@ -37,5 +37,5 @@ Principles followed:
 
 ## Verification
 
-- `scripts/check lint` first proves that `Caramel/ServiceNoun` reports service nouns. It then proves that `Layout/LineLength` reports a 101-character line and not a 100-character one under the framework's configuration. Finally it lints the framework, which must pass.
-- The proof was mutation-checked. Raising `MaxLength` to 140 fails it, and so does disabling the rule. A 110-character comment added to a file not on the list fails the framework lint.
+- `scripts/check lint` first proves that `Caramel/ServiceNoun` reports service nouns. It then proves that `Layout/LineLength` reports a 101-character line and not a 100-character one under the framework's configuration, and that every excluded file still has a long line. Finally it lints the framework, which must pass. Each proof fails if the linter exits 0 or reports anything else, and shows the linter's own output.
+- The proofs were mutation-checked. Raising `MaxLength` to 140 fails the line-length proof, and so does disabling the rule. Listing a file without a long line fails the list proof. A 110-character comment added to a file not on the list fails the framework lint.
