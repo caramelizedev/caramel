@@ -4,7 +4,7 @@ require "../../src/frappe/new_project"
 require "../../src/frappe/dev_files"
 
 describe Caramel::Frappe::NewProject do
-  it "creates a portable application that depends on this checkout, with no copied framework or secrets" do
+  it "creates a portable app that depends on this checkout, copying no framework or secrets" do
     parent = File.tempname("caramel-new-")
     Dir.mkdir(parent)
     target = File.join(parent, "reading-list")
@@ -13,15 +13,56 @@ describe Caramel::Frappe::NewProject do
       generator = Caramel::Frappe::NewProject.new(framework)
       project = generator.create("reading-list", target)
       project.origin.should eq("https://reading-list.caramel")
-      %w[app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/.keep app/changesets/.keep app/views/application_view.cr app/views/layouts/application.cr app/views/home/index.cr config/application.cr config/environment.yml config/routes.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .env.example .env.test .gitignore .zed/settings.json README.md public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js].each do |name|
+      generated = %w[
+        app/actions/application_action.cr
+        app/actions/home/show.cr
+        app/actions/health/show.cr
+        app/models/.keep
+        app/changesets/.keep
+        app/views/application_view.cr
+        app/views/layouts/application.cr
+        app/views/home/index.cr
+        config/application.cr
+        config/environment.yml
+        config/routes.cr
+        db/seeds.cr
+        src/reading_list.cr
+        spec/spec_helper.cr
+        spec/requests/home_spec.cr
+        shard.yml
+        shard.lock
+        .env.example
+        .env.test
+        .gitignore
+        .zed/settings.json
+        README.md
+        public/assets/htmx-4.0.0.min.js
+        public/assets/caramel-islands.js
+      ]
+      generated.each do |name|
         File.file?(File.join(target, name)).should be_true
       end
-      %w[.env .caramel-version vendor config/database.yml].each { |name| File.exists?(File.join(target, name)).should be_false }
-      File.read(File.join(target, "src/reading_list.cr")).should eq(%(require "../config/application"\n\nCaramel.run(App)\n))
+      absent = %w[.env .caramel-version vendor config/database.yml]
+      absent.each { |name| File.exists?(File.join(target, name)).should be_false }
+      main = File.read(File.join(target, "src/reading_list.cr"))
+      main.should eq(<<-CRYSTAL + "\n")
+        require "../config/application"
+
+        Caramel.run(App)
+        CRYSTAL
       # The dependency this checkout gives: a path, unless it is a clean release tag.
       source = generator.dependency
-      File.read(File.join(target, "shard.yml")).should end_with("  caramel:\n    #{source.shard}\n")
-      File.read(File.join(target, "shard.lock")).should contain("  caramel:\n    #{source.lock}\n    version: #{Caramel::VERSION}\n")
+      required = <<-YAML + "\n"
+          caramel:
+            #{source.shard}
+        YAML
+      File.read(File.join(target, "shard.yml")).should end_with(required)
+      locked = <<-YAML + "\n"
+          caramel:
+            #{source.lock}
+            version: #{Caramel::VERSION}
+        YAML
+      File.read(File.join(target, "shard.lock")).should contain(locked)
       lock = YAML.parse(File.read(File.join(target, "shard.lock")))["shards"]
       lock["pg"]["version"].as_s.should eq("0.30.0")
       lock["ameba"]?.should be_nil
@@ -53,18 +94,36 @@ describe Caramel::Frappe::NewProject do
   it "depends on the GitHub release only from a checkout of its tag without tracked changes" do
     repository = File.tempname("caramel-new-release-", dir: "/private/tmp")
     Dir.mkdir(repository)
-    git = ->(arguments : Array(String)) { Caramel::Latte::ProcessRunner.run(["/usr/bin/git", "-C", repository, "-c", "user.name=Caramel specs", "-c", "user.email=specs@caramel.invalid"] + arguments, timeout: 30.seconds).success?.should be_true }
+    identity = ["-c", "user.name=Caramel specs", "-c", "user.email=specs@caramel.invalid"]
+    git = ->(arguments : Array(String)) do
+      command = ["/usr/bin/git", "-C", repository] + identity + arguments
+      result = Caramel::Latte::ProcessRunner.run(command, timeout: 30.seconds)
+      result.success?.should be_true
+    end
     begin
       generator = Caramel::Frappe::NewProject.new(repository)
-      File.write(File.join(repository, "shard.yml"), "name: caramel\nversion: #{Caramel::VERSION}\n")
+      manifest = File.join(repository, "shard.yml")
+      release = <<-YAML + "\n"
+        name: caramel
+        version: #{Caramel::VERSION}
+        YAML
+      File.write(manifest, release)
       generator.dependency.shard.should eq("path: #{File.realpath(repository).to_json}")
-      [["init", "--quiet"], ["add", "--all"], ["commit", "--quiet", "--message", "release"]].each { |arguments| git.call(arguments) }
+      [
+        ["init", "--quiet"],
+        ["add", "--all"],
+        ["commit", "--quiet", "--message", "release"],
+      ].each { |arguments| git.call(arguments) }
       generator.dependency.shard.should start_with("path: ")
       git.call(["tag", "v#{Caramel::VERSION}"])
-      generator.dependency.should eq(Caramel::Frappe::NewProject::Dependency.new(%(github: caramelizedev/caramel\n    version: "~> #{Caramel::VERSION}"), %(git: "https://github.com/caramelizedev/caramel.git")))
+      github = Caramel::Frappe::NewProject::Dependency.new(
+        shard: %(github: caramelizedev/caramel\n    version: "~> #{Caramel::VERSION}"),
+        lock: %(git: "https://github.com/caramelizedev/caramel.git"),
+      )
+      generator.dependency.should eq(github)
       File.write(File.join(repository, "demo.txt"), "an application generated inside the clone")
       generator.dependency.shard.should start_with("github: ")
-      File.write(File.join(repository, "shard.yml"), "name: caramel\nversion: #{Caramel::VERSION}\n# edited\n")
+      File.write(manifest, release + "# edited\n")
       generator.dependency.shard.should start_with("path: ")
     ensure
       FileUtils.rm_rf(repository)
@@ -76,9 +135,22 @@ describe Caramel::Frappe::NewProject do
     Dir.mkdir(parent)
     ENV["CARAMEL_REPOSITORY"] = "/private/tmp/caramel-release.git"
     begin
-      Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__)).create("shelf", File.join(parent, "shelf"))
-      File.read(File.join(parent, "shelf/shard.yml")).should end_with(%(  caramel:\n    git: "/private/tmp/caramel-release.git"\n    version: "~> #{Caramel::VERSION}"\n))
-      File.read(File.join(parent, "shelf/shard.lock")).should start_with(%(version: 2.0\nshards:\n  caramel:\n    git: "/private/tmp/caramel-release.git"\n    version: #{Caramel::VERSION}\n))
+      generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
+      generator.create("shelf", File.join(parent, "shelf"))
+      required = <<-YAML + "\n"
+          caramel:
+            git: "/private/tmp/caramel-release.git"
+            version: "~> #{Caramel::VERSION}"
+        YAML
+      File.read(File.join(parent, "shelf/shard.yml")).should end_with(required)
+      locked = <<-YAML + "\n"
+        version: 2.0
+        shards:
+          caramel:
+            git: "/private/tmp/caramel-release.git"
+            version: #{Caramel::VERSION}
+        YAML
+      File.read(File.join(parent, "shelf/shard.lock")).should start_with(locked)
     ensure
       ENV.delete("CARAMEL_REPOSITORY")
       FileUtils.rm_rf(parent)
@@ -92,7 +164,9 @@ describe Caramel::Frappe::NewProject do
       File.write(File.join(root, "notes.txt"), "keep")
       generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
       expect_raises(Caramel::Frappe::Error, "empty") { generator.create("bookshelf", root) }
-      expect_raises(Caramel::Frappe::Error) { generator.create("../outside", File.join(root, "bad")) }
+      expect_raises(Caramel::Frappe::Error) do
+        generator.create("../outside", File.join(root, "bad"))
+      end
       Dir.children(root).should eq(["notes.txt"])
       File.read(File.join(root, "notes.txt")).should eq("keep")
     ensure

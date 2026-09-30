@@ -105,7 +105,6 @@ Layout/LineLength:
     - "spec/frappe/installations_spec.cr"
     - "spec/frappe/latte_client_spec.cr"
     - "spec/frappe/launchers_spec.cr"
-    - "spec/frappe/new_project_spec.cr"
     - "spec/frappe/project_spec.cr"
     - "spec/frappe/resource_generator_spec.cr"
     - "spec/frappe/schema_diff_spec.cr"
