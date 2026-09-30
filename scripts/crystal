@@ -1,15 +1,24 @@
 #!/bin/sh
 set -eu
 
+USER_ID=$(id -u)
+case $0 in
+    */*) CHECKOUT=$(CDPATH= cd -- "${0%/*}/.." && pwd -P) ;;
+    *) CHECKOUT=$(pwd -P) ;;
+esac
+
 # The managed toolchain: CARAMEL_TOOLCHAIN_ROOT when set, otherwise this
 # checkout's .caramel-toolchain, which scripts/install-toolchain writes.
 if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
-    POINTER=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)/.caramel-toolchain
+    POINTER=$CHECKOUT/.caramel-toolchain
     if [ ! -f "$POINTER" ] || [ -L "$POINTER" ]; then
         echo 'No Caramel toolchain is installed for this checkout. Run scripts/install-toolchain.' >&2
         exit 1
     fi
-    if [ "$(stat -f %u "$POINTER")" != "$(id -u)" ] || [ $(( 0$(stat -f %Lp "$POINTER") & 022 )) -ne 0 ]; then
+    read -r OWNER MODE <<EOF
+$(stat -f '%u %Lp' "$POINTER")
+EOF
+    if [ "$OWNER" != "$USER_ID" ] || [ $(( 0$MODE & 022 )) -ne 0 ]; then
         echo "$POINTER must be a regular file you own that no one else can write" >&2
         exit 1
     fi
@@ -29,56 +38,104 @@ OPENSSL=$BASE/data/installs/conda-openssl/3.6.4
 
 # Crystal 1.21 pastes pkg-config output into a shell command without quoting.
 # Keep the metadata in a short private alias; link the durable path into binaries.
-KEY=$(printf '%s' "$BASE" | /usr/bin/openssl dgst -sha256 -r | cut -c1-16)
-RUNTIME=/private/tmp/caramel-compiler-$(id -u)-$KEY
-mkdir -m 700 "$RUNTIME" 2>/dev/null || true
-if [ ! -d "$RUNTIME" ] || [ -L "$RUNTIME" ] ||
-    [ "$(stat -f %u "$RUNTIME")" != "$(id -u)" ] ||
-    [ $(( 0$(stat -f %Lp "$RUNTIME") & 077 )) -ne 0 ]; then
-    echo 'Compiler metadata directory must be owned and private' >&2
-    exit 1
-fi
-
+KEY=$(printf '%s' "$BASE" | /usr/bin/openssl dgst -sha256 -r)
+REST=${KEY#????????????????}
+KEY=${KEY%"$REST"}
+RUNTIME=/private/tmp/caramel-compiler-$USER_ID-$KEY
 ALIAS=$RUNTIME/openssl
-if [ ! -e "$ALIAS" ] && [ ! -L "$ALIAS" ]; then
-    ln -s "$OPENSSL" "$ALIAS" 2>/dev/null || true
-fi
-if [ ! -L "$ALIAS" ] || [ "$(stat -f %u "$ALIAS")" != "$(id -u)" ] ||
-    [ "$(readlink "$ALIAS")" != "$OPENSSL" ]; then
-    echo 'Compiler OpenSSL alias conflicts with existing state' >&2
-    exit 1
+STAMP=$RUNTIME/.stamp
+
+# The fast path: one stat shows that the private directory, the alias and
+# the three .pc files are exactly as the full path below leaves them, and a
+# stamp it wrote names this toolchain and the unchanged .pc sources. Any
+# mismatch, or any missing file, takes the full path.
+FRESH=
+STATS=$(stat -f '%u %Lp %Sp %i:%m:%z %Y' "$RUNTIME" "$ALIAS" "$STAMP" \
+    "$RUNTIME/libssl.pc" "$RUNTIME/libcrypto.pc" "$RUNTIME/openssl.pc" \
+    "$OPENSSL/lib/pkgconfig/libssl.pc" "$OPENSSL/lib/pkgconfig/libcrypto.pc" \
+    "$OPENSSL/lib/pkgconfig/openssl.pc" 2>/dev/null) || STATS=
+if [ -n "$STATS" ]; then
+    FRESH=1
+    SOURCES=
+    LINE=0
+    while read -r OWNER MODE PERMISSIONS IDENTITY TARGET; do
+        LINE=$((LINE + 1))
+        case $LINE in
+            1) case $PERMISSIONS in d*) ;; *) FRESH= ;; esac
+               [ "$OWNER" = "$USER_ID" ] && [ $(( 0$MODE & 077 )) -eq 0 ] || FRESH= ;;
+            2) case $PERMISSIONS in l*) ;; *) FRESH= ;; esac
+               [ "$OWNER" = "$USER_ID" ] && [ "$TARGET" = "$OPENSSL" ] || FRESH= ;;
+            [3-6]) case $PERMISSIONS in -*) ;; *) FRESH= ;; esac
+               [ "$OWNER" = "$USER_ID" ] && [ $(( 0$MODE & 077 )) -eq 0 ] || FRESH= ;;
+            *) SOURCES="$SOURCES $IDENTITY" ;;
+        esac
+    done <<EOF
+$STATS
+EOF
+    if [ -n "$FRESH" ]; then
+        RECORDED=
+        IFS= read -r RECORDED < "$STAMP" || true
+        [ "$RECORDED" = "1 $BASE$SOURCES" ] || FRESH=
+    fi
 fi
 
-TEMP=
-trap '[ -z "$TEMP" ] || rm -f -- "$TEMP"' 0
-for NAME in libssl.pc libcrypto.pc openssl.pc; do
-    SOURCE=$OPENSSL/lib/pkgconfig/$NAME
-    COUNT=$(grep -c '^prefix=' "$SOURCE" || true)
-    if [ "$COUNT" != 1 ]; then
-        echo 'Managed OpenSSL package metadata has no unique prefix' >&2
+if [ -z "$FRESH" ]; then
+    [ -d "$RUNTIME" ] || mkdir -m 700 "$RUNTIME" 2>/dev/null || true
+    if [ ! -d "$RUNTIME" ] || [ -L "$RUNTIME" ] ||
+        [ "$(stat -f %u "$RUNTIME")" != "$USER_ID" ] ||
+        [ $(( 0$(stat -f %Lp "$RUNTIME") & 077 )) -ne 0 ]; then
+        echo 'Compiler metadata directory must be owned and private' >&2
         exit 1
     fi
-    TEMP=$(/usr/bin/mktemp "$RUNTIME/.pkg-XXXXXX")
-    sed "s|^prefix=.*|prefix=$RUNTIME/openssl|" "$SOURCE" > "$TEMP"
-    TARGET=$RUNTIME/$NAME
-    if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
-        if [ ! -f "$TARGET" ] || [ -L "$TARGET" ] ||
-            [ "$(stat -f %u "$TARGET")" != "$(id -u)" ] ||
-            [ $(( 0$(stat -f %Lp "$TARGET") & 077 )) -ne 0 ]; then
-            rm -f -- "$TEMP"
-            TEMP=
-            echo 'Compiler package metadata must be an owned private file' >&2
+
+    if [ ! -e "$ALIAS" ] && [ ! -L "$ALIAS" ]; then
+        ln -s "$OPENSSL" "$ALIAS" 2>/dev/null || true
+    fi
+    if [ ! -L "$ALIAS" ] || [ "$(stat -f %u "$ALIAS")" != "$USER_ID" ] ||
+        [ "$(readlink "$ALIAS")" != "$OPENSSL" ]; then
+        echo 'Compiler OpenSSL alias conflicts with existing state' >&2
+        exit 1
+    fi
+
+    TEMP=
+    trap '[ -z "$TEMP" ] || rm -f -- "$TEMP"' 0
+    for NAME in libssl.pc libcrypto.pc openssl.pc; do
+        SOURCE=$OPENSSL/lib/pkgconfig/$NAME
+        COUNT=$(grep -c '^prefix=' "$SOURCE" || true)
+        if [ "$COUNT" != 1 ]; then
+            echo 'Managed OpenSSL package metadata has no unique prefix' >&2
             exit 1
         fi
-        if cmp -s "$TEMP" "$TARGET"; then
-            rm -f -- "$TEMP"
-            TEMP=
-            continue
+        TEMP=$(/usr/bin/mktemp "$RUNTIME/.pkg-XXXXXX")
+        sed "s|^prefix=.*|prefix=$RUNTIME/openssl|" "$SOURCE" > "$TEMP"
+        TARGET=$RUNTIME/$NAME
+        if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+            if [ ! -f "$TARGET" ] || [ -L "$TARGET" ] ||
+                [ "$(stat -f %u "$TARGET")" != "$USER_ID" ] ||
+                [ $(( 0$(stat -f %Lp "$TARGET") & 077 )) -ne 0 ]; then
+                rm -f -- "$TEMP"
+                TEMP=
+                echo 'Compiler package metadata must be an owned private file' >&2
+                exit 1
+            fi
+            if cmp -s "$TEMP" "$TARGET"; then
+                rm -f -- "$TEMP"
+                TEMP=
+                continue
+            fi
         fi
-    fi
-    mv -f "$TEMP" "$TARGET"
+        mv -f "$TEMP" "$TARGET"
+        TEMP=
+    done
+
+    # Record what the fast path must find next time.
+    SOURCES=$(stat -f '%i:%m:%z' "$OPENSSL/lib/pkgconfig/libssl.pc" \
+        "$OPENSSL/lib/pkgconfig/libcrypto.pc" "$OPENSSL/lib/pkgconfig/openssl.pc" | tr '\n' ' ')
+    TEMP=$(/usr/bin/mktemp "$RUNTIME/.stamp-XXXXXX")
+    printf '1 %s %s\n' "$BASE" "${SOURCES% }" > "$TEMP"
+    mv -f "$TEMP" "$STAMP"
     TEMP=
-done
+fi
 
 CRYSTAL_PATH=${CRYSTAL_PATH-lib:$CRYSTAL_ROOT/src}
 CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$CRYSTAL_ROOT/embedded/lib
