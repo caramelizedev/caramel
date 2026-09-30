@@ -1,7 +1,10 @@
 require "spec"
 require "../../src/caramel"
 
-private def form_request(body : String, method = "POST", path = "/books", headers = HTTP::Headers.new) : HTTP::Request
+private def form_request(body : String,
+                         method = "POST",
+                         path = "/books",
+                         headers = HTTP::Headers.new) : HTTP::Request
   headers["Content-Type"] ||= "application/x-www-form-urlencoded"
   HTTP::Request.new(method, path, headers, body)
 end
@@ -23,7 +26,8 @@ private def multipart_request(& : HTTP::FormData::Builder ->) : HTTP::Request
   builder = HTTP::FormData::Builder.new(io, "caramel-boundary")
   yield builder
   builder.finish
-  HTTP::Request.new("POST", "/uploads", HTTP::Headers{"Content-Type" => builder.content_type}, io.to_s)
+  headers = HTTP::Headers{"Content-Type" => builder.content_type}
+  HTTP::Request.new("POST", "/uploads", headers, io.to_s)
 end
 
 describe Caramel::RequestInput do
@@ -31,7 +35,9 @@ describe Caramel::RequestInput do
     max = Caramel::RequestInput::MAX_FORM_BYTES
     body = "a=" + "x" * (max - 2)
     Caramel::RequestInput.read(form_request(body)).body["a"].bytesize.should eq(max - 2)
-    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(form_request(body + "x")) }
+    expect_raises(Caramel::RequestInput::TooLarge) do
+      Caramel::RequestInput.read(form_request(body + "x"))
+    end
   end
 
   it "refuses a declared Content-Length over the cap before reading" do
@@ -50,7 +56,9 @@ describe Caramel::RequestInput do
       end
     end
     untyped = HTTP::Request.new("POST", "/books", HTTP::Headers.new, "a=1")
-    expect_raises(Caramel::RequestInput::UnsupportedMediaType) { Caramel::RequestInput.read(untyped) }
+    expect_raises(Caramel::RequestInput::UnsupportedMediaType) do
+      Caramel::RequestInput.read(untyped)
+    end
     Caramel::RequestInput.read(HTTP::Request.new("POST", "/books")).body.should be_empty
   end
 
@@ -154,13 +162,20 @@ describe Caramel::RequestInput do
 
   it "rejects invalid escapes and NUL in the body and the query" do
     ["title=%zz", "title=%00", "title=%ff"].each do |body|
-      expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(form_request(body)) }
+      expect_raises(Caramel::RequestInput::InvalidEncoding) do
+        Caramel::RequestInput.read(form_request(body))
+      end
     end
-    expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(HTTP::Request.new("GET", "/books?q=%zz")) }
+    query = HTTP::Request.new("GET", "/books?q=%zz")
+    expect_raises(Caramel::RequestInput::InvalidEncoding) do
+      Caramel::RequestInput.read(query)
+    end
   end
 
   it "records duplicate keys as errors and keeps transport controls out of fields" do
-    input = Caramel::RequestInput.read(form_request("title=a&title=b&_csrf=token", path: "/books?_csrf=x&_method=PUT&page=2"))
+    body = "title=a&title=b&_csrf=token"
+    path = "/books?_csrf=x&_method=PUT&page=2"
+    input = Caramel::RequestInput.read(form_request(body, path: path))
     input.errors["_base"].should eq(["Duplicate field: title"])
     input.body.should eq({"title" => "a"})
     input.query.should eq({"page" => "2"})
@@ -169,9 +184,13 @@ describe Caramel::RequestInput do
   end
 
   it "honors method overrides only on POST" do
-    Caramel::RequestInput.read(form_request("_method=patch")).method_override.should eq("PATCH")
-    Caramel::RequestInput.read(form_request("_method=DELETE", method: "PUT")).method_override.should be_nil
-    expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(form_request("_method=TRACE")) }
+    patch = Caramel::RequestInput.read(form_request("_method=patch"))
+    patch.method_override.should eq("PATCH")
+    put = Caramel::RequestInput.read(form_request("_method=DELETE", method: "PUT"))
+    put.method_override.should be_nil
+    expect_raises(Caramel::RequestInput::InvalidEncoding) do
+      Caramel::RequestInput.read(form_request("_method=TRACE"))
+    end
   end
 
   it "applies strict keys to GET queries only when the query is part of a write" do
@@ -185,9 +204,11 @@ describe Caramel::RequestInput do
   end
 
   it "streams multipart files to tempfiles and removes them on cleanup" do
+    metadata = HTTP::FormData::FileMetadata.new(filename: "cover.png")
+    png = HTTP::Headers{"Content-Type" => "image/png"}
     request = multipart_request do |form|
       form.field("title", "Cover")
-      form.file("cover", IO::Memory.new("image bytes"), HTTP::FormData::FileMetadata.new(filename: "cover.png"), HTTP::Headers{"Content-Type" => "image/png"})
+      form.file("cover", IO::Memory.new("image bytes"), metadata, png)
     end
     input = Caramel::RequestInput.read(request)
     input.body.should eq({"title" => "Cover"})
@@ -202,10 +223,13 @@ describe Caramel::RequestInput do
 
   it "deletes an oversized upload before refusing it" do
     before = Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size
+    metadata = HTTP::FormData::FileMetadata.new(filename: "big.bin")
     request = multipart_request do |form|
-      form.file("cover", IO::Memory.new("x" * 2048), HTTP::FormData::FileMetadata.new(filename: "big.bin"))
+      form.file("cover", IO::Memory.new("x" * 2048), metadata)
     end
-    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request, max_upload_bytes: 1024_i64) }
+    expect_raises(Caramel::RequestInput::TooLarge) do
+      Caramel::RequestInput.read(request, max_upload_bytes: 1024_i64)
+    end
     Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size.should eq(before)
   end
 
@@ -214,7 +238,8 @@ describe Caramel::RequestInput do
     expect_raises(Caramel::RequestInput::TooLarge) do
       Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: 32))
     end
-    broken = HTTP::Request.new("POST", "/uploads", HTTP::Headers{"Content-Type" => "multipart/form-data"}, "--x\r\n")
+    multipart = HTTP::Headers{"Content-Type" => "multipart/form-data"}
+    broken = HTTP::Request.new("POST", "/uploads", multipart, "--x\r\n")
     expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(broken) }
   end
 end

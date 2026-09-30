@@ -86,7 +86,6 @@ Layout/LineLength:
     - "spec/caramel/database_config_spec.cr"
     - "spec/caramel/http_spec.cr"
     - "spec/caramel/hypermedia_spec.cr"
-    - "spec/caramel/request_input_spec.cr"
     - "spec/caramel/router_spec.cr"
     - "spec/caramel/session_spec.cr"
     - "spec/caramel/streaming_spec.cr"
