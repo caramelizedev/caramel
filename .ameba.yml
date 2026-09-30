@@ -212,7 +212,6 @@ Layout/LineLength:
     - "src/frappe/resource_generator.cr"
     - "src/frappe/schema_diff.cr"
     - "src/frappe/tools.cr"
-    - "src/latte/postgres.cr"
     - "src/sugar_orm/associations.cr"
     - "src/sugar_orm/catalog.cr"
     - "src/sugar_orm/changeset.cr"
