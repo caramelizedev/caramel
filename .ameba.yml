@@ -196,7 +196,6 @@ Layout/LineLength:
     - "src/frappe/diagnostics.cr"
     - "src/frappe/editor_tools.cr"
     - "src/frappe/latte_client.cr"
-    - "src/frappe/launchers.cr"
     - "src/frappe/lint.cr"
     - "src/frappe/lint/service_noun.cr"
     - "src/frappe/mrdp.cr"
