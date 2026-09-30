@@ -5,7 +5,8 @@ require "./support/unit_schemas"
 private alias Catalog = SugarORM::Catalog
 
 describe SugarORM::Schema do
-  it "describes its table for the migration engine with PostgreSQL types, literal defaults and intent" do
+  it "describes its table for the migration engine " \
+     "with PostgreSQL types, literal defaults and intent" do
     table = SugarUnit::Team.__sugar_table
     table.name.should eq("unit_teams")
     table.columns.should eq([
@@ -25,15 +26,19 @@ describe SugarORM::Schema do
       Catalog::Index.new("index_unit_teams_on_name", ["name"], unique: true),
       Catalog::Index.new("index_unit_teams_on_seats_and_archived", ["seats", "archived"]),
     ])
-    table.foreign_keys.should eq([Catalog::ForeignKey.new("fk_unit_teams_owner_id", "owner_id", "unit_members")])
+    owner = Catalog::ForeignKey.new("fk_unit_teams_owner_id", "owner_id", "unit_members")
+    table.foreign_keys.should eq([owner])
     table.drops.should eq(["legacy_code"])
   end
 
   it "makes a NOT NULL belongs_to column, foreign key and index" do
+    column = Catalog::Column.new("team_id", "bigint", false, nil)
+    foreign_key = Catalog::ForeignKey.new("fk_unit_members_team_id", "team_id", "unit_teams")
+    index = Catalog::Index.new("index_unit_members_on_team_id", ["team_id"])
     table = SugarUnit::Member.__sugar_table
-    table.columns.last.should eq(Catalog::Column.new("team_id", "bigint", false, nil))
-    table.foreign_keys.should eq([Catalog::ForeignKey.new("fk_unit_members_team_id", "team_id", "unit_teams")])
-    table.indexes.should eq([Catalog::Index.new("index_unit_members_on_team_id", ["team_id"])])
+    table.columns.last.should eq(column)
+    table.foreign_keys.should eq([foreign_key])
+    table.indexes.should eq([index])
   end
 
   it "declares every concrete schema in the program, sorted by table name" do
@@ -42,7 +47,8 @@ describe SugarORM::Schema do
     names.should contain("unit_charters")
     names.should contain("unit_members")
     names.should contain("unit_teams")
-    Catalog.declared.find { |table| table.name == "unit_teams" }.should eq(SugarUnit::Team.__sugar_table)
+    teams = Catalog.declared.find { |table| table.name == "unit_teams" }
+    teams.should eq(SugarUnit::Team.__sugar_table)
   end
 
   it "is an immutable value: with returns a changed copy and leaves the original alone" do
@@ -67,7 +73,11 @@ describe SugarORM::Schema do
 
   it "serializes declared columns in declaration order and never association sentinels" do
     json = SugarUnit.team(billing_email: "a@b.c").to_json
-    JSON.parse(json).as_h.keys.should eq(%w[id name seats ratio archived motto billing_email created_at updated_at owner_id])
+    columns = %w[
+      id name seats ratio archived motto billing_email
+      created_at updated_at owner_id
+    ]
+    JSON.parse(json).as_h.keys.should eq(columns)
     json.should contain(%("created_at":"2026-01-01T00:00:00Z"))
     json.should_not contain("members")
     json.should_not contain("charter")

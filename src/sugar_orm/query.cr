@@ -41,15 +41,19 @@ module SugarORM
   # loaders. Every clause returns a new query. Each schema generates
   # `T::QueryOf(P)` with its typed `where` and `preload` overloads.
   abstract struct Query(T, P)
-    # Fully qualified: the generated `T::QueryOf` expands these defaults in its own scope.
-    def initialize(@clauses : ::SugarORM::Clauses = ::SugarORM::Clauses.new, @preloads : P = NamedTuple.new)
+    # Fully qualified: the generated `T::QueryOf` expands these defaults in its
+    # own scope.
+    def initialize(@clauses : ::SugarORM::Clauses = ::SugarORM::Clauses.new,
+                   @preloads : P = NamedTuple.new)
     end
 
     # A raw predicate with `?` binds: `where("seats > ?", 3)`.
     def where(fragment : String, *args) : self
       placeholders = fragment.count('?')
       unless placeholders == args.size
-        raise ArgumentError.new("where(#{fragment.inspect}) has #{placeholders} '?' placeholders but #{args.size} values")
+        message = "where(#{fragment.inspect}) has #{placeholders} '?' placeholders " \
+                  "but #{args.size} values"
+        raise ArgumentError.new(message)
       end
       values = [] of Value
       args.each { |arg| values << arg }
@@ -60,11 +64,7 @@ module SugarORM
     # `direction` stays a Symbol so an unknown field is reported on the field:
     # Crystal misattributes the failure when two symbol arguments autocast.
     def order_by(field : T::Field, direction : Symbol = :asc) : self
-      sql = case direction
-            when :asc  then "ASC"
-            when :desc then "DESC"
-            else            raise ArgumentError.new("order_by direction must be :asc or :desc, not #{direction.inspect}")
-            end
+      sql = direction_sql(direction)
       order = %("#{T.__sugar_column(field)}" #{sql})
       self.class.new(@clauses.copy_with(orders: @clauses.orders + [order]), @preloads)
     end
@@ -80,7 +80,8 @@ module SugarORM
     end
 
     protected def __sugar_where(conditions : Array(::SugarORM::Condition)) : self
-      self.class.new(@clauses.copy_with(conditions: @clauses.conditions + conditions), @preloads)
+      clauses = @clauses.copy_with(conditions: @clauses.conditions + conditions)
+      self.class.new(clauses, @preloads)
     end
 
     # The SELECT this query runs (before preloads), for inspection.
@@ -131,18 +132,22 @@ module SugarORM
     end
 
     def find(id : Int64)
-      __sugar_where([::SugarORM::Condition.column(T.__sugar_primary_key, id)]).limit(1).to_a.first?
+      condition = ::SugarORM::Condition.column(T.__sugar_primary_key, id)
+      __sugar_where([condition]).limit(1).to_a.first?
     end
 
     def find!(id : Int64)
-      find(id) || raise ::SugarORM::NotFound.new("#{T} with #{T.__sugar_primary_key} = #{id} was not found")
+      find(id) || raise ::SugarORM::NotFound.new(
+        "#{T} with #{T.__sugar_primary_key} = #{id} was not found"
+      )
     end
 
     def count : Int64
+      table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
-              "SELECT count(*) FROM (SELECT 1 FROM #{T.__sugar_quoted_table}#{filters}) AS sugar_count"
+              "SELECT count(*) FROM (SELECT 1 FROM #{table}#{filters}) AS sugar_count"
             else
-              "SELECT count(*) FROM #{T.__sugar_quoted_table}#{filters(order: false)}"
+              "SELECT count(*) FROM #{table}#{filters(order: false)}"
             end
       ::SugarORM::Repo.query_one?(sql, binds, &.read(Int64)) || 0_i64
     end
@@ -157,7 +162,8 @@ module SugarORM
       table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
               primary_key = %("#{T.__sugar_primary_key}")
-              "DELETE FROM #{table} WHERE #{primary_key} IN (SELECT #{primary_key} FROM #{table}#{filters})"
+              matching = "SELECT #{primary_key} FROM #{table}#{filters}"
+              "DELETE FROM #{table} WHERE #{primary_key} IN (#{matching})"
             else
               "DELETE FROM #{table}#{filters(order: false)}"
             end
@@ -238,7 +244,19 @@ module SugarORM
     end
 
     private def order_by_primary_key : self
-      self.class.new(@clauses.copy_with(orders: [%("#{T.__sugar_primary_key}" ASC)]), @preloads)
+      order = %("#{T.__sugar_primary_key}" ASC)
+      self.class.new(@clauses.copy_with(orders: [order]), @preloads)
+    end
+
+    private def direction_sql(direction : Symbol) : String
+      case direction
+      when :asc  then "ASC"
+      when :desc then "DESC"
+      else
+        raise ArgumentError.new(
+          "order_by direction must be :asc or :desc, not #{direction.inspect}"
+        )
+      end
     end
 
     private def filters(order : Bool = true) : String

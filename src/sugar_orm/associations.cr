@@ -57,7 +57,8 @@ module SugarORM
       ids = owners.compact_map { |owner| @key.call(owner) }.uniq!
       found = {} of Int64 => T
       unless ids.empty?
-        sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} WHERE \"#{T.__sugar_primary_key}\" = ANY($1)"
+        sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
+              "WHERE \"#{T.__sugar_primary_key}\" = ANY($1)"
         Repo.query_all(sql, [ids] of Value) { |rows| T.from_row(rows) }.each do |record|
           found[record.__sugar_primary_value] = record
         end
@@ -67,18 +68,30 @@ module SugarORM
         {% if V.nilable? %}
           target
         {% else %}
-          target || raise NotFound.new("#{T} referenced by #{O}##{@column} = #{@key.call(owner)} was not found")
+          target || raise not_found(owner)
         {% end %}
       end
+    end
+
+    private def not_found(owner : O) : NotFound
+      reference = "#{O}##{@column} = #{@key.call(owner)}"
+      NotFound.new("#{T} referenced by #{reference} was not found")
     end
   end
 
   module Associations
     # One query for every child of `owners`, yielding `{foreign key, child}`.
-    def self.children(owner : O.class, target : T.class, foreign_key : String, owners : Array(O), & : Int64, T ->) : Nil forall O, T
+    def self.children(owner : O.class,
+                      target : T.class,
+                      foreign_key : String,
+                      owners : Array(O),
+                      & : Int64, T ->) : Nil forall O, T
       ids = owners.map(&.__sugar_primary_value).uniq!
       return if ids.empty?
-      sql = "SELECT \"#{foreign_key}\", #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} WHERE \"#{foreign_key}\" = ANY($1) ORDER BY \"#{T.__sugar_primary_key}\""
+      sql = "SELECT \"#{foreign_key}\", #{T.__sugar_select_list} " \
+            "FROM #{T.__sugar_quoted_table} " \
+            "WHERE \"#{foreign_key}\" = ANY($1) " \
+            "ORDER BY \"#{T.__sugar_primary_key}\""
       Repo.query(sql, [ids] of Value) do |rows|
         rows.each do
           key = rows.read(Int64?)
