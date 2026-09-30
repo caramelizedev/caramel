@@ -52,22 +52,3 @@ Lint/SpecFilename:
 Layout/LineLength:
   Enabled: true
   MaxLength: 100
-  Excluded:
-    - "src/caramel/action.cr"
-    - "src/caramel/application.cr"
-    - "src/caramel/cold_brew.cr"
-    - "src/caramel/cold_brew/queue.cr"
-    - "src/caramel/command_line.cr"
-    - "src/caramel/contracts/request_contract.cr"
-    - "src/caramel/corretto.cr"
-    - "src/caramel/corretto/client.cr"
-    - "src/caramel/http/request_context.cr"
-    - "src/caramel/http/request_input.cr"
-    - "src/caramel/http/router.cr"
-    - "src/frappe/cli.cr"
-    - "src/frappe/commands.cr"
-    - "src/frappe/corretto_runner.cr"
-    - "src/frappe/dev_files.cr"
-    - "src/frappe/dev_gateway.cr"
-    - "src/frappe/new_project.cr"
-    - "src/frappe/resource_generator.cr"

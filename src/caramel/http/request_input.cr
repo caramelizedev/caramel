@@ -237,7 +237,8 @@ module Caramel
     end
 
     private def parse_pairs(text : String, target : Hash(String, String), controls : Bool) : Nil
-      raise InvalidEncoding.new("Malformed form encoding") if !text.valid_encoding? || text.matches?(/%(?![0-9a-fA-F]{2})/)
+      malformed = !text.valid_encoding? || text.matches?(/%(?![0-9a-fA-F]{2})/)
+      raise InvalidEncoding.new("Malformed form encoding") if malformed
       seen = Set(String).new
       URI::Params.parse(text).each do |key, value|
         check_text(key)
@@ -268,7 +269,9 @@ module Caramel
           file = File.tempfile("caramel-upload-")
           begin
             copied = IO.copy(part.body, file, upload_budget + 1)
-            raise TooLarge.new("Uploads exceed #{max_upload_bytes} bytes") if copied > upload_budget
+            if copied > upload_budget
+              raise TooLarge.new("Uploads exceed #{max_upload_bytes} bytes")
+            end
           rescue error
             file.close
             file.delete
@@ -276,7 +279,11 @@ module Caramel
           end
           file.close
           upload_budget -= copied
-          @files[name] = UploadedFile.new(part.filename, part.headers["Content-Type"]?, file.path, copied)
+          @files[name] = UploadedFile.new(
+            filename: part.filename,
+            content_type: part.headers["Content-Type"]?,
+            path: file.path,
+            size: copied)
         else
           copied = 0_i64
           value = String.build do |io|
@@ -293,7 +300,8 @@ module Caramel
     end
 
     private def check_text(text : String) : Nil
-      raise InvalidEncoding.new("Malformed form encoding") if !text.valid_encoding? || text.includes?('\0')
+      malformed = !text.valid_encoding? || text.includes?('\0')
+      raise InvalidEncoding.new("Malformed form encoding") if malformed
     end
 
     # `_csrf` and `_method` are transport controls, never contract fields.
