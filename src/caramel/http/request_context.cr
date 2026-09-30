@@ -92,7 +92,7 @@ module Caramel
         q = 1.0
         parts.each(within: 1..) do |parameter|
           key, _, value = parameter.partition('=')
-          q = value.strip.to_f64?.try { |number| number.finite? ? number.clamp(0.0, 1.0) : 0.0 } || 0.0 if key.strip.downcase == "q"
+          q = quality(value) if key.strip.downcase == "q"
         end
         if media_type == "application/json"
           @json_q = q if q > @json_q
@@ -100,6 +100,13 @@ module Caramel
           @html_q = q if q > @html_q
         end
       end
+    end
+
+    # A `q` parameter's weight, clamped to 0 through 1; one that is not a
+    # finite number weighs 0.
+    private def quality(value : String) : Float64
+      number = value.strip.to_f64? || return 0.0
+      number.finite? ? number.clamp(0.0, 1.0) : 0.0
     end
   end
 end
