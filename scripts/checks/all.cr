@@ -28,6 +28,7 @@ module Caramel::Checks::All
     end
     unknown = skipped - targets.map(&.first)
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
+    prune_program_caches
 
     runs = [
       # The linter, the longest build, compiles alongside the rest: two Crystal
@@ -61,6 +62,21 @@ module Caramel::Checks::All
     else
       puts "Failed: #{failed.join(", ")}"
       1
+    end
+  end
+
+  # scripts/crystal gives each checkout program a compiler cache root of its
+  # own. A root no build has touched for 30 days, such as a renamed check's,
+  # is deleted before the build step.
+  private def prune_program_caches : Nil
+    root = ENV["CARAMEL_TOOLCHAIN_ROOT"]? || return
+    programs = File.join(File.realpath(root), "crystal-cache-programs")
+    return unless Dir.exists?(programs)
+    cutoff = Time.utc - 30.days
+    Dir.each_child(programs) do |name|
+      path = File.join(programs, name)
+      info = File.info?(path, follow_symlinks: false) || next
+      FileUtils.rm_rf(path) if info.directory? && info.modification_time < cutoff
     end
   end
 
