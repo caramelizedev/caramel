@@ -187,7 +187,6 @@ Layout/LineLength:
     - "src/caramel/sse.cr"
     - "src/caramel/validate_url.cr"
     - "src/caramel/version.cr"
-    - "src/frappe.cr"
     - "src/frappe/check.cr"
     - "src/frappe/cli.cr"
     - "src/frappe/commands.cr"
