@@ -12,6 +12,8 @@ module Caramel
   class Session
     COOKIE_NAME      = "__Host-caramel_session"
     MAX_COOKIE_BYTES = 4096
+    OVERFLOW_MESSAGE = "The session exceeds #{MAX_COOKIE_BYTES} bytes. Store large " \
+                       "values in the database and keep only their ids in the session."
 
     class Overflow < Exception
     end
@@ -25,7 +27,7 @@ module Caramel
       payload = Base64.urlsafe_encode(data.to_json, padding: false)
       value = "#{payload}.#{sign(payload)}"
       if COOKIE_NAME.bytesize + 1 + value.bytesize > MAX_COOKIE_BYTES
-        raise Overflow.new("The session exceeds #{MAX_COOKIE_BYTES} bytes. Store large values in the database and keep only their ids in the session.")
+        raise Overflow.new(OVERFLOW_MESSAGE)
       end
       value
     end
@@ -45,11 +47,21 @@ module Caramel
     # Persists `data`, or deletes the cookie when `data` is empty. The cookie
     # has no Max-Age or Expires: it is a browser-session cookie.
     def cookie(data : Hash(String, String)) : HTTP::Cookie
-      if data.empty?
-        HTTP::Cookie.new(COOKIE_NAME, "", path: "/", secure: true, http_only: true, samesite: HTTP::Cookie::SameSite::Lax, max_age: Time::Span.zero)
-      else
-        HTTP::Cookie.new(COOKIE_NAME, encode(data), path: "/", secure: true, http_only: true, samesite: HTTP::Cookie::SameSite::Lax)
-      end
+      return session_cookie("", max_age: Time::Span.zero) if data.empty?
+
+      session_cookie(encode(data))
+    end
+
+    private def session_cookie(value : String, max_age : Time::Span? = nil) : HTTP::Cookie
+      HTTP::Cookie.new(
+        COOKIE_NAME,
+        value,
+        path: "/",
+        secure: true,
+        http_only: true,
+        samesite: HTTP::Cookie::SameSite::Lax,
+        max_age: max_age,
+      )
     end
 
     private def sign(payload : String) : String

@@ -178,7 +178,6 @@ Layout/LineLength:
     - "src/caramel/hypermedia.cr"
     - "src/caramel/outbound.cr"
     - "src/caramel/response.cr"
-    - "src/caramel/session.cr"
     - "src/frappe.cr"
     - "src/frappe/check.cr"
     - "src/frappe/cli.cr"
