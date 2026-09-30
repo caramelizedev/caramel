@@ -110,7 +110,6 @@ Layout/LineLength:
     - "spec/frappe/corretto_runner_spec.cr"
     - "spec/frappe/dev_files_spec.cr"
     - "spec/frappe/dev_gateway_spec.cr"
-    - "spec/frappe/installations_spec.cr"
     - "spec/frappe/latte_client_spec.cr"
     - "spec/frappe/launchers_spec.cr"
     - "spec/frappe/new_project_spec.cr"
