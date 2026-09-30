@@ -5,15 +5,26 @@ require "random/secure"
 module Caramel::Checks::Integration
   extend self
 
-  private def required(argv : Array(String), env : Hash(String, String?), input : String? = nil) : Caramel::Latte::ProcessResult
+  # What each role may do: log in, and nothing more.
+  LOGIN_ONLY = "LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"
+
+  private def required(argv : Array(String),
+                       env : Hash(String, String?),
+                       input : String? = nil) : Caramel::Latte::ProcessResult
     result = Checks.run(argv, env: env, input: input, timeout: 120.seconds)
     raise "Integration harness failed: TimeoutExpired" if result.timed_out?
     raise "Integration harness failed: CalledProcessError" unless result.success?
     result
   end
 
-  private def url(database : String, user : String, password : String, host : String, port : Int32, ca : String? = nil) : String
-    query = "host=#{URI.encode_www_form(host)}&port=#{port}&sslmode=#{ca ? "verify-full" : "disable"}"
+  private def url(database : String,
+                  user : String,
+                  password : String,
+                  host : String,
+                  port : Int32,
+                  ca : String? = nil) : String
+    sslmode = ca ? "verify-full" : "disable"
+    query = "host=#{URI.encode_www_form(host)}&port=#{port}&sslmode=#{sslmode}"
     query += "&sslrootcert=#{URI.encode_www_form(ca)}" if ca
     "postgresql://#{user}:#{URI.encode_www_form(password)}@/#{database}?#{query}"
   end
@@ -40,40 +51,81 @@ module Caramel::Checks::Integration
     # ameba:disable Lint/UselessAssign -- keeps failed a Bool, not Bool?, after the begin block
     failed = false
     begin
-      required([File.join(pg, "initdb"), "-D", data, "--username=caramel_admin", "--encoding=UTF8", "--locale=C", "--auth-local=trust", "--auth-host=scram-sha-256"], env)
+      required([File.join(pg, "initdb"), "-D", data, "--username=caramel_admin",
+                "--encoding=UTF8", "--locale=C",
+                "--auth-local=trust", "--auth-host=scram-sha-256"], env)
       {"ca", "untrusted"}.each do |name|
-        required([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=Caramel integration #{name}", "-keyout", File.join(owned, "#{name}.key"), "-out", File.join(owned, "#{name}.crt")], env)
+        required([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                  "-subj", "/CN=Caramel integration #{name}",
+                  "-keyout", File.join(owned, "#{name}.key"),
+                  "-out", File.join(owned, "#{name}.crt")], env)
       end
-      required([openssl, "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", File.join(owned, "server.key"), "-out", File.join(owned, "server.csr")], env)
-      File.write(File.join(owned, "server.ext"), "subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n", perm: 0o600)
-      required([openssl, "x509", "-req", "-in", File.join(owned, "server.csr"), "-CA", File.join(owned, "ca.crt"), "-CAkey", File.join(owned, "ca.key"), "-CAcreateserial", "-days", "1", "-extfile", File.join(owned, "server.ext"), "-out", File.join(owned, "server.crt")], env)
+      required([openssl, "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost",
+                "-keyout", File.join(owned, "server.key"),
+                "-out", File.join(owned, "server.csr")], env)
+      # Each text ends with a newline, the blank line before its terminator.
+      File.write(File.join(owned, "server.ext"), <<-EXT, perm: 0o600)
+        subjectAltName=DNS:localhost
+        extendedKeyUsage=serverAuth
+
+        EXT
+      required([openssl, "x509", "-req", "-in", File.join(owned, "server.csr"),
+                "-CA", File.join(owned, "ca.crt"), "-CAkey", File.join(owned, "ca.key"),
+                "-CAcreateserial", "-days", "1",
+                "-extfile", File.join(owned, "server.ext"),
+                "-out", File.join(owned, "server.crt")], env)
       File.chmod(File.join(owned, "server.key"), 0o600)
+      # Appended to initdb's configuration after a blank line.
+      settings = <<-CONF
+
+        listen_addresses = '127.0.0.1'
+        port = #{port}
+        unix_socket_directories = '#{sock}'
+        ssl = on
+        ssl_cert_file = '#{File.join(owned, "server.crt")}'
+        ssl_key_file = '#{File.join(owned, "server.key")}'
+        timezone = 'UTC'
+
+        CONF
       File.open(File.join(data, "postgresql.conf"), "a") do |config|
-        config << "\nlisten_addresses = '127.0.0.1'\nport = #{port}\nunix_socket_directories = '#{sock}'\nssl = on\nssl_cert_file = '#{File.join(owned, "server.crt")}'\nssl_key_file = '#{File.join(owned, "server.key")}'\ntimezone = 'UTC'\n"
+        config << settings
       end
-      required([File.join(pg, "pg_ctl"), "-D", data, "-l", File.join(owned, "postgres.log"), "-w", "start"], env)
+      log = File.join(owned, "postgres.log")
+      required([File.join(pg, "pg_ctl"), "-D", data, "-l", log, "-w", "start"], env)
       started = true
       password = Random::Secure.hex(24)
-      sql = [
-        "CREATE ROLE caramel_spec LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '#{password}';",
-        "CREATE ROLE caramel_dev LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '#{password}';",
-        "CREATE ROLE caramel_model_spec LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '#{password}';",
-        "CREATE DATABASE caramel_spec OWNER caramel_spec;",
-        "CREATE DATABASE caramel_development OWNER caramel_dev;",
-        "REVOKE CONNECT ON DATABASE caramel_spec FROM PUBLIC;",
-        "REVOKE CONNECT ON DATABASE caramel_development FROM PUBLIC;",
-        "GRANT CONNECT ON DATABASE caramel_spec TO caramel_model_spec;",
-      ].join("\n")
-      required([File.join(pg, "psql"), "-X", "-v", "ON_ERROR_STOP=1", "-h", sock, "-p", port.to_s, "-U", "caramel_admin", "-d", "postgres"], env, sql)
-      env["CARAMEL_OWNED_SPEC_URL"] = url("caramel_spec", "caramel_spec", password, sock, port)
-      env["CARAMEL_OWNED_MODEL_RUNTIME_URL"] = url("caramel_spec", "caramel_model_spec", password, sock, port)
-      env["CARAMEL_OWNED_DEV_URL"] = url("caramel_development", "caramel_dev", password, sock, port)
-      env["CARAMEL_OWNED_TLS_URL"] = url("caramel_spec", "caramel_spec", password, "localhost", port, File.join(owned, "ca.crt"))
-      env["CARAMEL_OWNED_WRONG_HOST_URL"] = url("caramel_spec", "caramel_spec", password, "127.0.0.1", port, File.join(owned, "ca.crt"))
-      env["CARAMEL_OWNED_UNTRUSTED_URL"] = url("caramel_spec", "caramel_spec", password, "localhost", port, File.join(owned, "untrusted.crt"))
+      sql = <<-SQL
+        CREATE ROLE caramel_spec #{LOGIN_ONLY} PASSWORD '#{password}';
+        CREATE ROLE caramel_dev #{LOGIN_ONLY} PASSWORD '#{password}';
+        CREATE ROLE caramel_model_spec #{LOGIN_ONLY} PASSWORD '#{password}';
+        CREATE DATABASE caramel_spec OWNER caramel_spec;
+        CREATE DATABASE caramel_development OWNER caramel_dev;
+        REVOKE CONNECT ON DATABASE caramel_spec FROM PUBLIC;
+        REVOKE CONNECT ON DATABASE caramel_development FROM PUBLIC;
+        GRANT CONNECT ON DATABASE caramel_spec TO caramel_model_spec;
+        SQL
+      psql = [File.join(pg, "psql"), "-X", "-v", "ON_ERROR_STOP=1",
+              "-h", sock, "-p", port.to_s, "-U", "caramel_admin", "-d", "postgres"]
+      required(psql, env, sql)
+      ca = File.join(owned, "ca.crt")
+      untrusted = File.join(owned, "untrusted.crt")
+      env["CARAMEL_OWNED_SPEC_URL"] =
+        url("caramel_spec", "caramel_spec", password, sock, port)
+      env["CARAMEL_OWNED_MODEL_RUNTIME_URL"] =
+        url("caramel_spec", "caramel_model_spec", password, sock, port)
+      env["CARAMEL_OWNED_DEV_URL"] =
+        url("caramel_development", "caramel_dev", password, sock, port)
+      env["CARAMEL_OWNED_TLS_URL"] =
+        url("caramel_spec", "caramel_spec", password, "localhost", port, ca)
+      env["CARAMEL_OWNED_WRONG_HOST_URL"] =
+        url("caramel_spec", "caramel_spec", password, "127.0.0.1", port, ca)
+      env["CARAMEL_OWNED_UNTRUSTED_URL"] =
+        url("caramel_spec", "caramel_spec", password, "localhost", port, untrusted)
       # Superuser over the owned socket (trust), for specs that create scratch databases.
       env["CARAMEL_OWNED_ADMIN_URL"] = url("postgres", "caramel_admin", "", sock, port)
-      status = Process.new([File.join(Checks::REPO, "scripts/crystal"), "spec", "spec/integration", "--error-trace"] + ARGV,
+      crystal = File.join(Checks::REPO, "scripts/crystal")
+      specs = [crystal, "spec", "spec/integration", "--error-trace"] + ARGV
+      status = Process.new(specs,
         env: env, chdir: Checks::REPO, input: Process::Redirect::Close,
         output: Process::Redirect::Inherit, error: Process::Redirect::Inherit).wait
       failed = !status.success?
@@ -83,7 +135,8 @@ module Caramel::Checks::Integration
     ensure
       if started || File.exists?(File.join(data, "postmaster.pid"))
         begin
-          stopped = Checks.run([File.join(pg, "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"], env: env, timeout: 30.seconds)
+          stop = [File.join(pg, "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"]
+          stopped = Checks.run(stop, env: env, timeout: 30.seconds)
           if stopped.success?
             FileUtils.rm_rf(owned)
           else

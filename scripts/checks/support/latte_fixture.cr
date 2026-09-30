@@ -23,7 +23,10 @@ module Caramel::Checks
       @runtime = Checks.runtime_root(@state)
       @socket = File.join(@runtime, "latte.sock")
       @env = {} of String => String?
-      ENV.each { |key, value| @env[key] = value unless key.starts_with?("PG") || key.ends_with?("DATABASE_URL") }
+      ENV.each do |key, value|
+        next if key.starts_with?("PG") || key.ends_with?("DATABASE_URL")
+        @env[key] = value
+      end
       @env["CARAMEL_HOME"] = @state
       @env["CARAMEL_FRAMEWORK_ROOT"] = @repo
       @frappe = File.join(@repo, "bin/frappe")
@@ -46,7 +49,12 @@ module Caramel::Checks
       raise message unless condition
     end
 
-    def command(argv : Array(String), *, chdir : String = @repo, timeout : Time::Span = 180.seconds, echo : Bool = true, environment : Hash(String, String?) = @env, input : String? = nil) : Caramel::Latte::ProcessResult
+    def command(argv : Array(String), *,
+                chdir : String = @repo,
+                timeout : Time::Span = 180.seconds,
+                echo : Bool = true,
+                environment : Hash(String, String?) = @env,
+                input : String? = nil) : Caramel::Latte::ProcessResult
       result = Checks.run(argv, chdir: chdir, env: environment, input: input, timeout: timeout)
       if echo || !result.success?
         STDOUT.print result.stdout
@@ -56,7 +64,10 @@ module Caramel::Checks
       result
     end
 
-    def attempt(argv : Array(String), *, chdir : String = @repo, timeout : Time::Span = 180.seconds, environment : Hash(String, String?) = @env) : Caramel::Latte::ProcessResult
+    def attempt(argv : Array(String), *,
+                chdir : String = @repo,
+                timeout : Time::Span = 180.seconds,
+                environment : Hash(String, String?) = @env) : Caramel::Latte::ProcessResult
       Checks.run(argv, chdir: chdir, env: environment, timeout: timeout)
     end
 
@@ -98,11 +109,13 @@ module Caramel::Checks
     end
 
     def site(name : String) : JSON::Any
-      rpc("GET", "/v1/sites")["sites"].as_a.find { |item| item["name"].as_s == name } || raise "Missing site: #{name}"
+      sites = rpc("GET", "/v1/sites")["sites"].as_a
+      sites.find { |item| item["name"].as_s == name } || raise "Missing site: #{name}"
     end
 
     def self.wait_exit(process : Process, timeout : Time::Span, label : String) : Process::Status
-      raise "Timed out waiting for #{label}" unless Checks.wait_until(timeout, 50.milliseconds) { process.terminated? }
+      exited = Checks.wait_until(timeout, 50.milliseconds) { process.terminated? }
+      raise "Timed out waiting for #{label}" unless exited
       process.wait
     end
 
@@ -114,7 +127,8 @@ module Caramel::Checks
       unless Checks.prebuilt?
         command([File.join(@repo, "scripts/build-frappe")])
         environment = File.join(@root, "environment")
-        command([File.join(@repo, "scripts/crystal"), "build", "spec/fixtures/frappe_environment.cr", "-o", environment])
+        source = "spec/fixtures/frappe_environment.cr"
+        command([File.join(@repo, "scripts/crystal"), "build", source, "-o", environment])
       end
       @ports = [Checks.free_udp_port, Checks.free_tcp_port, Checks.free_tcp_port]
       home = File.join(@root, "home")
@@ -122,7 +136,9 @@ module Caramel::Checks
       # Trust-store discovery follows HOME (NSS) and JAVA_HOME. Keep both
       # inside the fixture as a second barrier behind the untrusted CAs.
       daemon_env = @env.merge({"HOME" => home, "JAVA_HOME" => nil} of String => String?)
-      @daemon = Process.new(environment, [@state] + @ports.map(&.to_s), env: daemon_env, output: @daemon_log, error: @daemon_log)
+      arguments = [@state] + @ports.map(&.to_s)
+      @daemon = Process.new(environment, arguments,
+        env: daemon_env, output: @daemon_log, error: @daemon_log)
       wait_state("running")
       trust_guard!
     end
@@ -141,14 +157,34 @@ module Caramel::Checks
       caddy = File.join(@state, "services/caddy")
       authorities = File.join(caddy, "storage/pki/authorities")
       present = Dir.exists?(authorities) ? Dir.children(authorities) : [] of String
-      config = File.join(caddy, "caddy.json")
-      declared = File.exists?(config) ? JSON.parse(File.read(config)).dig?("apps", "pki", "certificate_authorities").try(&.as_h?) : nil
-      untrusted = (declared || {} of String => JSON::Any).select { |_, authority| authority["install_trust"]? == false }.keys
-      installing = Dir.glob(File.join(@state, "logs/proxy*.log")).any? { |log| File.read(log).includes?("installing root certificate") }
+      untrusted = untrusted_authorities(File.join(caddy, "caddy.json"))
+      installing = installation_logged?
       unexpected = present - untrusted
       return if unexpected.empty? && !installing
-      present.each { |name| Dir.glob(File.join(authorities, name, "*.key")).each { |key| File.delete(key) } }
-      "Caddy attempted a trust-store installation (#{installing}) or kept CAs not declared untrusted (#{unexpected}); deleted every fixture CA private key under #{authorities}"
+      present.each do |name|
+        Dir.glob(File.join(authorities, name, "*.key")).each { |key| File.delete(key) }
+      end
+      "Caddy attempted a trust-store installation (#{installing}) " \
+      "or kept CAs not declared untrusted (#{unexpected}); " \
+      "deleted every fixture CA private key under #{authorities}"
+    end
+
+    # The CAs that Caddy's configuration at *config* declares untrusted.
+    private def untrusted_authorities(config : String) : Array(String)
+      return [] of String unless File.exists?(config)
+
+      document = JSON.parse(File.read(config))
+      declared = document.dig?("apps", "pki", "certificate_authorities").try(&.as_h?)
+      return [] of String unless declared
+
+      declared.select { |_, authority| authority["install_trust"]? == false }.keys
+    end
+
+    # Whether a proxy log records Caddy installing a root certificate.
+    private def installation_logged? : Bool
+      Dir.glob(File.join(@state, "logs/proxy*.log")).any? do |log|
+        File.read(log).includes?("installing root certificate")
+      end
     end
 
     # Runs a project's compiled application on its site's private socket and
@@ -159,11 +195,19 @@ module Caramel::Checks
       FileUtils.mkdir_p(app_dir)
       File.chmod(app_dir, 0o700)
       app_socket = File.join(app_dir, "app.sock")
-      app_env = environment(values.merge({"CARAMEL_ENV" => "development", "CARAMEL_SOCKET" => app_socket}))
-      app = Process.new(File.join(project, ".caramel/application"), ["serve"], chdir: project, env: app_env, output: @app_log, error: @app_log)
+      settings = {"CARAMEL_ENV" => "development", "CARAMEL_SOCKET" => app_socket}
+      app_env = environment(values.merge(settings))
+      binary = File.join(project, ".caramel/application")
+      app = Process.new(binary, ["serve"],
+        chdir: project, env: app_env, output: @app_log, error: @app_log)
       @app = app
-      assert!(Checks.wait_until(10.seconds, 50.milliseconds) { File.exists?(app_socket) || app.terminated? } && File.exists?(app_socket), "Generated application failed to start")
-      rpc("POST", "/v1/sites/#{selected["id"].as_s}/upstream", JSON.parse({socket: app_socket}.to_json))
+      started = Checks.wait_until(10.seconds, 50.milliseconds) do
+        File.exists?(app_socket) || app.terminated?
+      end
+      listening = started && File.exists?(app_socket)
+      assert!(listening, "Generated application failed to start")
+      upstream = JSON.parse({socket: app_socket}.to_json)
+      rpc("POST", "/v1/sites/#{selected["id"].as_s}/upstream", upstream)
       trust_guard!
     end
 

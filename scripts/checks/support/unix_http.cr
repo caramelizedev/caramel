@@ -4,7 +4,11 @@ require "socket/unix_socket"
 module Caramel::Checks::UnixHTTP
   MAX_BODY = 1024 * 1024
 
-  def self.request(socket : String, method : String, path : String, body : JSON::Any? = nil, timeout : Time::Span = 15.seconds) : {Int32, JSON::Any?}
+  def self.request(socket : String,
+                   method : String,
+                   path : String,
+                   body : JSON::Any? = nil,
+                   timeout : Time::Span = 15.seconds) : {Int32, JSON::Any?}
     connection = Socket.unix
     connection.connect(Socket::UNIXAddress.new(socket), timeout: timeout)
     connection.read_timeout = timeout
@@ -22,7 +26,11 @@ module Caramel::Checks::UnixHTTP
     connection.try &.close
   end
 
-  def self.json!(socket : String, method : String, path : String, body : JSON::Any? = nil, timeout : Time::Span = 15.seconds) : JSON::Any
+  def self.json!(socket : String,
+                 method : String,
+                 path : String,
+                 body : JSON::Any? = nil,
+                 timeout : Time::Span = 15.seconds) : JSON::Any
     status, document = request(socket, method, path, body, timeout)
     raise "Latte request failed: #{status}" if status >= 400
     document || raise "Latte returned an empty response"
