@@ -214,7 +214,6 @@ Layout/LineLength:
     - "src/frappe/tools.cr"
     - "src/latte/postgres.cr"
     - "src/latte/process.cr"
-    - "src/latte/server.cr"
     - "src/latte/supervisor.cr"
     - "src/sugar_orm/associations.cr"
     - "src/sugar_orm/catalog.cr"
