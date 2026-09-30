@@ -24,7 +24,10 @@ module Caramel::Frappe
       return break next yield include extend enum struct alias lib fun out as is_a responds_to sizeof typeof instance_sizeof
       union uninitialized super previous_def annotation asm of select pointerof offsetof and or not
     ]
-    MODIFIERS = %w[server unique]
+    MODIFIERS = %w[server unique url]
+    USAGE     = "Use field:type, optionally followed by :server, :unique or :url, " \
+                "such as title:string, rating:float64?, " \
+                "short_code:string:server:unique or original_url:string:url"
     getter name : String
     getter kind : String
     getter? nullable : Bool
@@ -32,26 +35,58 @@ module Caramel::Frappe
     getter? server : Bool
     # Backed by a unique index; the changeset reports a duplicate as an error on the field.
     getter? unique : Bool
+    # Holds an http or https URL: the changeset validates it, the form asks for one.
+    getter? url : Bool
 
     def initialize(declaration : String)
       pieces = declaration.split(':')
       modifiers = pieces[2..]? || [] of String
       unless pieces.size >= 2 && (modifiers - MODIFIERS).empty? && modifiers.uniq.size == modifiers.size
-        raise Error.new("Use field:type, optionally followed by :server and :unique, such as title:string, rating:float64? or short_code:string:server:unique")
+        raise Error.new(USAGE)
       end
       @server = modifiers.includes?("server")
       @unique = modifiers.includes?("unique")
+      @url = modifiers.includes?("url")
       @name = pieces[0]
       @nullable = pieces[1].ends_with?('?')
       @kind = pieces[1].rchop('?')
       unless @name.matches?(/\A[a-z][a-z0-9_]*\z/) && @name.bytesize <= 50 && RESERVED.none?(@name) && TYPES.has_key?(@kind)
         raise Error.new("Invalid or reserved resource field: #{declaration}")
       end
-      raise Error.new("A bool field holds only two values, so it cannot be :unique: #{declaration}") if @unique && @kind == "bool"
+      check_modifiers(declaration)
+    end
+
+    private def check_modifiers(declaration : String) : Nil
+      if @unique && @kind == "bool"
+        raise Error.new("A bool field holds only two values, " \
+                        "so it cannot be :unique: #{declaration}")
+      end
+      if @url && @kind != "string"
+        raise Error.new("Only a string field holds a URL: #{declaration}")
+      end
+      if @url && @server
+        raise Error.new("A :server field starts with a random token, not a URL, " \
+                        "so it cannot be :url: #{declaration}")
+      end
     end
 
     def type : String
       TYPES[@kind][0] + (@nullable ? "?" : "")
+    end
+
+    # The changeset rules this field needs, as the generated `validate` writes them.
+    def presence_rule : String
+      "cs.validate_presence(:#{@name})"
+    end
+
+    # A blank required URL reports only that it is blank.
+    def url_rule : String
+      rule = "cs.validate_url(:#{@name})"
+      @nullable ? rule : "#{rule} unless cs.errors.has_key?(#{@name.to_json})"
+    end
+
+    def unique_rule : String
+      "cs.unique_constraint(:#{@name})"
     end
 
     def column : SugarORM::Catalog::Column
@@ -63,6 +98,8 @@ module Caramel::Frappe
     end
 
     def sample : String
+      # `&` must be escaped in HTML, so the request spec still proves escaping.
+      return "https://example.com/#{@name}?first=1&second=2" if @url
       case @kind
       when "string"  then "Example <#{@name}>"
       when "int32"   then "12"
@@ -74,6 +111,7 @@ module Caramel::Frappe
     end
 
     def updated_sample : String
+      return "https://example.org/#{@name}?first=2&second=3" if @url
       case @kind
       when "string"  then "Updated <#{@name}>"
       when "int32"   then "24"
@@ -110,11 +148,34 @@ module Caramel::Frappe
   end
 
   class ResourceGenerator
+    ACTIONS = %w[index show new create edit update destroy]
+    # Template files that belong to one action; every other file is always written.
+    ACTION_FILES = {
+      "app/actions/@@PLURAL@@.cr"         => "new",
+      "app/actions/@@PLURAL@@/index.cr"   => "index",
+      "app/actions/@@PLURAL@@/new.cr"     => "new",
+      "app/actions/@@PLURAL@@/edit.cr"    => "edit",
+      "app/actions/@@PLURAL@@/update.cr"  => "update",
+      "app/actions/@@PLURAL@@/destroy.cr" => "destroy",
+      "app/views/@@PLURAL@@/index.cr"     => "index",
+      "app/views/@@PLURAL@@/new.cr"       => "new",
+      "app/views/@@PLURAL@@/form.cr"      => "new",
+      "app/views/@@PLURAL@@/edit.cr"      => "edit",
+    }
+    # Template lines between `# frappe:only a,b` and `# frappe:end` are kept
+    # when any of those actions is generated, and between
+    # `# frappe:unless a,b` and `# frappe:end` when none is; `# frappe:else`
+    # turns a block over. Blocks nest, and the marker lines are dropped.
+    MARKER = /\A\s*# frappe:(only|unless|else|end)(?: ([a-z,]+))?\z/
+
     def initialize(@framework_root : String)
     end
 
     # ameba:disable Metrics/CyclomaticComplexity -- validates every name and field before writing anything
-    def generate(project : Project, name : String, declarations : Array(String), *, plural : String? = nil, version : Int64? = nil) : Array(String)
+    def generate(project : Project, name : String, declarations : Array(String), *,
+                 plural : String? = nil,
+                 version : Int64? = nil,
+                 only : String? = nil) : Array(String)
       unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 && %w[App ApplicationAction ApplicationView Home Health Caramel SugarORM Object String Time Int32 Int64 Bool Float64].none?(name)
         raise Error.new("Use a singular class name such as Book; application and framework names are reserved")
       end
@@ -123,6 +184,7 @@ module Caramel::Frappe
       unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 && collection != singular && %w[assets health home new edit views].none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
       end
+      actions = selected_actions(only)
       fields = declarations.map { |item| ResourceField.new(item) }
       raise Error.new("Declare at least one field and use each name only once") if fields.empty? || fields.map(&.name).uniq!.size != fields.size
       inputs = fields.reject(&.server?)
@@ -139,6 +201,7 @@ module Caramel::Frappe
       end
       required_text = fields.select { |field| field.kind == "string" && !field.nullable? }
       required_inputs = required_text.reject(&.server?)
+      changeset_checks = assert_changeset(name, fields, required_inputs, actions)
       tokens = {
         "@@MODEL@@" => name, "@@SINGULAR@@" => singular, "@@PLURAL@@" => collection,
         "@@COLLECTION@@" => collection.camelcase, "@@LABEL@@" => name.underscore.tr("_", " "),
@@ -146,7 +209,7 @@ module Caramel::Frappe
         "@@MODEL_FIELDS@@" => fields.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@CONTRACT_FIELDS@@" => inputs.map { |field| "      field #{field.name} : #{field.type}" }.join('\n'),
         "@@PARAMS@@" => fields.map { |field| "    param #{field.name} : #{field.type}" }.join('\n'),
-        "@@VALIDATIONS@@" => (required_text.map { |field| "      cs.validate_presence(:#{field.name})" } + uniques.map { |field| "      cs.unique_constraint(:#{field.name})" }).join('\n'),
+        "@@VALIDATIONS@@" => validations(required_text, fields),
         "@@INDEXES@@" => uniques.join { |field| "\n      index :#{field.name}, unique: true" },
         "@@CREATE_ATTRIBUTES@@" => fields.compact_map { |field| field.server? ? (field.nullable? ? nil : "#{field.name}: #{field.starting_value}") : "#{field.name}: contract.#{field.name}" }.join(", "),
         "@@UPDATE_ATTRIBUTES@@" => inputs.map { |field| "#{field.name}: contract.#{field.name}" }.join(", "),
@@ -159,7 +222,8 @@ module Caramel::Frappe
         "@@SAMPLE_CONDITIONS@@" => inputs.map { |field| "#{field.name}: #{field.literal(field.sample)}" }.join(", "),
         "@@UPDATED_FIELDS@@" => inputs.map { |field| "#{field.name.to_json} => #{field.updated_sample.to_json}" }.join(", "),
         "@@ASSERT_FIELDS@@" => inputs.map { |field| "      persisted.#{field.name}.should eq(Caramel::RequestContract.convert(#{field.updated_sample.to_json}, #{ResourceField::TYPES[field.kind][0]}))" }.join('\n'),
-        "@@ASSERT_CHANGESET@@" => ([assert_presence(name, required_inputs)] + uniques.map { |field| duplicate_probe(name, fields, field) }).reject(&.empty?).join('\n'),
+        "@@ASSERT_CHANGESET@@" => changeset_checks,
+        "@@SPEC_TITLE@@" => spec_title(actions),
         "@@ASSERT_ESCAPING@@" => inputs.select { |field| field.kind == "string" }.map { |field| "      shown.body.should contain(Caramel::HTML.escape(#{field.sample.to_json}))\n      shown.body.should_not contain(#{field.sample.to_json})" }.join('\n'),
       }
       files = {} of String => String
@@ -167,24 +231,26 @@ module Caramel::Frappe
       Dir.glob(File.join(template_root, "**/*")).sort.each do |path|
         next unless File.file?(path)
         relative = Path[path].relative_to(template_root).to_s
-        content = File.read(path)
+        next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
+        content = select_lines(File.read(path), actions)
         tokens.each { |key, value| relative = relative.gsub(key, value); content = content.gsub(key, value) }
+        content = without_unread_row(content) if relative.starts_with?("spec/requests/")
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
       migration = SugarORM::Migration.new(migration_version, "create_#{collection}", create_table(collection, fields))
       files["db/migrations/#{migration.version}_#{migration.name}.cr"] = SchemaDiff.source(migration)
       originals = {} of String => String
-      actions = "App::#{collection.camelcase}"
-      routes = [
-        %(    get "/#{collection}", #{actions}::Index),
-        %(    get "/#{collection}/new", #{actions}::New),
-        %(    post "/#{collection}", #{actions}::Create),
-        %(    get "/#{collection}/:id", #{actions}::Show),
-        %(    get "/#{collection}/:id/edit", #{actions}::Edit),
-        %(    patch "/#{collection}/:id", #{actions}::Update),
-        %(    delete "/#{collection}/:id", #{actions}::Destroy),
-      ]
+      namespace = "App::#{collection.camelcase}"
+      routes = {
+        "index"   => %(    get "/#{collection}", #{namespace}::Index),
+        "new"     => %(    get "/#{collection}/new", #{namespace}::New),
+        "create"  => %(    post "/#{collection}", #{namespace}::Create),
+        "show"    => %(    get "/#{collection}/:id", #{namespace}::Show),
+        "edit"    => %(    get "/#{collection}/:id/edit", #{namespace}::Edit),
+        "update"  => %(    patch "/#{collection}/:id", #{namespace}::Update),
+        "destroy" => %(    delete "/#{collection}/:id", #{namespace}::Destroy),
+      }.select { |action, _| actions.includes?(action) }.values
       {"config/routes.cr" => {"    # Frappé resource routes", routes},
        "config/paths.cr"  => {"  # Frappé resource paths", ["  Caramel.resource_paths :#{collection}, :#{singular}"]}}.each do |relative, insertion|
         validate_path(project.root, relative)
@@ -197,6 +263,94 @@ module Caramel::Frappe
       end
       publish(project, files, originals)
       files.keys.sort!
+    end
+
+    # Every action, or those `--only` names. Create and show are required:
+    # the spec creates a record and reads it back, and edit reuses the new
+    # form and saves through update.
+    private def selected_actions(only : String?) : Array(String)
+      return ACTIONS if only.nil?
+
+      chosen = only.split(',').map(&.strip)
+      unknown = chosen - ACTIONS
+      unless unknown.empty?
+        raise Error.new("Unknown resource action: #{unknown.join(", ")}; " \
+                        "choose from #{ACTIONS.join(",")}")
+      end
+      unless (%w[create show] - chosen).empty?
+        raise Error.new("A resource always has create and show; add them to --only")
+      end
+      if chosen.includes?("edit") && !(%w[new update] - chosen).empty?
+        raise Error.new("edit reuses the new form and saves through update; " \
+                        "add new and update to --only")
+      end
+      ACTIONS & chosen
+    end
+
+    # Keeps the template lines the generated actions need.
+    private def select_lines(content : String, actions : Array(String)) : String
+      kept = [] of Bool
+      String.build do |io|
+        content.each_line(chomp: false) do |line|
+          if marker = line.chomp.match(MARKER)
+            case marker[1]
+            when "else" then kept.push(!kept.pop)
+            when "end"  then kept.pop
+            else             kept.push(keep?(marker[1], marker[2], actions))
+            end
+          elsif kept.all?
+            io << line
+          end
+        end
+      end
+    end
+
+    # `only` keeps a block when any action it names is generated; `unless`
+    # keeps it when none is.
+    private def keep?(kind : String, names : String, actions : Array(String)) : Bool
+      named = names.split(',').any? { |action| actions.includes?(action) }
+      kind == "only" ? named : !named
+    end
+
+    # The request spec loads the saved row for its update and changeset
+    # checks. A resource that has neither must not load it: lint refuses a
+    # variable nothing reads.
+    private def without_unread_row(spec : String) : String
+      return spec if spec.includes?("persisted.")
+
+      spec.sub(/(?m)^ *persisted = .*\n/, "")
+    end
+
+    # The generated request spec's description of what it exercises.
+    private def spec_title(actions : Array(String)) : String
+      verbs = ["creates", "reads"]
+      verbs << "updates" if actions.includes?("update")
+      verbs << "deletes" if actions.includes?("destroy")
+      through = actions.includes?("new") ? "browser forms" : "requests"
+      "#{verbs[0...-1].join(", ")} and #{verbs.last} through CSRF-protected #{through}"
+    end
+
+    # Presence first, so a blank URL reports only that it is blank, then
+    # URLs, then unique constraints.
+    private def validations(required : Array(ResourceField),
+                            fields : Array(ResourceField)) : String
+      rules = required.map(&.presence_rule)
+      rules += fields.select(&.url?).map(&.url_rule)
+      rules += fields.select(&.unique?).map(&.unique_rule)
+      rules.join('\n') { |rule| "      #{rule}" }
+    end
+
+    # Blank required text and repeated unique values must fail through the
+    # generated changeset.
+    private def assert_changeset(model : String,
+                                 fields : Array(ResourceField),
+                                 required : Array(ResourceField),
+                                 actions : Array(String)) : String
+      updated = actions.includes?("update")
+      probes = fields.select(&.unique?).map do |unique|
+        duplicate_probe(model, fields, unique, updated)
+      end
+      ([assert_presence(model, required)] + probes).reject(&.empty?).join('\n')
     end
 
     private def pluralize(name : String) : String
@@ -238,15 +392,17 @@ module Caramel::Frappe
     # A second row repeating a unique field must fail through the changeset's
     # unique_constraint, not a database error. Every other field takes a value
     # no row holds: an input its first sample, which the row replaced when it
-    # was updated, and a server field its starting value.
-    private def duplicate_probe(model : String, fields : Array(ResourceField), unique : ResourceField) : String
+    # was updated (its updated sample when the resource has no update), and
+    # a server field its starting value.
+    private def duplicate_probe(model : String, fields : Array(ResourceField),
+                                unique : ResourceField, updated : Bool) : String
       values = fields.join(", ") do |field|
         value = if field.name == unique.name
                   "persisted.#{field.name}"
                 elsif field.server?
                   field.starting_value
                 else
-                  field.literal(field.sample)
+                  field.literal(updated ? field.sample : field.updated_sample)
                 end
         "#{field.name}: #{value}"
       end
@@ -262,12 +418,18 @@ module Caramel::Frappe
                   choices = options.map { |value| "            option(value: #{value.to_json}, selected: @values[#{name}]? == #{value.to_json}) { #{(value.empty? ? "Unspecified" : value.capitalize).to_json} }" }
                   "          select_tag #{attributes} do\n#{choices.join('\n')}\n          end"
                 else
-                  type = %w[int32 int64 float64].includes?(field.kind) ? "number" : "text"
+                  type = input_type(field)
                   extra = field.kind == "float64" ? ", step: \"any\"" : ""
                   extra += ", placeholder: \"2026-09-19T12:00:00Z\"" if field.kind == "time"
                   "          input type: \"#{type}\", #{attributes}#{extra}, value: @values[#{name}]? || \"\""
                 end
       "        labelled #{name}, #{field.label.to_json} do |id|\n#{control}\n        end"
+    end
+
+    private def input_type(field : ResourceField) : String
+      return "number" if %w[int32 int64 float64].includes?(field.kind)
+
+      field.url? ? "url" : "text"
     end
 
     private def validate_path(root : String, relative : String) : Nil

@@ -250,9 +250,11 @@ Responses carry `Vary: Accept, HX-Request, HX-Request-Type`. A full page wraps i
 * **Route Collision Overhead:** Deep nesting of dynamic routes can lead to ambiguous path matching.  
   *Mitigation:* The router macro verifies path uniqueness at compile time. It rejects two routes that match the same requests. It also rejects a static route (`/teams/new`) declared after an overlapping dynamic route (`/teams/:id`). Precedence is explicit: declare the static route first, and it wins.
 * **Large Request Body Memory Pressure:** Parsing massive multipart payloads in memory can exceed memory limits.  
-  *Mitigation:* `Caramel::RequestInput` reads every request before its contract binds ([ADR 0003](decisions/0003-core-routing-and-contracts.md)).
-  * It caps URL-encoded bodies and multipart text parts at 2 MiB and answers 413 beyond that.
+  *Mitigation:* `Caramel::RequestInput` reads every request before its contract binds ([ADR 0003](decisions/0003-core-routing-and-contracts.md)), as its route's `ingress` allows ([ADR 0020](decisions/0020-action-ingress-and-json-bodies.md)).
+  * It caps URL-encoded bodies, JSON objects and multipart text parts at 2 MiB, or the route's `limit:`, and answers 413 beyond that.
   * It streams file parts to private request-scoped tempfiles through `HTTP::FormData.parse`, up to 64 MiB in total, and deletes them when the request ends.
+* **Requests that are not browser forms:** JSON clients and signed webhooks need a body other than a form and a credential other than the CSRF token.  
+  *Mitigation:* Form routes also bind JSON objects, and same-origin `fetch` sends `X-CSRF-Token`. An action declares `ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?` to receive the exact bytes and verify them itself ([ADR 0020](decisions/0020-action-ingress-and-json-bodies.md)).
 
 ---
 
@@ -487,7 +489,7 @@ end
 
 #### 2.2. Worker Fiber Loop
 
-Cold Brew spawns a configurable pool of green execution fibers within the single host binary. The generated application's `serve` starts it, unless `CARAMEL_ENV=test`, with `Caramel::ColdBrew.start(database_url)`. The queues and per-queue concurrency come from `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`. It uses its own connection pool and stops gracefully on SIGTERM:
+Cold Brew spawns a configurable pool of green execution fibers within the single host binary. The generated application's `serve` starts it, unless `CARAMEL_ENV=test`, with `Caramel::ColdBrew.start(database_url)`. The queues and per-queue concurrency come from `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`. It uses its own connection pool and stops gracefully on SIGTERM. The same binary's `work [--queues=NAMES] [--concurrency=N] [--no-scheduler]` command runs Cold Brew without an HTTP server, as a second worker process or one dedicated to some queues:
 
 ```crystal
 # src/caramel/cold_brew/worker.cr (simplified)
@@ -531,13 +533,15 @@ RETURNING jobs.id, jobs.class_name, jobs.payload, jobs.attempts;
 
 * **Scheduler:** `Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }` is the charter's in-process scheduler. Each tick takes a database lease (`pg_try_advisory_xact_lock` plus a `caramel_schedules` row), so exactly one process runs each period.
 * **Maintenance fiber:** It releases stale locks whose backend is gone.
+* **Status and hooks:** `Caramel::ColdBrew.status(id)` reads a job's state without querying `caramel_jobs`, and `on_retry_scheduled`/`on_failed` hooks run after a failure's transition is written ([ADR 0019](decisions/0019-cold-brew-status-hooks-and-work.md)).
+* **Delivery:** A job runs at least once. Its own writes commit exactly once with its completion, but a call to another service from `perform` can repeat. The process can die, or the transaction can fail to commit, after the other service accepted the call; the job then runs again. Pass a stable identifier, such as the record's id, and have the receiver deduplicate it.
 
 #### 2.3. Real-Time PubSub via SSE
 
 Cold Brew eliminates WebSockets for hypermedia updates. It dedicates one listener connection per process to PostgreSQL's `LISTEN / NOTIFY` stream. That connection reconnects with backoff and re-`LISTEN`s. The broker bridges database events directly into Server-Sent Events (SSE) connections running over HTTP/1.1 or HTTP/2.
 
 * **Publish:** `Caramel::ColdBrew.publish(channel, payload)` runs `pg_notify` on the current Repo connection, so it is delivered only if its transaction commits.
-* **Delivery:** Each subscriber has an ordered mailbox, and delivery never blocks the broker.
+* **Delivery:** Each subscriber has an ordered mailbox, and delivery never blocks the broker. Notifications are at most once: one sent while the listener is reconnecting, or that a subscriber does not receive within a second, is dropped. A page that must not miss a change reloads state on reconnect.
 * **Lifetime:** A subscription ends when its owning fiber dies, so the action below does not leak. `subscribe(channel) { |events| … }` unsubscribes explicitly.
 * **Framing:** `Caramel::SSE.write(io, data, event: "BoardUpdated")` frames multi-line data.
 
@@ -792,7 +796,7 @@ end
 
 ```
 
-* **The client** drives `Caramel::Application#handle` in-process on the example's own connection. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and offers `get`, `post`, `put`, `patch`, `delete` and `follow_redirect`.
+* **The client** drives `Caramel::Application#handle` in-process on the example's own connection. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and offers `get`, `post`, `put`, `patch`, `delete` and `follow_redirect`. A body is form `params:` (multipart with `files:`), `json:` or a raw `body:`.
 * **`sign_in(user)`** writes `user_id` into the signed `Caramel::Session` cookie. Actions read it through `session`.
 * **Matchers:** `have_status`, `render_partial(target, swap:)`, `redirect_to`, `have_header`, `render_page` and `have_row(Schema, **conditions)`.
 

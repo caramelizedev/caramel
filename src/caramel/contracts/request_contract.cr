@@ -2,10 +2,22 @@ require "../http/request_input"
 
 module Caramel
   # The explicit, typed input of one action. Fields bind by name from route
-  # parameters, the form body and the query; every other submitted form key
-  # is rejected. Contracts only come from `parse`, and `handle` only ever
-  # receives a valid one.
+  # parameters, the form or JSON body and the query; every other submitted
+  # key is rejected. A JSON member must have its field's JSON type.
+  # Contracts only come from `parse`, and `handle` only ever receives a
+  # valid one.
   abstract struct RequestContract
+    # The JSON type a member must have to bind each field type, and its name
+    # in the error when it does not.
+    JSON_TYPES = {
+      "String"  => {"String", "string"},
+      "Time"    => {"String", "string"},
+      "Int32"   => {"Number", "number"},
+      "Int64"   => {"Number", "number"},
+      "Float64" => {"Number", "number"},
+      "Bool"    => {"Bool", "boolean"},
+    }
+
     getter errors = {} of String => Array(String)
     # Submitted text for each declared field, kept to re-render forms.
     getter values = {} of String => String
@@ -143,6 +155,12 @@ module Caramel
             add_error({{ name.stringify }}, "is required")
           {% end %}
         {% else %}
+          {% json = ::Caramel::RequestContract::JSON_TYPES[full] %}
+          json = ::Caramel::RequestInput::JsonKind::{{ json[0].id }}
+          if input.json_mismatch?({{ name.stringify }}, json)
+            add_error({{ name.stringify }}, {{ "must be a JSON #{json[1].id}" }})
+            return
+          end
           raw = input.value?({{ name.stringify }})
           @values[{{ name.stringify }}] = raw if raw
           if raw.nil? || raw.strip.empty?

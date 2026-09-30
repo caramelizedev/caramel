@@ -90,8 +90,19 @@ struct ActionSpecBare < Caramel::Action
   end
 end
 
+# A changeset's errors, which arrive after the contract has passed.
+struct ActionSpecRejected < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    render_errors({"title" => ["can't be blank"], "_base" => ["<b>Closed</b>"]})
+  end
+end
+
 module ActionSpecApp
   Caramel::Router.draw do
+    get "/rejected", ActionSpecRejected
     get "/items/:id", ActionSpecShow
     get "/pass", ActionSpecPass
     post "/items", ActionSpecCreate
@@ -123,6 +134,28 @@ private def post(body : String, headers = HTTP::Headers.new, token : String? = A
 end
 
 describe Caramel::Action do
+  it "answers errors found after the contract as JSON, an escaped page or MRDP text" do
+    json = get("/rejected", HTTP::Headers{"Accept" => "application/json"})
+    json.status.should eq(422)
+    JSON.parse(json.body).should eq(JSON.parse(<<-JSON))
+      {"errors": {"title": ["can't be blank"], "_base": ["<b>Closed</b>"]}}
+      JSON
+
+    page = get("/rejected")
+    page.status.should eq(422)
+    page.body.should contain("<li><code>title</code>: can&#39;t be blank</li>")
+    page.body.should contain("&lt;b&gt;Closed&lt;/b&gt;")
+
+    text = get("/rejected", HTTP::Headers{"Accept" => "*/*"})
+    text.status.should eq(422)
+    text.headers["Content-Type"].should eq("text/plain; charset=utf-8")
+    text.body.should eq(<<-MRDP + "\n")
+      ERR INVALID:422 at GET /rejected
+      FIELD title: can't be blank
+      FIELD _base: <b>Closed</b>
+      MRDP
+  end
+
   it "negotiates a full page, an htmx fragment or JSON from one result" do
     full = get("/items/5")
     full.status.should eq(200)
