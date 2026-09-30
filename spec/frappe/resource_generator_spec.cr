@@ -9,7 +9,8 @@ private def resource_project(&)
   parent = File.tempname("caramel-resource-")
   Dir.mkdir(parent)
   package = File.expand_path("../..", __DIR__)
-  project = Caramel::Frappe::NewProject.new(package).create("bookshelf", File.join(parent, "bookshelf"))
+  target = File.join(parent, "bookshelf")
+  project = Caramel::Frappe::NewProject.new(package).create("bookshelf", target)
   yield project, package
 ensure
   FileUtils.rm_rf(parent) if parent
@@ -21,7 +22,8 @@ describe Caramel::Frappe::ResourceGenerator do
       route = File.join(project.root, "config/routes.cr")
       File.open(route, "a") { |io| io.puts("# My existing route notes") }
       generator = Caramel::Frappe::ResourceGenerator.new(package)
-      paths = generator.generate(project, "Book", ["title:string", "author:string"], version: 20260919000001_i64)
+      fields = ["title:string", "author:string"]
+      paths = generator.generate(project, "Book", fields, version: 20260919000001_i64)
       paths.should contain("app/models/book.cr")
       paths.should contain("app/changesets/book.cr")
       paths.should contain("app/actions/books.cr")
@@ -30,15 +32,21 @@ describe Caramel::Frappe::ResourceGenerator do
       paths.should contain("db/migrations/20260919000001_create_books.cr")
       File.read(route).should contain("# My existing route notes")
       File.read(route).should contain(%(get "/books/:id", App::Books::Show))
-      File.read(File.join(project.root, "config/paths.cr")).should contain("Caramel.resource_paths :books, :book")
+      helpers = File.read(File.join(project.root, "config/paths.cr"))
+      helpers.should contain("Caramel.resource_paths :books, :book")
       %w[index show new edit form].each do |view|
         File.file?(File.join(project.root, "app/views/books/#{view}.cr")).should be_true
       end
       before = File.read(route)
-      expect_raises(Caramel::Frappe::Error, "exists") { generator.generate(project, "Book", ["title:string"], version: 20260919000002_i64) }
+      expect_raises(Caramel::Frappe::Error, "exists") do
+        generator.generate(project, "Book", ["title:string"], version: 20260919000002_i64)
+      end
       File.read(route).should eq(before)
-      File.exists?(File.join(project.root, "db/migrations/20260919000002_create_books.cr")).should be_false
-      expect_raises(Caramel::Frappe::Error, "version") { generator.generate(project, "Magazine", ["title:string"], version: 20260919000001_i64) }
+      unwritten = File.join(project.root, "db/migrations/20260919000002_create_books.cr")
+      File.exists?(unwritten).should be_false
+      expect_raises(Caramel::Frappe::Error, "version") do
+        generator.generate(project, "Magazine", ["title:string"], version: 20260919000001_i64)
+      end
     end
   end
 
@@ -46,14 +54,29 @@ describe Caramel::Frappe::ResourceGenerator do
     resource_project do |project, package|
       generator = Caramel::Frappe::ResourceGenerator.new(package)
       ["../Book", "book", "SugarORM", "Home", "ApplicationView", "View"].each do |name|
-        expect_raises(Caramel::Frappe::Error) { generator.generate(project, name, ["title:string"]) }
+        expect_raises(Caramel::Frappe::Error) do
+          generator.generate(project, name, ["title:string"])
+        end
       end
-      reserved = %w[id created_at query with create update delete changes record errors values schema field timestamps if to_s]
-      rejected = [["title:json"], ["title:string", "title:string"], ["x:string:extra"], ["bad-name:string"], ["code:string:server"], ["title:string:readonly"], ["code:string:unique:unique"]]
+      reserved = %w[
+        id created_at query with create update delete changes record errors values schema
+        field timestamps if to_s
+      ]
+      rejected = [
+        ["title:json"],
+        ["title:string", "title:string"],
+        ["x:string:extra"],
+        ["bad-name:string"],
+        ["code:string:server"],
+        ["title:string:readonly"],
+        ["code:string:unique:unique"],
+      ]
       (rejected + reserved.map { |field| ["#{field}:string"] }).each do |fields|
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
-      expect_raises(Caramel::Frappe::Error, "cannot be :unique") { generator.generate(project, "Book", ["flag:bool:unique"]) }
+      expect_raises(Caramel::Frappe::Error, "cannot be :unique") do
+        generator.generate(project, "Book", ["flag:bool:unique"])
+      end
       url_refusals = {
         "link:int32:url"         => "Only a string field holds a URL",
         "link:string:server:url" => "cannot be :url",
@@ -63,24 +86,38 @@ describe Caramel::Frappe::ResourceGenerator do
           generator.generate(project, "Book", [field])
         end
       end
-      expect_raises(Caramel::Frappe::Error, "63-byte") { generator.generate(project, "Book", ["#{"a" * 50}:string:unique"]) }
-      File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
-      expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
+      expect_raises(Caramel::Frappe::Error, "63-byte") do
+        generator.generate(project, "Book", ["#{"a" * 50}:string:unique"])
+      end
+      routes = File.join(project.root, "config/routes.cr")
+      File.write(routes, "# custom routes without a generation marker\n")
+      expect_raises(Caramel::Frappe::Error, "marker") do
+        generator.generate(project, "Book", ["title:string"])
+      end
       %w[app/models app/changesets db/migrations].each do |directory|
         Dir.children(File.join(project.root, directory)).should eq([".keep"])
       end
     end
   end
 
-  it "keeps :server fields out of contracts, forms and request inputs, and gives them starting values on create" do
+  it "keeps :server fields out of contracts, forms and request inputs, setting them on create" do
     resource_project do |project, package|
-      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Link", ["title:string?", "original_url:string", "short_code:string:server", "click_count:int64:server"], version: 20260919000004_i64)
+      fields = [
+        "title:string?",
+        "original_url:string",
+        "short_code:string:server",
+        "click_count:int64:server",
+      ]
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Link", fields, version: 20260919000004_i64)
       read = ->(relative : String) { File.read(File.join(project.root, relative)) }
       read.call("app/models/link.cr").should contain("field short_code : String")
       create = read.call("app/actions/links/create.cr")
       create.should_not contain("field short_code")
-      create.should contain("App::Link.create(title: contract.title, original_url: contract.original_url, short_code: Random::Secure.urlsafe_base64(8), click_count: 0_i64)")
-      read.call("app/actions/links/update.cr").should contain("record.update(title: contract.title, original_url: contract.original_url)\n")
+      submitted = "title: contract.title, original_url: contract.original_url"
+      starting = "short_code: Random::Secure.urlsafe_base64(8), click_count: 0_i64"
+      create.should contain("App::Link.create(#{submitted}, #{starting})")
+      read.call("app/actions/links/update.cr").should contain("record.update(#{submitted})\n")
       form = read.call("app/views/links/form.cr")
       form.should contain(%(labelled "original_url"))
       form.should_not contain(%(labelled "short_code"))
@@ -89,17 +126,42 @@ describe Caramel::Frappe::ResourceGenerator do
     end
   end
 
-  it "backs :unique fields with a unique index, the changeset's unique_constraint and a duplicate check in the request spec" do
+  it "backs :unique fields with a unique index, unique_constraint and a spec duplicate check" do
     resource_project do |project, package|
-      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Invite", ["email:string:unique", "token:string:unique:server", "number:int32:server:unique"], version: 20260919000005_i64)
+      fields = [
+        "email:string:unique",
+        "token:string:unique:server",
+        "number:int32:server:unique",
+      ]
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Invite", fields, version: 20260919000005_i64)
       read = ->(relative : String) { File.read(File.join(project.root, relative)) }
-      read.call("app/models/invite.cr").should contain("      timestamps\n      index :email, unique: true\n      index :token, unique: true\n      index :number, unique: true\n")
-      read.call("app/changesets/invite.cr").should contain("      cs.unique_constraint(:email)\n      cs.unique_constraint(:token)\n      cs.unique_constraint(:number)\n")
-      read.call("app/actions/invites/create.cr").should contain("App::Invite.create(email: contract.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX))")
-      read.call("db/migrations/20260919000005_create_invites.cr").should contain(%(CREATE UNIQUE INDEX "index_invites_on_token" ON "invites" ("token")))
+      read.call("app/models/invite.cr").should contain(<<-CRYSTAL + "\n")
+              timestamps
+              index :email, unique: true
+              index :token, unique: true
+              index :number, unique: true
+        CRYSTAL
+      read.call("app/changesets/invite.cr").should contain(<<-CRYSTAL + "\n")
+              cs.unique_constraint(:email)
+              cs.unique_constraint(:token)
+              cs.unique_constraint(:number)
+        CRYSTAL
+
+      # The :server fields' starting values.
+      token = "token: Random::Secure.urlsafe_base64(8)"
+      number = "number: Random::Secure.rand(Int32::MAX)"
+      creation = "App::Invite.create(email: contract.email, #{token}, #{number})"
+      read.call("app/actions/invites/create.cr").should contain(creation)
+      index = %(CREATE UNIQUE INDEX "index_invites_on_token" ON "invites" ("token"))
+      read.call("db/migrations/20260919000005_create_invites.cr").should contain(index)
+
       spec = read.call("spec/requests/invites_spec.cr")
-      spec.should contain(%(App::Invite.create(email: persisted.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX)).errors["email"]?.should eq(["has already been taken"])))
-      spec.should contain(%(App::Invite.create(email: "Example <email>", token: persisted.token, number: Random::Secure.rand(Int32::MAX)).errors["token"]?.should eq(["has already been taken"])))
+      same_email = %(email: persisted.email, #{token}, #{number})
+      same_token = %(email: "Example <email>", token: persisted.token, #{number})
+      taken = %(?.should eq(["has already been taken"]))
+      spec.should contain(%(App::Invite.create(#{same_email}).errors["email"]#{taken}))
+      spec.should contain(%(App::Invite.create(#{same_token}).errors["token"]#{taken}))
     end
   end
 
@@ -209,7 +271,17 @@ describe Caramel::Frappe::ResourceGenerator do
 
   it "supports every scalar, nullable values and explicit irregular plurals" do
     resource_project do |project, package|
-      Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people", version: 20260919000003_i64)
+      fields = [
+        "name:string",
+        "age:int32",
+        "total:int64",
+        "active:bool",
+        "rating:float64?",
+        "joined_at:time?",
+      ]
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Person", fields,
+        plural: "people", version: 20260919000003_i64)
       model = File.read(File.join(project.root, "app/models/person.cr"))
       model.should contain("field rating : Float64?")
       model.should contain("field joined_at : Time?")
@@ -217,17 +289,30 @@ describe Caramel::Frappe::ResourceGenerator do
 
       # The catalog SugarORM declares for the generated schema; frappe db diff
       # would write exactly this file for it against an empty database.
-      column = ->(name : String, type : String, nullable : Bool) { SugarORM::Catalog::Column.new(name, type, nullable, nil) }
-      stamp = ->(name : String) { SugarORM::Catalog::Column.new(name, "timestamp with time zone", false, "CURRENT_TIMESTAMP") }
+      column = ->(name : String, type : String, nullable : Bool) do
+        SugarORM::Catalog::Column.new(name, type, nullable, nil)
+      end
+      zoned = "timestamp with time zone"
+      stamp = ->(name : String) do
+        SugarORM::Catalog::Column.new(name, zoned, false, "CURRENT_TIMESTAMP")
+      end
       declared = SugarORM::Catalog::Table.new("people", [
         SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
-        column.call("name", "text", false), column.call("age", "integer", false), column.call("total", "bigint", false),
-        column.call("active", "boolean", false), column.call("rating", "double precision", true),
-        column.call("joined_at", "timestamp with time zone", true), stamp.call("created_at"), stamp.call("updated_at"),
+        column.call("name", "text", false),
+        column.call("age", "integer", false),
+        column.call("total", "bigint", false),
+        column.call("active", "boolean", false),
+        column.call("rating", "double precision", true),
+        column.call("joined_at", zoned, true),
+        stamp.call("created_at"),
+        stamp.call("updated_at"),
       ])
-      statements = SugarORM::DDL.statements(SugarORM::Differ.diff([declared], [] of SugarORM::Catalog::Table).transactional)
-      expected = Caramel::Frappe::SchemaDiff.source(SugarORM::Migration.new(20260919000003_i64, "create_people", statements))
-      File.read(File.join(project.root, "db/migrations/20260919000003_create_people.cr")).should eq(expected)
+      diff = SugarORM::Differ.diff([declared], [] of SugarORM::Catalog::Table)
+      statements = SugarORM::DDL.statements(diff.transactional)
+      migration = SugarORM::Migration.new(20260919000003_i64, "create_people", statements)
+      expected = Caramel::Frappe::SchemaDiff.source(migration)
+      generated = File.join(project.root, "db/migrations/20260919000003_create_people.cr")
+      File.read(generated).should eq(expected)
     end
   end
 end
