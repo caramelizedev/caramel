@@ -1,6 +1,6 @@
 #!/bin/bash
 # Readies a Claude Code on the web session, which runs on Linux, to format,
-# lint and run the specs that do not need macOS: Crystal 1.21.0 (the pinned
+# lint and run the specs that do not need macOS: Crystal 1.21.1 (the pinned
 # compiler), this checkout's shards and bin/frappe-lint. On a Mac, use
 # scripts/install-toolchain instead (CONTRIBUTING.md).
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 [ "$(uname -s)-$(uname -m)" = "Linux-x86_64" ] || exit 0
 
-VERSION=1.21.0
+VERSION=1.21.1
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/caramel
 CRYSTAL=$CACHE/crystal-$VERSION-1
 ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
