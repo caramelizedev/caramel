@@ -57,7 +57,6 @@ Layout/LineLength:
     - "scripts/checks/compiler_profile.cr"
     - "scripts/checks/contract_compilation.cr"
     - "scripts/checks/dev_child.cr"
-    - "scripts/checks/dev_retirement.cr"
     - "scripts/checks/editor_tools.cr"
     - "scripts/checks/frappe_project.cr"
     - "scripts/checks/frappe_project/benchmark.cr"
