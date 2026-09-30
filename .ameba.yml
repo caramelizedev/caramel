@@ -83,7 +83,6 @@ Layout/LineLength:
     - "scripts/checks/toolchain_paths.cr"
     - "scripts/cut/cut.cr"
     - "spec/caramel/action_spec.cr"
-    - "spec/caramel/database_config_spec.cr"
     - "spec/caramel/http_spec.cr"
     - "spec/caramel/hypermedia_spec.cr"
     - "spec/caramel/request_contract_spec.cr"
