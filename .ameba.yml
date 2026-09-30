@@ -55,7 +55,6 @@ Layout/LineLength:
   Excluded:
     - "scripts/checks/browser.cr"
     - "scripts/checks/frappe_project.cr"
-    - "scripts/checks/frappe_project/dev.cr"
     - "scripts/checks/route_compilation.cr"
     - "spec/caramel/action_spec.cr"
     - "spec/caramel/application_spec.cr"
