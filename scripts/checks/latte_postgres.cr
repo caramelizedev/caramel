@@ -4,6 +4,9 @@ require "c/signal"
 module Caramel::Checks::LattePostgres
   extend self
 
+  # How `ps -o lstart=` prints a process's start time.
+  LSTART_FORMAT = "%a %b %e %H:%M:%S %Y"
+
   private def owned_postgres_pid(data : String, pid_file : String, postgres : String) : Int64?
     info = File.info?(pid_file, follow_symlinks: false)
     return unless info
@@ -14,11 +17,13 @@ module Caramel::Checks::LattePostgres
     pid = lines[0].to_i64
     postmaster_start = lines[2].to_i64
     return unless pid > 1 && pid <= Int32::MAX
-    snapshot = Checks.run(["/bin/ps", "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="], env: {"LC_ALL" => "C"}, timeout: 2.seconds)
+    ps = ["/bin/ps", "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="]
+    snapshot = Checks.run(ps, env: {"LC_ALL" => "C"}, timeout: 2.seconds)
     return unless snapshot.success?
     fields = snapshot.stdout.strip.split(/\s+/, 7)
     return unless fields.size == 7 && fields[0].to_i64 == LibC.getuid.to_i64
-    process_start = Time.parse(fields[1..5].join(" "), "%a %b %e %H:%M:%S %Y", Time::Location.local).to_unix
+    lstart = fields[1..5].join(" ")
+    process_start = Time.parse(lstart, LSTART_FORMAT, Time::Location.local).to_unix
     return if (process_start - postmaster_start).abs > 1
     expected = "#{postgres} -D #{data}"
     command = fields[6]
@@ -41,7 +46,8 @@ module Caramel::Checks::LattePostgres
     toolchain = File.realpath(Checks.toolchain_root)
     pg = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin")
     unless File.file?(File.join(pg, "initdb")) && File.file?(File.join(pg, "pg_ctl"))
-      STDERR.puts "Pinned PostgreSQL 18.6 tools are unavailable in the managed toolchain; rerun scripts/install-toolchain."
+      STDERR.puts "Pinned PostgreSQL 18.6 tools are unavailable " \
+                  "in the managed toolchain; rerun scripts/install-toolchain."
       return 2
     end
 
@@ -58,11 +64,14 @@ module Caramel::Checks::LattePostgres
     environment["LC_ALL"] = "C"
 
     code = begin
-      result = Checks.crystal(["spec", "spec/latte_integration/postgres_spec.cr", "--error-trace"], env: environment, timeout: 180.seconds)
+      spec = "spec/latte_integration/postgres_spec.cr"
+      result = Checks.crystal(["spec", spec, "--error-trace"],
+        env: environment, timeout: 180.seconds)
       print result.stdout
       STDERR.print result.stderr
       if result.timed_out?
-        STDERR.puts "PostgreSQL integration exceeded its 180-second budget; cleaning up owned state."
+        STDERR.puts "PostgreSQL integration exceeded its 180-second budget; " \
+                    "cleaning up owned state."
         124
       else
         result.status.exit_code
@@ -78,7 +87,8 @@ module Caramel::Checks::LattePostgres
     if File.exists?(pid_file) || File.symlink?(pid_file)
       if pid = owned_postgres_pid(data, pid_file, File.join(pg, "postgres"))
         begin
-          result = Checks.run([File.join(pg, "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"], env: environment, timeout: 30.seconds)
+          stop = [File.join(pg, "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"]
+          result = Checks.run(stop, env: environment, timeout: 30.seconds)
           stopped = false
           unless result.timed_out?
             if result.success? && !File.exists?(pid_file) && !File.symlink?(pid_file)
