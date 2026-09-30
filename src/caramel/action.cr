@@ -27,7 +27,8 @@ module Caramel
       struct Contract < ::Caramel::RequestContract
         {% call = @caller ? @caller.first : nil %}
         {% if call && call.filename %}
-          CARAMEL_CONTRACT_LOCATION = {{ "#{call.filename.id}:#{call.line_number}:#{call.column_number}" }}
+          {% position = "#{call.line_number}:#{call.column_number}" %}
+          CARAMEL_CONTRACT_LOCATION = {{ "#{call.filename.id}:#{position.id}" }}
         {% end %}
         {{ block.body }}
       end
@@ -195,7 +196,9 @@ module Caramel
     # (the generated ApplicationAction renders its layout view); actions that
     # only stream, morph or answer JSON never need to.
     def layout(page : Page) : String
-      %(<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>#{HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>)
+      title = HTML.escape(title_for(page))
+      head = %(<head><meta charset="utf-8"><title>#{title}</title></head>)
+      %(<!DOCTYPE html><html lang="en">#{head}<body>#{page.body}</body></html>)
     end
 
     def title_for(page : Page) : String
@@ -257,12 +260,19 @@ module Caramel
     end
 
     # Replaces one target's content with `html`, a view or trusted HTML.
-    def morph(target : String, with html, swap : String = "innerMorph", status : Int32 = @status) : Response
+    def morph(target : String,
+              with html,
+              swap : String = "innerMorph",
+              status : Int32 = @status) : Response
       partials([Partial.new(target, html.to_s, swap)], status)
     end
 
     def json(value, status : Int32 = @status) : Response
-      headers = HTTP::Headers{"Content-Type" => "application/json", "Vary" => VARY, "Cache-Control" => "no-store"}
+      headers = HTTP::Headers{
+        "Content-Type"  => "application/json",
+        "Vary"          => VARY,
+        "Cache-Control" => "no-store",
+      }
       Response.new(status, value.to_json, headers)
     end
 
@@ -280,8 +290,15 @@ module Caramel
     end
 
     # Streams the body; uploaded files are already deleted when the block runs.
-    def stream(content_type : String, status : Int32 = @status, &block : IO -> Nil) : Response
-      Response.stream(status, HTTP::Headers{"Content-Type" => content_type, "Cache-Control" => "no-store", "Vary" => VARY}, &block)
+    def stream(content_type : String,
+               status : Int32 = @status,
+               &block : IO -> Nil) : Response
+      headers = HTTP::Headers{
+        "Content-Type"  => content_type,
+        "Cache-Control" => "no-store",
+        "Vary"          => VARY,
+      }
+      Response.stream(status, headers, &block)
     end
 
     # A `Response` from `handle` passes through unchanged; any other result is
@@ -299,7 +316,9 @@ module Caramel
       elsif @context.browser?
         contract_failure_page(contract)
       else
-        Response.new(422, contract.to_mrdp(@context.method, request.path), HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
+        text = contract.to_mrdp(@context.method, request.path)
+        headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
+        Response.new(422, text, headers)
       end
     end
 
@@ -341,7 +360,11 @@ module Caramel
     end
 
     private def html_headers : HTTP::Headers
-      headers = HTTP::Headers{"Content-Type" => "text/html; charset=utf-8", "Vary" => VARY, "Cache-Control" => "no-store"}
+      headers = HTTP::Headers{
+        "Content-Type"  => "text/html; charset=utf-8",
+        "Vary"          => VARY,
+        "Cache-Control" => "no-store",
+      }
       headers.add("Set-Cookie", @context.csrf_cookie.to_set_cookie_header)
       headers
     end
