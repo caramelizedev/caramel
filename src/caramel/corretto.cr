@@ -17,6 +17,18 @@ require "./corretto/matchers"
 module Corretto
   WORKER_DATABASE = /\Acaramel_spec_[0-9a-f]{16}_w[1-9][0-9]?\z/
 
+  # What Corretto.configure refuses to run without.
+  MISSING_DATABASE_URL = "Set config.database_url (Caramel::Database.url) " \
+                         "in Corretto.configure"
+  MISSING_MIGRATION_URL = "Set config.migration_url " \
+                          "(Caramel::Database.url(migration: true)) in Corretto.configure"
+  MISSING_APPLICATION = "Set config.application = ->(db : DB::Database) " \
+                        "{ Caramel.build(App, db, …) } in Corretto.configure"
+  UNCONFIGURED_SESSION = "Call Corretto.configure in spec/spec_helper.cr " \
+                         "before Corretto.session"
+  UNCONFIGURED_APPLICATION = "Corretto has no application; " \
+                             "call Corretto.configure in spec/spec_helper.cr"
+
   class Config
     property database_url : String? = nil
     property migration_url : String? = nil
@@ -37,7 +49,9 @@ module Corretto
     configure do |config|
       config.database_url = Caramel::Database.url
       config.migration_url = Caramel::Database.url(migration: true)
-      config.application = ->(db : DB::Database) { Caramel.build(app, db, ENV["APP_SECRET"], ENV["APP_ORIGIN"], root) }
+      config.application = ->(db : DB::Database) do
+        Caramel.build(app, db, ENV["APP_SECRET"], ENV["APP_ORIGIN"], root)
+      end
     end
   end
 
@@ -50,14 +64,17 @@ module Corretto
     abort("Run these specs with frappe corretto") unless ENV["CARAMEL_ENV"]? == "test" && index
     config = Config.new
     yield config
-    runtime_url = config.database_url || raise Error.new("Set config.database_url (Caramel::Database.url) in Corretto.configure")
-    migration_url = config.migration_url || raise Error.new("Set config.migration_url (Caramel::Database.url(migration: true)) in Corretto.configure")
-    build = config.application || raise Error.new("Set config.application = ->(db : DB::Database) { Caramel.build(App, db, …) } in Corretto.configure")
+    runtime_url = config.database_url || raise Error.new(MISSING_DATABASE_URL)
+    migration_url = config.migration_url || raise Error.new(MISSING_MIGRATION_URL)
+    build = config.application || raise Error.new(MISSING_APPLICATION)
     expected = ENV["CARAMEL_SPEC_DATABASE"]?
     database = Caramel::Database::Config.parse(runtime_url).database
-    unless runtime_url == ENV["CARAMEL_EXPECTED_DATABASE_URL"]? && expected && database == expected && database.matches?(WORKER_DATABASE) &&
+    unless runtime_url == ENV["CARAMEL_EXPECTED_DATABASE_URL"]? &&
+           expected && database == expected &&
+           database.matches?(WORKER_DATABASE) &&
            Caramel::Database::Config.parse(migration_url).database == database
-      abort("Spec database identity differs from this Corretto worker; development data was not touched")
+      abort("Spec database identity differs from this Corretto worker; " \
+            "development data was not touched")
     end
     worker = Worker.new(runtime_url, migration_url, latte_reset(index))
     unless worker.database.query_one("SELECT current_database()", as: String) == expected
@@ -72,7 +89,10 @@ module Corretto
       application(worker) # rebinds SugarORM::Repo.database after a reset
       leaked = worker.run(item.all_tags.includes?("catalog")) { example.run }
       if leaked
-        STDERR.puts "\nCorretto: #{item.file}:#{item.line} changed the database catalog outside its transaction; worker #{index} was reset from the migrated template. Tag the example `catalog` when it must run DDL."
+        warning = "\nCorretto: #{item.file}:#{item.line} changed the database catalog " \
+                  "outside its transaction; worker #{index} was reset from the " \
+                  "migrated template. Tag the example `catalog` when it must run DDL."
+        STDERR.puts warning
       end
     ensure
       begin
@@ -90,7 +110,7 @@ module Corretto
   # Yields a client for the configured application and the example's
   # connection, which in-process requests share.
   def self.session(& : Client, DB::Connection ->) : Nil
-    worker = @@worker || raise Error.new("Call Corretto.configure in spec/spec_helper.cr before Corretto.session")
+    worker = @@worker || raise Error.new(UNCONFIGURED_SESSION)
     connection = worker.connection
     yield Client.new(application(worker)), connection
   end
@@ -134,7 +154,7 @@ module Corretto
   private def self.application(worker : Worker) : Caramel::Application
     current = @@application
     return current[1] if current && current[0].same?(worker.database)
-    build = @@build || raise Error.new("Corretto has no application; call Corretto.configure in spec/spec_helper.cr")
+    build = @@build || raise Error.new(UNCONFIGURED_APPLICATION)
     application = build.call(worker.database)
     @@application = {worker.database, application}
     application
@@ -143,28 +163,50 @@ module Corretto
   # Asks Latte to replace this worker's database with a fresh clone of the
   # migrated spec template (the endpoint `frappe corretto` created it with).
   private def self.latte_reset(index : String) : Proc(Nil)
-    socket = ENV["CORRETTO_LATTE_SOCKET"]? || abort("CORRETTO_LATTE_SOCKET is missing; run these specs with frappe corretto")
+    socket = ENV["CORRETTO_LATTE_SOCKET"]? ||
+             abort("CORRETTO_LATTE_SOCKET is missing; " \
+                   "run these specs with frappe corretto")
     site = ENV["CORRETTO_SITE"]?
-    abort("CORRETTO_SITE and CORRETTO_WORKER are invalid; run these specs with frappe corretto") unless site && site.matches?(/\A[0-9a-f]{16}\z/) && index.matches?(/\A[1-9][0-9]?\z/)
+    unless site && site.matches?(/\A[0-9a-f]{16}\z/) && index.matches?(/\A[1-9][0-9]?\z/)
+      abort("CORRETTO_SITE and CORRETTO_WORKER are invalid; " \
+            "run these specs with frappe corretto")
+    end
     -> do
       UNIXSocket.open(socket) do |io|
         io.read_timeout = 20.seconds
-        response = HTTP::Client.new(io, "latte").post("/v1/sites/#{site}/test-workers/#{index}", HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}, "{}")
-        raise Error.new("Latte could not reset test worker #{index} (#{response.status_code}): #{response.body}") unless response.success?
+        client = HTTP::Client.new(io, "latte")
+        path = "/v1/sites/#{site}/test-workers/#{index}"
+        headers = HTTP::Headers{
+          "Content-Type" => "application/json",
+          "Connection"   => "close",
+        }
+        response = client.post(path, headers, "{}")
+        unless response.success?
+          raise Error.new("Latte could not reset test worker #{index} " \
+                          "(#{response.status_code}): #{response.body}")
+        end
       end
       nil
     end
   end
 
-  # Mocking is forbidden (RFC-0006 §2.1): refuse to compile a suite that loads a mocking library.
+  # Mocking is forbidden (RFC-0006 §2.1): refuse to compile a suite that
+  # loads a mocking library.
   macro finished
+    {% instead = "assert on observable ingress, database rows and rendered hypermedia, " +
+                 "and fake third parties at the wire with Corretto.stub_wire." %}
     {% for name in %w[Mocks Mock Double] %}
       {% if @top_level.has_constant?(name) %}
-        {% raise "Corretto forbids mocking, but `#{name.id}` from a mocking library is loaded.\nRemediation: remove the mocking shard and its requires; assert on observable ingress, database rows and rendered hypermedia, and fake third parties at the wire with Corretto.stub_wire." %}
+        {% raise "Corretto forbids mocking, but `#{name.id}` from a mocking library " +
+                 "is loaded.\nRemediation: remove the mocking shard and its requires; " +
+                 instead %}
       {% end %}
     {% end %}
-    {% if @top_level.has_constant?("Spectator") && @top_level.constant("Spectator").has_constant?("Mocks") %}
-      {% raise "Corretto forbids mocking, but Spectator::Mocks is loaded.\nRemediation: remove Spectator's mocks; assert on observable ingress, database rows and rendered hypermedia, and fake third parties at the wire with Corretto.stub_wire." %}
+    {% if @top_level.has_constant?("Spectator") %}
+      {% if @top_level.constant("Spectator").has_constant?("Mocks") %}
+        {% raise "Corretto forbids mocking, but Spectator::Mocks is loaded.\n" +
+                 "Remediation: remove Spectator's mocks; " + instead %}
+      {% end %}
     {% end %}
   end
 end
