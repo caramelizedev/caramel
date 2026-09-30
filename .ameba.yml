@@ -65,7 +65,6 @@ Layout/LineLength:
     - "scripts/checks/latte_ipc.cr"
     - "scripts/checks/latte_network.cr"
     - "scripts/checks/latte_postgres.cr"
-    - "scripts/checks/orm_compilation.cr"
     - "scripts/checks/route_compilation.cr"
     - "scripts/checks/schema_diff.cr"
     - "scripts/checks/support/harness.cr"
