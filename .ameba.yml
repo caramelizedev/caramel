@@ -212,7 +212,6 @@ Layout/LineLength:
     - "src/frappe/resource_generator.cr"
     - "src/frappe/schema_diff.cr"
     - "src/frappe/tools.cr"
-    - "src/latte.cr"
     - "src/latte/postgres.cr"
     - "src/latte/process.cr"
     - "src/latte/server.cr"
