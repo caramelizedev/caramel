@@ -128,7 +128,6 @@ Layout/LineLength:
     - "spec/integration/migrations_spec.cr"
     - "spec/integration/sugar_orm_spec.cr"
     - "spec/latte_integration/postgres_spec.cr"
-    - "spec/latte_integration/supervisor_spec.cr"
     - "spec/native/latte_tools_installer_spec.cr"
     - "spec/native/local_integration_spec.cr"
     - "spec/native/login_item_spec.cr"
