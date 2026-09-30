@@ -13,9 +13,13 @@ module Caramel::ColdBrew
   #
   #     Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }
   def self.every(span : Time::Span, name : String, &block : ->) : Nil
-    raise ArgumentError.new("every needs a span of at least 1 second, got #{span}") if span < 1.second
+    if span < 1.second
+      raise ArgumentError.new("every needs a span of at least 1 second, got #{span}")
+    end
     raise ArgumentError.new("every needs a schedule name") if name.blank?
-    raise ArgumentError.new("A schedule named #{name.inspect} already exists") if @@schedules.any? { |schedule| schedule.name == name }
+    if @@schedules.any? { |schedule| schedule.name == name }
+      raise ArgumentError.new("A schedule named #{name.inspect} already exists")
+    end
     @@schedules << Schedule.new(span, name, block)
   end
 
@@ -29,6 +33,8 @@ module Caramel::ColdBrew
   class Scheduler
     Log = ::Log.for("cold_brew.scheduler")
 
+    LOCK = "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS held"
+
     LEASE = <<-SQL
       INSERT INTO caramel_schedules AS schedules (name, last_run_at) VALUES ($1, now())
       ON CONFLICT (name) DO UPDATE SET last_run_at = now()
@@ -37,11 +43,14 @@ module Caramel::ColdBrew
       SQL
 
     REMAINING = <<-SQL
-      SELECT EXTRACT(EPOCH FROM last_run_at + make_interval(secs => $2) - clock_timestamp())::float8 AS seconds
+      SELECT EXTRACT(EPOCH FROM last_run_at + make_interval(secs => $2) \
+        - clock_timestamp())::float8 AS seconds
       FROM caramel_schedules WHERE name = $1
       SQL
 
-    def initialize(@schedules : Array(Schedule) = ColdBrew.schedules, @db : DB::Database = SugarORM::Repo.database, @retry : Time::Span = 1.minute)
+    def initialize(@schedules : Array(Schedule) = ColdBrew.schedules,
+                   @db : DB::Database = SugarORM::Repo.database,
+                   @retry : Time::Span = 1.minute)
       @stopping = Channel(Nil).new
       @done = WaitGroup.new
     end
@@ -71,9 +80,10 @@ module Caramel::ColdBrew
       ran = false
       SugarORM::Repo.using(@db) do
         SugarORM::Repo.transaction do
-          held = SugarORM.sql("SELECT pg_try_advisory_xact_lock(hashtext($1)) AS held", schedule.name, as: {held: Bool}).first[:held]
+          held = SugarORM.sql(LOCK, schedule.name, as: {held: Bool}).first[:held]
           next unless held
-          next if SugarORM.sql(LEASE, schedule.name, schedule.span.total_seconds, as: {name: String}).empty?
+          period = schedule.span.total_seconds
+          next if SugarORM.sql(LEASE, schedule.name, period, as: {name: String}).empty?
           schedule.block.call
           ran = true
         end
@@ -100,7 +110,9 @@ module Caramel::ColdBrew
 
     private def remaining(schedule : Schedule) : Time::Span
       SugarORM::Repo.using(@db) do
-        seconds = SugarORM.sql(REMAINING, schedule.name, schedule.span.total_seconds, as: {seconds: Float64}).first?.try(&.[:seconds])
+        period = schedule.span.total_seconds
+        rows = SugarORM.sql(REMAINING, schedule.name, period, as: {seconds: Float64})
+        seconds = rows.first?.try(&.[:seconds])
         seconds ? seconds.seconds : Time::Span.zero
       end
     end

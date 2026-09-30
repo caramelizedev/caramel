@@ -15,8 +15,7 @@ module Caramel::Frappe
     def run(agent : Bool, color : Bool) : Int32
       entrypoint = @project.entrypoint
       compiler = IO::Memory.new
-      status = Process.run(File.join(@tools.framework_root, "scripts/crystal"), ["build", entrypoint, "--no-codegen", *DEFINES],
-        chdir: @project.root, env: @tools.environment, clear_env: true, input: Process::Redirect::Close, output: compiler, error: compiler)
+      status = type_check(entrypoint, compiler)
       if status.success?
         if agent
           @output.puts("OK check #{files} files")
@@ -25,7 +24,8 @@ module Caramel::Frappe
         end
         return 0
       end
-      Diagnostics.parse(compiler.to_s, @project.root, entrypoint).each_with_index do |diagnostic, index|
+      diagnostics = Diagnostics.parse(compiler.to_s, @project.root, entrypoint)
+      diagnostics.each_with_index do |diagnostic, index|
         if agent
           diagnostic.to_mrdp(@output)
         else
@@ -36,9 +36,24 @@ module Caramel::Frappe
       1
     end
 
+    # Runs the compiler without code generation; *output* collects what it
+    # prints on both streams.
+    private def type_check(entrypoint : String, output : IO) : Process::Status
+      crystal = File.join(@tools.framework_root, "scripts/crystal")
+      Process.run(crystal, ["build", entrypoint, "--no-codegen", *DEFINES],
+        chdir: @project.root,
+        env: @tools.environment,
+        clear_env: true,
+        input: Process::Redirect::Close,
+        output: output,
+        error: output)
+    end
+
     # The application's own Crystal sources and views that the main target compiles.
     private def files : Int32
-      %w[app config db src].sum { |directory| Dir.glob(File.join(@project.root, directory, "**", "*.{cr,ecr}")).size }
+      %w[app config db src].sum do |directory|
+        Dir.glob(File.join(@project.root, directory, "**", "*.{cr,ecr}")).size
+      end
     end
   end
 end

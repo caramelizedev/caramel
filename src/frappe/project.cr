@@ -15,6 +15,8 @@ module Caramel::Frappe
     include YAML::Serializable
     include YAML::Serializable::Strict
 
+    EXTENSION = /\A[a-z][a-z0-9_-]*\z/
+
     getter version : Int32
     getter name : String
     getter postgresql_major : Int32
@@ -25,8 +27,11 @@ module Caramel::Frappe
       raise Error.new("Unsupported environment.yml version; expected 1") unless @version == 1
       Latte::Site.validate_name(@name)
       @domain_suffix = Latte::Site.normalize_suffix(@domain_suffix)
-      raise Error.new("This Caramel release requires PostgreSQL major 18") unless @postgresql_major == 18
-      unless @extensions.uniq.size == @extensions.size && @extensions.all?(&.matches?(/\A[a-z][a-z0-9_-]*\z/))
+      unless @postgresql_major == 18
+        raise Error.new("This Caramel release requires PostgreSQL major 18")
+      end
+      unique = @extensions.uniq.size == @extensions.size
+      unless unique && @extensions.all?(&.matches?(EXTENSION))
         raise Error.new("PostgreSQL extensions must be unique lowercase identifiers")
       end
     rescue ex : ArgumentError
@@ -37,16 +42,19 @@ module Caramel::Frappe
   # A deliberately literal dotenv format: no evaluation, variable expansion,
   # export statements, multiline literals, or hidden shell execution.
   module LocalEnvironment
+    KEY = /\A[A-Za-z_][A-Za-z0-9_]*\z/
+
     # ameba:disable Metrics/CyclomaticComplexity -- a single-pass .env parser
     def self.parse(text : String) : Hash(String, String)
-      raise Error.new("Invalid local environment encoding") if !text.valid_encoding? || text.includes?('\0')
+      valid = text.valid_encoding? && !text.includes?('\0')
+      raise Error.new("Invalid local environment encoding") unless valid
       values = {} of String => String
       text.each_line.with_index(1) do |line, number|
         line = line.strip
         next if line.empty? || line.starts_with?('#')
         key, separator, raw = line.partition('=')
         key = key.strip
-        unless separator == "=" && key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+        unless separator == "=" && key.matches?(KEY)
           raise Error.new("Invalid .env assignment on line #{number}")
         end
         raise Error.new("Duplicate .env key #{key}") if values.has_key?(key)
@@ -74,7 +82,7 @@ module Caramel::Frappe
     def self.dump(values : Hash(String, String)) : String
       String.build do |io|
         values.each do |key, value|
-          raise Error.new("Invalid environment key") unless key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+          raise Error.new("Invalid environment key") unless key.matches?(KEY)
           raise Error.new("Invalid environment value") if value.includes?('\0')
           io << key << '=' << value.to_json << '\n'
         end
@@ -92,11 +100,10 @@ module Caramel::Frappe
     def self.load(directory : String = Dir.current) : self
       root = Latte::Site.canonical_directory(directory)
       pin = pin(root)
-      unless pin == Caramel::VERSION
-        raise Error.new(pin ? "This project uses Caramel #{pin}, not #{Caramel::VERSION}; use its matching Caramel installation" : "shard.lock does not pin caramel; restore it from version control")
-      end
+      raise Error.new(mismatch(pin)) unless pin == Caramel::VERSION
       begin
-        metadata = EnvironmentManifest.from_yaml(File.read(File.join(root, "config/environment.yml")))
+        document = File.read(File.join(root, "config/environment.yml"))
+        metadata = EnvironmentManifest.from_yaml(document)
       rescue YAML::Error | File::Error
         raise Error.new("Invalid or missing config/environment.yml")
       end
@@ -106,13 +113,21 @@ module Caramel::Frappe
       raise Error.new(ex.message)
     end
 
+    # Why a project that pins *pin* does not load under this release.
+    private def self.mismatch(pin : String?) : String
+      return "shard.lock does not pin caramel; restore it from version control" unless pin
+      "This project uses Caramel #{pin}, not #{Caramel::VERSION}; " \
+      "use its matching Caramel installation"
+    end
+
     # The Caramel release a project pins (ADR 0016): the version of the caramel
     # entry in its shard.lock, without build metadata.
     def self.pin(root : String) : String?
       path = File.join(root, "shard.lock")
       info = File.info?(path, follow_symlinks: false)
       return unless info && info.file? && info.size <= 1_048_576
-      entry = YAML.parse(File.read(path))["shards"]?.try(&.as_h?).try(&.[YAML::Any.new("caramel")]?).try(&.as_h?)
+      shards = YAML.parse(File.read(path))["shards"]?.try(&.as_h?)
+      entry = shards.try(&.[YAML::Any.new("caramel")]?).try(&.as_h?)
       entry.try(&.[YAML::Any.new("version")]?).try(&.as_s?).try(&.split('+').first)
     rescue YAML::ParseException
       nil
@@ -144,10 +159,13 @@ module Caramel::Frappe
         raise Error.new("shard.yml application target must be a Crystal file under src/")
       end
       path = File.realpath(File.join(@root, source))
-      raise Error.new("Application entry point must remain inside the project") unless path.starts_with?(@root + "/") && File.file?(path)
+      unless path.starts_with?(@root + "/") && File.file?(path)
+        raise Error.new("Application entry point must remain inside the project")
+      end
       source
     rescue YAML::Error | KeyError | TypeCastError | File::Error
-      raise Error.new("shard.yml must declare an existing main source for its named application target")
+      raise Error.new("shard.yml must declare an existing main source for its named " \
+                      "application target")
     end
 
     def local_environment : Hash(String, String)
@@ -168,7 +186,8 @@ module Caramel::Frappe
       if File.info?(path, follow_symlinks: false)
         values = local_environment
         expected.each do |key, value|
-          raise Error.new("Local #{key} differs from Latte; .env was preserved") unless values[key]? == value
+          next if values[key]? == value
+          raise Error.new("Local #{key} differs from Latte; .env was preserved")
         end
         unless values["APP_SECRET"]?.try(&.matches?(/\A[0-9a-f]{64}\z/))
           raise Error.new("Local APP_SECRET is missing or invalid; .env was preserved")

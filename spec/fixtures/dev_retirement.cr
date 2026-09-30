@@ -7,7 +7,8 @@ end
 
 directory = ARGV[0]
 environment = {"PATH" => "/usr/bin:/bin"}
-child = Caramel::Frappe::DevCommand.new(["/bin/sh", "-c", "trap \"\" TERM; printf '%s' \"$$\" > ready; while :; do /bin/sleep 1; done"], environment, directory)
+script = "trap \"\" TERM; printf '%s' \"$$\" > ready; while :; do /bin/sleep 1; done"
+child = Caramel::Frappe::DevCommand.new(["/bin/sh", "-c", script], environment, directory)
 retirement = Caramel::Frappe::DevRetirement.new
 begin
   deadline = Time.instant + 5.seconds
@@ -34,7 +35,8 @@ begin
     raise ex unless ex.message.try(&.includes?("cleanup-failure-proof"))
   end
   raise "Failed cleanup left command alive" if failed_cleanup.running?
-  puts "PASS: nonblocking retirement, tracked shutdown, completed cleanup, and surfaced cleanup failure"
+  puts "PASS: nonblocking retirement, tracked shutdown, completed cleanup, " \
+       "and surfaced cleanup failure"
 ensure
   child.stop
 end

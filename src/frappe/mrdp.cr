@@ -3,7 +3,10 @@ module Caramel::Frappe
   # lines with no ANSI. Each diagnostic is an `ERR` line followed by one
   # `KEY: value` field per line.
   module MRDP
-    CODES = %w[CONTRACT_MISMATCH N_PLUS_ONE UNDEFINED_METHOD UNDEFINED_CONSTANT NO_OVERLOAD SYNTAX COMPILE USAGE LINT_<RULE> DIFF_HALT]
+    CODES = %w[
+      CONTRACT_MISMATCH N_PLUS_ONE UNDEFINED_METHOD UNDEFINED_CONSTANT NO_OVERLOAD
+      SYNTAX COMPILE USAGE LINT_<RULE> DIFF_HALT
+    ]
 
     GRAMMAR = <<-TEXT
       MRDP (with --agent, or whenever stdout is not a TTY)
@@ -12,8 +15,10 @@ module Caramel::Frappe
       MISSING: <name>:<Type>
       MSG: <message>
       FIX: <remediation>
-      PATCH: INSERT "<text>" AT <line>:<col>  # insert <text> as a new line before <line> of the ERR file, indented to <col>
-      PATCH: INSERT "<text>" AFTER <line>:<col>  # insert <text> into <line> of the ERR file after column <col>
+      PATCH: INSERT "<text>" AT <line>:<col>  # insert <text> as a new line \
+        before <line> of the ERR file, indented to <col>
+      PATCH: INSERT "<text>" AFTER <line>:<col>  # insert <text> into <line> \
+        of the ERR file after column <col>
       SYNTAX: frappe <syntax>
       SUGGEST: <nearest valid token>
       OK <command> <summary>
@@ -21,7 +26,10 @@ module Caramel::Frappe
       EXIT: 0 when no ERR line is printed; 1 otherwise
       TEXT
 
-    def self.write(io : IO, code : String, at : String, fields : Enumerable(Tuple(String, String))) : Nil
+    def self.write(io : IO,
+                   code : String,
+                   at : String,
+                   fields : Enumerable(Tuple(String, String))) : Nil
       io << "ERR " << code << " at " << at << '\n'
       fields.each { |key, value| io << key << ": " << flat(value) << '\n' }
     end

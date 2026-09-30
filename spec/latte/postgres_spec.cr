@@ -12,26 +12,35 @@ private def remove_postgres_unit_root(root : String)
   FileUtils.rm_rf(root)
 end
 
+# Writes an owner-only executable at *relative* under the root's installs.
+private def install_tool(root : String, relative : String, content : String) : Nil
+  path = File.join(root, "data", "installs", relative)
+  Dir.mkdir_p(File.dirname(path), mode: 0o700)
+  File.write(path, content)
+  File.chmod(path, 0o700)
+end
+
 describe Caramel::Latte::Toolchain do
   it "resolves every managed executable from the explicit root" do
     root = postgres_unit_root
     begin
-      %w[conda-postgresql/18.6/bin/postgres conda-postgresql/18.6/bin/initdb conda-postgresql/18.6/bin/pg_ctl conda-postgresql/18.6/bin/psql conda-postgresql/18.6/bin/pg_dump conda-postgresql/18.6/bin/pg_restore conda-openssl/3.6.4/bin/openssl].each do |relative|
-        path = File.join(root, "data", "installs", relative)
-        Dir.mkdir_p(File.dirname(path), mode: 0o700)
-        File.write(path, "#!/bin/sh\n")
-        File.chmod(path, 0o700)
-      end
-      Dir.mkdir_p(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4"), mode: 0o700)
-      File.write(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4", "caddy"), "")
-      File.chmod(File.join(root, "data", "installs", "aqua-caddyserver-caddy", "2.11.4", "caddy"), 0o700)
-      Dir.mkdir_p(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7"), mode: 0o700)
-      File.write(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7", "coredns"), "")
-      File.chmod(File.join(root, "data", "installs", "github-coredns-coredns", "1.14.7", "coredns"), 0o700)
+      scripts = %w[
+        conda-postgresql/18.6/bin/postgres
+        conda-postgresql/18.6/bin/initdb
+        conda-postgresql/18.6/bin/pg_ctl
+        conda-postgresql/18.6/bin/psql
+        conda-postgresql/18.6/bin/pg_dump
+        conda-postgresql/18.6/bin/pg_restore
+        conda-openssl/3.6.4/bin/openssl
+      ]
+      scripts.each { |relative| install_tool(root, relative, "#!/bin/sh\n") }
+      install_tool(root, "aqua-caddyserver-caddy/2.11.4/caddy", "")
+      install_tool(root, "github-coredns-coredns/1.14.7/coredns", "")
 
       tools = Caramel::Latte::Toolchain.new(root)
       tools.root.should eq(File.realpath(root))
-      tools.postgres.should eq(File.join(File.realpath(root), "data/installs/conda-postgresql/18.6/bin/postgres"))
+      installs = File.join(File.realpath(root), "data/installs")
+      tools.postgres.should eq(File.join(installs, "conda-postgresql/18.6/bin/postgres"))
       tools.pg_ctl.should end_with("/conda-postgresql/18.6/bin/pg_ctl")
       tools.pg_dump.should end_with("/conda-postgresql/18.6/bin/pg_dump")
       tools.pg_restore.should end_with("/conda-postgresql/18.6/bin/pg_restore")
@@ -70,7 +79,10 @@ end
 
 describe Caramel::Latte::ProcessRunner do
   it "kills a command that exceeds its deadline and bounds diagnostics" do
-    result = Caramel::Latte::ProcessRunner.run(["/bin/sh", "-c", "sleep 2"], timeout: 50.milliseconds)
+    result = Caramel::Latte::ProcessRunner.run(
+      ["/bin/sh", "-c", "sleep 2"],
+      timeout: 50.milliseconds,
+    )
     result.timed_out?.should be_true
     result.status.success?.should be_false
   end
@@ -148,7 +160,8 @@ describe Caramel::Latte::ManagedChild do
     log = File.join(root, "child.log")
     File.write(target, "private\n")
     File.symlink(target, log)
-    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], File.join(root, "child.json"), log)
+    record = File.join(root, "child.json")
+    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
     expect_raises(Caramel::Latte::OwnershipError) { child.start }
   ensure
     FileUtils.rm_rf(root) if root
@@ -206,7 +219,12 @@ describe Caramel::Latte::Postgres do
     names.spec.should eq("caramel_spec_0123456789abcdef")
     names.development.bytesize.should be <= 63
 
-    url = Caramel::Latte::Postgres.connection_url("caramel_runtime_#{id}", "secret", names.development, "/private/tmp/caramel-test/postgres")
+    url = Caramel::Latte::Postgres.connection_url(
+      "caramel_runtime_#{id}",
+      "secret",
+      names.development,
+      "/private/tmp/caramel-test/postgres",
+    )
     url.should start_with("postgresql://caramel_runtime_#{id}:secret@/")
     url.should contain("host=%2Fprivate%2Ftmp%2Fcaramel-test%2Fpostgres")
     url.should_not contain("127.0.0.1")
@@ -220,15 +238,22 @@ describe Caramel::Latte::Postgres do
       bin = File.join(tools, "data/installs/conda-postgresql/18.6/bin")
       Dir.mkdir_p(bin, mode: 0o700)
       marker = File.join(tools, "initdb-ran")
-      {"postgres" => "echo 'postgres (PostgreSQL) 18.6'", "initdb" => "touch '#{marker}'"}.each do |name, body|
+      scripts = {
+        "postgres" => "echo 'postgres (PostgreSQL) 18.6'",
+        "initdb"   => "touch '#{marker}'",
+      }
+      scripts.each do |name, body|
         File.write(File.join(bin, name), "#!/bin/sh\n#{body}\n")
         File.chmod(File.join(bin, name), 0o700)
       end
       previous = File.join(state, "services/postgres/17/data")
       Dir.mkdir_p(previous, mode: 0o700)
       File.write(File.join(previous, "PG_VERSION"), "17\n")
-      service = Caramel::Latte::Postgres.new(Caramel::Latte::Paths.new(state), Caramel::Latte::Toolchain.new(tools))
-      expect_raises(Caramel::Latte::Postgres::WrongMajor, "Latte's databases are in PostgreSQL 17, but Caramel #{Caramel::VERSION} uses PostgreSQL 18") { service.start }
+      paths = Caramel::Latte::Paths.new(state)
+      service = Caramel::Latte::Postgres.new(paths, Caramel::Latte::Toolchain.new(tools))
+      refusal = "Latte's databases are in PostgreSQL 17, " \
+                "but Caramel #{Caramel::VERSION} uses PostgreSQL 18"
+      expect_raises(Caramel::Latte::Postgres::WrongMajor, refusal) { service.start }
       File.exists?(marker).should be_false
       Dir.children(File.join(state, "services/postgres/18/data")).should be_empty
       File.read(File.join(previous, "PG_VERSION")).should eq("17\n")
@@ -240,7 +265,8 @@ describe Caramel::Latte::Postgres do
 
   it "quotes generated SQL identifiers and literals" do
     Caramel::Latte::Postgres.quote_identifier("safe_name").should eq("\"safe_name\"")
-    Caramel::Latte::Postgres.quote_identifier("name\"with\"quotes").should eq("\"name\"\"with\"\"quotes\"")
+    quoted = %("name""with""quotes")
+    Caramel::Latte::Postgres.quote_identifier(%(name"with"quotes)).should eq(quoted)
     Caramel::Latte::Postgres.quote_literal("don't").should eq("'don''t'")
   end
 
@@ -262,35 +288,57 @@ describe Caramel::Latte::Postgres do
     credentials.to_s.should_not contain("postgresql://")
   end
 
-  it "accepts only short lowercase branch names and derives an identifier within PostgreSQL's limit" do
+  it "accepts only short lowercase branch names " \
+     "and derives an identifier within PostgreSQL's limit" do
     id = "0123456789abcdef"
     longest = "a" + "b" * 30
     database = Caramel::Latte::Postgres.branch_database(id, longest)
     database.should eq("caramel_branch_0123456789abcdef_#{longest}")
     database.bytesize.should eq(63)
-    Caramel::Latte::Postgres.branch_database(id, "diff_1a2b").should eq("caramel_branch_0123456789abcdef_diff_1a2b")
-    [longest + "c", "", "1diff", "_diff", "Diff", "feat-stripe", "a b", "a\"b", "é"].each do |name|
-      expect_raises(ArgumentError, "branch name must be lowercase") { Caramel::Latte::Postgres.branch_database(id, name) }
+    diff = "caramel_branch_0123456789abcdef_diff_1a2b"
+    Caramel::Latte::Postgres.branch_database(id, "diff_1a2b").should eq(diff)
+    rejected = [
+      longest + "c", "", "1diff", "_diff", "Diff", "feat-stripe", "a b", "a\"b", "é",
+    ]
+    rejected.each do |name|
+      expect_raises(ArgumentError, "branch name must be lowercase") do
+        Caramel::Latte::Postgres.branch_database(id, name)
+      end
     end
     expect_raises(ArgumentError) { Caramel::Latte::Postgres.branch_database("not-a-site", "diff") }
   end
 
-  it "guards the source by refusing connections and terminating every other backend before cloning" do
-    guard = Caramel::Latte::Postgres.branch_guard_sql("caramel_dev_0123456789abcdef")
+  it "guards the source by refusing connections " \
+     "and terminating every other backend before cloning" do
+    source = "caramel_dev_0123456789abcdef"
+    branch = "caramel_branch_0123456789abcdef_diff"
+    migration = "caramel_dev_migration_0123456789abcdef"
+    runtime = "caramel_dev_runtime_0123456789abcdef"
+    guard = Caramel::Latte::Postgres.branch_guard_sql(source)
     guard.lines.map(&.strip).should eq([
-      %(ALTER DATABASE "caramel_dev_0123456789abcdef" WITH ALLOW_CONNECTIONS false;),
-      %(SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'caramel_dev_0123456789abcdef' AND pid <> pg_backend_pid();),
+      %(ALTER DATABASE "#{source}" WITH ALLOW_CONNECTIONS false;),
+      "SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity " \
+      "WHERE datname = '#{source}' AND pid <> pg_backend_pid();",
     ])
-    Caramel::Latte::Postgres.branch_clone_sql("caramel_dev_0123456789abcdef", "caramel_branch_0123456789abcdef_diff", "caramel_dev_migration_0123456789abcdef").should eq(
-      %(CREATE DATABASE "caramel_branch_0123456789abcdef_diff" WITH TEMPLATE "caramel_dev_0123456789abcdef" OWNER "caramel_dev_migration_0123456789abcdef" STRATEGY FILE_COPY;))
-    Caramel::Latte::Postgres.branch_release_sql("caramel_dev_0123456789abcdef").should eq(%(ALTER DATABASE "caramel_dev_0123456789abcdef" WITH ALLOW_CONNECTIONS true;))
-    access = Caramel::Latte::Postgres.branch_access_sql("caramel_branch_0123456789abcdef_diff", "caramel_dev_migration_0123456789abcdef", "caramel_dev_runtime_0123456789abcdef")
-    access.should contain(%(REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE "caramel_branch_0123456789abcdef_diff" FROM PUBLIC;))
-    access.should contain(%(GRANT CONNECT ON DATABASE "caramel_branch_0123456789abcdef_diff" TO "caramel_dev_migration_0123456789abcdef", "caramel_dev_runtime_0123456789abcdef";))
+    clone = %(CREATE DATABASE "#{branch}" WITH TEMPLATE "#{source}" ) +
+            %(OWNER "#{migration}" STRATEGY FILE_COPY;)
+    Caramel::Latte::Postgres.branch_clone_sql(source, branch, migration).should eq(clone)
+    release = %(ALTER DATABASE "#{source}" WITH ALLOW_CONNECTIONS true;)
+    Caramel::Latte::Postgres.branch_release_sql(source).should eq(release)
+    access = Caramel::Latte::Postgres.branch_access_sql(branch, migration, runtime)
+    revoke = %(REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE "#{branch}" FROM PUBLIC;)
+    grant = %(GRANT CONNECT ON DATABASE "#{branch}" TO "#{migration}", "#{runtime}";)
+    access.should contain(revoke)
+    access.should contain(grant)
   end
 
   it "redacts branch URLs from inspection" do
-    branch = Caramel::Latte::Postgres::Branch.new("diff", "caramel_branch_0123456789abcdef_diff", "postgresql://migration:secret@/b", "postgresql://runtime:secret@/b")
+    branch = Caramel::Latte::Postgres::Branch.new(
+      name: "diff",
+      database: "caramel_branch_0123456789abcdef_diff",
+      migration_url: "postgresql://migration:secret@/b",
+      runtime_url: "postgresql://runtime:secret@/b",
+    )
     branch.inspect.should_not contain("secret")
     branch.to_s.should contain("caramel_branch_0123456789abcdef_diff")
   end

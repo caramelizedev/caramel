@@ -28,8 +28,15 @@ module Caramel::Frappe
     getter patch : String?
     getter source : String?
 
-    def initialize(@code, @file, @line, @column, @message, *, @width = 1, @details = [] of String, @remediation = nil,
-                   @status = nil, @node = nil, @missing = nil, @patch = nil, @source = nil)
+    def initialize(@code, @file, @line, @column, @message, *,
+                   @width = 1,
+                   @details = [] of String,
+                   @remediation = nil,
+                   @status = nil,
+                   @node = nil,
+                   @missing = nil,
+                   @patch = nil,
+                   @source = nil)
     end
 
     def location : String
@@ -59,7 +66,8 @@ module Caramel::Frappe
     def render(io : IO, color : Bool) : Nil
       paint = ->(text : String, style : String) { color ? "\e[#{style}m#{text}\e[0m" : text }
       bar = paint.call("│", "2")
-      io << "  " << paint.call("╭─[ ", "2") << (@line > 0 ? "#{@file}:#{@line}" : @file) << paint.call(" ]", "2") << '\n'
+      heading = @line > 0 ? "#{@file}:#{@line}" : @file
+      io << "  " << paint.call("╭─[ ", "2") << heading << paint.call(" ]", "2") << '\n'
       io << "  " << bar << '\n'
       if (source = @source) && @line > 0
         number = @line.to_s
@@ -67,7 +75,9 @@ module Caramel::Frappe
         start = (@column - 1).clamp(0, text.size)
         carets = "^" * @width.clamp(1, Math.max(1, text.size - start))
         io << "  " << bar << "  " << number << ' ' << bar << ' ' << text << '\n'
-        io << "  " << bar << "  " << " " * number.size << ' ' << bar << ' ' << " " * start << paint.call(carets, "1;31") << ' ' << paint.call(@message, "1") << '\n'
+        gutter = " " * number.size
+        io << "  " << bar << "  " << gutter << ' ' << bar << ' ' << " " * start
+        io << paint.call(carets, "1;31") << ' ' << paint.call(@message, "1") << '\n'
       else
         io << "  " << bar << "  " << paint.call(@message, "1") << '\n'
       end
@@ -92,6 +102,16 @@ module Caramel::Frappe
     CONTRACT = /\AContract: (.+):(\d+):(\d+)\z/
     SENTINEL = /NotLoaded\(NamedTuple\("(.+?)": Nil\)\)/
 
+    # The ways a call fails to match any overload.
+    OVERLOAD_FAILURES = "no overload matches|expected argument #\\d+|" \
+                        "no parameter named|wrong number of arguments"
+
+    # How a message starts, by the MRDP code it maps to.
+    UNDEFINED_CONSTANT = /\Aundefined constant /
+    UNDEFINED_METHOD   = /\Aundefined (?:local variable or )?method /
+    NO_OVERLOAD        = /\A(?:#{OVERLOAD_FAILURES})/
+    PARSER             = /\A(?:expecting |unexpected |unterminated |invalid )/
+
     # `root` is the compiler's working directory; paths under it are shown
     # relative to it. `entrypoint` locates errors that name no file.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per compiler output form
@@ -99,7 +119,8 @@ module Caramel::Frappe
       lines = output.gsub(/\e\[[0-9;]*m/, "").lines
       error = lines.rindex(&.starts_with?("Error: "))
       unless error
-        message = lines.reverse.find { |line| !line.strip.empty? }.try(&.strip) || "the compiler failed without a message"
+        last = lines.reverse.find { |line| !line.strip.empty? }
+        message = last.try(&.strip) || "the compiler failed without a message"
         return [Diagnostic.new("COMPILE", entrypoint, 0, 0, message)]
       end
       file, line, column, width = entrypoint, 0, 0, 1
@@ -157,48 +178,74 @@ module Caramel::Frappe
         message = "#{message.capitalize}: #{explanation}"
       end
       code = case message
-             when /\Aundefined constant /                                                                         then "UNDEFINED_CONSTANT"
-             when /\Aundefined (?:local variable or )?method /                                                    then "UNDEFINED_METHOD"
-             when /\A(?:no overload matches|expected argument #\d+|no parameter named|wrong number of arguments)/ then "NO_OVERLOAD"
-             when /\A(?:expecting |unexpected |unterminated |invalid )/
+             when UNDEFINED_CONSTANT then "UNDEFINED_CONSTANT"
+             when UNDEFINED_METHOD   then "UNDEFINED_METHOD"
+             when NO_OVERLOAD        then "NO_OVERLOAD"
+             when PARSER
                # Parser errors are the only ones printed without the frame notice.
                unframed ? "SYNTAX" : "COMPILE"
              else "COMPILE"
              end
-      [Diagnostic.new(code, file, line, column, message, width: width, details: details, remediation: remediation, source: source(root, file, line))]
+      diagnostic = Diagnostic.new(code, file, line, column, message,
+        width: width,
+        details: details,
+        remediation: remediation,
+        source: source(root, file, line))
+      [diagnostic]
     end
 
     # The router's message names the route, its location (`-->`) and the
     # contract block (`Contract:`), which is where the fix goes.
     # ameba:disable Metrics/CyclomaticComplexity -- both router mismatch forms
-    private def self.contract_mismatch(block : Array(String), root : String, file : String, line : Int32, column : Int32) : Diagnostic
+    private def self.contract_mismatch(block : Array(String),
+                                       root : String,
+                                       file : String,
+                                       line : Int32,
+                                       column : Int32) : Diagnostic
       route = first(block, /\ARoute: '([^']+)'/).try(&.[1]) || "?"
       remediation = first(block, /\ARemediation: (.+)\z/).try(&.[1])
       declaration = remediation.try(&.match(/`(field (\w+) : (\w+))`/))
       where = first(block, ARROW)
       contract = first(block, CONTRACT)
-      route_at = where ? "#{relative(where[1], root)}:#{where[2]}:#{where[3]}" : "#{file}:#{line}:#{column}"
+      route_at = where ? located(where, root) : "#{file}:#{line}:#{column}"
       if contract
         file, line, column = relative(contract[1], root), contract[2].to_i, contract[3].to_i
       elsif where
         file, line, column = relative(where[1], root), where[2].to_i, where[3].to_i
       end
       source = source(root, file, line)
-      width = source && source[(column - 1)..]?.try(&.starts_with?("contract")) ? "contract".size : 1
+      at_contract = source && source[(column - 1)..]?.try(&.starts_with?("contract"))
+      width = at_contract ? "contract".size : 1
       if missing = first(block, /\AAction: '([^']+)' is missing 'field (\w+) : Type'\z/)
         # `contract do` must end its line for the next line to be inside the block.
         patch = if contract && declaration && source.try(&.matches?(/\bdo\s*\z/))
                   %(INSERT "#{declaration[1]}" AT #{line + 1}:#{column + 2})
                 end
-        Diagnostic.new("CONTRACT_MISMATCH", file, line, column, "#{missing[1]} is missing 'field #{missing[2]} : Type' for route '#{route}'",
-          width: width, status: 422, node: "RequestContract", missing: declaration ? "#{declaration[2]}:#{declaration[3]}" : missing[2],
-          details: ["Route '#{route}' is declared at #{route_at}"], remediation: remediation, patch: patch, source: source)
+        message = "#{missing[1]} is missing 'field #{missing[2]} : Type' " \
+                  "for route '#{route}'"
+        field = declaration ? "#{declaration[2]}:#{declaration[3]}" : missing[2]
+        Diagnostic.new("CONTRACT_MISMATCH", file, line, column, message,
+          width: width,
+          status: 422,
+          node: "RequestContract",
+          missing: field,
+          details: ["Route '#{route}' is declared at #{route_at}"],
+          remediation: remediation,
+          patch: patch,
+          source: source)
       else
-        binding = first(block, /\ARoute: '[^']+' (parameter .+)\z/).try(&.[1]) || "parameter binds to an unsupported field"
+        binding = first(block, /\ARoute: '[^']+' (parameter .+)\z/).try(&.[1]) ||
+                  "parameter binds to an unsupported field"
         rule = first(block, /\A(Path parameters .+)\z/).try(&.[1])
         details = [rule, "Route '#{route}' is declared at #{route_at}"].compact
-        Diagnostic.new("CONTRACT_MISMATCH", file, line, column, "Route '#{route}' #{binding}", width: width, status: 422,
-          node: "RequestContract", details: details, remediation: remediation, source: source)
+        message = "Route '#{route}' #{binding}"
+        Diagnostic.new("CONTRACT_MISMATCH", file, line, column, message,
+          width: width,
+          status: 422,
+          node: "RequestContract",
+          details: details,
+          remediation: remediation,
+          source: source)
       end
     end
 
@@ -207,9 +254,19 @@ module Caramel::Frappe
       nil
     end
 
+    # A `FILE:LINE:COL` match as a location relative to *root*.
+    private def self.located(match : Regex::MatchData, root : String) : String
+      "#{relative(match[1], root)}:#{match[2]}:#{match[3]}"
+    end
+
     # SugarORM's sentinel type name reads "Association 'x' of T was not
     # preloaded; … Remediation: add .preload(:x) to the query …".
-    private def self.n_plus_one(text : String, root : String, file : String, line : Int32, column : Int32, width : Int32) : Diagnostic
+    private def self.n_plus_one(text : String,
+                                root : String,
+                                file : String,
+                                line : Int32,
+                                column : Int32,
+                                width : Int32) : Diagnostic
       statement, _, remediation = text.partition(" Remediation: ")
       message = statement.partition("; ").first.rstrip('.') + "."
       association = remediation.match(/\.preload\(:(\w+)\)/).try(&.[1])
@@ -217,15 +274,19 @@ module Caramel::Frappe
       patch = nil
       if association && source
         before = source[0, Math.max(0, column - 1)]
-        if (access = before.rindex(".#{association}")) && !before[access + 1 + association.size]?.try(&.alphanumeric?)
+        access = before.rindex(".#{association}")
+        if access && !before[access + 1 + association.size]?.try(&.alphanumeric?)
           column, width = access + 2, association.size
           if query = source[0, access].rindex(/\.query(?![\w(])/)
             patch = %(INSERT ".preload(:#{association})" AFTER #{line}:#{query + ".query".size})
           end
         end
       end
-      Diagnostic.new("N_PLUS_ONE", file, line, column, message, width: width, remediation: remediation.empty? ? nil : remediation,
-        patch: patch, source: source)
+      Diagnostic.new("N_PLUS_ONE", file, line, column, message,
+        width: width,
+        remediation: remediation.empty? ? nil : remediation,
+        patch: patch,
+        source: source)
     end
 
     private def self.relative(path : String, root : String) : String

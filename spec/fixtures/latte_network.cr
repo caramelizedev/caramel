@@ -30,5 +30,6 @@ proxy.write
 puts({corefile: dns.config_file, caddy_config: proxy.config_file, admin: proxy.admin_socket,
       ca: proxy.root_certificate, environment: proxy.environment, runtime: paths.run_dir,
       sites: registry.list.map do |entry|
-        {name: entry.name, domain: entry.domain, socket: File.join(paths.site_run_dir(entry.id), "app.sock")}
+        socket = File.join(paths.site_run_dir(entry.id), "app.sock")
+        {name: entry.name, domain: entry.domain, socket: socket}
       end}.to_json)

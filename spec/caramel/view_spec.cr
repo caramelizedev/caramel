@@ -52,11 +52,13 @@ end
 describe Caramel::View do
   it "escapes attribute values like text, so a stored entity survives a round trip" do
     escaped = "Tom &amp;amp; &quot;Jerry&quot; &lt;3 &#39;"
-    LinkView.new(%(Tom &amp; "Jerry" <3 ')).to_s.should eq(%(<a href="/items?q=#{escaped}" title="#{escaped}">#{escaped}</a>))
+    link = LinkView.new(%(Tom &amp; "Jerry" <3 ')).to_s
+    link.should eq(%(<a href="/items?q=#{escaped}" title="#{escaped}">#{escaped}</a>))
   end
 
   it "writes Caramel::HTML::Safe values as they are, in text and in attributes" do
-    TrustedView.new(Caramel::HTML::Safe.new("<em>trusted</em>")).to_s.should eq(%(<div data-markup="<em>trusted</em>"><em>trusted</em></div>))
+    trusted = TrustedView.new(Caramel::HTML::Safe.new("<em>trusted</em>")).to_s
+    trusted.should eq(%(<div data-markup="<em>trusted</em>"><em>trusted</em></div>))
   end
 
   it "renders nested views into the same document, each escaping its own input" do
@@ -64,7 +66,9 @@ describe Caramel::View do
   end
 
   it "writes an island tag in place, without escaping it again" do
-    IslandView.new.to_s.should eq(%(<caramel-island component="Counter" props="{&quot;label&quot;:&quot;first&quot;}" hx-morph-skip-children></caramel-island>))
+    props = "{&quot;label&quot;:&quot;first&quot;}"
+    attributes = %(component="Counter" props="#{props}" hx-morph-skip-children)
+    IslandView.new.to_s.should eq("<caramel-island #{attributes}></caramel-island>")
   end
 
   it "keeps no rendered attribute values after rendering" do

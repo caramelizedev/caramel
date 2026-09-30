@@ -61,7 +61,8 @@ describe Caramel::Frappe::Launchers do
       Dir.mkdir(directory, 0o755)
       launchers = Caramel::Frappe::Launchers.new(directory)
       File.write(launchers.path("latte"), "#!/bin/sh\necho mine\n")
-      expect_raises(Caramel::Frappe::Error, "#{launchers.path("latte")} exists and was not created by Caramel") do
+      taken = "#{launchers.path("latte")} exists and was not created by Caramel"
+      expect_raises(Caramel::Frappe::Error, taken) do
         launchers.install(root)
       end
       File.read(launchers.path("latte")).should eq("#!/bin/sh\necho mine\n")
@@ -69,7 +70,9 @@ describe Caramel::Frappe::Launchers do
 
       File.delete(launchers.path("latte"))
       File.symlink(File.join(root, "bin/latte"), launchers.path("latte"))
-      expect_raises(Caramel::Frappe::Error, "was not created by Caramel") { launchers.install(root) }
+      expect_raises(Caramel::Frappe::Error, "was not created by Caramel") do
+        launchers.install(root)
+      end
       File.symlink?(launchers.path("latte")).should be_true
     end
   end
@@ -79,7 +82,8 @@ describe Caramel::Frappe::Launchers do
       directory = File.join(base, "shared")
       Dir.mkdir(directory)
       File.chmod(directory, 0o777)
-      expect_raises(Caramel::Frappe::Error, "must be a directory you own that no one else can write") do
+      shared = "must be a directory you own that no one else can write"
+      expect_raises(Caramel::Frappe::Error, shared) do
         Caramel::Frappe::Launchers.new(directory).install(root)
       end
       Dir.children(directory).should be_empty

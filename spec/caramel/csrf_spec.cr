@@ -1,12 +1,18 @@
 require "spec"
 require "../../src/caramel/csrf"
 
+# A POST from the configured origin that carries `token` in its CSRF cookie.
+private def csrf_request(path : String, token : String) : HTTP::Request
+  cookie = "__Host-caramel_csrf=#{token}"
+  headers = HTTP::Headers{"Origin" => "https://bookshelf.caramel", "Cookie" => cookie}
+  HTTP::Request.new("POST", path, headers)
+end
+
 describe Caramel::CSRF do
   it "accepts only a signed unexpired token and the exact configured origin" do
     csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
     token = csrf.issue
-    headers = HTTP::Headers{"Origin" => "https://bookshelf.caramel", "Cookie" => "__Host-caramel_csrf=#{token}"}
-    request = HTTP::Request.new("POST", "/books", headers)
+    request = csrf_request("/books", token)
     csrf.valid?(request, token).should be_true
     csrf.valid?(request, "forged").should be_false
     other = Caramel::CSRF.new("x" * 64, "https://bookshelf.caramel").issue
@@ -23,7 +29,7 @@ describe Caramel::CSRF do
   it "rejects expired tokens and uses secure host-only cookies" do
     csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
     expired = csrf.issue(Time.utc - 2.days)
-    request = HTTP::Request.new("POST", "/", HTTP::Headers{"Origin" => "https://bookshelf.caramel", "Cookie" => "__Host-caramel_csrf=#{expired}"})
+    request = csrf_request("/", expired)
     csrf.valid?(request, expired).should be_false
     cookie = csrf.cookie(csrf.issue).to_set_cookie_header
     cookie.should contain("Secure")

@@ -21,6 +21,19 @@ module Caramel::Frappe
     DYLD_LINE               = /^dyld\[\d+\]: <[0-9A-Fa-f-]+> (\/.+)$/
     SYSTEM_LIBRARY_PREFIXES = {"/usr/lib/", "/System/Library/", "/Library/Apple/System/Library/"}
 
+    # Variables that would point the compiler or the loader elsewhere.
+    CLEARED = %w[
+      CRYSTAL_LIBRARY_PATH CRYSTAL_OPTS CRYSTAL_CACHE_DIR CRYSTAL_CONFIG_PATH
+      DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+      PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR
+    ]
+
+    # A pinned download: HTTPS only, bounded in time, retried twice.
+    CURL = %w[
+      /usr/bin/curl --fail --location --silent --show-error --proto =https
+      --proto-redir =https --connect-timeout 15 --max-time 600 --retry 2
+    ]
+
     struct AmebaPin
       include JSON::Serializable
       getter version : String
@@ -54,7 +67,13 @@ module Caramel::Frappe
       getter llvmdev : LlvmPin
     end
 
-    record Server, name : String, version : String, binary : String, root : String, source : String, crystal : String
+    record Server,
+      name : String,
+      version : String,
+      binary : String,
+      root : String,
+      source : String,
+      crystal : String
 
     @manifest : Manifest? = nil
 
@@ -65,7 +84,8 @@ module Caramel::Frappe
       @manifest ||= begin
         Manifest.from_json(File.read(File.join(@framework_root, "tools/editor-darwin-arm64.json")))
       rescue JSON::ParseException | File::Error
-        raise Error.new("frappe lsp: tools/editor-darwin-arm64.json is missing or invalid in Caramel at #{@framework_root}")
+        raise Error.new("frappe lsp: tools/editor-darwin-arm64.json is missing " \
+                        "or invalid in Caramel at #{@framework_root}")
       end
     end
 
@@ -73,7 +93,9 @@ module Caramel::Frappe
     # The source commit covers crystalline's own shard.lock.
     def crystalline_fingerprint : String
       pins = manifest
-      Digest::SHA256.hexdigest("#{pins.crystalline.commit}\n#{pins.crystalline.crystal}\n#{pins.llvmdev.sha256}\n#{BUILD_RECIPE}")[0, 12]
+      inputs = "#{pins.crystalline.commit}\n#{pins.crystalline.crystal}\n" \
+               "#{pins.llvmdev.sha256}\n#{BUILD_RECIPE}"
+      Digest::SHA256.hexdigest(inputs)[0, 12]
     end
 
     # The same toolchain every Frappé command uses (Latte::Toolchain.locate):
@@ -81,7 +103,10 @@ module Caramel::Frappe
     # checkout's .caramel-toolchain.
     def toolchain_root(env : ENV.class | Hash(String, String) = ENV) : {String, String}
       located = Latte::Toolchain.locate(@framework_root, env)
-      raise Error.new("frappe lsp: no Caramel toolchain is configured. Run scripts/install-toolchain.") unless located
+      unless located
+        raise Error.new("frappe lsp: no Caramel toolchain is configured. " \
+                        "Run scripts/install-toolchain.")
+      end
       value, source = located
       {Latte::Toolchain.new(value).root, source}
     rescue ex : Latte::Toolchain::Unavailable
@@ -99,9 +124,7 @@ module Caramel::Frappe
         directory = ameba_directory(root)
         binary = File.join(directory, "ameba-ls")
         not_installed(name, version, root) unless File.exists?(binary)
-        failed_verification(binary, directory) unless owned?(directory, directory: true) &&
-                                                      owned?(binary, directory: false) &&
-                                                      digest(binary) == pins.ameba_ls.binary_sha256
+        failed_verification(binary, directory) unless ameba_verified?(directory, binary)
       else
         version = pins.crystalline.reported_version
         directory = crystalline_directory(root)
@@ -114,14 +137,14 @@ module Caramel::Frappe
 
     def environment(server : Server) : Hash(String, String?)
       values = {} of String => String?
-      %w[CRYSTAL_LIBRARY_PATH CRYSTAL_OPTS CRYSTAL_CACHE_DIR CRYSTAL_CONFIG_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR].each do |key|
-        values[key] = nil
-      end
+      CLEARED.each { |key| values[key] = nil }
       values["CRYSTAL_PATH"] = "lib:#{server.crystal}/src"
       # crystalline's prelude index runs the native compiler and invokes
       # pkg-config for stdlib metadata. Both helpers come from this root.
-      values["PATH"] = "#{server.crystal}/embedded/bin:#{server.root}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-      values["PKG_CONFIG_LIBDIR"] = File.join(server.root, "data/installs/conda-openssl", Latte::Toolchain::OPENSSL_VERSION, "lib/pkgconfig")
+      values["PATH"] = "#{server.crystal}/embedded/bin:#{server.root}/bin:" \
+                       "/usr/bin:/bin:/usr/sbin:/sbin"
+      openssl = File.join("data/installs/conda-openssl", Latte::Toolchain::OPENSSL_VERSION)
+      values["PKG_CONFIG_LIBDIR"] = File.join(server.root, openssl, "lib/pkgconfig")
       values["CARAMEL_TOOLCHAIN_ROOT"] = server.root
       values["XDG_CACHE_HOME"] = owned_directory(File.join(server.root, "editor/cache"))
       values
@@ -131,7 +154,9 @@ module Caramel::Frappe
       selected = server(name)
       env = environment(selected)
       # stdout is the LSP stream; diagnostics go to stderr only.
-      @error.puts("frappe lsp: #{selected.name} #{selected.version} at #{selected.binary}; toolchain #{selected.root} (from #{selected.source}); PATH=#{env["PATH"]}")
+      @error.puts("frappe lsp: #{selected.name} #{selected.version} " \
+                  "at #{selected.binary}; toolchain #{selected.root} " \
+                  "(from #{selected.source}); PATH=#{env["PATH"]}")
       @error.flush
       Process.exec(selected.binary, args, env: env, clear_env: false, chdir: directory)
     end
@@ -151,7 +176,8 @@ module Caramel::Frappe
       lock_path = File.join(editor, ".install.lock")
       if info = File.info?(lock_path, follow_symlinks: false)
         unless Latte::StateSecurity.private_file?(info)
-          raise Error.new("frappe lsp: editor tools installation lock must be an owned private file")
+          raise Error.new("frappe lsp: editor tools installation lock must be " \
+                          "an owned private file")
         end
       end
       File.open(lock_path, "a+", perm: 0o600) do |lock|
@@ -163,7 +189,8 @@ module Caramel::Frappe
         ameba = install_ameba(root)
         crystalline = install_crystalline(root, crystal, tools)
         @output.puts("Verified ameba-ls #{manifest.ameba_ls.version}: #{ameba}")
-        @output.puts("Verified crystalline #{manifest.crystalline.reported_version}: #{crystalline}")
+        version = manifest.crystalline.reported_version
+        @output.puts("Verified crystalline #{version}: #{crystalline}")
       end
     end
 
@@ -172,8 +199,9 @@ module Caramel::Frappe
       target = ameba_directory(root)
       binary = File.join(target, "ameba-ls")
       if File.info?(target, follow_symlinks: false)
-        unless owned?(target, directory: true) && owned?(binary, directory: false) && digest(binary) == pin.binary_sha256
-          raise Error.new("frappe lsp: existing ameba-ls installation failed verification; preserved for inspection: #{target}")
+        unless ameba_verified?(target, binary)
+          raise Error.new("frappe lsp: existing ameba-ls installation failed " \
+                          "verification; preserved for inspection: #{target}")
         end
         return binary
       end
@@ -183,12 +211,14 @@ module Caramel::Frappe
         archive = File.join(stage, "archive.tar.gz")
         download(pin.url, archive, pin.archive_sha256)
         listing = run!(["/usr/bin/tar", "-tzf", archive], "could not list #{pin.url}")
-        unless listing.stdout.lines.map(&.strip).reject(&.empty?).sort! == ["ameba-ls", "ameba-ls.dwarf"]
+        entries = listing.stdout.lines.map(&.strip).reject(&.empty?).sort!
+        unless entries == ["ameba-ls", "ameba-ls.dwarf"]
           raise Error.new("frappe lsp: unexpected contents in #{pin.url}; nothing was installed")
         end
         payload = File.join(stage, "payload")
         Dir.mkdir(payload, 0o700)
-        run!(["/usr/bin/tar", "-xzf", archive, "-C", payload, "ameba-ls"], "could not extract #{pin.url}")
+        extract = ["/usr/bin/tar", "-xzf", archive, "-C", payload, "ameba-ls"]
+        run!(extract, "could not extract #{pin.url}")
         staged = File.join(payload, "ameba-ls")
         info = File.info?(staged, follow_symlinks: false)
         unless info && info.file? && info.size <= MAX_BINARY && digest(staged) == pin.binary_sha256
@@ -210,11 +240,13 @@ module Caramel::Frappe
       binary = File.join(target, "crystalline")
       if File.info?(target, follow_symlinks: false)
         unless owned?(target, directory: true) && crystalline_receipt_valid?(target)
-          raise Error.new("frappe lsp: existing crystalline build failed verification; preserved for inspection: #{target}. Remove it to rebuild.")
+          raise Error.new("frappe lsp: existing crystalline build failed verification; " \
+                          "preserved for inspection: #{target}. Remove it to rebuild.")
         end
         return binary
       end
-      @output.puts("Building crystalline #{pin.version} with Crystal #{pin.crystal} (this can take up to 20 minutes)…")
+      @output.puts("Building crystalline #{pin.version} with Crystal #{pin.crystal} " \
+                   "(this can take up to 20 minutes)…")
       @output.flush
       # Crystal pastes link flags into a shell command unquoted, so both LLVM
       # and the compiler source live in a space-free build directory. Rebuild
@@ -226,20 +258,12 @@ module Caramel::Frappe
         llvm = prepare_llvm(build)
         targets, libfiles, system_libs = llvm_configuration(build, llvm)
         compiler_source = File.join(build, "crystal-src")
-        # The Crystal distribution includes dangling cross-platform symlinks;
-        # /bin/cp -R preserves them, whereas FileUtils.cp_r follows them.
-        copy = Latte::ProcessRunner.run(["/bin/cp", "-R", File.join(crystal, "src"), compiler_source],
-          env: {"PATH" => "/usr/bin:/bin"} of String => String?, clear_env: true, timeout: 120.seconds)
-        raise Error.new("frappe lsp: could not copy the pinned Crystal source: #{copy.stderr.strip}") unless copy.success?
-        ext = File.join(compiler_source, "llvm/ext")
-        result = Latte::ProcessRunner.run([
-          "/usr/bin/clang++", "-std=c++14", "-stdlib=libc++", "-fno-exceptions", "-fno-rtti",
-          "-I#{build}/llvm/include", "-c", File.join(ext, "llvm_ext.cc"), "-o", File.join(ext, "llvm_ext.o"),
-        ], env: {"PATH" => "/usr/bin:/bin"} of String => String?, clear_env: true, timeout: 120.seconds)
-        raise Error.new("frappe lsp: could not build llvm_ext.o against pinned LLVM: #{result.stderr.strip}") unless result.success?
+        copy_compiler_source(crystal, compiler_source)
+        rebuild_llvm_ext(build, compiler_source)
         source = File.join(build, "crystalline")
         fetch_crystalline(source, pin)
-        tools.run(File.join(@framework_root, "scripts/shards"), ["install", "--production"], source)
+        shards = File.join(@framework_root, "scripts/shards")
+        tools.run(shards, ["install", "--production"], source)
         enable_save_notifications(source)
         Dir.mkdir(File.join(source, "bin"), 0o700)
         extras = {
@@ -249,7 +273,9 @@ module Caramel::Frappe
           "LLVM_TARGETS" => targets,
           "LLVM_LDFLAGS" => Process.quote_posix(libfiles + system_libs),
         }
-        tools.run(File.join(@framework_root, "scripts/crystal"), ["build", "src/crystalline.cr", "-o", "bin/crystalline", "--release", "--no-debug"], source, extras)
+        compiler = File.join(@framework_root, "scripts/crystal")
+        release = %w[build src/crystalline.cr -o bin/crystalline --release --no-debug]
+        tools.run(compiler, release, source, extras)
         publish_crystalline(root, File.join(source, "bin/crystalline"), target)
         FileUtils.rm_rf(build)
       rescue ex
@@ -257,6 +283,37 @@ module Caramel::Frappe
         raise ex
       end
       binary
+    end
+
+    # The Crystal distribution includes dangling cross-platform symlinks;
+    # /bin/cp -R preserves them, whereas FileUtils.cp_r follows them.
+    private def copy_compiler_source(crystal : String, destination : String) : Nil
+      command = ["/bin/cp", "-R", File.join(crystal, "src"), destination]
+      copy = Latte::ProcessRunner.run(command,
+        env: {"PATH" => "/usr/bin:/bin"} of String => String?,
+        clear_env: true,
+        timeout: 120.seconds)
+      return if copy.success?
+      raise Error.new("frappe lsp: could not copy the pinned Crystal source: " \
+                      "#{copy.stderr.strip}")
+    end
+
+    # Compiles the compiler source's llvm_ext.o against the pinned LLVM.
+    private def rebuild_llvm_ext(build : String, compiler_source : String) : Nil
+      ext = File.join(compiler_source, "llvm/ext")
+      command = [
+        "/usr/bin/clang++", "-std=c++14", "-stdlib=libc++",
+        "-fno-exceptions", "-fno-rtti", "-I#{build}/llvm/include",
+        "-c", File.join(ext, "llvm_ext.cc"),
+        "-o", File.join(ext, "llvm_ext.o"),
+      ]
+      result = Latte::ProcessRunner.run(command,
+        env: {"PATH" => "/usr/bin:/bin"} of String => String?,
+        clear_env: true,
+        timeout: 120.seconds)
+      return if result.success?
+      raise Error.new("frappe lsp: could not build llvm_ext.o against pinned LLVM: " \
+                      "#{result.stderr.strip}")
     end
 
     # The pinned crystalline/lsp revisions implement didSave diagnostics but
@@ -272,12 +329,15 @@ module Caramel::Frappe
       main = File.join(source, "src/crystalline/main.cr")
       patch_once(main,
         "    text_document_sync: LSP::TextDocumentSyncKind::Incremental,\n",
-        "    text_document_sync: LSP::TextDocumentSyncOptions.new(open_close: true, change: LSP::TextDocumentSyncKind::Incremental, save: true),\n")
+        "    text_document_sync: LSP::TextDocumentSyncOptions.new(open_close: true, " \
+        "change: LSP::TextDocumentSyncKind::Incremental, save: true),\n")
     end
 
     private def patch_once(path : String, original : String, replacement : String) : Nil
       content = File.read(path)
-      raise Error.new("frappe lsp: pinned crystalline source differs at #{path}") unless content.split(original).size == 2
+      unless content.split(original).size == 2
+        raise Error.new("frappe lsp: pinned crystalline source differs at #{path}")
+      end
       File.write(path, content.sub(original, replacement))
     end
 
@@ -298,37 +358,57 @@ module Caramel::Frappe
       config
     end
 
-    private def llvm_configuration(build : String, config : String) : {String, Array(String), Array(String)}
-      env = {"PATH" => "/usr/bin:/bin", "DYLD_FALLBACK_LIBRARY_PATH" => "/usr/lib"} of String => String?
+    private def llvm_configuration(build : String,
+                                   config : String) : {String, Array(String), Array(String)}
+      env = {
+        "PATH"                       => "/usr/bin:/bin",
+        "DYLD_FALLBACK_LIBRARY_PATH" => "/usr/lib",
+      } of String => String?
       query = ->(args : Array(String)) do
-        result = Latte::ProcessRunner.run([config, *args], env: env, clear_env: true, timeout: 30.seconds)
-        raise Error.new("frappe lsp: llvm-config #{args.join(' ')} failed: #{result.stderr.strip}") unless result.success?
+        result = Latte::ProcessRunner.run([config, *args],
+          env: env,
+          clear_env: true,
+          timeout: 30.seconds)
+        unless result.success?
+          raise Error.new("frappe lsp: llvm-config #{args.join(' ')} failed: " \
+                          "#{result.stderr.strip}")
+        end
         result.stdout.strip
       end
       version = query.call(["--version"])
-      raise Error.new("frappe lsp: llvm-config reports #{version}, expected #{LLVM_VERSION}") unless version == LLVM_VERSION
+      unless version == LLVM_VERSION
+        raise Error.new("frappe lsp: llvm-config reports #{version}, " \
+                        "expected #{LLVM_VERSION}")
+      end
       targets = query.call(["--targets-built"])
       library_root = File.join(build, "llvm/lib") + "/"
       libfiles = query.call(["--link-static", "--libfiles"]).split
       libfiles.each do |file|
         unless file.starts_with?(library_root) && File.file?(file)
-          raise Error.new("frappe lsp: llvm-config named a library outside the pinned LLVM: #{file}")
+          raise Error.new("frappe lsp: llvm-config named a library outside " \
+                          "the pinned LLVM: #{file}")
         end
       end
       system_libs = query.call(["--link-static", "--system-libs"]).split
       system_libs.each do |flag|
-        raise Error.new("frappe lsp: unexpected llvm-config system library flag: #{flag}") unless flag.starts_with?("-l")
+        next if flag.starts_with?("-l")
+        raise Error.new("frappe lsp: unexpected llvm-config system library flag: #{flag}")
       end
       {targets, libfiles, system_libs}
     end
 
     private def fetch_crystalline(source : String, pin : CrystallinePin) : Nil
       git = "/usr/bin/git"
-      run!([git, "init", "-q", source], "git init failed", 600.seconds)
-      run!([git, "-C", source, "fetch", "--depth", "1", pin.git, pin.commit], "could not fetch #{pin.git} #{pin.commit}", 600.seconds)
-      run!([git, "-C", source, "checkout", "-q", "--detach", "FETCH_HEAD"], "could not check out #{pin.commit}", 600.seconds)
-      head = run!([git, "-C", source, "rev-parse", "HEAD"], "git rev-parse failed", 600.seconds).stdout.strip
-      raise Error.new("frappe lsp: fetched crystalline #{head}, expected #{pin.commit}") unless head == pin.commit
+      limit = 600.seconds
+      run!([git, "init", "-q", source], "git init failed", limit)
+      fetch = [git, "-C", source, "fetch", "--depth", "1", pin.git, pin.commit]
+      run!(fetch, "could not fetch #{pin.git} #{pin.commit}", limit)
+      checkout = [git, "-C", source, "checkout", "-q", "--detach", "FETCH_HEAD"]
+      run!(checkout, "could not check out #{pin.commit}", limit)
+      rev_parse = [git, "-C", source, "rev-parse", "HEAD"]
+      head = run!(rev_parse, "git rev-parse failed", limit).stdout.strip
+      return if head == pin.commit
+      raise Error.new("frappe lsp: fetched crystalline #{head}, expected #{pin.commit}")
     end
 
     private def publish_crystalline(root : String, built : String, target : String) : Nil
@@ -382,12 +462,18 @@ module Caramel::Frappe
     end
 
     private def download(url : String, path : String, sha256 : String) : Nil
-      result = Latte::ProcessRunner.run(["/usr/bin/curl", "--fail", "--location", "--silent", "--show-error", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", "600", "--retry", "2", "--output", path, url], timeout: 660.seconds)
-      raise Error.new("frappe lsp: download failed: #{url}") unless result.success? && File.file?(path)
-      raise Error.new("frappe lsp: checksum mismatch for #{url}; nothing was installed") unless digest(path) == sha256
+      command = CURL + ["--output", path, url]
+      result = Latte::ProcessRunner.run(command, timeout: 660.seconds)
+      unless result.success? && File.file?(path)
+        raise Error.new("frappe lsp: download failed: #{url}")
+      end
+      return if digest(path) == sha256
+      raise Error.new("frappe lsp: checksum mismatch for #{url}; nothing was installed")
     end
 
-    private def run!(command : Array(String), failure : String, timeout : Time::Span = 120.seconds) : Latte::ProcessResult
+    private def run!(command : Array(String),
+                     failure : String,
+                     timeout : Time::Span = 120.seconds) : Latte::ProcessResult
       result = Latte::ProcessRunner.run(command, timeout: timeout)
       raise Error.new("frappe lsp: #{failure}: #{result.stderr.strip}") unless result.success?
       result
@@ -395,9 +481,20 @@ module Caramel::Frappe
 
     # Port of verifyNativeOutput in tools/installer/install_toolchain.swift: every image
     # dyld loads must come from the toolchain root or macOS itself.
-    private def verify_libraries(root : String, command : Array(String), expected : String) : Array(String)
-      env = {"PATH" => "/usr/bin:/bin", "HOME" => ENV["HOME"]?, "DYLD_PRINT_LIBRARIES" => "1"} of String => String?
-      result = Latte::ProcessRunner.run(command, env: env, clear_env: true, chdir: root, timeout: 20.seconds, output_limit: 1_048_576)
+    private def verify_libraries(root : String,
+                                 command : Array(String),
+                                 expected : String) : Array(String)
+      env = {
+        "PATH"                 => "/usr/bin:/bin",
+        "HOME"                 => ENV["HOME"]?,
+        "DYLD_PRINT_LIBRARIES" => "1",
+      } of String => String?
+      result = Latte::ProcessRunner.run(command,
+        env: env,
+        clear_env: true,
+        chdir: root,
+        timeout: 20.seconds,
+        output_limit: 1_048_576)
       unless result.success? && result.stdout.starts_with?(expected)
         raise Error.new("frappe lsp: #{command[0]} did not report #{expected}")
       end
@@ -406,8 +503,9 @@ module Caramel::Frappe
         next unless match = DYLD_LINE.match(line)
         # Shared-cache images have no file on disk; keep their lexical path.
         path = File.realpath(match[1]) rescue Path[match[1]].normalize.to_s
-        unless path.starts_with?(root + "/") || SYSTEM_LIBRARY_PREFIXES.any? { |prefix| path.starts_with?(prefix) }
-          raise Error.new("frappe lsp: #{command[0]} loaded a library outside Caramel or macOS: #{path}")
+        unless allowed_library?(root, path)
+          raise Error.new("frappe lsp: #{command[0]} loaded a library outside " \
+                          "Caramel or macOS: #{path}")
         end
         libraries << path
       end
@@ -415,9 +513,23 @@ module Caramel::Frappe
       libraries.uniq.sort!
     end
 
+    # Whether dyld may load *path*: from the toolchain *root* or macOS itself.
+    private def allowed_library?(root : String, path : String) : Bool
+      path.starts_with?(root + "/") ||
+        SYSTEM_LIBRARY_PREFIXES.any? { |prefix| path.starts_with?(prefix) }
+    end
+
+    # Whether *binary* in *directory* is the pinned ameba-ls, owned by this user.
+    private def ameba_verified?(directory : String, binary : String) : Bool
+      owned?(directory, directory: true) &&
+        owned?(binary, directory: false) &&
+        digest(binary) == manifest.ameba_ls.binary_sha256
+    end
+
     private def require_complete(root : String) : Nil
       complete = begin
-        JSON.parse(File.read(File.join(root, ".caramel-toolchain.json")))["status"]?.try(&.as_s?) == "complete"
+        toolchain = JSON.parse(File.read(File.join(root, ".caramel-toolchain.json")))
+        toolchain["status"]?.try(&.as_s?) == "complete"
       rescue JSON::ParseException | File::Error
         false
       end
@@ -428,7 +540,8 @@ module Caramel::Frappe
       version = manifest.crystalline.crystal
       crystal = File.join(root, "data/installs/github-crystal-lang-crystal", version)
       unless File.file?(File.join(crystal, "embedded/bin/crystal"))
-        raise Error.new("frappe lsp: #{root} does not provide Crystal #{version} required by Caramel at #{@framework_root}")
+        raise Error.new("frappe lsp: #{root} does not provide Crystal #{version} " \
+                        "required by Caramel at #{@framework_root}")
       end
       crystal
     end
@@ -438,15 +551,18 @@ module Caramel::Frappe
     end
 
     private def crystalline_directory(root : String) : String
-      File.join(root, "editor/crystalline", "#{manifest.crystalline.reported_version}-#{crystalline_fingerprint}")
+      version = manifest.crystalline.reported_version
+      File.join(root, "editor/crystalline", "#{version}-#{crystalline_fingerprint}")
     end
 
     private def not_installed(name : String, version : String, root : String) : NoReturn
-      raise Error.new("frappe lsp: #{name} #{version} is not installed in #{root} for Caramel at #{@framework_root}. Run frappe lsp install.")
+      raise Error.new("frappe lsp: #{name} #{version} is not installed in #{root} " \
+                      "for Caramel at #{@framework_root}. Run frappe lsp install.")
     end
 
     private def failed_verification(binary : String, directory : String) : NoReturn
-      raise Error.new("frappe lsp: #{binary} failed verification; remove #{directory} and run frappe lsp install.")
+      raise Error.new("frappe lsp: #{binary} failed verification; " \
+                      "remove #{directory} and run frappe lsp install.")
     end
 
     private def owned?(path : String, *, directory : Bool) : Bool

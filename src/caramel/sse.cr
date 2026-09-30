@@ -11,7 +11,9 @@ module Caramel
     #     end
     def self.write(io : IO, data : String, event : String? = nil) : Nil
       if event
-        raise ArgumentError.new("SSE event names cannot contain line breaks") if event.includes?('\n') || event.includes?('\r')
+        if event.includes?('\n') || event.includes?('\r')
+          raise ArgumentError.new("SSE event names cannot contain line breaks")
+        end
         io << "event: " << event << '\n'
       end
       data.split(/\r\n|\r|\n/).each { |line| io << "data: " << line << '\n' }

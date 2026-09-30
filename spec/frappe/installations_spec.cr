@@ -37,7 +37,13 @@ describe Caramel::Frappe::Installations do
     root = "/private/tmp/caramel-installations-#{Random::Secure.hex(8)}"
     registry = Caramel::Frappe::Installations.new(root)
     registry.newest.should be_nil
-    {"0.9.0" => "/a", "0.10.0-rc.1" => "/b", "0.10.0" => "/c", "0.2.0" => "/d"}.each { |release, checkout| registry.register(release, checkout) }
+    checkouts = {
+      "0.9.0"       => "/a",
+      "0.10.0-rc.1" => "/b",
+      "0.10.0"      => "/c",
+      "0.2.0"       => "/d",
+    }
+    checkouts.each { |release, checkout| registry.register(release, checkout) }
     registry.newest.should eq({"0.10.0", "/c"})
     registry.remove("0.10.0")
     registry.newest.should eq({"0.10.0-rc.1", "/b"})

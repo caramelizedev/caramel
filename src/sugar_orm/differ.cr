@@ -21,11 +21,27 @@ module SugarORM
     record ValidateForeignKey, table : String, name : String
     record DropForeignKey, table : String, name : String
 
-    alias Operation = CreateTable | AddColumn | RenameColumn | DropColumn | AlterNull | AlterDefault | AlterType |
-                      AddIndex | DropIndex | AddForeignKey | ValidateForeignKey | DropForeignKey
+    alias Operation = CreateTable | AddColumn | RenameColumn | DropColumn |
+                      AlterNull | AlterDefault | AlterType |
+                      AddIndex | DropIndex |
+                      AddForeignKey | ValidateForeignKey | DropForeignKey
+
+    # The Crystal type a halt suggests for a column's SQL type.
+    CRYSTAL_TYPES = {
+      "text"                     => "String",
+      "integer"                  => "Int32",
+      "bigint"                   => "Int64",
+      "boolean"                  => "Bool",
+      "double precision"         => "Float64",
+      "timestamp with time zone" => "Time",
+    }
 
     # `--dev-override` turns an overridable halt into its operation.
-    record Halt, subject : String, message : String, remediation : String, overridable : Bool = true do
+    record Halt,
+      subject : String,
+      message : String,
+      remediation : String,
+      overridable : Bool = true do
       def to_s(io : IO) : Nil
         io << "HALT " << subject << ": " << message << "\n  Remediation: " << remediation
       end
@@ -65,17 +81,18 @@ module SugarORM
       end
     end
 
-    def self.diff(declared : Array(Catalog::Table), snapshot : Introspection::Snapshot, dev_override : Bool = false) : Plan
+    def self.diff(declared : Array(Catalog::Table),
+                  snapshot : Introspection::Snapshot,
+                  dev_override : Bool = false) : Plan
       plan = diff(declared, snapshot.tables, dev_override)
-      snapshot.invalid_indexes.each do |index|
-        plan.halts << Halt.new(index, "index is INVALID, left behind by a failed CREATE INDEX CONCURRENTLY.",
-          "run DROP INDEX CONCURRENTLY #{DDL.quote(index)}; then diff again.", overridable: false)
-      end
+      snapshot.invalid_indexes.each { |index| plan.halts << invalid_index(index) }
       plan.notes.concat(snapshot.skipped)
       plan
     end
 
-    def self.diff(declared : Array(Catalog::Table), actual : Array(Catalog::Table), dev_override : Bool = false) : Plan
+    def self.diff(declared : Array(Catalog::Table),
+                  actual : Array(Catalog::Table),
+                  dev_override : Bool = false) : Plan
       plan = Plan.new
       existing = actual.index_by(&.name)
       names = declared.map(&.name).to_set
@@ -100,35 +117,53 @@ module SugarORM
       pending = tables.dup
       deferred = [] of Operation
       waiting = ->(table : Catalog::Table, key : Catalog::ForeignKey) do
-        key.references_table != table.name && pending.any? { |other| other.name == key.references_table }
+        target = key.references_table
+        target != table.name && pending.any? { |other| other.name == target }
       end
       until pending.empty?
-        table = pending.find { |candidate| candidate.foreign_keys.none? { |key| waiting.call(candidate, key) } } || pending.first
+        ready = pending.find do |candidate|
+          candidate.foreign_keys.none? { |key| waiting.call(candidate, key) }
+        end
+        table = ready || pending.first
         later, inline = table.foreign_keys.partition { |key| waiting.call(table, key) }
         pending.delete(table)
-        plan.transactional << CreateTable.new(table.copy_with(foreign_keys: inline, indexes: [] of Catalog::Index, drops: [] of String))
-        table.indexes.each { |index| plan.transactional << AddIndex.new(table.name, index, concurrently: false) }
+        created = table.copy_with(
+          foreign_keys: inline,
+          indexes: [] of Catalog::Index,
+          drops: [] of String,
+        )
+        plan.transactional << CreateTable.new(created)
+        table.indexes.each do |index|
+          plan.transactional << AddIndex.new(table.name, index, concurrently: false)
+        end
         later.each { |key| deferred << AddForeignKey.new(table.name, key, not_valid: false) }
       end
       plan.transactional.concat(deferred)
     end
 
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
-    private def self.alter(declared : Catalog::Table, current : Catalog::Table, plan : Plan, dev_override : Bool) : Nil
+    private def self.alter(declared : Catalog::Table,
+                           current : Catalog::Table,
+                           plan : Plan,
+                           dev_override : Bool) : Nil
       table = declared.name
       columns = current.columns.index_by(&.name)
       names = declared.columns.map(&.name).to_set
       renamed = {} of String => String
       dropped, claimed = Set(String).new, Set(String).new
-      renames, changes, drops, key_drops, key_adds = Array(Operation).new, Array(Operation).new, Array(Operation).new, Array(Operation).new, Array(Operation).new
+      renames = [] of Operation
+      changes = [] of Operation
+      drops = [] of Operation
+      key_drops = [] of Operation
+      key_adds = [] of Operation
 
       declared.columns.each do |column|
         actual = columns[column.name]?
         source = column.renamed_from
-        if source && !names.includes?(source) && !declared.drops.includes?(source) && columns.has_key?(source)
+        if source && !names.includes?(source) && !declared.drops.includes?(source) &&
+           columns.has_key?(source)
           if actual
-            plan.halts << Halt.new("#{table}.#{column.name}", "both #{column.name} and its renamed_from source #{source} exist.",
-              "remove renamed_from: :#{source} if the rename is finished, or record drop_column :#{source}.", overridable: false)
+            plan.halts << rename_conflict(table, column.name, source)
             claimed << source
             next
           end
@@ -141,28 +176,30 @@ module SugarORM
         elsif column.nullable || column.default || column.identity
           changes << AddColumn.new(table, column)
         else
-          halt(plan, dev_override, Halt.new("#{table}.#{column.name}", "NOT NULL column without a default cannot be added to the existing #{table} table: existing rows have no value for it.",
-            "give the field a default (field #{column.name} : #{crystal_type(column.sql_type)} = …) or make it nilable; in development, --dev-override adds it as declared.")) do
+          halt(plan, dev_override, missing_default(table, column)) do
             changes << AddColumn.new(table, column)
           end
         end
       end
 
       current.columns.each do |column|
-        next if names.includes?(column.name) || renamed.has_key?(column.name) || claimed.includes?(column.name)
+        next if names.includes?(column.name) || renamed.has_key?(column.name) ||
+                claimed.includes?(column.name)
         if declared.drops.includes?(column.name)
           drops << DropColumn.new(table, column.name, explicit: true)
           dropped << column.name
         else
-          halt(plan, dev_override, Halt.new("#{table}.#{column.name}", "column exists in the database but no field declares it; SugarORM never drops a column it was not told to.",
-            "declare the field again, mark its replacement renamed_from: :#{column.name}, or record the intent with drop_column :#{column.name}.")) do
+          halt(plan, dev_override, undeclared_column(table, column.name)) do
             drops << DropColumn.new(table, column.name, explicit: false)
             dropped << column.name
           end
         end
       end
 
-      indexes = current.indexes.map { |index| index.copy_with(columns: index.columns.map { |column| renamed[column]? || column }) }.index_by(&.name)
+      renamed_indexes = current.indexes.map do |index|
+        index.copy_with(columns: index.columns.map { |column| renamed[column]? || column })
+      end
+      indexes = renamed_indexes.index_by(&.name)
       declared.indexes.each do |index|
         found = indexes[index.name]?
         next if found == index
@@ -170,11 +207,15 @@ module SugarORM
         plan.online << AddIndex.new(table, index, concurrently: true)
       end
       current.indexes.each do |index|
-        next if declared.indexes.any? { |wanted| wanted.name == index.name } || index.columns.any? { |column| dropped.includes?(column) }
+        next if declared.indexes.any? { |wanted| wanted.name == index.name }
+        next if index.columns.any? { |column| dropped.includes?(column) }
         plan.online << DropIndex.new(table, index.name)
       end
 
-      keys = current.foreign_keys.map { |key| key.copy_with(column: renamed[key.column]? || key.column) }.index_by(&.name)
+      renamed_keys = current.foreign_keys.map do |key|
+        key.copy_with(column: renamed[key.column]? || key.column)
+      end
+      keys = renamed_keys.index_by(&.name)
       declared.foreign_keys.each do |key|
         found = keys[key.name]?
         next if found == key
@@ -183,35 +224,39 @@ module SugarORM
         plan.online << ValidateForeignKey.new(table, key.name)
       end
       current.foreign_keys.each do |key|
-        next if declared.foreign_keys.any? { |wanted| wanted.name == key.name } || dropped.includes?(key.column)
+        next if declared.foreign_keys.any? { |wanted| wanted.name == key.name }
+        next if dropped.includes?(key.column)
         key_drops << DropForeignKey.new(table, key.name)
       end
 
-      plan.transactional.concat(key_drops).concat(renames).concat(changes).concat(drops).concat(key_adds)
+      steps = [key_drops, renames, changes, drops, key_adds]
+      steps.each { |operations| plan.transactional.concat(operations) }
     end
 
-    private def self.compare(table : String, column : Catalog::Column, actual : Catalog::Column, plan : Plan, dev_override : Bool, changes : Array(Operation)) : Nil
-      subject = "#{table}.#{column.name}"
+    private def self.compare(table : String,
+                             column : Catalog::Column,
+                             actual : Catalog::Column,
+                             plan : Plan,
+                             dev_override : Bool,
+                             changes : Array(Operation)) : Nil
       if column.primary != actual.primary || column.identity != actual.identity
-        plan.halts << Halt.new(subject, "primary key or identity differs from the database (declared primary: #{column.primary}, identity: #{column.identity}; database primary: #{actual.primary}, identity: #{actual.identity}).",
-          "SugarORM does not rewrite primary keys; create a new table and copy the rows deliberately.", overridable: false)
+        plan.halts << key_changed(table, column, actual)
         return
       end
       if column.sql_type != actual.sql_type
-        halt(plan, dev_override, Halt.new(subject, "declared type #{column.sql_type} differs from #{actual.sql_type} in the database; changing it rewrites #{table} under an exclusive lock.",
-          "add a new field with the new type, backfill it, and drop_column :#{actual.name}; in development, --dev-override alters the type.")) do
+        halt(plan, dev_override, type_changed(table, column, actual)) do
           changes << AlterType.new(table, column.name, column.sql_type)
         end
       end
       if column.nullable && !actual.nullable
         changes << AlterNull.new(table, column.name, nullable: true)
       elsif !column.nullable && actual.nullable
-        halt(plan, dev_override, Halt.new(subject, "SET NOT NULL scans #{table} under an exclusive lock and fails if any row holds NULL.",
-          "keep the field nilable, or backfill it and add a CHECK (#{column.name} IS NOT NULL) NOT VALID constraint by hand first; in development, --dev-override sets NOT NULL.")) do
+        halt(plan, dev_override, not_null_added(table, column)) do
           changes << AlterNull.new(table, column.name, nullable: false)
         end
       end
-      changes << AlterDefault.new(table, column.name, column.default) unless column.identity || column.default == actual.default
+      return if column.identity || column.default == actual.default
+      changes << AlterDefault.new(table, column.name, column.default)
     end
 
     private def self.halt(plan : Plan, dev_override : Bool, halt : Halt, &) : Nil
@@ -224,8 +269,89 @@ module SugarORM
     end
 
     private def self.crystal_type(sql_type : String) : String
-      {"text" => "String", "integer" => "Int32", "bigint" => "Int64", "boolean" => "Bool",
-       "double precision" => "Float64", "timestamp with time zone" => "Time"}[sql_type]? || sql_type
+      CRYSTAL_TYPES[sql_type]? || sql_type
+    end
+
+    private def self.invalid_index(index : String) : Halt
+      Halt.new(
+        subject: index,
+        message: "index is INVALID, left behind by a failed CREATE INDEX CONCURRENTLY.",
+        remediation: "run DROP INDEX CONCURRENTLY #{DDL.quote(index)}; then diff again.",
+        overridable: false,
+      )
+    end
+
+    private def self.rename_conflict(table : String,
+                                     column : String,
+                                     source : String) : Halt
+      Halt.new(
+        subject: "#{table}.#{column}",
+        message: "both #{column} and its renamed_from source #{source} exist.",
+        remediation: "remove renamed_from: :#{source} if the rename is finished, " \
+                     "or record drop_column :#{source}.",
+        overridable: false,
+      )
+    end
+
+    private def self.missing_default(table : String, column : Catalog::Column) : Halt
+      field = "field #{column.name} : #{crystal_type(column.sql_type)} = …"
+      Halt.new(
+        subject: "#{table}.#{column.name}",
+        message: "NOT NULL column without a default cannot be added to the existing " \
+                 "#{table} table: existing rows have no value for it.",
+        remediation: "give the field a default (#{field}) or make it nilable; " \
+                     "in development, --dev-override adds it as declared.",
+      )
+    end
+
+    private def self.undeclared_column(table : String, column : String) : Halt
+      Halt.new(
+        subject: "#{table}.#{column}",
+        message: "column exists in the database but no field declares it; " \
+                 "SugarORM never drops a column it was not told to.",
+        remediation: "declare the field again, " \
+                     "mark its replacement renamed_from: :#{column}, " \
+                     "or record the intent with drop_column :#{column}.",
+      )
+    end
+
+    private def self.key_changed(table : String,
+                                 column : Catalog::Column,
+                                 actual : Catalog::Column) : Halt
+      Halt.new(
+        subject: "#{table}.#{column.name}",
+        message: "primary key or identity differs from the database " \
+                 "(declared primary: #{column.primary}, identity: #{column.identity}; " \
+                 "database primary: #{actual.primary}, identity: #{actual.identity}).",
+        remediation: "SugarORM does not rewrite primary keys; " \
+                     "create a new table and copy the rows deliberately.",
+        overridable: false,
+      )
+    end
+
+    private def self.type_changed(table : String,
+                                  column : Catalog::Column,
+                                  actual : Catalog::Column) : Halt
+      Halt.new(
+        subject: "#{table}.#{column.name}",
+        message: "declared type #{column.sql_type} differs from #{actual.sql_type} " \
+                 "in the database; changing it rewrites #{table} " \
+                 "under an exclusive lock.",
+        remediation: "add a new field with the new type, backfill it, " \
+                     "and drop_column :#{actual.name}; " \
+                     "in development, --dev-override alters the type.",
+      )
+    end
+
+    private def self.not_null_added(table : String, column : Catalog::Column) : Halt
+      Halt.new(
+        subject: "#{table}.#{column.name}",
+        message: "SET NOT NULL scans #{table} under an exclusive lock " \
+                 "and fails if any row holds NULL.",
+        remediation: "keep the field nilable, or backfill it and add a " \
+                     "CHECK (#{column.name} IS NOT NULL) NOT VALID constraint " \
+                     "by hand first; in development, --dev-override sets NOT NULL.",
+      )
     end
   end
 end

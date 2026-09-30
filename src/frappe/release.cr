@@ -14,8 +14,13 @@ module Caramel::Frappe
   class Release
     getter version : String
 
-    def initialize(@version : String, @installations : Installations, @output : IO = STDOUT, @error : IO = STDERR)
-      raise Error.new("#{@version} is not a Caramel release version") unless @version.matches?(Dispatch::RELEASE)
+    def initialize(@version : String,
+                   @installations : Installations,
+                   @output : IO = STDOUT,
+                   @error : IO = STDERR)
+      unless @version.matches?(Dispatch::RELEASE)
+        raise Error.new("#{@version} is not a Caramel release version")
+      end
     end
 
     # Where releases come from: CARAMEL_REPOSITORY, a git URL for tests and
@@ -25,19 +30,28 @@ module Caramel::Frappe
     end
 
     def install(toolchain : String) : String
-      releases = Latte::StateSecurity.ensure_owned_directory(File.join(@installations.root, "releases"))
+      directory = File.join(@installations.root, "releases")
+      releases = Latte::StateSecurity.ensure_owned_directory(directory)
       root = File.join(releases, @version)
       if File.exists?(root)
         # An earlier install stopped after cloning; resume from its checkout.
-        pinned = YAML.parse(File.read(File.join(root, "shard.yml")))["version"].as_s rescue nil
-        raise Error.new("#{root} is not Caramel #{@version}; move it aside and install again") unless pinned == @version
+        manifest = File.join(root, "shard.yml")
+        pinned = YAML.parse(File.read(manifest))["version"].as_s rescue nil
+        unless pinned == @version
+          raise Error.new("#{root} is not Caramel #{@version}; " \
+                          "move it aside and install again")
+        end
       else
         clone(releases, root)
       end
       @output.puts("Installing the toolchain Caramel #{@version} pins…")
       # The toolchain installer refuses a root that pins another selection.
-      reused = Latte::ProcessRunner.run([File.join(root, "scripts/install-toolchain"), "--root", toolchain, "--offline"],
-        chdir: root, env: {"CARAMEL_TOOLCHAIN_ROOT" => nil}, timeout: 600.seconds, output_limit: 64 * 1024)
+      installer = File.join(root, "scripts/install-toolchain")
+      reused = Latte::ProcessRunner.run([installer, "--root", toolchain, "--offline"],
+        chdir: root,
+        env: {"CARAMEL_TOOLCHAIN_ROOT" => nil},
+        timeout: 600.seconds,
+        output_limit: 64 * 1024)
       run(root, "scripts/install-toolchain") unless reused.success?
       @output.puts("Building Caramel #{@version}…")
       if File.file?(File.join(root, "scripts/build-release"))
@@ -75,23 +89,38 @@ module Caramel::Frappe
 
     private def clone(releases : String, root : String) : Nil
       stage = File.join(releases, ".#{@version}-#{Random::Secure.hex(6)}")
-      @output.puts("Cloning Caramel #{@version} from #{self.class.source}…")
+      source = self.class.source
+      tag = "v#{@version}"
+      @output.puts("Cloning Caramel #{@version} from #{source}…")
       begin
-        status = Process.run("/usr/bin/git", ["clone", "--quiet", "--depth", "1", "--branch", "v#{@version}", self.class.source, stage],
-          output: @output, error: @error, input: Process::Redirect::Close)
-        raise Error.new("Could not clone tag v#{@version} of #{self.class.source}") unless status.success?
+        arguments = ["clone", "--quiet", "--depth", "1", "--branch", tag, source, stage]
+        status = Process.run("/usr/bin/git", arguments,
+          output: @output,
+          error: @error,
+          input: Process::Redirect::Close)
+        raise Error.new("Could not clone tag #{tag} of #{source}") unless status.success?
         pinned = YAML.parse(File.read(File.join(stage, "shard.yml")))["version"].as_s
-        raise Error.new("Tag v#{@version} of #{self.class.source} is Caramel #{pinned}") unless pinned == @version
+        unless pinned == @version
+          raise Error.new("Tag #{tag} of #{source} is Caramel #{pinned}")
+        end
         File.rename(stage, root)
       ensure
         FileUtils.rm_rf(stage) if Dir.exists?(stage)
       end
     end
 
-    private def run(root : String, script : String, arguments : Array(String) = [] of String) : Nil
-      status = Process.run(File.join(root, script), arguments, chdir: root, env: {"CARAMEL_TOOLCHAIN_ROOT" => nil},
-        output: @output, error: @error, input: Process::Redirect::Close)
-      raise Error.new("#{script} failed for Caramel #{@version} (exit #{status.exit_code}); its checkout is #{root}") unless status.success?
+    private def run(root : String,
+                    script : String,
+                    arguments : Array(String) = [] of String) : Nil
+      status = Process.run(File.join(root, script), arguments,
+        chdir: root,
+        env: {"CARAMEL_TOOLCHAIN_ROOT" => nil},
+        output: @output,
+        error: @error,
+        input: Process::Redirect::Close)
+      return if status.success?
+      failed = "#{script} failed for Caramel #{@version} (exit #{status.exit_code})"
+      raise Error.new("#{failed}; its checkout is #{root}")
     end
   end
 end

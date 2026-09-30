@@ -3,7 +3,9 @@ require "../../scripts/checks/support/harness"
 
 INTEGRATION_BINARY      = File.join(Caramel::Checks::REPO, "bin/install-local-integration")
 INTEGRATION_TEST_BINARY = File.join(Caramel::Checks::REPO, "bin/test/install-local-integration")
-raise "Run scripts/check native" unless File.file?(INTEGRATION_BINARY) && File.file?(INTEGRATION_TEST_BINARY)
+unless File.file?(INTEGRATION_BINARY) && File.file?(INTEGRATION_TEST_BINARY)
+  raise "Run scripts/check native"
+end
 
 private class IntegrationFixture
   getter root : String
@@ -29,9 +31,13 @@ private class IntegrationFixture
     raise "unable to prepare native fixture: #{result.stderr}" unless result.success?
   end
 
-  def run(args : Array(String), *, test : Bool = true, fixture : String? = nil) : Caramel::Latte::ProcessResult
+  def run(args : Array(String),
+          *,
+          test : Bool = true,
+          fixture : String? = nil) : Caramel::Latte::ProcessResult
     env = {"CARAMEL_INSTALLER_FIXTURE" => fixture}
-    Caramel::Checks.run([test ? INTEGRATION_TEST_BINARY : INTEGRATION_BINARY] + args, env: env, timeout: 12.seconds)
+    binary = test ? INTEGRATION_TEST_BINARY : INTEGRATION_BINARY
+    Caramel::Checks.run([binary] + args, env: env, timeout: 12.seconds)
   end
 
   def fixture(jobs : Array(String?), ports : Array(Int32)) : String
@@ -80,7 +86,9 @@ describe "local integration installer" do
       contents = Dir.children(fixture.bundle).sort
       contents.should eq(["manifest.json", "plist", "relay", "resolver"])
       File.info(fixture.bundle).permissions.value.should eq(0o700)
-      contents.each { |name| File.info(File.join(fixture.bundle, name)).permissions.value.should eq(0o600) }
+      contents.each do |name|
+        File.info(File.join(fixture.bundle, name)).permissions.value.should eq(0o600)
+      end
       manifest = JSON.parse(File.read(File.join(fixture.bundle, "manifest.json")))
       manifest["uid"].as_i.should eq(LibC.getuid.to_i)
       File.read(File.join(fixture.bundle, "resolver")).should contain("port 15353")
@@ -90,7 +98,10 @@ describe "local integration installer" do
   it "reports each installed file as absent, current or stale, as the ordinary user" do
     with_integration_fixture do |fixture|
       host = fixture.fixture([nil] of String?, [] of Int32)
-      states = -> { JSON.parse(fixture.run(["status"], fixture: host).stdout).as_h.transform_values(&.as_s) }
+      states = -> do
+        status = fixture.run(["status"], fixture: host)
+        JSON.parse(status.stdout).as_h.transform_values(&.as_s)
+      end
       states.call.should eq({"plist" => "absent", "relay" => "absent", "resolver" => "absent"})
       fixture.destinations.each do |name, path|
         Dir.mkdir_p(File.dirname(path))
@@ -134,7 +145,8 @@ describe "local integration installer" do
   it "rejects a root-owned relay plist even with a matching manifest digest" do
     with_integration_fixture do |fixture|
       plist = File.join(fixture.bundle, "plist")
-      changed = Caramel::Checks.run(["/usr/bin/plutil", "-replace", "UserName", "-string", "root", "--", plist])
+      replace = ["/usr/bin/plutil", "-replace", "UserName", "-string", "root", "--", plist]
+      changed = Caramel::Checks.run(replace)
       changed.success?.should be_true, changed.stderr
       fixture.update_hash("plist", File.read(plist))
       result = fixture.run(["test-validate", fixture.bundle])
@@ -146,8 +158,10 @@ describe "local integration installer" do
   it "rejects a same-label launchd job loaded from another plist" do
     with_integration_fixture do |fixture|
       path = File.join(fixture.root, "job.txt")
-      File.write(path, integration_job("/Library/LaunchDaemons/foreign.plist", fixture.destinations["relay"]))
-      result = fixture.run(["test-verify-job", path], fixture: fixture.fixture([] of String?, [] of Int32))
+      relay = fixture.destinations["relay"]
+      File.write(path, integration_job("/Library/LaunchDaemons/foreign.plist", relay))
+      no_jobs = fixture.fixture([] of String?, [] of Int32)
+      result = fixture.run(["test-verify-job", path], fixture: no_jobs)
       result.success?.should be_false
       result.stderr.should contain("not owned by this installation")
     end
@@ -156,8 +170,10 @@ describe "local integration installer" do
   it "rejects extra arguments on the recorded launchd job" do
     with_integration_fixture do |fixture|
       path = File.join(fixture.root, "job.txt")
-      File.write(path, integration_job(fixture.destinations["plist"], fixture.destinations["relay"], "--extra\n"))
-      result = fixture.run(["test-verify-job", path], fixture: fixture.fixture([] of String?, [] of Int32))
+      plist, relay = fixture.destinations["plist"], fixture.destinations["relay"]
+      File.write(path, integration_job(plist, relay, "--extra\n"))
+      no_jobs = fixture.fixture([] of String?, [] of Int32)
+      result = fixture.run(["test-verify-job", path], fixture: no_jobs)
       result.success?.should be_false
       result.stderr.should contain("unexpected arguments")
     end
@@ -168,7 +184,8 @@ describe "local integration installer" do
       resolver = fixture.destinations["resolver"]
       Dir.mkdir_p(File.dirname(resolver))
       File.write(resolver, "existing local resolver")
-      host = fixture.fixture([nil] of String?, [Caramel::Checks.free_tcp_port, Caramel::Checks.free_tcp_port])
+      ports = [Caramel::Checks.free_tcp_port, Caramel::Checks.free_tcp_port]
+      host = fixture.fixture([nil] of String?, ports)
       result = fixture.run(["apply", fixture.bundle], fixture: host)
       result.success?.should be_false
       result.stderr.should contain("Existing configuration was preserved")

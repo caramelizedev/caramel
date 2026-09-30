@@ -14,6 +14,14 @@ module Caramel::Frappe
     # 0012). A multi-file save that outlasts it only cancels a check.
     DEBOUNCE = 50.milliseconds
 
+    # The names of dev builds and their debug files: cleanup deletes only these.
+    DEV_BINARY = /\Aapplication-[0-9a-f]{16}(?:\.dwarf)?\z/
+
+    NOT_READY = "Application did not become ready within 20 seconds. " \
+                "Check /health and terminal output."
+    LIVE_SOCKET = "A live application still owns a private development socket; " \
+                  "it was preserved"
+
     @compiler : DevCommand? = nil
     @application : DevCommand? = nil
     @app_log : SiteLog? = nil
@@ -41,7 +49,13 @@ module Caramel::Frappe
 
     # *runtime_url* replaces the application's DATABASE_URL, e.g. with a
     # Latte branch's runtime URL for `frappe dev --branch`.
-    def initialize(@project : Project, @tools : Tools, @client : LatteClient, @values : Hash(String, String), @output : IO = STDOUT, @error : IO = STDERR, *, @runtime_url : String? = nil)
+    def initialize(@project : Project,
+                   @tools : Tools,
+                   @client : LatteClient,
+                   @values : Hash(String, String),
+                   @output : IO = STDOUT,
+                   @error : IO = STDERR, *,
+                   @runtime_url : String? = nil)
       @id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
       secrets = @values.select { |key, _| key.matches?(/SECRET|PASSWORD|TOKEN|URL/) }.values
       @runtime_url.try { |url| secrets << url }
@@ -101,7 +115,9 @@ module Caramel::Frappe
           begin
             # Wake at the debounce deadline while a source change waits.
             wait = 100.milliseconds
-            wait = (changed_at + DEBOUNCE - Time.instant).clamp(Time::Span.zero, wait) if !@busy && @pending
+            if !@busy && @pending
+              wait = (changed_at + DEBOUNCE - Time.instant).clamp(Time::Span.zero, wait)
+            end
             # A kernel event is only a hint: hashing confirms a real change and
             # whether it touched sources, assets or both.
             if watcher.changed?(wait)
@@ -132,18 +148,27 @@ module Caramel::Frappe
               @retry_at = nil
               launch_boot(binary)
             end
-            if !@busy && @gateway.state == "ready" && (application = @application) && !application.running?
-              @gateway.failed("Application exited. Fix the problem and save a source file to restart.\n#{application.output.contents}")
-            end
+            report_exit if !@busy && @gateway.state == "ready"
           rescue ex
             @files_failed = true
-            @gateway.failed("Development files need attention: #{ex.message}") unless @gateway.state == "failed"
+            unless @gateway.state == "failed"
+              @gateway.failed("Development files need attention: #{ex.message}")
+            end
             sleep 100.milliseconds
           end
         end
       ensure
         watcher.close
       end
+    end
+
+    # Fails the session when the application it serves has exited.
+    private def report_exit : Nil
+      application = @application || return
+      return if application.running?
+      contents = application.output.contents
+      @gateway.failed("Application exited. Fix the problem and save a source file " \
+                      "to restart.\n#{contents}")
     end
 
     private def launch_build(source : String) : Nil
@@ -176,10 +201,12 @@ module Caramel::Frappe
       started = Time.instant
       current = Project.load(@project.root)
       unless current.origin == @project.origin && current.local_environment == @values
-        @gateway.failed("Project environment changed. Stop and restart frappe dev to load the new configuration.")
+        @gateway.failed("Project environment changed. Stop and restart frappe dev to " \
+                        "load the new configuration.")
         return
       end
-      directory = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel/dev"))
+      builds = File.join(@project.root, ".caramel/dev")
+      directory = Latte::StateSecurity.ensure_owned_directory(builds)
       binary = File.join(directory, "application-#{fingerprint[0, 16]}")
       metadata = File.join(directory, "build.json")
       cached = cached?(metadata, binary, fingerprint)
@@ -190,7 +217,7 @@ module Caramel::Frappe
         return if @stopping || @pending
         elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
         unless command.status.try(&.success?)
-          @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
+          @gateway.failed(failure(command, "Type check stopped before completing."))
           @output.puts("Type check failed in #{elapsed} ms")
           @output.flush
           return
@@ -203,17 +230,27 @@ module Caramel::Frappe
           command = compile(["-o", temporary], "build")
           return if @stopping || @pending
           unless command.status.try(&.success?)
-            @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
+            @gateway.failed(failure(command, "Compiler stopped before completing."))
             return
           end
           reject_symlink(binary)
           {% if flag?(:darwin) %}
             reject_symlink(binary + ".dwarf")
-            raise Error.new("Compiler did not produce development debug information") unless File.file?(temporary + ".dwarf")
+            unless File.file?(temporary + ".dwarf")
+              raise Error.new("Compiler did not produce development debug information")
+            end
             File.rename(temporary + ".dwarf", binary + ".dwarf")
           {% end %}
           File.rename(temporary, binary)
-          write_metadata(metadata, {source: fingerprint, binary: Digest::SHA256.hexdigest(File.read(binary)), debug: debug_checksum(binary), toolchain: @tools.toolchain.root, framework: Caramel::VERSION, mode: "caramel_development"}.to_json)
+          receipt = {
+            source:    fingerprint,
+            binary:    Digest::SHA256.hexdigest(File.read(binary)),
+            debug:     debug_checksum(binary),
+            toolchain: @tools.toolchain.root,
+            framework: Caramel::VERSION,
+            mode:      "caramel_development",
+          }
+          write_metadata(metadata, receipt.to_json)
         ensure
           File.delete?(temporary)
           File.delete?(temporary + ".dwarf")
@@ -223,17 +260,28 @@ module Caramel::Frappe
       return if @stopping || @pending
       if boot(binary)
         elapsed = (Time.instant - started).total_milliseconds.round.to_i64
-        @output.puts("Build ready#{cached ? " (cached)" : ""} in #{elapsed} ms · #{@project.origin}")
+        label = cached ? " (cached)" : ""
+        @output.puts("Build ready#{label} in #{elapsed} ms · #{@project.origin}")
         @output.flush
         cleanup_binaries
       end
+    end
+
+    # What a failed compiler run printed, or *stopped* when it printed nothing.
+    private def failure(command : DevCommand, stopped : String) : String
+      contents = command.output.contents
+      contents.empty? ? "#{stopped} Save a source file to retry." : contents
     end
 
     # Runs the dev build command with *arguments* until it exits, the session
     # stops, a newer source change supersedes it, or 180 seconds pass.
     private def compile(arguments : Array(String), event : String) : DevCommand
       @compiler_log.try(&.mark("#{event} #{@project.name}"))
-      command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace"] + arguments, @tools.environment, @project.root, @error, log: @compiler_log)
+      crystal = File.join(@tools.framework_root, "scripts/crystal")
+      flags = ["-D", "caramel_development", "--error-trace"]
+      command_line = [crystal, "build", @project.entrypoint, *flags] + arguments
+      command = DevCommand.new(command_line, @tools.environment, @project.root, @error,
+        log: @compiler_log)
       @compiler = command
       deadline = Time.instant + 180.seconds
       while command.running? && !@stopping && !@pending && Time.instant < deadline
@@ -252,16 +300,28 @@ module Caramel::Frappe
     # A quiet boot retries a start that stopped on pending migrations. It does
     # not print or log that refusal again, and forwards the application's
     # output once it serves.
-    # ameba:disable Metrics/CyclomaticComplexity -- readiness, handover and failure paths of one start
+    # ameba:disable Metrics/CyclomaticComplexity -- readiness, handover and failure paths
     private def boot(binary : String, quiet : Bool = false) : Bool
       return false if @stopping
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
       # Request serving receives only the runtime role, never migration/spec credentials.
-      values = @values.reject { |key, _| key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL" }
+      values = @values.reject do |key, _|
+        key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL"
+      end
       database = @runtime_url || @values["DATABASE_URL"]
-      values.merge!({"CARAMEL_ENV" => "development", "CARAMEL_PROJECT_ROOT" => @project.root, "CARAMEL_SOCKET" => socket, "DATABASE_URL" => database, "CARAMEL_EXPECTED_DATABASE_URL" => database})
+      values.merge!({
+        "CARAMEL_ENV"                   => "development",
+        "CARAMEL_PROJECT_ROOT"          => @project.root,
+        "CARAMEL_SOCKET"                => socket,
+        "DATABASE_URL"                  => database,
+        "CARAMEL_EXPECTED_DATABASE_URL" => database,
+      })
       @app_log.try(&.mark("start #{@project.name}")) unless quiet
-      candidate = DevCommand.new([binary, "serve"], @tools.environment(values), @project.root, quiet ? nil : @output, log: quiet ? nil : @app_log)
+      candidate = DevCommand.new([binary, "serve"],
+        @tools.environment(values),
+        @project.root,
+        quiet ? nil : @output,
+        log: quiet ? nil : @app_log)
       accepted = false
       begin
         deadline = Time.instant + 20.seconds
@@ -296,7 +356,7 @@ module Caramel::Frappe
         end
         unless @stopping
           message = candidate.output.contents
-          message = "Application did not become ready within 20 seconds. Check /health and terminal output." if message.empty?
+          message = NOT_READY if message.empty?
           @gateway.failed(message)
           if message.includes?("Pending migrations")
             @retry_at = Time.instant + 1.second
@@ -325,7 +385,8 @@ module Caramel::Frappe
       keep = [@binary, @application_binary].compact
       Dir.glob(File.join(@project.root, ".caramel/dev/application-*")).each do |old|
         next if keep.any? { |binary| old == binary || old == binary + ".dwarf" }
-        File.delete(old) if File.basename(old).matches?(/\Aapplication-[0-9a-f]{16}(?:\.dwarf)?\z/) && File.file?(old) && !File.symlink?(old)
+        next unless File.basename(old).matches?(DEV_BINARY)
+        File.delete(old) if File.file?(old) && !File.symlink?(old)
       end
     end
 
@@ -335,7 +396,8 @@ module Caramel::Frappe
       socket.connect(Socket::UNIXAddress.new(path), timeout: 200.milliseconds)
       socket.read_timeout = 500.milliseconds
       client = HTTP::Client.new(socket, @project.name + "." + @project.metadata.domain_suffix)
-      authority = URI.parse(@project.origin).authority || raise Error.new("#{@project.name} has no HTTPS origin")
+      authority = URI.parse(@project.origin).authority
+      raise Error.new("#{@project.name} has no HTTPS origin") unless authority
       response = client.get("/health", HTTP::Headers{"Host" => authority, "Connection" => "close"})
       response.status_code == 200 && response.body == "ok"
     rescue IO::Error
@@ -354,7 +416,12 @@ module Caramel::Frappe
         return false unless debug
       {% end %}
       saved = JSON.parse(File.read(metadata))
-      saved["source"].as_s == fingerprint && saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) && saved["debug"].as_s? == debug && saved["toolchain"].as_s == @tools.toolchain.root && saved["framework"].as_s == Caramel::VERSION && saved["mode"].as_s == "caramel_development"
+      saved["source"].as_s == fingerprint &&
+        saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) &&
+        saved["debug"].as_s? == debug &&
+        saved["toolchain"].as_s == @tools.toolchain.root &&
+        saved["framework"].as_s == Caramel::VERSION &&
+        saved["mode"].as_s == "caramel_development"
     rescue JSON::ParseException | KeyError | TypeCastError
       false
     end
@@ -384,7 +451,9 @@ module Caramel::Frappe
 
     private def reject_symlink(path : String) : Nil
       if info = File.info?(path, follow_symlinks: false)
-        raise Error.new("Development artifacts must be owned regular files") unless Latte::StateSecurity.owned_file?(info)
+        unless Latte::StateSecurity.owned_file?(info)
+          raise Error.new("Development artifacts must be owned regular files")
+        end
       end
     end
 
@@ -405,14 +474,15 @@ module Caramel::Frappe
           ensure
             socket.close
           end
-          raise Error.new("A live application still owns a private development socket; it was preserved") if Time.instant >= deadline
+          raise Error.new(LIVE_SOCKET) if Time.instant >= deadline
           sleep 100.milliseconds
         end
       end
     end
 
     private def open_logs : Nil
-      directory = @client.site_log_directory(@id, create: true) || raise Error.new("Site logs are unavailable for #{@project.name}")
+      directory = @client.site_log_directory(@id, create: true)
+      raise Error.new("Site logs are unavailable for #{@project.name}") unless directory
       @app_log = SiteLog.new(File.join(directory, "app.log"), @error)
       @compiler_log = SiteLog.new(File.join(directory, "compiler.log"), @error)
     end

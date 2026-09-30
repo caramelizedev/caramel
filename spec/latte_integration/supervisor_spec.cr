@@ -11,20 +11,33 @@ ensure
   listeners.try(&.each(&.close))
 end
 
+# The version file of the cluster for this release's PostgreSQL major.
+private def cluster_version_file(registry : Caramel::Latte::Registry) : String
+  data = registry.paths.postgres_data(Caramel::Latte::Postgres::MAJOR)
+  File.join(data, "PG_VERSION")
+end
+
 describe Caramel::Latte::Supervisor do
   it "starts shared services, reconciles projects and retains databases on stop" do
     root = File.join("/private/tmp", "latte-supervisor-#{Random::Secure.hex(6)}")
     Dir.mkdir(root, 0o700)
     registry = Caramel::Latte::Registry.new(root)
     dns_port, http_port, https_port = supervisor_ports
-    supervisor = Caramel::Latte::Supervisor.new(registry, dns_port: dns_port, http_port: http_port, https_port: https_port)
+    supervisor = Caramel::Latte::Supervisor.new(
+      registry,
+      dns_port: dns_port,
+      http_port: http_port,
+      https_port: https_port,
+    )
     begin
       before = Time.instant
       supervisor.start_services
       (Time.instant - before).should be < 500.milliseconds
       supervisor.await_idle(90.seconds)
       status = JSON.parse(supervisor.status_json)
-      %w[postgres dns proxy].each { |name| status["services"][name]["state"].as_s.should eq("running") }
+      %w[postgres dns proxy].each do |name|
+        status["services"][name]["state"].as_s.should eq("running")
+      end
       site = supervisor.register("bookshelf", root, "caramel")
       # Proxy health checks must not execute project handlers (or depend on
       # how quickly those handlers respond).
@@ -49,15 +62,20 @@ describe Caramel::Latte::Supervisor do
       trust.fingerprint.should match(/\A[0-9a-f]{64}\z/)
       trust_directory = File.join(root, "trust")
       Dir.mkdir(trust_directory, 0o700)
-      Caramel::Latte::ConfigFile.write(File.join(trust_directory, "receipt.json"), {version: 1, sha256: "0" * 64}.to_json)
+      # A receipt recorded for another authority.
+      other_authority = {version: 1, sha256: "0" * 64}.to_json
+      receipt = File.join(trust_directory, "receipt.json")
+      Caramel::Latte::ConfigFile.write(receipt, other_authority)
       expect_raises(Caramel::Latte::PublicError, /rotating/) { trust.install }
       supervisor.unregister(site.id).should be_true
       supervisor.postgres.credentials(site).development_runtime.should contain("postgres")
       supervisor.stop_services
       supervisor.await_idle(60.seconds)
       status = JSON.parse(supervisor.status_json)
-      %w[postgres dns proxy].each { |name| status["services"][name]["state"].as_s.should eq("stopped") }
-      File.exists?(File.join(registry.paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "PG_VERSION")).should be_true
+      %w[postgres dns proxy].each do |name|
+        status["services"][name]["state"].as_s.should eq("stopped")
+      end
+      File.exists?(cluster_version_file(registry)).should be_true
     ensure
       supervisor.stop_monitor
       app.try { |server| server.close unless server.closed? }
@@ -73,7 +91,12 @@ describe Caramel::Latte::Supervisor do
     registry = Caramel::Latte::Registry.new(root)
     dns_port, _, https_port = supervisor_ports
     occupied = TCPServer.new("127.0.0.1", 0)
-    supervisor = Caramel::Latte::Supervisor.new(registry, dns_port: dns_port, http_port: occupied.local_address.port, https_port: https_port)
+    supervisor = Caramel::Latte::Supervisor.new(
+      registry,
+      dns_port: dns_port,
+      http_port: occupied.local_address.port,
+      https_port: https_port,
+    )
     begin
       supervisor.start_services
       supervisor.await_idle(30.seconds)
@@ -81,7 +104,7 @@ describe Caramel::Latte::Supervisor do
       status["services"]["proxy"]["state"].as_s.should eq("failed")
       supervisor.postgres.running?.should be_false
       occupied.closed?.should be_false
-      File.exists?(File.join(registry.paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "PG_VERSION")).should be_true
+      File.exists?(cluster_version_file(registry)).should be_true
     ensure
       supervisor.stop_services
       supervisor.await_idle(60.seconds)
