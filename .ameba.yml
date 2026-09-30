@@ -194,7 +194,6 @@ Layout/LineLength:
     - "src/frappe/dev_gateway.cr"
     - "src/frappe/dev_session.cr"
     - "src/frappe/diagnostics.cr"
-    - "src/frappe/dispatch.cr"
     - "src/frappe/editor_tools.cr"
     - "src/frappe/installations.cr"
     - "src/frappe/latte_client.cr"
