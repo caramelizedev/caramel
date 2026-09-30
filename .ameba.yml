@@ -106,7 +106,6 @@ Layout/LineLength:
     - "spec/frappe/schema_diff_spec.cr"
     - "spec/integration/cold_brew_spec.cr"
     - "spec/integration/corretto_spec.cr"
-    - "spec/integration/database_spec.cr"
     - "spec/integration/migrations_spec.cr"
     - "spec/integration/sugar_orm_spec.cr"
     - "spec/latte/installed_releases_spec.cr"
