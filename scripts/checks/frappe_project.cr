@@ -7,6 +7,14 @@ module Caramel::Checks
   class FrappeProject < LatteFixture
     getter project : String
 
+    MATCHED         = "The database matches the declared schema."
+    RESOURCE_ROUTES = "    # Frappé resource routes"
+
+    # What Corretto prints when corretto_probe_spec.cr's line 25 leaks DDL.
+    CATALOG_RESET = Regex.new("corretto_probe_spec\\.cr:25 " \
+                              "changed the database catalog outside its transaction; " \
+                              "worker [12] was reset")
+
     def initialize
       toolchain = Checks.toolchain_root
       super("caramel-frappe-")
@@ -18,7 +26,19 @@ module Caramel::Checks
       uri = URI.parse(url)
       query = HTTP::Params.parse(uri.query || "")
       pg_env = environment({"PGPASSWORD" => URI.decode(uri.password || "")})
-      command([@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", query["host"], "-p", query["port"]? || "5432", "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')], environment: pg_env, input: statement, echo: false, timeout: 15.seconds).stdout.strip
+      psql = [@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+              "-h", query["host"], "-p", query["port"]? || "5432",
+              "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')]
+      result = command(psql,
+        environment: pg_env, input: statement, echo: false, timeout: 15.seconds)
+      result.stdout.strip
+    end
+
+    # Asserts that *result* exited 1 after printing exactly *expected*.
+    private def assert_reported!(result : Caramel::Latte::ProcessResult,
+                                 expected : String) : Nil
+      reported = result.status.exit_code == 1 && result.stdout == expected
+      assert!(reported, result.stdout + result.stderr)
     end
 
     def execute(args : Array(String)) : Nil
@@ -30,31 +50,57 @@ module Caramel::Checks
         command([@frappe, "new", "bookshelf"], chdir: @projects)
         values = local_values(@project)
         assert!(File.info(File.join(@project, ".env")).permissions.value == 0o600)
-        urls = %w[DATABASE_URL MIGRATION_DATABASE_URL SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL].map { |key| values[key] }
+        keys = %w[
+          DATABASE_URL MIGRATION_DATABASE_URL
+          SPEC_DATABASE_URL SPEC_MIGRATION_DATABASE_URL
+        ]
+        urls = keys.map { |key| values[key] }
         assert!(urls.uniq.size == 4)
-        command([@frappe, "make", "resource", "Book", "title:string", "author:string"], chdir: @project)
-        command([@frappe, "make", "resource", "Person", "name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?", "--plural=people"], chdir: @project)
-        command([@frappe, "make", "resource", "Link", "title:string?", "original_url:string:unique", "short_code:string:server:unique", "click_count:int64:server"], chdir: @project)
+        make = [@frappe, "make", "resource"]
+        person = %w[
+          Person name:string age:int32 total:int64 active:bool rating:float64?
+          joined_at:time? --plural=people
+        ]
+        link = %w[
+          Link title:string? original_url:string:unique
+          short_code:string:server:unique click_count:int64:server
+        ]
+        command(make + %w[Book title:string author:string], chdir: @project)
+        command(make + person, chdir: @project)
+        command(make + link, chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
         print routes
-        assert!(routes.lines.any? { |line| line.split == %w[GET /books/:id App::Books::Show id:Int64(min=1)] }, routes)
-        assert!(routes.lines.any? { |line| line.split == %w[PATCH /people/:id App::People::Update id:Int64(min=1) name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?] }, routes)
-        assert!(routes.lines.any? { |line| line.split == %w[POST /links App::Links::Create title:String? original_url:String] }, routes)
+        show = %w[GET /books/:id App::Books::Show id:Int64(min=1)]
+        update = %w[
+          PATCH /people/:id App::People::Update id:Int64(min=1)
+          name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?
+        ]
+        create = %w[POST /links App::Links::Create title:String? original_url:String]
+        [show, update, create].each do |route|
+          assert!(routes.lines.any? { |line| line.split == route }, routes)
+        end
         agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
-        assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
+        assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
         # The generated create_* migrations must be exactly what the differ
         # derives, so diffing the migrated database finds nothing to write.
-        probe = command([@frappe, "db", "diff", "--name", "drift_probe"], chdir: @project, timeout: 300.seconds)
-        assert!(probe.stdout.includes?("already matches the declared schema; no migration was written"), probe.stdout)
+        drift_probe = [@frappe, "db", "diff", "--name", "drift_probe"]
+        probe = command(drift_probe, chdir: @project, timeout: 300.seconds)
+        nothing = "already matches the declared schema; no migration was written"
+        assert!(probe.stdout.includes?(nothing), probe.stdout)
         assert!(Dir.glob(File.join(@project, "db/migrations/*drift_probe*")).empty?)
-        puts "PASS: generated SugarORM resources migrate without drift, and frappe db diff --name drift_probe derives nothing"
-        sql(values["MIGRATION_DATABASE_URL"], "CREATE TABLE dev_sentinel (value text NOT NULL); INSERT INTO dev_sentinel VALUES ('keep');")
+        puts "PASS: generated SugarORM resources migrate without drift, " \
+             "and frappe db diff --name drift_probe derives nothing"
+        sentinel = "CREATE TABLE dev_sentinel (value text NOT NULL); " \
+                   "INSERT INTO dev_sentinel VALUES ('keep');"
+        sql(values["MIGRATION_DATABASE_URL"], sentinel)
         corretto(values)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
         env_path = File.join(@project, ".env")
         original_env = File.read(env_path)
-        changed = original_env.sub("SPEC_DATABASE_URL=#{values["SPEC_DATABASE_URL"].to_json}", "SPEC_DATABASE_URL=#{values["DATABASE_URL"].to_json}")
+        spec_url = "SPEC_DATABASE_URL=#{values["SPEC_DATABASE_URL"].to_json}"
+        development_url = "SPEC_DATABASE_URL=#{values["DATABASE_URL"].to_json}"
+        changed = original_env.sub(spec_url, development_url)
         assert!(changed != original_env)
         File.write(env_path, changed)
         refused = attempt([@frappe, "corretto"], chdir: @project, timeout: 30.seconds)
@@ -72,7 +118,8 @@ module Caramel::Checks
         Dir.mkdir(clone, 0o700)
         Dir.children(@project).each do |entry|
           next if %w[lib .caramel .env].includes?(entry)
-          command(["/bin/cp", "-R", File.join(@project, entry), File.join(clone, entry)], echo: false)
+          copy = ["/bin/cp", "-R", File.join(@project, entry), File.join(clone, entry)]
+          command(copy, echo: false)
         end
         manifest = File.join(clone, "config/environment.yml")
         File.write(manifest, File.read(manifest).sub("name: bookshelf", "name: bookshelf-clone"))
@@ -88,14 +135,22 @@ module Caramel::Checks
 
         injected = File.join(@root, "package-with-failed-installer")
         Dir.mkdir(injected)
-        %w[src templates vendor].each { |folder| command(["/bin/cp", "-R", File.join(@repo, folder), File.join(injected, folder)], echo: false) }
-        %w[shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md].each { |name| File.copy(File.join(@repo, name), File.join(injected, name)) }
+        %w[src templates vendor].each do |folder|
+          copy = ["/bin/cp", "-R", File.join(@repo, folder), File.join(injected, folder)]
+          command(copy, echo: false)
+        end
+        %w[shard.yml shard.lock LICENSE THIRD_PARTY_NOTICES.md].each do |name|
+          File.copy(File.join(@repo, name), File.join(injected, name))
+        end
         Dir.mkdir(File.join(injected, "scripts"))
         failed_shards = File.join(injected, "scripts/shards")
         File.write(failed_shards, "#!/bin/sh\nexit 67\n")
         File.chmod(failed_shards, 0o700)
-        interrupted = attempt([@frappe, "new", "resumed"], chdir: @projects, timeout: 40.seconds, environment: environment({"CARAMEL_FRAMEWORK_ROOT" => injected}))
-        assert!(!interrupted.success? && interrupted.stderr.includes?("frappe setup to resume"), interrupted.stderr)
+        framework = environment({"CARAMEL_FRAMEWORK_ROOT" => injected})
+        interrupted = attempt([@frappe, "new", "resumed"],
+          chdir: @projects, timeout: 40.seconds, environment: framework)
+        resumable = interrupted.stderr.includes?("frappe setup to resume")
+        assert!(!interrupted.success? && resumable, interrupted.stderr)
         resumed = File.join(@projects, "resumed")
         resume_readme = File.join(resumed, "README.md")
         File.write(resume_readme, File.read(resume_readme) + "\nPreserve this edit during setup.\n")
@@ -103,32 +158,52 @@ module Caramel::Checks
         assert!(File.read(resume_readme).ends_with?("Preserve this edit during setup.\n"))
         dump = command([@frappe, "db", "dump"], chdir: @project, echo: false)
         backup = dump.stdout.lines.last.strip.split(": ", 2).last
-        assert!(backup.starts_with?(File.join(@state, "backups") + "/") && File.info(backup).permissions.value == 0o600, dump.stdout)
+        backups = File.join(@state, "backups") + "/"
+        private_backup = backup.starts_with?(backups) &&
+                         File.info(backup).permissions.value == 0o600
+        assert!(private_backup, dump.stdout)
         sql(values["MIGRATION_DATABASE_URL"], "DELETE FROM dev_sentinel")
         restored = command([@frappe, "db", "restore", backup], chdir: @project, echo: false)
-        assert!(restored.stdout.includes?("Saved the current development database to"), restored.stdout)
+        saved = restored.stdout.includes?("Saved the current development database to")
+        assert!(saved, restored.stdout)
         assert!(sql(values["DATABASE_URL"], "SELECT value FROM dev_sentinel") == "keep")
         missing_log = attempt([@frappe, "logs"], chdir: @project)
-        assert!(missing_log.status.exit_code == 1 && missing_log.stderr.includes?("No app log for bookshelf yet"), missing_log.stderr)
+        guided = missing_log.stderr.includes?("No app log for bookshelf yet")
+        assert!(missing_log.status.exit_code == 1 && guided, missing_log.stderr)
 
         resumed_id = site("resumed")["id"].as_s
         resumed_url = local_values(resumed)["DATABASE_URL"]
         removed = command([@frappe, "sites", "remove", "resumed"], echo: false)
         assert!(removed.stdout.includes?("Removed resumed"), removed.stdout)
-        assert!(rpc("GET", "/v1/sites")["sites"].as_a.none? { |entry| entry["name"].as_s == "resumed" })
+        sites = rpc("GET", "/v1/sites")["sites"].as_a
+        assert!(sites.none? { |entry| entry["name"].as_s == "resumed" })
         assert!(File.exists?(File.join(@state, "secrets", "site-#{resumed_id}.json")))
         command([@frappe, "setup"], chdir: resumed, echo: false)
-        assert!(site("resumed")["id"].as_s == resumed_id && local_values(resumed)["DATABASE_URL"] == resumed_url)
-        puts "PASS: frappe db dump/restore with safety dump, missing-log guidance, and site removal with retained data and re-registration"
+        same_site = site("resumed")["id"].as_s == resumed_id
+        assert!(same_site && local_values(resumed)["DATABASE_URL"] == resumed_url)
+        puts "PASS: frappe db dump/restore with safety dump, missing-log guidance, " \
+             "and site removal with retained data and re-registration"
         git_source
 
         Dev.new(self, clone).check if args.includes?("--dev")
-        Benchmark.new(self, edit_only: args.includes?("--edit-benchmark")).check if args.includes?("--benchmark") || args.includes?("--edit-benchmark")
+        edit_only = args.includes?("--edit-benchmark")
+        if args.includes?("--benchmark") || edit_only
+          Benchmark.new(self, edit_only: edit_only).check
+        end
 
         serve(@project, "bookshelf", values)
-        page = command(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--max-time", "5", "--noproxy", "*", "--cacert", certificate, "--resolve", "bookshelf.caramel:#{@ports[2]}:127.0.0.1", "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{@ports[2]}/"], echo: false)
-        assert!(page.stdout.includes?("A little less setup.") && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
-        puts "PASS: real frappe new/setup/migrate/routes/corretto, clone secrets, failed-dependency recovery, source preservation, spec refusal for development URL, retained development data, and generated native app over CA-verified named HTTPS"
+        port = @ports[2]
+        curl = ["/usr/bin/curl", "--fail", "--silent", "--show-error",
+                "--max-time", "5", "--noproxy", "*", "--cacert", certificate,
+                "--resolve", "bookshelf.caramel:#{port}:127.0.0.1",
+                "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{port}/"]
+        page = command(curl, echo: false)
+        welcome = page.stdout.includes?("A little less setup.")
+        assert!(welcome && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
+        puts "PASS: real frappe new/setup/migrate/routes/corretto, clone secrets, " \
+             "failed-dependency recovery, source preservation, " \
+             "spec refusal for development URL, retained development data, " \
+             "and generated native app over CA-verified named HTTPS"
         failed = false
       ensure
         finish(failed)
@@ -140,15 +215,29 @@ module Caramel::Checks
     # for github.com/caramelizedev/caramel.
     def git_source : Nil
       url = "file://#{Checks.tagged_repository(File.join(@root, "caramel.git"), Caramel::VERSION)}"
-      command([@frappe, "new", "tagged"], chdir: @projects, environment: environment({"CARAMEL_REPOSITORY" => url}))
+      repository = environment({"CARAMEL_REPOSITORY" => url})
+      command([@frappe, "new", "tagged"], chdir: @projects, environment: repository)
       tagged = File.join(@projects, "tagged")
-      assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(%(  caramel:\n    git: #{url.to_json}\n    version: "~> #{Caramel::VERSION}"\n)))
-      assert!(File.read(File.join(tagged, "shard.lock")).includes?(%(  caramel:\n    git: #{url.to_json}\n    version: #{Caramel::VERSION}\n)))
+      dependency = <<-YAML
+          caramel:
+            git: #{url.to_json}
+            version: "~> #{Caramel::VERSION}"\n
+        YAML
+      assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(dependency))
+      locked = <<-YAML
+          caramel:
+            git: #{url.to_json}
+            version: #{Caramel::VERSION}\n
+        YAML
+      assert!(File.read(File.join(tagged, "shard.lock")).includes?(locked))
       library = File.join(tagged, "lib/caramel")
-      assert!(File.info(library, follow_symlinks: false).directory? && File.file?(File.join(library, "src/caramel/command_line.cr")), "lib/caramel is not the tagged release")
+      checkout = File.info(library, follow_symlinks: false).directory? &&
+                 File.file?(File.join(library, "src/caramel/command_line.cr"))
+      assert!(checkout, "lib/caramel is not the tagged release")
       checked = command([@frappe, "check"], chdir: tagged, echo: false)
       assert!(checked.stdout.starts_with?("OK check "), checked.stdout)
-      puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} resolves the framework by git, migrates and type-checks"
+      puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} " \
+           "resolves the framework by git, migrates and type-checks"
     end
 
     # RFC-0005 agent tooling on the generated project: the stateless manifest,
@@ -157,60 +246,98 @@ module Caramel::Checks
     # human typography, `frappe expand` and database branches.
     def agent_tooling : Nil
       absent = environment({"CARAMEL_HOME" => File.join(@root, "absent-latte")})
-      manifest = command([@frappe, "agent-manifest"], chdir: "/", environment: absent, echo: false).stdout.lines
+      listing = command([@frappe, "agent-manifest"],
+        chdir: "/", environment: absent, echo: false)
+      manifest = listing.stdout.lines
       assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
       assert!(manifest[1]? == "VERSION: #{Caramel::VERSION}", manifest[1]?.to_s)
       Caramel::Frappe::Commands::TABLE.each do |entry|
-        assert!(manifest.includes?("frappe #{entry.syntax}  # #{entry.summary}"), "manifest lacks frappe #{entry.syntax}")
+        line = "frappe #{entry.syntax}  # #{entry.summary}"
+        assert!(manifest.includes?(line), "manifest lacks frappe #{entry.syntax}")
       end
-      ["check [--agent|--human]", "lint [--agent|--human]", "format", "routes [FILTER]", "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]", "expand FILE:LINE:COL"].each do |syntax|
-        assert!(manifest.any?(&.starts_with?("frappe #{syntax}")), "manifest lacks frappe #{syntax}")
+      syntaxes = [
+        "check [--agent|--human]", "lint [--agent|--human]", "format", "routes [FILTER]",
+        "db branch create NAME", "db diff --name NAME", "corretto [SPEC_PATHS...]",
+        "expand FILE:LINE:COL",
+      ]
+      syntaxes.each do |syntax|
+        offered = manifest.any?(&.starts_with?("frappe #{syntax}"))
+        assert!(offered, "manifest lacks frappe #{syntax}")
       end
-      assert!(manifest.any?(&.starts_with?(%(PATCH: INSERT "<text>" AT <line>:<col>))), manifest.join("\n"))
+      patch_syntax = %(PATCH: INSERT "<text>" AT <line>:<col>)
+      assert!(manifest.any?(&.starts_with?(patch_syntax)), manifest.join("\n"))
       unknown = attempt([@frappe, "routes", "--verbose"], chdir: @project)
-      assert!(unknown.status.exit_code == 1 && unknown.stderr == "ERR USAGE at frappe routes\nMSG: unknown option --verbose\nSYNTAX: frappe routes [FILTER]\n", unknown.stderr)
+      usage = <<-MRDP
+        ERR USAGE at frappe routes
+        MSG: unknown option --verbose
+        SYNTAX: frappe routes [FILTER]\n
+        MRDP
+      assert!(unknown.status.exit_code == 1 && unknown.stderr == usage, unknown.stderr)
       typo = attempt([@frappe, "chek", "--human"], chdir: @project)
-      assert!(typo.status.exit_code == 1 && typo.stderr.includes?("Usage: frappe check [--agent|--human]\nDid you mean check?"), typo.stderr)
-      puts "PASS: frappe agent-manifest lists every command without Latte, and unknown input exits 1 with the exact syntax and a suggestion"
+      suggestion = "Usage: frappe check [--agent|--human]\nDid you mean check?"
+      suggested = typo.stderr.includes?(suggestion)
+      assert!(typo.status.exit_code == 1 && suggested, typo.stderr)
+      puts "PASS: frappe agent-manifest lists every command without Latte, " \
+           "and unknown input exits 1 with the exact syntax and a suggestion"
 
       people = command([@frappe, "routes", "people"], chdir: @project, echo: false).stdout.lines
-      assert!(people.size == 7 && people.all? { |line| line.split[1].starts_with?("/people") && line.split[2].starts_with?("App::People::") }, people.join("\n"))
+      assert!(people.size == 7, people.join("\n"))
+      scoped = people.all? do |line|
+        fields = line.split
+        fields[1].starts_with?("/people") && fields[2].starts_with?("App::People::")
+      end
+      assert!(scoped, people.join("\n"))
       patches = command([@frappe, "routes", "patch"], chdir: @project, echo: false).stdout.lines
-      assert!(patches.map { |line| line.split[0, 2] } == [%w[PATCH /books/:id], %w[PATCH /people/:id], %w[PATCH /links/:id]], patches.join("\n"))
-      assert!(command([@frappe, "routes", "no-such-route"], chdir: @project, echo: false).stdout.empty?)
-      puts "PASS: frappe routes FILTER keeps routes whose method, path or action contains it, ignoring case"
+      expected = [%w[PATCH /books/:id], %w[PATCH /people/:id], %w[PATCH /links/:id]]
+      assert!(patches.map { |line| line.split[0, 2] } == expected, patches.join("\n"))
+      unmatched = command([@frappe, "routes", "no-such-route"],
+        chdir: @project, echo: false)
+      assert!(unmatched.stdout.empty?)
+      puts "PASS: frappe routes FILTER keeps routes " \
+           "whose method, path or action contains it, ignoring case"
 
-      assert!(File.file?(File.join(@project, ".ameba.yml")), "the generated application lacks its rule set, .ameba.yml")
+      assert!(File.file?(File.join(@project, ".ameba.yml")),
+        "the generated application lacks its rule set, .ameba.yml")
       linted = command([@frappe, "lint"], chdir: @project, echo: false)
       assert!(linted.stdout.matches?(/\AOK lint \d+ files\n\z/), linted.stdout)
       noun = File.join(@project, "app/models/invitation_service.cr")
       File.write(noun, "module App\n  class  InvitationService\n  end\nend\n")
       flagged = attempt([@frappe, "lint", "--agent"], chdir: @project)
-      assert!(flagged.status.exit_code == 1 && flagged.stdout == <<-MRDP, flagged.stdout + flagged.stderr)
+      # A backslash at a line's end joins it to the next line.
+      assert_reported!(flagged, <<-MRDP)
         ERR LINT_LINT_FORMATTING at app/models/invitation_service.cr:1:1
         MSG: Use built-in formatter to format this source (Lint/Formatting)
         FIX: frappe format
         ERR LINT_CARAMEL_SERVICE_NOUN at app/models/invitation_service.cr:2:10
-        MSG: `InvitationService` is a service noun; put the verb on its subject instead (RFC-0008 §2.1), e.g. a method on the model, a changeset or a job (Caramel/ServiceNoun)\n
+        MSG: `InvitationService` is a service noun; put the verb on its subject instead \
+        (RFC-0008 §2.1), e.g. a method on the model, a changeset or a job \
+        (Caramel/ServiceNoun)\n
         MRDP
       command([@frappe, "format"], chdir: @project, echo: false)
-      assert!(File.read(noun) == "module App\n  class InvitationService\n  end\nend\n", File.read(noun))
+      formatted = "module App\n  class InvitationService\n  end\nend\n"
+      assert!(File.read(noun) == formatted, File.read(noun))
       File.delete(noun)
-      assert!(command([@frappe, "lint"], chdir: @project, echo: false).stdout.starts_with?("OK lint "))
-      puts "PASS: the generated application and its resources pass frappe lint; a planted service noun yields ERR LINT_CARAMEL_SERVICE_NOUN, and frappe format fixes its layout"
+      relinted = command([@frappe, "lint"], chdir: @project, echo: false)
+      assert!(relinted.stdout.starts_with?("OK lint "))
+      puts "PASS: the generated application and its resources pass frappe lint; " \
+           "a planted service noun yields ERR LINT_CARAMEL_SERVICE_NOUN, " \
+           "and frappe format fixes its layout"
 
       clean = command([@frappe, "check"], chdir: @project, echo: false)
       assert!(clean.stdout.matches?(/\AOK check \d+ files\n\z/), clean.stdout)
-      assert!(command([@frappe, "check", "--human"], chdir: @project, echo: false).stdout == "✓ Type check passed\n")
+      human_clean = command([@frappe, "check", "--human"], chdir: @project, echo: false)
+      assert!(human_clean.stdout == "✓ Type check passed\n")
 
       action = File.join(@project, "app/actions/shelves/show.cr")
       Dir.mkdir_p(File.dirname(action))
       File.write(action, SHELF_ACTION)
       routes = File.join(@project, "config/routes.cr")
       original_routes = File.read(routes)
-      File.write(routes, original_routes.sub("    # Frappé resource routes", %(    get "/shelves/:id", App::Shelves::Show\n    # Frappé resource routes)))
+      shelf_route = %(    get "/shelves/:id", App::Shelves::Show\n) \
+                    %(    # Frappé resource routes)
+      File.write(routes, original_routes.sub(RESOURCE_ROUTES, shelf_route))
       mismatch = attempt([@frappe, "check"], chdir: @project)
-      assert!(mismatch.status.exit_code == 1 && mismatch.stdout == <<-MRDP, mismatch.stdout + mismatch.stderr)
+      assert_reported!(mismatch, <<-MRDP)
         ERR CONTRACT_MISMATCH:422 at app/actions/shelves/show.cr:3:5
         NODE: RequestContract
         MISSING: id:Int64
@@ -219,54 +346,92 @@ module Caramel::Checks
       apply(mismatch.stdout)
       repaired = command([@frappe, "check"], chdir: @project, echo: false)
       assert!(repaired.stdout.starts_with?("OK check "), repaired.stdout)
-      puts "PASS: a planted route-contract mismatch yields MRDP with a PATCH, and applying the PATCH line mechanically makes frappe check pass"
+      puts "PASS: a planted route-contract mismatch yields MRDP with a PATCH, " \
+           "and applying the PATCH line mechanically makes frappe check pass"
 
       model = File.join(@project, "app/models/shelf.cr")
       File.write(model, SHELF_MODELS)
-      File.write(action, File.read(action).sub(%(page "Shelf", "Shelf \#{contract.id}"), %(titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)\n      page "Shelf", titles.join(", "))))
+      titles = <<-CRYSTAL
+        titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)
+              page "Shelf", titles.join(", ")
+        CRYSTAL
+      shelf_page = %(page "Shelf", "Shelf \#{contract.id}")
+      File.write(action, File.read(action).sub(shelf_page, titles))
       n_plus_one = attempt([@frappe, "check", "--agent"], chdir: @project)
-      assert!(n_plus_one.status.exit_code == 1 && n_plus_one.stdout == <<-MRDP, n_plus_one.stdout + n_plus_one.stderr)
+      assert_reported!(n_plus_one, <<-MRDP)
         ERR N_PLUS_ONE at app/actions/shelves/show.cr:9:52
         MSG: Association 'volumes' of App::Shelf was not preloaded.
         PATCH: INSERT ".preload(:volumes)" AFTER 9:31\n
         MRDP
       human = attempt([@frappe, "check", "--human"], chdir: @project)
       assert!(human.status.exit_code == 1 && !human.stdout.includes?("\e["), human.stdout)
-      ["  ╭─[ app/actions/shelves/show.cr:9 ]\n", "  │  9 │       titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)\n",
-       "  │    │ #{" " * 51}^^^^^^^ Association 'volumes' of App::Shelf was not preloaded.\n",
-       "  ╰─ Accessing un-preloaded relationships triggers runtime N+1 queries.\n",
-       "     Remediation:\n     Add .preload(:volumes) to the query that loaded this App::Shelf",
-      ].each { |text| assert!(human.stdout.includes?(text), "missing #{text.inspect} in:\n#{human.stdout}") }
+      boxed = [
+        "  ╭─[ app/actions/shelves/show.cr:9 ]\n",
+        "  │  9 │       titles = App::Shelf.query.find!(contract.id).volumes.map(&.title)\n",
+        "  │    │ #{" " * 51}^^^^^^^ " \
+        "Association 'volumes' of App::Shelf was not preloaded.\n",
+        "  ╰─ Accessing un-preloaded relationships triggers runtime N+1 queries.\n",
+        "     Remediation:\n" \
+        "     Add .preload(:volumes) to the query that loaded this App::Shelf",
+      ]
+      boxed.each do |text|
+        assert!(human.stdout.includes?(text), "missing #{text.inspect} in:\n#{human.stdout}")
+      end
       apply(n_plus_one.stdout)
-      assert!(File.read(action).includes?("App::Shelf.query.preload(:volumes).find!(contract.id)"), File.read(action))
-      assert!(command([@frappe, "check"], chdir: @project, echo: false).stdout.starts_with?("OK check "))
-      puts "PASS: a planted un-preloaded association yields N_PLUS_ONE with a PATCH that makes frappe check pass, and --human shows the box, source line, caret and remediation"
+      patched = File.read(action)
+      preload = "App::Shelf.query.preload(:volumes).find!(contract.id)"
+      assert!(patched.includes?(preload), patched)
+      rechecked = command([@frappe, "check"], chdir: @project, echo: false)
+      assert!(rechecked.stdout.starts_with?("OK check "))
+      puts "PASS: a planted un-preloaded association yields N_PLUS_ONE " \
+           "with a PATCH that makes frappe check pass, " \
+           "and --human shows the box, source line, caret and remediation"
 
-      expanded = command([@frappe, "expand", "config/routes.cr:2:3"], chdir: @project, echo: false).stdout
-      assert!(expanded.includes?("__caramel_router_draw") && expanded.includes?("App::Shelves::Show"), expanded)
-      contract = command([@frappe, "expand", "app/actions/shelves/show.cr:3:5"], chdir: @project, echo: false).stdout
-      assert!(contract.includes?("~> struct Contract < ::Caramel::RequestContract") && contract.includes?(%(CARAMEL_CONTRACT_LOCATION = "#{@project}/app/actions/shelves/show.cr:3:5")), contract)
+      expanded = command([@frappe, "expand", "config/routes.cr:2:3"],
+        chdir: @project, echo: false).stdout
+      drawn = expanded.includes?("__caramel_router_draw")
+      assert!(drawn && expanded.includes?("App::Shelves::Show"), expanded)
+      contract = command([@frappe, "expand", "app/actions/shelves/show.cr:3:5"],
+        chdir: @project, echo: false).stdout
+      location = %(CARAMEL_CONTRACT_LOCATION = ) \
+                 %("#{@project}/app/actions/shelves/show.cr:3:5")
+      declared = contract.includes?("~> struct Contract < ::Caramel::RequestContract")
+      assert!(declared && contract.includes?(location), contract)
       nothing = attempt([@frappe, "expand", "app/actions/shelves/show.cr:6:1"], chdir: @project)
-      assert!(nothing.status.exit_code == 1 && nothing.stdout.starts_with?("no expansion found"), nothing.stdout + nothing.stderr)
+      unexpanded = nothing.stdout.starts_with?("no expansion found")
+      assert!(nothing.status.exit_code == 1 && unexpanded, nothing.stdout + nothing.stderr)
       File.delete(model)
       File.delete(action)
       Dir.delete(File.dirname(action))
       File.write(routes, original_routes)
-      puts "PASS: frappe expand prints the Crystal that Caramel::Router.draw and an action's contract block expand to, and exits 1 where no macro is called"
+      puts "PASS: frappe expand prints the Crystal that Caramel::Router.draw " \
+           "and an action's contract block expand to, " \
+           "and exits 1 where no macro is called"
 
       id = site("bookshelf")["id"].as_s
-      created = command([@frappe, "db", "branch", "create", "agent_probe"], chdir: @project, echo: false)
+      created = command([@frappe, "db", "branch", "create", "agent_probe"],
+        chdir: @project, echo: false)
       url = created.stdout.chomp
-      assert!(created.stdout.lines.size == 1 && url.starts_with?("postgresql://") && url.includes?("@/caramel_branch_#{id}_agent_probe?"), created.stdout)
+      branch = "@/caramel_branch_#{id}_agent_probe?"
+      one_url = created.stdout.lines.size == 1 && url.starts_with?("postgresql://")
+      assert!(one_url && url.includes?(branch), created.stdout)
       assert!(sql(url, "SELECT current_database()") == "caramel_branch_#{id}_agent_probe")
-      assert!(command([@frappe, "db", "branch", "list"], chdir: @project, echo: false).stdout == "agent_probe\n")
-      missing = attempt([@frappe, "dev", "--no-open", "--branch", "absent_probe"], chdir: @project, timeout: 60.seconds)
-      assert!(missing.status.exit_code == 1 && missing.stderr.includes?("bookshelf has no database branch absent_probe"), missing.stderr)
-      deleted = command([@frappe, "db", "branch", "delete", "agent_probe"], chdir: @project, echo: false)
+      list_branches = [@frappe, "db", "branch", "list"]
+      branches = command(list_branches, chdir: @project, echo: false)
+      assert!(branches.stdout == "agent_probe\n")
+      missing = attempt([@frappe, "dev", "--no-open", "--branch", "absent_probe"],
+        chdir: @project, timeout: 60.seconds)
+      no_branch = "bookshelf has no database branch absent_probe"
+      refused_branch = missing.stderr.includes?(no_branch)
+      assert!(missing.status.exit_code == 1 && refused_branch, missing.stderr)
+      deleted = command([@frappe, "db", "branch", "delete", "agent_probe"],
+        chdir: @project, echo: false)
       assert!(deleted.stdout == "Deleted database branch agent_probe.\n", deleted.stdout)
-      listed = command([@frappe, "db", "branch", "list"], chdir: @project, echo: false)
-      assert!(listed.stdout.empty? && listed.stderr.includes?("bookshelf has no database branches."), listed.stdout + listed.stderr)
-      puts "PASS: frappe db branch create prints a connectable branch URL; list and delete manage it, and frappe dev --branch refuses an absent branch"
+      listed = command(list_branches, chdir: @project, echo: false)
+      none = listed.stderr.includes?("bookshelf has no database branches.")
+      assert!(listed.stdout.empty? && none, listed.stdout + listed.stderr)
+      puts "PASS: frappe db branch create prints a connectable branch URL; " \
+           "list and delete manage it, and frappe dev --branch refuses an absent branch"
     end
 
     # Applies every `PATCH:` line of MRDP to the file its ERR line names, as a
@@ -329,12 +494,23 @@ module Caramel::Checks
     # mocking call is refused before anything compiles.
     def corretto(values : Hash(String, String)) : Nil
       mocked = File.join(@project, "spec/requests/mock_probe_spec.cr")
-      File.write(mocked, %(require "../spec_helper"\n\ndescribe "Mocks" do\n  it("stubs") { allow(App::Book).to receive(:create) }\nend\n))
-      refused = attempt([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 30.seconds)
+      File.write(mocked, <<-CRYSTAL)
+        require "../spec_helper"
+
+        describe "Mocks" do
+          it("stubs") { allow(App::Book).to receive(:create) }
+        end\n
+        CRYSTAL
+      refused = attempt([@frappe, "corretto", "--concurrency=2"],
+        chdir: @project, timeout: 30.seconds)
       File.delete(mocked)
-      assert!(refused.status.exit_code == 1 && refused.stderr.includes?("spec/requests/mock_probe_spec.cr:4: `allow(` is a mocking API") && refused.stderr.includes?("Specs refused: 1 mocking call"), refused.stderr)
+      mocking = "spec/requests/mock_probe_spec.cr:4: `allow(` is a mocking API"
+      located = refused.status.exit_code == 1 && refused.stderr.includes?(mocking)
+      counted = refused.stderr.includes?("Specs refused: 1 mocking call")
+      assert!(located && counted, refused.stderr)
       assert!(!refused.stdout.includes?("Applied"), refused.stdout)
-      puts "PASS: frappe corretto refuses a planted allow( with its file and line before migrating or compiling"
+      puts "PASS: frappe corretto refuses a planted allow( with its file and line " \
+           "before migrating or compiling"
 
       rfc_example
 
@@ -343,17 +519,30 @@ module Caramel::Checks
       Dir.mkdir_p(File.join(@project, "app/actions/probe"))
       File.write(File.join(@project, "app/actions/probe/enqueue.cr"), PROBE_ACTION)
       routes = File.join(@project, "config/routes.cr")
-      File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/probe/jobs", App::Probe::Enqueue\n    # Frappé resource routes)))
-      result = command([@frappe, "corretto", "--concurrency=2"], chdir: @project, timeout: 900.seconds)
+      probe_route = %(    post "/probe/jobs", App::Probe::Enqueue\n) \
+                    %(    # Frappé resource routes)
+      File.write(routes, File.read(routes).sub(RESOURCE_ROUTES, probe_route))
+      result = command([@frappe, "corretto", "--concurrency=2"],
+        chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
-      assert!(result.stdout.includes?("Corretto: 6 spec files across 2 workers") && result.stdout.includes?("Corretto: 2 of 2 workers passed"), output)
+      spread = result.stdout.includes?("Corretto: 6 spec files across 2 workers")
+      passed = result.stdout.includes?("Corretto: 2 of 2 workers passed")
+      assert!(spread && passed, output)
       %w[[w1] [w2]].each do |prefix|
-        assert!(result.stdout.lines.any? { |line| line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors") }, output)
+        clean = result.stdout.lines.any? do |line|
+          line.starts_with?(prefix) && line.includes?(" examples, 0 failures, 0 errors")
+        end
+        assert!(clean, output)
       end
-      assert!(result.stderr.matches?(/corretto_probe_spec\.cr:25 changed the database catalog outside its transaction; worker [12] was reset/), output)
+      assert!(result.stderr.matches?(CATALOG_RESET), output)
       id = site("bookshelf")["id"].as_s
-      assert!(sql(values["SPEC_DATABASE_URL"], "SELECT count(*) FROM pg_database WHERE starts_with(datname, 'caramel_spec_#{id}_w')") == "0")
-      puts "PASS: frappe corretto --concurrency=2 runs the generated Corretto specs in two Latte test workers with savepoint isolation, catalog resets, wire isolation and a synchronously drained Cold Brew job, then drops the workers"
+      workers = "SELECT count(*) FROM pg_database " \
+                "WHERE starts_with(datname, 'caramel_spec_#{id}_w')"
+      assert!(sql(values["SPEC_DATABASE_URL"], workers) == "0")
+      puts "PASS: frappe corretto --concurrency=2 runs the generated Corretto specs " \
+           "in two Latte test workers with savepoint isolation, catalog resets, " \
+           "wire isolation and a synchronously drained Cold Brew job, " \
+           "then drops the workers"
     end
 
     # RFC-0006 §2.1's example spec, copied byte for byte from docs/rfc.md, runs
@@ -361,11 +550,16 @@ module Caramel::Checks
     # and Notification schemas, a Teams::Create action and a Cold Brew job.
     def rfc_example : Nil
       rfc = File.read_lines(File.join(@repo, "docs/rfc.md"), chomp: false)
-      start = rfc.index { |line| line == "# spec/actions/teams/create_spec.cr\n" } || raise "docs/rfc.md lacks the RFC-0006 example spec"
-      assert!(rfc[start - 1] == "```crystal\n", "the RFC-0006 example must start a crystal code block")
-      finish = (start...rfc.size).find { |index| rfc[index].starts_with?("```") } || raise "the RFC-0006 example code block is not closed"
+      heading = "# spec/actions/teams/create_spec.cr\n"
+      start = rfc.index(heading) || raise "docs/rfc.md lacks the RFC-0006 example spec"
+      assert!(rfc[start - 1] == "```crystal\n",
+        "the RFC-0006 example must start a crystal code block")
+      closing = (start...rfc.size).find { |index| rfc[index].starts_with?("```") }
+      finish = closing || raise "the RFC-0006 example code block is not closed"
       example = rfc[start...finish].join
-      assert!(example.includes?("describe Teams::Create do") && example.includes?("Notification::Query.where(user_id: user.id).count(db).should eq(1)"), example)
+      described = example.includes?("describe Teams::Create do")
+      notified = "Notification::Query.where(user_id: user.id).count(db).should eq(1)"
+      assert!(described && example.includes?(notified), example)
       spec = File.join(@project, "spec/actions/teams/create_spec.cr")
       Dir.mkdir_p(File.dirname(spec))
       File.write(spec, example)
@@ -374,20 +568,31 @@ module Caramel::Checks
         File.write(File.join(@project, relative), source)
       end
       routes = File.join(@project, "config/routes.cr")
-      File.write(routes, File.read(routes).sub("    # Frappé resource routes", %(    post "/teams", Teams::Create\n    # Frappé resource routes)))
+      teams_route = %(    post "/teams", Teams::Create\n    # Frappé resource routes)
+      File.write(routes, File.read(routes).sub(RESOURCE_ROUTES, teams_route))
 
       before = Dir.glob(File.join(@project, "db/migrations/*.cr"))
-      command([@frappe, "db", "diff", "--name", "create_teams"], chdir: @project, timeout: 300.seconds)
+      command([@frappe, "db", "diff", "--name", "create_teams"],
+        chdir: @project, timeout: 300.seconds)
       derived = Dir.glob(File.join(@project, "db/migrations/*.cr")) - before
       assert!(!derived.empty? && derived.all?(&.includes?("_create_teams")), derived.inspect)
       migrated = command([@frappe, "migrate"], chdir: @project, timeout: 300.seconds)
-      assert!(migrated.stdout.includes?("The database matches the declared schema."), migrated.stdout)
+      assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
 
-      result = command([@frappe, "corretto", "spec/actions/teams/create_spec.cr"], chdir: @project, timeout: 600.seconds)
+      result = command([@frappe, "corretto", "spec/actions/teams/create_spec.cr"],
+        chdir: @project, timeout: 600.seconds)
       assert!(File.read(spec) == example, "the RFC-0006 example spec changed on disk")
-      assert!(result.stdout.includes?("[w1] 1 examples, 0 failures, 0 errors, 0 pending") && result.stdout.includes?("Corretto: 1 of 1 workers passed"), result.stdout + result.stderr)
-      puts "PASS: RFC-0006 §2.1's example spec, verbatim from docs/rfc.md, passes under frappe corretto with a derived create_teams migration and a drained Cold Brew notification job"
+      ran = result.stdout.includes?("[w1] 1 examples, 0 failures, 0 errors, 0 pending")
+      passed = result.stdout.includes?("Corretto: 1 of 1 workers passed")
+      assert!(ran && passed, result.stdout + result.stderr)
+      puts "PASS: RFC-0006 §2.1's example spec, verbatim from docs/rfc.md, " \
+           "passes under frappe corretto with a derived create_teams migration " \
+           "and a drained Cold Brew notification job"
     end
+
+    # The list item the RFC's Teams::Create action renders. It is a raw
+    # literal, so its interpolations reach the generated source as written.
+    TEAM_ITEM = %q(<li>#{Caramel::HTML.escape(created.name)} · #{created.seats} seats</li>)
 
     RFC_APP = {
       "app/models/user.cr" => <<-CRYSTAL,
@@ -426,7 +631,7 @@ module Caramel::Checks
           end
         end
         CRYSTAL
-      "app/actions/teams/create.cr" => <<-'CRYSTAL',
+      "app/actions/teams/create.cr" => <<-CRYSTAL,
         module Teams
           struct Create < App::ApplicationAction
             contract do
@@ -445,7 +650,7 @@ module Caramel::Checks
                 NotifyTeamOwner.enqueue(user_id: owner_id)
               end
               created = team.not_nil!
-              partials [Caramel::Partial.new("#team-list", "<li>#{Caramel::HTML.escape(created.name)} · #{created.seats} seats</li>", "innerMorph")]
+              partials [Caramel::Partial.new("#team-list", "#{TEAM_ITEM}", "innerMorph")]
             end
           end
         end
@@ -483,15 +688,19 @@ module Caramel::Checks
           leak.close
         end
 
-        it "starts from the migrated template after each reset and answers outbound HTTP only from stubs" do
+        it "starts from the migrated template after each reset \
+          and answers outbound HTTP only from stubs" do
           Corretto.session do |client, db|
             %w(catalog_probe catalog_probe_table leaked_probe).each do |relation|
               db.query_one("SELECT to_regclass($1)::text", relation, as: String?).should be_nil
             end
             client.get("/books").should render_page("Books")
             Caramel::Outbound.get("https://api.stripe.com/v1/customers").status_code.should eq(502)
-            Corretto.stub_wire("https://api.stripe.com/v1/customers", method: "GET").to_return(status: 200, body: %({"data":[]}), headers: {"Content-Type" => "application/json"})
-            Caramel::Outbound.get("https://api.stripe.com/v1/customers").body.should eq(%({"data":[]}))
+            Corretto.stub_wire("https://api.stripe.com/v1/customers", \
+              method: "GET").to_return(status: 200, body: %({"data":[]}), \
+              headers: {"Content-Type" => "application/json"})
+            Caramel::Outbound.get("https://api.stripe.com/v1/customers").body.should \
+              eq(%({"data":[]}))
             Corretto.wire_requests.size.should eq(2)
           end
         end
@@ -501,9 +710,11 @@ module Caramel::Checks
           Caramel::Outbound.get("https://api.stripe.com/v1/customers").status_code.should eq(502)
         end
 
-        it "drains the job an action enqueued, synchronously and inside the example's transaction" do
+        it "drains the job an action enqueued, \
+          synchronously and inside the example's transaction" do
           Corretto.session do |client, db|
-            client.post("/probe/jobs", headers: {"HX-Request" => "true"}, params: {"title" => "Drained probe"}).should render_partial("#jobs")
+            client.post("/probe/jobs", headers: {"HX-Request" => "true"}, \
+              params: {"title" => "Drained probe"}).should render_partial("#jobs")
             db.should_not have_row(App::Book, title: "Drained probe")
             Caramel::ColdBrew.drain_queue!(db, "default").should eq(1)
             db.should have_row(App::Book, title: "Drained probe", author: "Cold Brew")
