@@ -4,8 +4,15 @@ private CORRETTO_REPO = File.expand_path("../..", __DIR__)
 
 private def corretto_compile(fixture : String) : {Bool, String}
   error = IO::Memory.new
-  status = Process.run(File.join(CORRETTO_REPO, "scripts/crystal"), ["build", "--no-codegen", "spec/fixtures/corretto/#{fixture}.cr"],
-    chdir: CORRETTO_REPO, output: Process::Redirect::Close, error: error)
+  crystal = File.join(CORRETTO_REPO, "scripts/crystal")
+  arguments = ["build", "--no-codegen", "spec/fixtures/corretto/#{fixture}.cr"]
+  status = Process.run(
+    crystal,
+    arguments,
+    chdir: CORRETTO_REPO,
+    output: Process::Redirect::Close,
+    error: error,
+  )
   {status.success?, error.to_s}
 end
 
@@ -23,12 +30,17 @@ private CORRETTO_COMPILES = begin
       compiled.send({fixture, false, "could not run the compiler: #{ex.message}"})
     end
   end
-  Array.new(fixtures.size) { compiled.receive }.to_h { |(fixture, success, diagnostic)| {fixture, {success, diagnostic}} }
+  results = Array.new(fixtures.size) { compiled.receive }
+  results.to_h { |(fixture, success, diagnostic)| {fixture, {success, diagnostic}} }
 end
 
 describe "Corretto's mocking refusal" do
   it "fails the build, with a remedy, when a mocking library is loaded before or after Corretto" do
-    {"compile_mocks" => "`Mocks` from a mocking library is loaded", "compile_spectator_mocks" => "Spectator::Mocks is loaded"}.each do |fixture, reason|
+    refusals = {
+      "compile_mocks"           => "`Mocks` from a mocking library is loaded",
+      "compile_spectator_mocks" => "Spectator::Mocks is loaded",
+    }
+    refusals.each do |fixture, reason|
       success, diagnostic = CORRETTO_COMPILES[fixture]
       success.should be_false
       diagnostic.should contain("Corretto forbids mocking")
