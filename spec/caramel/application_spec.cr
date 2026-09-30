@@ -34,21 +34,29 @@ module ApplicationSpecApp
 end
 
 private def application_spec_app(root : String? = nil) : Caramel::Application
-  Caramel::Application.new(ApplicationSpecApp::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel"), root)
+  csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+  Caramel::Application.new(ApplicationSpecApp::AppRouter.new, csrf, root)
+end
+
+# A request addressed to the application's configured host, or to `host`.
+private def hosted_request(method : String,
+                           path : String,
+                           host : String = "bookshelf.caramel") : HTTP::Request
+  HTTP::Request.new(method, path, HTTP::Headers{"Host" => host})
 end
 
 describe Caramel::Application do
   it "checks the configured Host and adds browser security headers" do
     app = application_spec_app
-    good = app.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    good = app.handle(hosted_request("GET", "/"))
     good.body.should eq("hello")
     good.headers["X-Content-Type-Options"].should eq("nosniff")
-    app.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "evil.example"})).status.should eq(421)
+    app.handle(hosted_request("GET", "/", host: "evil.example")).status.should eq(421)
   end
 
   it "returns a traceable error without exposing an exception or secrets" do
     app = application_spec_app
-    response = app.handle(HTTP::Request.new("GET", "/broken", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    response = app.handle(hosted_request("GET", "/broken"))
     response.status.should eq(500)
     response.body.should_not contain("do-not-disclose")
     response.headers["X-Request-ID"].should match(/\A[0-9a-f-]{36}\z/)
@@ -67,11 +75,11 @@ describe Caramel::Application do
     begin
       app = application_spec_app("#{root}/public")
       ["/../secret", "/%2e%2e/secret", "/link", "/.env", "/app/"].each do |path|
-        app.handle(HTTP::Request.new("GET", path, HTTP::Headers{"Host" => "bookshelf.caramel"})).status.should eq(404)
+        app.handle(hosted_request("GET", path)).status.should eq(404)
       end
-      app.handle(HTTP::Request.new("GET", "foo", HTTP::Headers{"Host" => "bookshelf.caramel"})).status.should eq(400)
-      app.handle(HTTP::Request.new("GET", "/app.css", HTTP::Headers{"Host" => "bookshelf.caramel"})).body.should eq("body{}")
-      app.handle(HTTP::Request.new("POST", "/app.css", HTTP::Headers{"Host" => "bookshelf.caramel"})).status.should eq(405)
+      app.handle(hosted_request("GET", "foo")).status.should eq(400)
+      app.handle(hosted_request("GET", "/app.css")).body.should eq("body{}")
+      app.handle(hosted_request("POST", "/app.css")).status.should eq(405)
     ensure
       FileUtils.rm_rf(root)
     end

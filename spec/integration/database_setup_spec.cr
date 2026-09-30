@@ -24,7 +24,9 @@ private def read_backend_message(socket : UNIXSocket) : UInt8
   type
 end
 
-private def write_backend_message(socket : UNIXSocket, type : UInt8, body : Bytes = Bytes.empty) : Nil
+private def write_backend_message(socket : UNIXSocket,
+                                  type : UInt8,
+                                  body : Bytes = Bytes.empty) : Nil
   socket.write_byte(type)
   socket.write_bytes((body.size + 4).to_i32, IO::ByteFormat::NetworkEndian)
   socket.write(body) unless body.empty?

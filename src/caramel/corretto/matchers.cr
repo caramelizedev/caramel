@@ -9,7 +9,8 @@ module Corretto
       headers = response.headers.compact_map do |name, values|
         "  #{name}: #{values.join(", ")}" unless name.in?("Content-Security-Policy", "Set-Cookie")
       end
-      "Response status #{response.status}\n#{headers.join('\n')}\n  Body: #{body.empty? ? "(empty)" : body}"
+      shown = body.empty? ? "(empty)" : body
+      "Response status #{response.status}\n#{headers.join('\n')}\n  Body: #{shown}"
     end
 
     struct HaveStatus
@@ -36,12 +37,16 @@ module Corretto
       end
 
       def match(response : Caramel::Response) : Bool
-        partials(response).any? { |(target, swap)| target == @target && (@swap.nil? || swap == @swap) }
+        partials(response).any? do |(target, swap)|
+          target == @target && (@swap.nil? || swap == @swap)
+        end
       end
 
       def failure_message(response : Caramel::Response) : String
         found = partials(response).join(", ") { |(target, swap)| "#{target} (#{swap})" }
-        "Expected an <hx-partial> for #{description}; found #{found.empty? ? "none" : found}\n#{Expectations.excerpt(response)}"
+        found = "none" if found.empty?
+        excerpt = Expectations.excerpt(response)
+        "Expected an <hx-partial> for #{description}; found #{found}\n#{excerpt}"
       end
 
       def negative_failure_message(response : Caramel::Response) : String
@@ -62,11 +67,14 @@ module Corretto
       end
 
       def match(response : Caramel::Response) : Bool
-        ((300..399).includes?(response.status) && response.headers["Location"]? == @path) || response.headers["HX-Location"]? == @path
+        redirect = (300..399).includes?(response.status)
+        (redirect && response.headers["Location"]? == @path) ||
+          response.headers["HX-Location"]? == @path
       end
 
       def failure_message(response : Caramel::Response) : String
-        "Expected a redirect (Location or HX-Location) to #{@path}\n#{Expectations.excerpt(response)}"
+        excerpt = Expectations.excerpt(response)
+        "Expected a redirect (Location or HX-Location) to #{@path}\n#{excerpt}"
       end
 
       def negative_failure_message(response : Caramel::Response) : String
@@ -108,7 +116,9 @@ module Corretto
       end
 
       def failure_message(response : Caramel::Response) : String
-        "Expected a full HTML page titled #{@title.inspect}; got #{title(response).try(&.inspect) || "no <title>"}\n#{Expectations.excerpt(response)}"
+        got = title(response).try(&.inspect) || "no <title>"
+        excerpt = Expectations.excerpt(response)
+        "Expected a full HTML page titled #{@title.inspect}; got #{got}\n#{excerpt}"
       end
 
       def negative_failure_message(response : Caramel::Response) : String
@@ -129,7 +139,8 @@ module Corretto
       end
 
       def failure_message(db : SugarORM::Handle) : String
-        "Expected #{T} to have a row where #{description}; none matched among #{T.query.count(db)} rows"
+        total = T.query.count(db)
+        "Expected #{T} to have a row where #{description}; none matched among #{total} rows"
       end
 
       def negative_failure_message(db : SugarORM::Handle) : String
@@ -137,7 +148,9 @@ module Corretto
       end
 
       private def description : String
-        @conditions.empty? ? "(any)" : @conditions.map { |key, value| "#{key}: #{value.inspect}" }.join(", ")
+        return "(any)" if @conditions.empty?
+
+        @conditions.map { |key, value| "#{key}: #{value.inspect}" }.join(", ")
       end
     end
   end
@@ -172,7 +185,11 @@ module Corretto
     # macro, so an unknown or mistyped field fails compilation at the caller.
     macro have_row(schema, **conditions)
       %conditions = {{ conditions.empty? ? "NamedTuple.new".id : conditions }}
-      ::Corretto::Expectations::HaveRow.new({{ schema }}, {{ schema }}.query.where(**%conditions), %conditions)
+      ::Corretto::Expectations::HaveRow.new(
+        {{ schema }},
+        {{ schema }}.query.where(**%conditions),
+        %conditions,
+      )
     end
   end
 end

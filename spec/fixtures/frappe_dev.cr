@@ -9,4 +9,11 @@ project = Caramel::Frappe::Project.load(ARGV[0])
 tools = Caramel::Frappe::Tools.new(File.expand_path("../..", __DIR__))
 client = Caramel::Frappe::LatteClient.new
 client.ready!
-Caramel::Frappe::DevSession.new(project, tools, client, project.local_environment, runtime_url: ENV["CARAMEL_DEV_RUNTIME_URL"]?).run(open_browser: false)
+session = Caramel::Frappe::DevSession.new(
+  project,
+  tools,
+  client,
+  project.local_environment,
+  runtime_url: ENV["CARAMEL_DEV_RUNTIME_URL"]?,
+)
+session.run(open_browser: false)

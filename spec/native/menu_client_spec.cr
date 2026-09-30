@@ -5,7 +5,10 @@ MENU_APP = File.join(Caramel::Checks::REPO, "bin/Latte.app/Contents/MacOS/Latte"
 raise "Run scripts/check native" unless File.file?(MENU_APP)
 
 private class FakeMenuDaemon
-  def initialize(@path : String, @responses : Hash(String, String), @trickle : Bool = false, @delays : Hash(String, Time::Span) = Hash(String, Time::Span).new)
+  def initialize(@path : String,
+                 @responses : Hash(String, String),
+                 @trickle : Bool = false,
+                 @delays : Hash(String, Time::Span) = Hash(String, Time::Span).new)
     @server = UNIXServer.new(@path)
     File.chmod(@path, 0o600)
     @closed = false
@@ -36,7 +39,9 @@ private class FakeMenuDaemon
     if delay = @delays[key]?
       sleep delay
     end
-    client << "HTTP/1.1 #{status}\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
+    head = "HTTP/1.1 #{status}\r\nContent-Type: application/json\r\n" \
+           "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
+    client << head
     if @trickle
       body.each_byte.with_index do |byte, index|
         if index < 60
@@ -74,12 +79,23 @@ private class MenuFixture
     @daemon = nil
   end
 
-  def serve(sites : String = "[]", *, include_sites_version : Bool = true, trickle : Bool = false, delays : Hash(String, Time::Span) = Hash(String, Time::Span).new, postgres : String = "running", dns : String = "running", proxy : String = "stopped", status_error : String? = nil) : Nil
-    status = %({"version":1,"services":{"postgres":{"state":#{postgres.to_json},"detail":null},"dns":{"state":#{dns.to_json},"detail":null},"proxy":{"state":#{proxy.to_json},"detail":null}})
+  def serve(sites : String = "[]",
+            *,
+            include_sites_version : Bool = true,
+            trickle : Bool = false,
+            delays : Hash(String, Time::Span) = Hash(String, Time::Span).new,
+            postgres : String = "running",
+            dns : String = "running",
+            proxy : String = "stopped",
+            status_error : String? = nil) : Nil
+    services = [service("postgres", postgres), service("dns", dns), service("proxy", proxy)]
+    status = %({"version":1,"services":{#{services.join(',')}})
     status += %(,"error":#{status_error.to_json}) if status_error
     status += "}"
-    sites_response = include_sites_version ? %({"sites":#{sites},"version":1}) : %({"sites":#{sites}})
-    @daemon = FakeMenuDaemon.new(@socket, {"GET /v1/status" => status, "GET /v1/sites" => sites_response}, trickle, delays)
+    version = include_sites_version ? %(,"version":1) : ""
+    sites_response = %({"sites":#{sites}#{version}})
+    responses = {"GET /v1/status" => status, "GET /v1/sites" => sites_response}
+    @daemon = FakeMenuDaemon.new(@socket, responses, trickle, delays)
   end
 
   def check : Caramel::Latte::ProcessResult
@@ -93,6 +109,22 @@ private class MenuFixture
     File.chmod(@runtime, 0o700) if Dir.exists?(@runtime)
     Dir.delete(@runtime) if Dir.exists?(@runtime)
   end
+
+  # One service's entry in the daemon's status response.
+  private def service(name : String, state : String) : String
+    %("#{name}":{"state":#{state.to_json},"detail":null})
+  end
+end
+
+# The daemon's site list holding bookshelf; `rest` adds members after its
+# upstream.
+private def bookshelf_sites(fixture : MenuFixture,
+                            id : String = "0123456789abcdef",
+                            origin : String = "https://bookshelf.caramel",
+                            rest : String = "") : String
+  directory = File.join(fixture.home, "bookshelf").to_json
+  %([{"id":"#{id}","name":"bookshelf","directory":#{directory},"suffix":"caramel",) \
+  %("domain":"bookshelf.caramel","origin":"#{origin}","upstream":null#{rest}}])
 end
 
 def with_menu_fixture(& : MenuFixture ->) : Nil
@@ -107,7 +139,7 @@ end
 describe "native Latte menu client" do
   it "reads shared status and sites" do
     with_menu_fixture do |fixture|
-      site = %([{"id":"0123456789abcdef","name":"bookshelf","directory":#{File.join(fixture.home, "bookshelf").to_json},"suffix":"caramel","domain":"bookshelf.caramel","origin":"https://bookshelf.caramel","upstream":null,"state":"build-error","owner":"terminal"}])
+      site = bookshelf_sites(fixture, rest: %(,"state":"build-error","owner":"terminal"))
       fixture.serve(sites: site)
       result = fixture.check
       result.success?.should be_true
@@ -116,13 +148,14 @@ describe "native Latte menu client" do
       result.stdout.should contain("https://bookshelf.caramel")
       result.stdout.should contain("Build error")
       result.stdout.should contain("Terminal session")
-      result.stdout.should contain("logs: #{File.join(fixture.home, "logs/sites/0123456789abcdef")}")
+      logs = File.join(fixture.home, "logs/sites/0123456789abcdef")
+      result.stdout.should contain("logs: #{logs}")
     end
   end
 
   it "rejects an origin that does not match the validated domain" do
     with_menu_fixture do |fixture|
-      fixture.serve(sites: %([{"id":"0123456789abcdef","name":"bookshelf","directory":#{File.join(fixture.home, "bookshelf").to_json},"suffix":"caramel","domain":"bookshelf.caramel","origin":"https://evil.example","upstream":null}]))
+      fixture.serve(sites: bookshelf_sites(fixture, origin: "https://evil.example"))
       result = fixture.check
       result.success?.should be_false
       (result.stdout + result.stderr).downcase.should contain("origin")
@@ -131,7 +164,7 @@ describe "native Latte menu client" do
 
   it "rejects site identifiers that cannot name a log folder" do
     with_menu_fixture do |fixture|
-      fixture.serve(sites: %([{"id":"0123456789ABCDEF","name":"bookshelf","directory":#{File.join(fixture.home, "bookshelf").to_json},"suffix":"caramel","domain":"bookshelf.caramel","origin":"https://bookshelf.caramel","upstream":null}]))
+      fixture.serve(sites: bookshelf_sites(fixture, id: "0123456789ABCDEF"))
       result = fixture.check
       result.success?.should be_false
       (result.stdout + result.stderr).should contain("site identifier")
