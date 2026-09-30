@@ -46,7 +46,7 @@ module Caramel::Frappe
       state = Latte::StateSecurity.ensure_owned_directory(File.join(@root, ".caramel"))
       manifest_path = File.join(state, "assets.json")
       validate_path(manifest_path)
-      previous = File.exists?(manifest_path) ? Hash(String, String).from_json(File.read(manifest_path)) : {} of String => String
+      previous = read_manifest(manifest_path)
       desired = {} of String => String
       sources = {} of String => String
       tree("app/assets").each do |relative, hash|
@@ -58,9 +58,7 @@ module Caramel::Frappe
         sources[path] = relative
       end
       (previous.keys | desired.keys).each do |relative|
-        unless relative.starts_with?("public/assets/") && relative.split('/').none? { |part| part.empty? || part.starts_with?('.') }
-          raise Error.new("Invalid asset manifest")
-        end
+        raise Error.new("Invalid asset manifest") unless published_asset?(relative)
         path = File.join(@root, relative)
         validate_path(path)
         if File.exists?(path)
@@ -85,6 +83,18 @@ module Caramel::Frappe
         temporary.close
         File.delete?(temporary.path)
       end
+    end
+
+    # The asset hashes the last publish wrote; none before the first.
+    private def read_manifest(path : String) : Hash(String, String)
+      return {} of String => String unless File.exists?(path)
+      Hash(String, String).from_json(File.read(path))
+    end
+
+    # A path under public/assets/ with no empty or hidden segment.
+    private def published_asset?(relative : String) : Bool
+      relative.starts_with?("public/assets/") &&
+        relative.split('/').none? { |part| part.empty? || part.starts_with?('.') }
     end
 
     # A public file Frappé did not write: keep it and name the way forward.
