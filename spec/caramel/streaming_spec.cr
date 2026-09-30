@@ -1,4 +1,5 @@
 require "spec"
+require "log/spec"
 require "../../src/caramel"
 
 STREAM_GATE = Channel(Nil).new
@@ -18,9 +19,30 @@ struct StreamingSpecEvents < StreamingSpecAction
   end
 end
 
+struct StreamingSpecTicks < StreamingSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    stream("text/event-stream") { |io| Caramel::SSE.write(io, "tick") }
+  end
+end
+
 module StreamingSpecApp
   Caramel::Router.draw do
     get "/events", StreamingSpecEvents
+    get "/ticks", StreamingSpecTicks
+  end
+end
+
+# A client connection the browser has already closed.
+private class StreamingSpecClosedSocket < IO
+  def read(slice : Bytes) : Int32
+    0
+  end
+
+  def write(slice : Bytes) : Nil
+    raise IO::Error.new("Broken pipe")
   end
 end
 
@@ -56,6 +78,17 @@ describe "Caramel streaming responses" do
       end
     ensure
       server.close
+    end
+  end
+
+  it "treats a client that closed its stream as a disconnect, not an error" do
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    request = HTTP::Request.new("GET", "/ticks", host)
+    response = HTTP::Server::Response.new(StreamingSpecClosedSocket.new)
+    context = HTTP::Server::Context.new(request, response)
+    Log.capture do |logs|
+      streaming_spec_app.call(context)
+      logs.empty
     end
   end
 

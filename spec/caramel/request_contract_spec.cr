@@ -28,7 +28,75 @@ private def input(body : String, method = "POST", path = "/teams", route = {} of
   Caramel::RequestInput.read(HTTP::Request.new(method, path, headers, body)).tap(&.route_params=(route))
 end
 
+private def json_input(body : String,
+                       route = {} of String => String) : Caramel::RequestInput
+  headers = HTTP::Headers{"Content-Type" => "application/json"}
+  request = HTTP::Request.new("POST", "/teams", headers, body)
+  Caramel::RequestInput.read(request).tap(&.route_params=(route))
+end
+
 describe Caramel::RequestContract do
+  it "binds a JSON object whose members have their fields' JSON types" do
+    contract = ScalarContract.parse(json_input(<<-JSON))
+      {
+        "count": -23,
+        "total": 9223372036854775807,
+        "active": false,
+        "score": 1.5e1,
+        "published_at": "2026-09-19T14:30:00+02:00",
+        "note": null
+      }
+      JSON
+    contract.valid?.should be_true
+    contract.count.should eq(-23)
+    contract.total.should eq(Int64::MAX)
+    contract.active.should be_false
+    contract.score.should eq(15.0)
+    contract.note.should be_nil
+    contract.published_at.should eq(Time.utc(2026, 9, 19, 12, 30))
+
+    team_body = %({"seats": 3, "name": "Owls", "plan": null})
+    team = TeamContract.parse(json_input(team_body, {"id" => "7"}))
+    team.valid?.should be_true
+    {team.id, team.plan, team.archived}.should eq({7_i64, "free", false})
+  end
+
+  it "refuses mistyped and unknown JSON members, and a body that is not an object" do
+    contract = ScalarContract.parse(json_input(<<-JSON))
+      {
+        "count": "5",
+        "total": 1.5,
+        "active": "true",
+        "score": true,
+        "published_at": 1,
+        "note": ["x"],
+        "extra": null
+      }
+      JSON
+    contract.errors.should eq({
+      "count"        => ["must be a JSON number"],
+      "total"        => ["must be a valid Int64"],
+      "active"       => ["must be a JSON boolean"],
+      "score"        => ["must be a JSON number"],
+      "published_at" => ["must be a JSON string"],
+      "note"         => ["must be a JSON string"],
+      "_base"        => ["Unknown field: extra"],
+    })
+
+    twice = %({"count": 1, "total": 1, "active": true, "total": 2})
+    duplicated = ScalarContract.parse(json_input(twice))
+    duplicated.errors["_base"].should eq(["Duplicate field: total"])
+    listed = ScalarContract.parse(json_input("[1]"))
+    listed.errors["_base"].should contain("Expected a JSON object")
+    named = AvatarContract.parse(json_input(%({"avatar": "me.png"})))
+    named.errors["avatar"].should eq(["must be a file"])
+
+    # A route parameter counts as a member.
+    body = %({"id": 8, "seats": 3, "name": "Owls"})
+    routed = TeamContract.parse(json_input(body, {"id" => "7"}))
+    routed.errors["_base"].should eq(["Duplicate field: id"])
+  end
+
   it "parses the documented scalar grammar and treats blank nilable fields as nil" do
     contract = ScalarContract.parse(input("count=-23&total=9223372036854775807&active=false&score=&note=+"))
     contract.valid?.should be_true

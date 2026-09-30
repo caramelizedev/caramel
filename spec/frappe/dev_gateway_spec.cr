@@ -88,6 +88,44 @@ describe Caramel::Frappe::DevGateway do
     end
   end
 
+  it "forwards bodiless responses without reading or decorating a body" do
+    directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
+    Dir.mkdir(directory, 0o700)
+    socket_path = File.join(directory, "app.sock")
+    page = "<!DOCTYPE html><body>page</body>"
+    upstream = HTTP::Server.new do |context|
+      context.response.headers["Content-Type"] = "text/html; charset=utf-8"
+      case context.request.path
+      when "/notes/1" then context.response.status_code = 204
+      when "/cached"  then context.response.status_code = 304
+      else                 context.response.print(page)
+      end
+    end
+    upstream.bind_unix(socket_path)
+    spawn { upstream.listen }
+    begin
+      gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+      gateway.ready(socket_path)
+      headers = HTTP::Headers{"Host" => "bookshelf.caramel"}
+      bodiless = {"DELETE" => {"/notes/1", 204}, "GET" => {"/cached", 304}}
+      bodiless.each do |method, (path, status)|
+        response = gateway.handle(HTTP::Request.new(method, path, headers))
+        response.status.should eq(status)
+        response.body.should eq("")
+        response.headers["Content-Length"]?.should be_nil
+      end
+      head = gateway.handle(HTTP::Request.new("HEAD", "/page", headers))
+      head.status.should eq(200)
+      head.body.should eq("")
+      head.headers["Content-Length"].should eq(page.bytesize.to_s)
+      gateway.state.should eq("ready")
+    ensure
+      upstream.close
+      File.delete?(socket_path)
+      Dir.delete(directory)
+    end
+  end
+
   it "streams upstream event streams without buffering them" do
     directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
     Dir.mkdir(directory, 0o700)

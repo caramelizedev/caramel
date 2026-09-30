@@ -1,5 +1,6 @@
 require "../../sugar_orm"
 require "./job"
+require "./hooks"
 
 module Caramel::ColdBrew
   # A job row a worker has locked for one run; `attempts` includes this run.
@@ -56,15 +57,21 @@ module Caramel::ColdBrew
       UPDATE caramel_jobs
       SET run_at = now() + make_interval(secs => $3), locked_at = NULL, locked_by = NULL, last_error = $4
       WHERE id = $1 AND enqueued_at = $2
+      RETURNING queue, run_at
       SQL
 
     FAIL = <<-SQL
       UPDATE caramel_jobs
       SET failed_at = now(), locked_at = NULL, locked_by = NULL, last_error = $3
       WHERE id = $1 AND enqueued_at = $2
+      RETURNING queue, failed_at
       SQL
 
     CLAIMED = {id: Int64, enqueued_at: Time, class_name: String, payload: String, attempts: Int32}
+
+    # What a retry or a failure returns about the row it wrote.
+    RESCHEDULED = {queue: String, run_at: Time}
+    FAILED      = {queue: String, failed_at: Time}
 
     def self.push(queue : String, class_name : String, payload : String, run_at : Time?, priority : Int32) : Int64
       SugarORM.sql(PUSH, queue, class_name, payload, priority, run_at, as: {id: Int64}).first[:id]
@@ -86,8 +93,8 @@ module Caramel::ColdBrew
 
     # Runs `perform` and marks the job finished in one transaction, so the
     # job's writes and its completion commit together. On an exception the
-    # transaction rolls back and the job is rescheduled or failed; the error
-    # is returned.
+    # transaction rolls back, the job is rescheduled or failed, and the
+    # lifecycle hooks see the transition; the error is returned.
     def self.run(job : Claim) : Exception?
       finished = false
       SugarORM::Repo.transaction do
@@ -99,18 +106,40 @@ module Caramel::ColdBrew
       finish(job) unless finished
       nil
     rescue error
-      record_failure(job, error)
+      if event = record_failure(job, error)
+        ColdBrew.notify(event)
+      end
       error
     end
 
-    def self.record_failure(job : Claim, error : Exception) : Nil
-      message = describe(error)
+    # Reschedules or fails the job and returns the transition, which is
+    # durable once this returns outside a transaction. Nil when the row is gone.
+    def self.record_failure(job : Claim, error : Exception) : Transition?
       rule = Retry.rule_for(Job.__cold_brew_lineage(job.class_name), error)
       if error.is_a?(UnknownJob) || job.attempts >= rule.attempts
-        SugarORM.sql_exec(FAIL, job.id, job.enqueued_at, message)
+        give_up(job, error)
       else
-        SugarORM.sql_exec(RETRY, job.id, job.enqueued_at, rule.delay(job.attempts).total_seconds, message)
+        reschedule(job, error, after: rule.delay(job.attempts))
       end
+    end
+
+    private def self.reschedule(job : Claim, error : Exception,
+                                after delay : Time::Span) : RetryScheduled?
+      values = {job.id, job.enqueued_at, delay.total_seconds, describe(error)}
+      row = SugarORM.sql(RETRY, *values, as: RESCHEDULED).first? || return
+      RetryScheduled.new(
+        id: job.id, queue: row[:queue], class_name: job.class_name,
+        attempts: job.attempts, run_at: row[:run_at], error_class: error.class.name,
+      )
+    end
+
+    private def self.give_up(job : Claim, error : Exception) : JobFailed?
+      values = {job.id, job.enqueued_at, describe(error)}
+      row = SugarORM.sql(FAIL, *values, as: FAILED).first? || return
+      JobFailed.new(
+        id: job.id, queue: row[:queue], class_name: job.class_name,
+        attempts: job.attempts, failed_at: row[:failed_at], error_class: error.class.name,
+      )
     end
 
     # The class, message and the first backtrace lines, within ERROR_LIMIT.

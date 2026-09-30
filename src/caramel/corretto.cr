@@ -1,6 +1,8 @@
 require "spec"
 require "http/client"
 require "socket"
+require "file_utils"
+require "random/secure"
 require "../caramel"
 require "./outbound"
 require "./corretto/worker"
@@ -22,6 +24,7 @@ module Corretto
   end
 
   @@worker : Worker? = nil
+  @@tmpdir : String? = nil
   @@build : Proc(DB::Database, Caramel::Application)? = nil
   @@application : {DB::Database, Caramel::Application}? = nil
   @@wire : Wire? = nil
@@ -72,7 +75,11 @@ module Corretto
         STDERR.puts "\nCorretto: #{item.file}:#{item.line} changed the database catalog outside its transaction; worker #{index} was reset from the migrated template. Tag the example `catalog` when it must run DDL."
       end
     ensure
-      wire.reset
+      begin
+        wire.reset
+      ensure
+        clean_tmpdir
+      end
     end
     Spec.after_suite do
       worker.close
@@ -86,6 +93,24 @@ module Corretto
     worker = @@worker || raise Error.new("Call Corretto.configure in spec/spec_helper.cr before Corretto.session")
     connection = worker.connection
     yield Client.new(application(worker)), connection
+  end
+
+  # A private directory for the files this example writes, such as uploads
+  # the application stores: rolling back the example's transaction does not
+  # undo filesystem writes, so Corretto removes the directory when the
+  # example ends. Point the application's storage at it in the example.
+  def self.tmpdir : String
+    @@tmpdir ||= begin
+      path = File.join(Dir.tempdir, "corretto-#{Random::Secure.hex(8)}")
+      Dir.mkdir(path, 0o700)
+      path
+    end
+  end
+
+  # :nodoc:
+  def self.clean_tmpdir : Nil
+    @@tmpdir.try { |path| FileUtils.rm_rf(path) }
+    @@tmpdir = nil
   end
 
   # Stubs `url` (any method unless `method` is given) at the wire proxy until

@@ -15,7 +15,7 @@ Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configur
 - The macOS resolver/port installer and `latte trust install` are applied on the development machine: `https://<site>.caramel` resolves through `/etc/resolver/caramel`, reaches Caddy on port 443 through the launchd relay, and is trusted by Safari and curl without flags.
 - Sites can instead choose the `.localhost` suffix, which macOS and browsers resolve without a resolver entry ([ADR 0006](docs/decisions/0006-browser-acceptance-and-localhost-sites.md)).
 
-The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts, actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
+The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts that bind forms and JSON objects, per-action ingress for signed webhooks and token APIs ([ADR 0020](docs/decisions/0020-action-ingress-and-json-bodies.md)), actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
 
 - The CLI creates and restores projects, generates typed resources, derives and applies migrations, and runs Corretto specs (`frappe corretto`) in rolled-back savepoints against per-worker Latte databases.
 - Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs.
@@ -28,10 +28,11 @@ Frappé's agent surface (RFC-0005) is one command table: `frappe --help`, `frapp
 
 `frappe lint` checks an application against Caramel's RFC-0008 rule set, Ameba 1.7.0 plus Caramel's service-noun rule, printing Ameba's report on a terminal or MRDP `ERR LINT_<RULE>` lines for agents; `frappe format` runs the pinned formatter ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)). The framework follows the same rule set.
 
-Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`.
+Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enqueued inside the business transaction, `FOR UPDATE SKIP LOCKED` worker fibers with per-job and global `retry_on`, daily-partitioned `caramel_jobs` with a maintenance fiber, leased recurring schedules, LISTEN/NOTIFY PubSub for server-sent events, an UNLOGGED cache, and a synchronous `drain_queue!` for specs. Generated apps include its system migrations and run its workers from `serve`, or from a worker-only `work` process. `Caramel::ColdBrew.status` and hooks that run after a retry or failure is written report jobs without querying Cold Brew's tables ([ADR 0019](docs/decisions/0019-cold-brew-status-hooks-and-work.md)).
 
 - [Caramel RFCs](docs/rfc.md)
 - [RFC implementation status and ranked gaps](docs/research/rfc-implementation-status.md)
+- [Views: elements, attributes, escaping and trusted HTML](docs/views.md)
 - [SugarORM and request contract APIs, verification and limits](docs/research/typed-application-apis.md)
 - [Frappé generated-project workflow and current limits](docs/research/frappe-workflow.md)
 - [Development watcher, process ownership and acceptance limits](docs/research/frappe-development.md)
