@@ -117,7 +117,6 @@ Layout/LineLength:
     - "spec/latte/watcher_spec.cr"
     - "spec/latte_integration/postgres_spec.cr"
     - "spec/latte_integration/supervisor_spec.cr"
-    - "spec/native/local_integration_spec.cr"
     - "spec/native/port_relay_spec.cr"
     - "spec/native/toolchain_installer_spec.cr"
     - "spec/release/cut_spec.cr"
