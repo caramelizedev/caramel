@@ -9,8 +9,12 @@ module Caramel
     NAME = /\A[A-Z][A-Za-z0-9]{0,63}\z/
 
     def self.tag(component : String, props) : HTML::Safe
-      raise ArgumentError.new("island component must be a PascalCase name: #{component}") unless component.matches?(NAME)
-      HTML::Safe.new(%(<caramel-island component="#{component}" props="#{HTML.escape(props.to_json)}" hx-morph-skip-children></caramel-island>))
+      unless component.matches?(NAME)
+        raise ArgumentError.new("island component must be a PascalCase name: #{component}")
+      end
+      escaped = HTML.escape(props.to_json)
+      attributes = %(component="#{component}" props="#{escaped}" hx-morph-skip-children)
+      HTML::Safe.new(%(<caramel-island #{attributes}></caramel-island>))
     end
   end
 end
