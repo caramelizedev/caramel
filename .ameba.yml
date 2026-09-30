@@ -150,7 +150,6 @@ Layout/LineLength:
     - "spec/sugar_orm/ddl_spec.cr"
     - "spec/sugar_orm/differ_spec.cr"
     - "spec/sugar_orm/linter_spec.cr"
-    - "spec/sugar_orm/query_spec.cr"
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
     - "src/caramel/cache.cr"
