@@ -173,7 +173,6 @@ Layout/LineLength:
     - "src/caramel/http/request_context.cr"
     - "src/caramel/http/request_input.cr"
     - "src/caramel/http/router.cr"
-    - "src/caramel/outbound.cr"
     - "src/caramel/response.cr"
     - "src/frappe.cr"
     - "src/frappe/check.cr"
