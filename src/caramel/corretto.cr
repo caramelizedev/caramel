@@ -75,8 +75,11 @@ module Corretto
         STDERR.puts "\nCorretto: #{item.file}:#{item.line} changed the database catalog outside its transaction; worker #{index} was reset from the migrated template. Tag the example `catalog` when it must run DDL."
       end
     ensure
-      wire.reset
-      clean_tmpdir
+      begin
+        wire.reset
+      ensure
+        clean_tmpdir
+      end
     end
     Spec.after_suite do
       worker.close

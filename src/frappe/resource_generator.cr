@@ -234,6 +234,7 @@ module Caramel::Frappe
         next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
         content = select_lines(File.read(path), actions)
         tokens.each { |key, value| relative = relative.gsub(key, value); content = content.gsub(key, value) }
+        content = without_unread_row(content) if relative.starts_with?("spec/requests/")
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
@@ -309,6 +310,15 @@ module Caramel::Frappe
     private def keep?(kind : String, names : String, actions : Array(String)) : Bool
       named = names.split(',').any? { |action| actions.includes?(action) }
       kind == "only" ? named : !named
+    end
+
+    # The request spec loads the saved row for its update and changeset
+    # checks. A resource that has neither must not load it: lint refuses a
+    # variable nothing reads.
+    private def without_unread_row(spec : String) : String
+      return spec if spec.includes?("persisted.")
+
+      spec.sub(/(?m)^ *persisted = .*\n/, "")
     end
 
     # The generated request spec's description of what it exercises.

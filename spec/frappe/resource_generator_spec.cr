@@ -196,6 +196,17 @@ describe Caramel::Frappe::ResourceGenerator do
     end
   end
 
+  it "loads the saved row in the request spec only when a check reads it" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      fields = ["points:int32", "rating:float64?"]
+      generator.generate(project, "Score", fields,
+        only: "create,show", version: 20260919000008_i64)
+      spec = File.read(File.join(project.root, "spec/requests/scores_spec.cr"))
+      spec.should_not contain("persisted")
+    end
+  end
+
   it "supports every scalar, nullable values and explicit irregular plurals" do
     resource_project do |project, package|
       Caramel::Frappe::ResourceGenerator.new(package).generate(project, "Person", ["name:string", "age:int32", "total:int64", "active:bool", "rating:float64?", "joined_at:time?"], plural: "people", version: 20260919000003_i64)

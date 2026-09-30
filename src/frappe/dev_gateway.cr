@@ -148,7 +148,8 @@ module Caramel::Frappe
         client.exec(request.method, request.resource, headers, request.body) do |upstream|
           returned = upstream.headers.dup
           remove_hop_headers(returned)
-          # A HEAD answer keeps the length of the body a GET would send.
+          # A HEAD answer keeps the upstream's length: it describes the app's
+          # page, before the development script a GET would add.
           returned.delete("Content-Length") unless request.method == "HEAD"
           returned["Cache-Control"] = "no-store"
           if bodiless?(request, upstream.status_code)
