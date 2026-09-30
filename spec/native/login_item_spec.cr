@@ -16,15 +16,22 @@ describe "Latte login item" do
     survivor = nil
     begin
       item.install
-      Caramel::Checks.wait_until(10.seconds, 50.milliseconds) { File.exists?(ran) && File.exists?(child) }.should be_true
+      started = Caramel::Checks.wait_until(10.seconds, 50.milliseconds) do
+        File.exists?(ran) && File.exists?(child)
+      end
+      started.should be_true
       survivor = File.read(child).strip.to_i64
       # The job itself exits right away; launchd must not take the child with it.
-      Caramel::Checks.wait_until(5.seconds, 50.milliseconds) { !Process.exists?(File.read(ran).strip.to_i64) }.should be_true
+      exited = Caramel::Checks.wait_until(5.seconds, 50.milliseconds) do
+        !Process.exists?(File.read(ran).strip.to_i64)
+      end
+      exited.should be_true
       sleep 500.milliseconds
       Process.exists?(survivor).should be_true
       item.uninstall.should be_true
       File.exists?(item.plist).should be_false
-      Caramel::Checks.run(["/bin/launchctl", "print", "#{item.domain}/#{label}"], timeout: 10.seconds).success?.should be_false
+      lookup = ["/bin/launchctl", "print", "#{item.domain}/#{label}"]
+      Caramel::Checks.run(lookup, timeout: 10.seconds).success?.should be_false
       Process.exists?(survivor).should be_true
       item.uninstall.should be_false
     ensure

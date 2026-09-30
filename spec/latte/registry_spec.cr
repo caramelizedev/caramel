@@ -132,8 +132,11 @@ describe Caramel::Latte::Site do
       local = Caramel::Latte::Site.new("bookshelf", root, suffix: "localhost")
       local.domain.should eq("bookshelf.localhost")
       local.id.should_not eq(site.id)
-      expect_raises(ArgumentError) { Caramel::Latte::Site.new("bookshelf", root, suffix: "example") }
-      expect_raises(ArgumentError) { Caramel::Latte::Site.new("bookshelf", root, suffix: "local") }
+      %w[example local].each do |rejected|
+        expect_raises(ArgumentError) do
+          Caramel::Latte::Site.new("bookshelf", root, suffix: rejected)
+        end
+      end
     ensure
       remove_latte_root(root)
     end
@@ -196,7 +199,9 @@ describe Caramel::Latte::Registry do
       original = %({"version":2,"sites":[],"aliases":[]})
       File.write(registry.registry_file, original)
       File.chmod(registry.registry_file, 0o600)
-      expect_raises(Caramel::Latte::StateFormat::Newer, "written by a newer Caramel (format 2); Caramel #{Caramel::VERSION} reads format 1") { registry.list }
+      newer = "written by a newer Caramel (format 2); " \
+              "Caramel #{Caramel::VERSION} reads format 1"
+      expect_raises(Caramel::Latte::StateFormat::Newer, newer) { registry.list }
       File.read(registry.registry_file).should eq(original)
 
       malformed = "{not json"
@@ -225,11 +230,14 @@ describe Caramel::Latte::Registry do
       File.write(socket, "not a socket")
       File.chmod(socket, 0o600)
 
+      outside = File.join(root, "outside.sock")
+      traversal = File.join(socket_directory, "..", "other.sock")
+      link = File.join(socket_directory, "alias.sock")
       expect_raises(ArgumentError) { registry.validate_upstream(site.id, socket) }
-      expect_raises(ArgumentError) { registry.validate_upstream(site.id, File.join(root, "outside.sock")) }
-      expect_raises(ArgumentError) { registry.validate_upstream(site.id, File.join(socket_directory, "..", "other.sock")) }
-      File.symlink(socket, File.join(socket_directory, "alias.sock"))
-      expect_raises(ArgumentError) { registry.validate_upstream(site.id, File.join(socket_directory, "alias.sock")) }
+      expect_raises(ArgumentError) { registry.validate_upstream(site.id, outside) }
+      expect_raises(ArgumentError) { registry.validate_upstream(site.id, traversal) }
+      File.symlink(socket, link)
+      expect_raises(ArgumentError) { registry.validate_upstream(site.id, link) }
       File.chmod(socket, 0o666)
       expect_raises(ArgumentError) { registry.validate_upstream(site.id, socket) }
 

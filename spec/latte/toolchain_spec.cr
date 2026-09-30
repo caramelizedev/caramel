@@ -26,18 +26,26 @@ end
 describe Caramel::Latte::Toolchain do
   it "prefers CARAMEL_TOOLCHAIN_ROOT, then the checkout's .caramel-toolchain" do
     with_checkout do |checkout, root|
-      Caramel::Latte::Toolchain.locate(checkout, {} of String => String).should be_nil
+      none = {} of String => String
+      pointed = {root, ".caramel-toolchain"}
+      Caramel::Latte::Toolchain.locate(checkout, none).should be_nil
       point(checkout, root)
-      Caramel::Latte::Toolchain.locate(checkout, {} of String => String).should eq({root, ".caramel-toolchain"})
-      Caramel::Latte::Toolchain.locate(checkout, {"CARAMEL_TOOLCHAIN_ROOT" => "/elsewhere"}).should eq({"/elsewhere", "CARAMEL_TOOLCHAIN_ROOT"})
-      Caramel::Latte::Toolchain.locate(checkout, {"CARAMEL_TOOLCHAIN_ROOT" => ""}).should eq({root, ".caramel-toolchain"})
-      Caramel::Latte::Toolchain.for_checkout(checkout, {} of String => String).root.should eq(File.realpath(root))
+      Caramel::Latte::Toolchain.locate(checkout, none).should eq(pointed)
+      override = {"CARAMEL_TOOLCHAIN_ROOT" => "/elsewhere"}
+      elsewhere = {"/elsewhere", "CARAMEL_TOOLCHAIN_ROOT"}
+      Caramel::Latte::Toolchain.locate(checkout, override).should eq(elsewhere)
+      empty_override = {"CARAMEL_TOOLCHAIN_ROOT" => ""}
+      Caramel::Latte::Toolchain.locate(checkout, empty_override).should eq(pointed)
+      installed = File.realpath(root)
+      Caramel::Latte::Toolchain.for_checkout(checkout, none).root.should eq(installed)
     end
   end
 
   it "names the fix when a checkout has no toolchain" do
     with_checkout do |checkout, _|
-      expect_raises(Caramel::Latte::Toolchain::Unavailable, "No Caramel toolchain is installed for #{checkout}. Run scripts/install-toolchain.") do
+      fix = "No Caramel toolchain is installed for #{checkout}. " \
+            "Run scripts/install-toolchain."
+      expect_raises(Caramel::Latte::Toolchain::Unavailable, fix) do
         Caramel::Latte::Toolchain.for_checkout(checkout, {} of String => String)
       end
     end
@@ -45,14 +53,15 @@ describe Caramel::Latte::Toolchain do
 
   it "refuses a pointer that someone else could redirect" do
     with_checkout do |checkout, root|
+      unsafe = "must be a regular file you own that no one else can write"
       point(checkout, root, 0o666)
-      expect_raises(Caramel::Latte::Toolchain::Unavailable, "must be a regular file you own that no one else can write") do
+      expect_raises(Caramel::Latte::Toolchain::Unavailable, unsafe) do
         Caramel::Latte::Toolchain.locate(checkout, {} of String => String)
       end
       File.delete(File.join(checkout, ".caramel-toolchain"))
       real = point(File.dirname(root), root)
       File.symlink(real, File.join(checkout, ".caramel-toolchain"))
-      expect_raises(Caramel::Latte::Toolchain::Unavailable, "must be a regular file you own that no one else can write") do
+      expect_raises(Caramel::Latte::Toolchain::Unavailable, unsafe) do
         Caramel::Latte::Toolchain.locate(checkout, {} of String => String)
       end
     end
@@ -61,7 +70,8 @@ describe Caramel::Latte::Toolchain do
   it "refuses a pointer to a relative path" do
     with_checkout do |checkout, _|
       point(checkout, "toolchains/dev")
-      expect_raises(Caramel::Latte::Toolchain::Unavailable, "must name an absolute toolchain directory") do
+      relative = "must name an absolute toolchain directory"
+      expect_raises(Caramel::Latte::Toolchain::Unavailable, relative) do
         Caramel::Latte::Toolchain.locate(checkout, {} of String => String)
       end
     end

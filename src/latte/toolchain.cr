@@ -21,7 +21,10 @@ module Caramel::Latte
       getter expected_version : String?
       getter actual_version : String?
 
-      def initialize(@expected : Int32, @actual : Int32?, @expected_version : String? = nil, @actual_version : String? = nil)
+      def initialize(@expected : Int32,
+                     @actual : Int32?,
+                     @expected_version : String? = nil,
+                     @actual_version : String? = nil)
         detail = if @actual_version
                    "found PostgreSQL #{@actual_version}"
                  elsif @actual
@@ -49,7 +52,8 @@ module Caramel::Latte
     # Where a checkout's toolchain lives, and why: CARAMEL_TOOLCHAIN_ROOT when
     # set (checks and deliberate overrides), otherwise the checkout's
     # .caramel-toolchain. Nil when neither exists.
-    def self.locate(checkout : String?, env : ENV.class | Hash(String, String) = ENV) : {String, String}?
+    def self.locate(checkout : String?,
+                    env : ENV.class | Hash(String, String) = ENV) : {String, String}?
       if (value = env["CARAMEL_TOOLCHAIN_ROOT"]?) && !value.empty?
         return {value, "CARAMEL_TOOLCHAIN_ROOT"}
       end
@@ -58,18 +62,28 @@ module Caramel::Latte
       info = File.info?(pointer, follow_symlinks: false)
       return unless info
       # Whoever can rewrite the pointer chooses the compiler this user runs.
-      unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64 && (info.permissions.value & 0o022) == 0
-        raise Unavailable.new("#{pointer} must be a regular file you own that no one else can write")
+      owned = info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64
+      unless owned && (info.permissions.value & 0o022) == 0
+        message = "#{pointer} must be a regular file you own that no one else can write"
+        raise Unavailable.new(message)
       end
       root = File.read(pointer).lines.first?.try(&.strip) || ""
-      raise Unavailable.new("#{pointer} must name an absolute toolchain directory") unless Path[root].absolute?
+      unless Path[root].absolute?
+        raise Unavailable.new("#{pointer} must name an absolute toolchain directory")
+      end
       {root, POINTER}
     end
 
     # A checkout's toolchain (see `.locate`).
-    def self.for_checkout(checkout : String? = executable_checkout, env : ENV.class | Hash(String, String) = ENV) : Toolchain
+    def self.for_checkout(checkout : String? = executable_checkout,
+                          env : ENV.class | Hash(String, String) = ENV) : Toolchain
       located = locate(checkout, env)
-      raise Unavailable.new("No Caramel toolchain is installed#{checkout ? " for #{checkout}" : ""}. Run scripts/install-toolchain.") unless located
+      unless located
+        where = checkout ? " for #{checkout}" : ""
+        message = "No Caramel toolchain is installed#{where}. " \
+                  "Run scripts/install-toolchain."
+        raise Unavailable.new(message)
+      end
       new(located[0])
     end
 
@@ -79,8 +93,12 @@ module Caramel::Latte
         info = File.info(root, follow_symlinks: false)
         raise Unavailable.new("toolchain root must not be a symlink") if info.symlink?
         raise Unavailable.new("toolchain root must be a directory") unless info.directory?
-        raise Unavailable.new("toolchain root has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
-        raise Unavailable.new("toolchain root must be private") if (info.permissions.value & 0o077) != 0
+        unless info.owner_id.to_i64? == LibC.getuid.to_i64
+          raise Unavailable.new("toolchain root has foreign ownership")
+        end
+        if (info.permissions.value & 0o077) != 0
+          raise Unavailable.new("toolchain root must be private")
+        end
         @root = File.realpath(root)
       rescue File::Error
         raise Unavailable.new("managed toolchain root is unavailable: #{root}")
@@ -140,7 +158,13 @@ module Caramel::Latte
       timeout : Time::Span = 30.seconds,
       output_limit : Int32 = ProcessRunner::MAX_OUTPUT_BYTES,
     ) : ProcessResult
-      ProcessRunner.run(command(tool, args), input: input, env: environment(env), timeout: timeout, output_limit: output_limit)
+      ProcessRunner.run(
+        command(tool, args),
+        input: input,
+        env: environment(env),
+        timeout: timeout,
+        output_limit: output_limit,
+      )
     end
 
     def postgres_major : Int32
@@ -150,14 +174,14 @@ module Caramel::Latte
     end
 
     def postgres_version : String
-      result = ProcessRunner.run([postgres, "--version"], env: environment, timeout: 5.seconds, output_limit: 4 * 1024)
+      result = version_report
       actual = parse_version("#{result.stdout}\n#{result.stderr}") rescue nil
       return actual if result.success? && actual
       raise VersionMismatch.new(POSTGRES_MAJOR, nil, POSTGRES_VERSION, nil)
     end
 
     def verify_postgres_version!(expected : String = POSTGRES_VERSION) : String
-      result = ProcessRunner.run([postgres, "--version"], env: environment, timeout: 5.seconds, output_limit: 4 * 1024)
+      result = version_report
       actual = parse_version("#{result.stdout}\n#{result.stderr}") rescue nil
       return actual if result.success? && actual && actual == expected
       actual_major = actual.try { |value| major_of_version(value) }
@@ -167,7 +191,9 @@ module Caramel::Latte
     def verify_postgres_major!(expected : Int32 = POSTGRES_MAJOR) : Int32
       actual_version = verify_postgres_version!(POSTGRES_VERSION)
       actual = parse_major(actual_version)
-      raise VersionMismatch.new(expected, actual, "#{expected}.x", actual_version) unless actual == expected
+      unless actual == expected
+        raise VersionMismatch.new(expected, actual, "#{expected}.x", actual_version)
+      end
       actual
     end
 
@@ -185,6 +211,16 @@ module Caramel::Latte
         extra.each { |key, value| values[key] = value }
       end
       values
+    end
+
+    # What `postgres --version` prints, within 5 seconds and 4 KiB.
+    private def version_report : ProcessResult
+      ProcessRunner.run(
+        [postgres, "--version"],
+        env: environment,
+        timeout: 5.seconds,
+        output_limit: 4 * 1024,
+      )
     end
 
     private def executable_for(tool : Symbol) : String
@@ -210,7 +246,9 @@ module Caramel::Latte
         info = File.info(path, follow_symlinks: false)
         raise Unavailable.new("managed executable is a symlink") if info.symlink?
         raise Unavailable.new("managed executable is not a regular file") unless info.file?
-        raise Unavailable.new("managed executable has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
+        unless info.owner_id.to_i64? == LibC.getuid.to_i64
+          raise Unavailable.new("managed executable has foreign ownership")
+        end
         if (info.permissions.value & 0o022) != 0
           begin
             # The selected provider root is explicitly owned by this user.
@@ -223,14 +261,20 @@ module Caramel::Latte
             raise Unavailable.new("managed executable is writable by another user")
           end
         end
-        raise Unavailable.new("managed executable is writable by another user") if (info.permissions.value & 0o022) != 0
-        raise Unavailable.new("managed executable is not executable") if (info.permissions.value & 0o111) == 0
+        if (info.permissions.value & 0o022) != 0
+          raise Unavailable.new("managed executable is writable by another user")
+        end
+        if (info.permissions.value & 0o111) == 0
+          raise Unavailable.new("managed executable is not executable")
+        end
         # Some package providers publish 0775 binaries. They are still safe
         # under Latte's boundary when the provider root itself is owner-only;
         # no other user can traverse into that root to modify or execute the
         # binary. The private-root check is performed during initialization.
         root_info = File.info(@root, follow_symlinks: false)
-        raise Unavailable.new("toolchain root must remain private") if root_info.owner_id.to_i64? != LibC.getuid.to_i64 || (root_info.permissions.value & 0o077) != 0
+        foreign = root_info.owner_id.to_i64? != LibC.getuid.to_i64
+        shared = (root_info.permissions.value & 0o077) != 0
+        raise Unavailable.new("toolchain root must remain private") if foreign || shared
       rescue File::Error
         raise Unavailable.new("managed executable is unavailable: #{relative}")
       end

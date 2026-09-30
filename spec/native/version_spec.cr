@@ -8,8 +8,10 @@ describe "the release version" do
     version = YAML.parse(File.read(File.join(Caramel::Checks::REPO, "shard.yml")))["version"].as_s
     Caramel::VERSION.should eq(version)
     plist = File.join(Caramel::Checks::REPO, "bin/Latte.app/Contents/Info.plist")
+    short_version = version.split('-').first
     %w[CFBundleShortVersionString CFBundleVersion].each do |key|
-      Caramel::Checks.run(["/usr/bin/plutil", "-extract", key, "raw", "-o", "-", plist], timeout: 10.seconds).stdout.strip.should eq(version.split('-').first)
+      extract = ["/usr/bin/plutil", "-extract", key, "raw", "-o", "-", plist]
+      Caramel::Checks.run(extract, timeout: 10.seconds).stdout.strip.should eq(short_version)
     end
   end
 end

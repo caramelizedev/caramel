@@ -76,7 +76,8 @@ describe "native CoreDNS installer" do
       File.info(binary).permissions.value.should eq(0o755)
       File.info(File.join(target, "receipt.json")).permissions.value.should eq(0o600)
       receipt = File.read(File.join(target, "receipt.json"))
-      JSON.parse(receipt)["binary_sha256"].as_s.should eq(Digest::SHA256.hexdigest("verified executable"))
+      digest = Digest::SHA256.hexdigest("verified executable")
+      JSON.parse(receipt)["binary_sha256"].as_s.should eq(digest)
       File.delete(archive)
       second = run_coredns(root, archive, manifest)
       second.success?.should be_true
@@ -91,7 +92,8 @@ describe "native CoreDNS installer" do
       File.write(binary, "tampered")
       result = run_coredns(root, archive, manifest)
       result.success?.should be_false
-      result.stderr.should contain("existing CoreDNS installation failed verification; preserved for inspection")
+      result.stderr.should contain("existing CoreDNS installation failed verification; " \
+                                   "preserved for inspection")
       File.read(binary).should eq("tampered")
     end
   end

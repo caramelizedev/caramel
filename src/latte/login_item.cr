@@ -32,18 +32,23 @@ module Caramel::Latte
     def render : String
       <<-PLIST
         <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
           <key>Label</key><string>#{HTML.escape(@label)}</string>
           <key>ProgramArguments</key>
-          <array>#{@arguments.map { |argument| "<string>#{HTML.escape(argument)}</string>" }.join}</array>
+          <array>#{program_arguments}</array>
           <key>RunAtLoad</key><true/>
           <key>AbandonProcessGroup</key><true/>
         </dict>
         </plist>
 
         PLIST
+    end
+
+    private def program_arguments : String
+      @arguments.map { |argument| "<string>#{HTML.escape(argument)}</string>" }.join
     end
 
     # Writes the agent and loads it into this login session, replacing an
@@ -53,7 +58,8 @@ module Caramel::Latte
       Dir.mkdir_p(directory, 0o755)
       if info = File.info?(@plist, follow_symlinks: false)
         unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64
-          raise PublicError.new("login_item", "#{@plist} is not a file you own; remove it and try again")
+          message = "#{@plist} is not a file you own; remove it and try again"
+          raise PublicError.new("login_item", message)
         end
       end
       bootout
@@ -64,9 +70,11 @@ module Caramel::Latte
       ensure
         File.delete?(temporary)
       end
-      result = ProcessRunner.run(["/bin/launchctl", "bootstrap", domain, @plist], timeout: 30.seconds)
+      bootstrap = ["/bin/launchctl", "bootstrap", domain, @plist]
+      result = ProcessRunner.run(bootstrap, timeout: 30.seconds)
       unless result.success?
-        raise PublicError.new("login_item", "launchctl could not load #{@plist}: #{result.stderr.strip}")
+        message = "launchctl could not load #{@plist}: #{result.stderr.strip}"
+        raise PublicError.new("login_item", message)
       end
     end
 
@@ -80,7 +88,8 @@ module Caramel::Latte
     end
 
     private def bootout : Bool
-      ProcessRunner.run(["/bin/launchctl", "bootout", "#{domain}/#{@label}"], timeout: 30.seconds).success?
+      command = ["/bin/launchctl", "bootout", "#{domain}/#{@label}"]
+      ProcessRunner.run(command, timeout: 30.seconds).success?
     end
   end
 end

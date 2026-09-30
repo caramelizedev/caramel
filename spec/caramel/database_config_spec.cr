@@ -71,21 +71,15 @@ describe Caramel::Database::Config do
   end
 
   it "accepts an explicit pool bound from one through thirty two" do
-    config = Caramel::Database::Config.parse(
-      "postgresql://alice:secret@db.example.test/books", pool_size: 7
-    )
+    url = "postgresql://alice:secret@db.example.test/books"
+    config = Caramel::Database::Config.parse(url, pool_size: 7)
 
     config.pool_options.initial_pool_size.should eq(1)
     config.pool_options.max_pool_size.should eq(7)
     config.pool_options.max_idle_pool_size.should eq(7)
 
-    expect_raises(ArgumentError) do
-      Caramel::Database::Config.parse("postgresql://alice:secret@db.example.test/books", pool_size: 0)
-    end
-
-    expect_raises(ArgumentError) do
-      Caramel::Database::Config.parse("postgresql://alice:secret@db.example.test/books", pool_size: 33)
-    end
+    expect_raises(ArgumentError) { Caramel::Database::Config.parse(url, pool_size: 0) }
+    expect_raises(ArgumentError) { Caramel::Database::Config.parse(url, pool_size: 33) }
   end
 
   it "rejects conflicting authority/query addresses and URL fragments" do
