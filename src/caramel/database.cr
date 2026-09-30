@@ -19,6 +19,9 @@ module Caramel
     CONNECT_TIMEOUT_SECONDS = 5.0
     IO_TIMEOUT              = 5.seconds
 
+    # A connection's transport: a Unix socket, or TLS over TCP.
+    private alias Transport = UNIXSocket | OpenSSL::SSL::Socket::Client
+
     record Config,
       host : String,
       port : Int32,
@@ -230,8 +233,12 @@ module Caramel
     # SPEC_DATABASE_URL and SPEC_MIGRATION_DATABASE_URL.
     def self.url(migration : Bool = false) : String
       environment = ENV["CARAMEL_ENV"]? || "production"
-      raise "CARAMEL_ENV must be development, test or production" unless %w[development test production].includes?(environment)
-      key = "#{environment == "test" ? "SPEC_" : ""}#{migration ? "MIGRATION_" : ""}DATABASE_URL"
+      unless %w[development test production].includes?(environment)
+        raise "CARAMEL_ENV must be development, test or production"
+      end
+      prefix = environment == "test" ? "SPEC_" : ""
+      role = migration ? "MIGRATION_" : ""
+      key = "#{prefix}#{role}DATABASE_URL"
       ENV[key]? || raise "Missing database configuration: #{key}"
     end
 
@@ -256,7 +263,8 @@ module Caramel
       end
     end
 
-    private def self.listener_on(socket : UNIXSocket | OpenSSL::SSL::Socket::Client, config : Config) : {PG::Connection, PQ::Connection}
+    private def self.listener_on(socket : Transport,
+                                 config : Config) : {PG::Connection, PQ::Connection}
       pq = PQ::Connection.new(socket, config.conninfo)
       connection = PG::Connection.new(config.connection_options, pq)
       socket.read_timeout = nil
@@ -266,7 +274,8 @@ module Caramel
       raise ex
     end
 
-    private def self.build_connection(config : Config, options : DB::Connection::Options) : PG::Connection
+    private def self.build_connection(config : Config,
+                                      options : DB::Connection::Options) : PG::Connection
       if config.unix_socket?
         connection_from(unix_socket(config), config, options)
       else
@@ -282,7 +291,9 @@ module Caramel
       socket
     end
 
-    private def self.connection_from(socket : UNIXSocket | OpenSSL::SSL::Socket::Client, config : Config, options : DB::Connection::Options) : PG::Connection
+    private def self.connection_from(socket : Transport,
+                                     config : Config,
+                                     options : DB::Connection::Options) : PG::Connection
       connection : PG::Connection? = nil
       begin
         pq = PQ::Connection.new(socket, config.conninfo)
@@ -298,7 +309,8 @@ module Caramel
     # DB::Database installs its setup callback after construction. Running the
     # session setup here keeps the connection and transport in one cleanup
     # scope for both initial and lazily-created pool resources.
-    private def self.close_failed_connection(connection : PG::Connection?, socket : UNIXSocket | OpenSSL::SSL::Socket::Client) : Nil
+    private def self.close_failed_connection(connection : PG::Connection?,
+                                             socket : Transport) : Nil
       connection.try(&.close)
     rescue
     ensure
