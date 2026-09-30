@@ -216,7 +216,6 @@ Layout/LineLength:
     - "src/latte/login_item.cr"
     - "src/latte/postgres.cr"
     - "src/latte/process.cr"
-    - "src/latte/project_status.cr"
     - "src/latte/proxy.cr"
     - "src/latte/registry.cr"
     - "src/latte/server.cr"
