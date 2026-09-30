@@ -241,4 +241,3 @@ Layout/LineLength:
     - "src/sugar_orm/query.cr"
     - "src/sugar_orm/repo.cr"
     - "src/sugar_orm/schema.cr"
-    - "src/sugar_orm/sql.cr"
