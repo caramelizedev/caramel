@@ -90,7 +90,6 @@ Layout/LineLength:
     - "spec/caramel/validate_url_spec.cr"
     - "spec/caramel/view_spec.cr"
     - "spec/cold_brew/job_spec.cr"
-    - "spec/corretto/client_spec.cr"
     - "spec/corretto/mocking_spec.cr"
     - "spec/corretto/wire_spec.cr"
     - "spec/fixtures/dev_retirement.cr"
