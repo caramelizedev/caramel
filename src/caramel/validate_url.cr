@@ -6,7 +6,10 @@ require "../sugar_orm/changeset"
 abstract class SugarORM::Changeset(T)
   # A changed string must be a URL `redirect_external` accepts
   # (`Caramel::ExternalURL`), so what is saved can be redirected to.
-  def validate_url(field : T::Field, message : String = "must be an absolute http or https URL") : Nil
-    string(field) { |value| add_error(field, message) unless Caramel::ExternalURL.valid?(value) }
+  def validate_url(field : T::Field,
+                   message : String = "must be an absolute http or https URL") : Nil
+    string(field) do |value|
+      add_error(field, message) unless Caramel::ExternalURL.valid?(value)
+    end
   end
 end

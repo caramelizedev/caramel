@@ -181,7 +181,6 @@ Layout/LineLength:
     - "src/caramel/outbound.cr"
     - "src/caramel/response.cr"
     - "src/caramel/session.cr"
-    - "src/caramel/validate_url.cr"
     - "src/caramel/version.cr"
     - "src/frappe.cr"
     - "src/frappe/check.cr"
