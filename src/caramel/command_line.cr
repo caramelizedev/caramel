@@ -22,18 +22,61 @@ module Caramel
   end
 
   module CommandLine
-    USAGE = "serve|seed|routes|schema|drift|migrate [--dev-override]|lint [--dev-override]"
+    USAGE = [
+      "serve",
+      "work [--queues=NAMES] [--concurrency=N] [--no-scheduler]",
+      "seed", "routes", "schema", "drift",
+      "migrate [--dev-override]",
+      "lint [--dev-override]",
+    ].join('|')
+
+    # `work`'s flags: `--queues` and `--concurrency` stand in for
+    # CARAMEL_WORKER_QUEUES and CARAMEL_WORKER_CONCURRENCY, which
+    # `ColdBrew.start` validates, and `--no-scheduler` leaves `every`
+    # schedules to other processes.
+    record WorkOptions,
+      queues : String? = nil,
+      concurrency : String? = nil,
+      scheduler : Bool = true do
+      # Nil for an unknown or repeated flag, or a flag missing its value.
+      def self.parse(arguments : Array(String)) : WorkOptions?
+        names = arguments.map(&.partition('=')[0])
+        return unless names.uniq.size == names.size
+
+        arguments.reduce(new) { |options, argument| options.adding(argument) || return }
+      end
+
+      # These options with one more flag; nil when the flag is not `work`'s.
+      protected def adding(argument : String) : WorkOptions?
+        name, equals, value = argument.partition('=')
+        case name
+        when "--queues"       then copy_with(queues: value) unless value.empty?
+        when "--concurrency"  then copy_with(concurrency: value) unless value.empty?
+        when "--no-scheduler" then copy_with(scheduler: false) if equals.empty?
+        end
+      end
+
+      # *env* with the flags' worker settings applied.
+      def environment(env : Hash(String, String) = ENV.to_h) : Hash(String, String)
+        values = env.dup
+        queues.try { |names| values["CARAMEL_WORKER_QUEUES"] = names }
+        concurrency.try { |count| values["CARAMEL_WORKER_CONCURRENCY"] = count }
+        values
+      end
+    end
 
     # Runs one command and returns its exit status. `App` provides TITLE,
     # MIGRATIONS, AppRouter and `seed`.
     def self.run(app : T.class, arguments : Array(String), root : String) : Int32 forall T
       command = arguments.first? || "help"
-      dev_override = arguments[1..]? == ["--dev-override"] && {"migrate", "lint"}.includes?(command)
-      usage = "Usage: #{File.basename(PROGRAM_NAME)} #{USAGE}"
-      unless arguments.size <= 1 || dev_override
-        STDERR.puts(usage)
-        return 2
+      flags = arguments[1..]? || [] of String
+      if command == "work"
+        options = WorkOptions.parse(flags) || return refuse_usage
+        return run_workers(app, options)
       end
+      dev_override = flags == ["--dev-override"] && {"migrate", "lint"}.includes?(command)
+      return refuse_usage unless flags.empty? || dev_override
+
       case command
       when "routes"
         routes(T::AppRouter.routes)
@@ -48,10 +91,63 @@ module Caramel
       end
     end
 
+    # Runs Cold Brew's workers, maintenance and, unless disabled, schedules
+    # without an HTTP server until *stop* closes, then lets in-flight jobs
+    # finish. The ready line goes to *output* once the workers are claiming.
+    def self.work(title : String, url : String, options : WorkOptions,
+                  stop : Channel(Nil), output : IO = STDOUT) : Int32
+      service = ColdBrew.start(url, options.environment, scheduler: options.scheduler)
+      begin
+        output.puts "#{title} worker is ready: #{readiness(service, options)}"
+        output.flush
+        stop.receive?
+      ensure
+        # In-flight jobs finish; no new ones start.
+        service.stop
+      end
+      0
+    end
+
+    private def self.usage : String
+      "Usage: #{File.basename(PROGRAM_NAME)} #{USAGE}"
+    end
+
+    private def self.refuse_usage : Int32
+      STDERR.puts(usage)
+      2
+    end
+
+    # `work`, once the database holds every migration; a signal stops it.
+    private def self.run_workers(app : T.class, options : WorkOptions) : Int32 forall T
+      if ENV["CARAMEL_ENV"]? == "test"
+        abort("Specs run no workers; drain queues with Caramel::ColdBrew.drain_queue!")
+      end
+      with_database(false) do |db, url|
+        refuse_pending(db, T::MIGRATIONS)
+        stop = Channel(Nil).new
+        # A second signal finds the channel closed and changes nothing.
+        Process.on_terminate { stop.close }
+        work(T::TITLE, url, options, stop)
+      end
+    end
+
+    # Such as `queues default, mailers; concurrency 4; scheduler on`.
+    private def self.readiness(service : ColdBrew::Service,
+                               options : WorkOptions) : String
+      queues = service.workers.join(", ", &.queue)
+      concurrency = service.workers.first?.try(&.concurrency) || 0
+      scheduler = options.scheduler ? "on" : "off"
+      "queues #{queues}; concurrency #{concurrency}; scheduler #{scheduler}"
+    end
+
     private def self.routes(entries : Array(Router::Entry)) : Int32
       width = entries.max_of?(&.path.size) || 0
       entries.each do |entry|
-        puts "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}#{entry.contract.empty? ? "" : "  " + entry.contract}"
+        line = "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}"
+        line += "  #{entry.contract}" unless entry.contract.empty?
+        ingress = entry.ingress.summary
+        line += "  [#{ingress}]" unless ingress.empty?
+        puts line
       end
       0
     end
@@ -92,10 +188,17 @@ module Caramel
       when "drift"
         return drift(db)
       else
-        abort("Pending migrations. Run frappe migrate first.") unless migrator.pending.empty?
+        refuse_pending(db, T::MIGRATIONS)
         command == "seed" ? app.seed(db) : serve(app, db, url, root)
       end
       0
+    end
+
+    private def self.refuse_pending(db : DB::Database,
+                                    migrations : Array(SugarORM::Migration)) : Nil
+      return if SugarORM::Migrator.new(db, migrations).pending.empty?
+
+      abort("Pending migrations. Run frappe migrate first.")
     end
 
     private def self.drift(db : DB::Database) : Int32
@@ -122,16 +225,21 @@ module Caramel
       end
       abort("Application socket is already occupied") if File.info?(socket_path, follow_symlinks: false)
       server = HTTP::Server.new([Caramel.build(app, db, secret, origin, root)])
-      server.bind_unix(socket_path)
-      File.chmod(socket_path, 0o600)
-      cold_brew = ColdBrew.start(url) unless ENV["CARAMEL_ENV"]? == "test"
-      Process.on_terminate { server.close }
-      puts "#{T::TITLE} is ready at #{origin}"
+      # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
+      bound = false
+      cold_brew : ColdBrew::Service? = nil
       begin
+        server.bind_unix(socket_path)
+        bound = true
+        File.chmod(socket_path, 0o600)
+        # Invalid worker settings raise here; the ensure still frees the socket.
+        cold_brew = ColdBrew.start(url) unless ENV["CARAMEL_ENV"]? == "test"
+        Process.on_terminate { server.close }
+        puts "#{T::TITLE} is ready at #{origin}"
         server.listen
       ensure
         server.close unless server.closed?
-        File.delete?(socket_path)
+        File.delete?(socket_path) if bound
         # In-flight jobs finish; no new ones start.
         cold_brew.try(&.stop)
       end

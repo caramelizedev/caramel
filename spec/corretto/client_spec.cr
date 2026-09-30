@@ -1,4 +1,5 @@
 require "spec"
+require "file_utils"
 require "../../src/caramel/corretto"
 
 abstract struct CorrettoSpecAction < Caramel::Action
@@ -56,8 +57,52 @@ struct CorrettoSpecEvents < CorrettoSpecAction
   end
 end
 
+struct CorrettoSpecApiCreate < CorrettoSpecAction
+  contract do
+    field title : String
+    field copies : Int32
+  end
+
+  def handle(contract : Contract)
+    json({title: contract.title, copies: contract.copies}, 201)
+  end
+end
+
+# Stores its upload where a spec points the application's storage.
+struct CorrettoSpecUpload < CorrettoSpecAction
+  contract do
+    field caption : String
+    field cover : Caramel::UploadedFile
+  end
+
+  def handle(contract : Contract)
+    cover = contract.cover
+    FileUtils.cp(cover.path, File.join(Corretto.tmpdir, cover.filename.not_nil!))
+    summary = "#{cover.filename} #{cover.content_type} #{cover.size}"
+    Caramel::Response.new(201, "#{contract.caption}: #{summary}")
+  end
+end
+
+struct CorrettoSpecHook < CorrettoSpecAction
+  ingress body: :raw, limit: 1.kilobyte, csrf: false, authenticate: :signed?
+
+  contract do
+  end
+
+  def handle(contract : Contract)
+    Caramel::Response.new(202, String.new(raw_body))
+  end
+
+  private def signed? : Bool
+    request.headers["X-Signature"]? == "valid"
+  end
+end
+
 module CorrettoSpecApp
   Caramel::Router.draw do
+    post "/api/notes", CorrettoSpecApiCreate
+    post "/covers", CorrettoSpecUpload
+    post "/hooks", CorrettoSpecHook
     get "/", CorrettoSpecHome
     get "/events", CorrettoSpecEvents
     post "/notes", CorrettoSpecCreate
@@ -117,6 +162,66 @@ describe Corretto::Client do
     client.get("/events").body.should eq("data: one\n\n")
     client.get("/", params: {"utm" => "spec"}).should render_page("Tom & Jerry")
     client.get("/").body.should contain("Reader 42")
+  end
+
+  it "sends JSON with the same cookies and CSRF as a form" do
+    client = corretto_spec_client
+    accept = {"Accept" => "application/json"}
+    forged = accept.merge({"X-CSRF-Token" => "forged"})
+    note = {title: "Tea", copies: 2}
+
+    created = client.post("/api/notes", json: note, headers: accept)
+    created.should have_status(201)
+    JSON.parse(created.body).should eq(JSON.parse(%({"title": "Tea", "copies": 2})))
+
+    quoted = client.post("/api/notes", json: {title: "Tea", copies: "2"}, headers: accept)
+    quoted.body.should contain("must be a JSON number")
+    client.post("/api/notes", json: note, headers: forged).should have_status(403)
+  end
+
+  it "uploads files beside form params and keeps what the app stores in Corretto.tmpdir" do
+    client = corretto_spec_client
+    cover = {"cover" => Corretto::Upload.new("png bytes", "cover.png", "image/png")}
+    uploaded = client.post("/covers", params: {"caption" => "Front"}, files: cover)
+    uploaded.should have_status(201)
+    uploaded.body.should eq("Front: cover.png image/png 9")
+    File.read(File.join(Corretto.tmpdir, "cover.png")).should eq("png bytes")
+
+    fixture = {"cover" => Corretto.upload(__FILE__, "text/plain", filename: "spec.cr")}
+    source = client.post("/covers", params: {"caption" => "Source"}, files: fixture)
+    source.body.should eq("Source: spec.cr text/plain #{File.size(__FILE__)}")
+
+    directory = Corretto.tmpdir
+    Corretto.clean_tmpdir
+    Dir.exists?(directory).should be_false
+    Corretto.tmpdir.should_not eq(directory)
+    Corretto.clean_tmpdir
+  end
+
+  it "sends a raw body exactly as given, with the headers a webhook signs" do
+    client = corretto_spec_client
+    valid = {"X-Signature" => "valid"}
+    json = valid.merge({"Content-Type" => "application/json"})
+    delivered = client.post("/hooks", body: %({"id":1}), headers: json)
+    delivered.should have_status(202)
+    delivered.body.should eq(%({"id":1}))
+
+    binary = client.post("/hooks", body: Bytes[0, 255], headers: valid)
+    binary.body.to_slice.should eq(Bytes[0, 255])
+    forged = client.post("/hooks", body: "x", headers: {"X-Signature" => "forged"})
+    forged.should have_status(401)
+  end
+
+  it "refuses a request with two bodies, or a GET with any body" do
+    client = corretto_spec_client
+    fixture = Corretto::Upload.new("png bytes", "cover.png", "image/png")
+    expect_raises(ArgumentError, "Send one body") do
+      client.post("/api/notes", json: {title: "Tea"}, params: {"copies" => 1})
+    end
+    expect_raises(ArgumentError, "GET sends params") { client.get("/", json: {page: 1}) }
+    expect_raises(ArgumentError, "GET sends params") do
+      client.get("/", files: {"cover" => fixture})
+    end
   end
 
   it "explains failed expectations with the relevant response" do

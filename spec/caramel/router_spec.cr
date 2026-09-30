@@ -145,6 +145,29 @@ describe Caramel::Router do
     tree.match("/teams/new/members", Caramel::Router::Segments.parse("/teams/new/members").not_nil!, "GET")[0].should eq(3)
   end
 
+  it "matches a request by its own method before any body, without heap allocation" do
+    router = RouterSpecApp::AppRouter.new
+    requests = [
+      HTTP::Request.new("GET", "/teams/new"),
+      HTTP::Request.new("GET", "/teams/7"),
+      HTTP::Request.new("HEAD", "/teams/7"),
+      HTTP::Request.new("POST", "/teams/7"),
+      HTTP::Request.new("GET", "/missing"),
+      HTTP::Request.new("GET", "/%zz"),
+    ]
+    requests.each { |request| router.match(request) }
+    before = GC.stats.total_bytes
+    100.times { requests.each { |request| router.match(request) } }
+    (GC.stats.total_bytes - before).should eq(0)
+
+    matches = requests.map { |request| router.match(request) }
+    matches.map(&.index).should eq([0, 1, 1, -1, -1, -1])
+    get_or_patch = Caramel::Router.method_bit("GET") | Caramel::Router.method_bit("PATCH")
+    matches[3].mask.should eq(get_or_patch)
+    matches[5].segments.should be_nil
+    matches.map(&.ingress).uniq!.should eq([Caramel::Ingress::DEFAULT])
+  end
+
   it "lists routes with their contract summaries" do
     RouterSpecApp::AppRouter.routes.should eq([
       Caramel::Router::Entry.new("GET", "/teams/new", "TeamNew", ""),

@@ -4,6 +4,7 @@ require "./html"
 require "./hypermedia"
 require "./islands"
 require "./contracts/request_contract"
+require "./http/ingress"
 require "./http/request_context"
 require "./view"
 
@@ -30,6 +31,164 @@ module Caramel
         {% end %}
         {{ block.body }}
       end
+    end
+
+    # How this action's route reads its request; `ingress` replaces it.
+    CARAMEL_INGRESS = ::Caramel::Ingress::DEFAULT
+
+    # :nodoc:
+    # The router calls this before the contract binds. Every `ingress`
+    # replaces it: with a call to the method `authenticate:` names, or with
+    # `true` when it names none.
+    def __caramel_authenticated? : Bool
+      true
+    end
+
+    # Declares how the route reads this action's request (ADR 0020):
+    #
+    # ```
+    # ingress body: :raw,
+    #   limit: 256.kilobytes,
+    #   csrf: false,
+    #   authenticate: :signed?
+    # ```
+    #
+    # * `body: :raw` keeps the bytes exactly as sent, of any content type, for
+    #   `raw_body`; the contract then binds only the route and the query. The
+    #   default, `:form`, binds a form or a JSON object.
+    # * `limit:` caps a URL-encoded, JSON or raw body, or a multipart body's
+    #   text fields, at a whole number of bytes, `N.kilobytes` or
+    #   `N.megabytes`, up to 64 MiB. The default is 2 MiB. Uploaded files keep
+    #   their own 64 MiB budget.
+    # * `authenticate: :method?` names an instance method returning `Bool`.
+    #   It runs before the contract binds, and false answers 401.
+    # * `csrf: false` skips the browser CSRF check. It requires an
+    #   authenticator, and the session reads empty and is never saved: only a
+    #   credential a browser does not attach on its own, such as a signature
+    #   or a bearer token, can stand in for the check.
+    #
+    # A subtype inherits its parent's ingress. Its own declaration replaces
+    # it, but must name the parent's authenticator again (or its own) and
+    # cannot turn a raw parent's body back into a form. The macro checks
+    # the parent as compiled so far, so declare a base action's ingress
+    # where the base is first defined, before its subtypes.
+    macro ingress(*arguments, **options)
+      {% site = @caller ? @caller.first : nil %}
+      {% where = "" %}
+      {% if site && site.filename %}
+        {% position = "#{site.line_number}:#{site.column_number}" %}
+        {% where = "\n  --> #{site.filename.id}:#{position.id}" %}
+      {% end %}
+      {% given = options.keys.map(&.id.stringify) %}
+      {% keywords = ::Caramel::Ingress::KEYWORDS %}
+      {% units = ::Caramel::Ingress::UNITS %}
+      {% max = ::Caramel::Ingress::MAX_LIMIT %}
+      {% example = ::Caramel::Ingress::EXAMPLE %}
+
+      # Keywords only, once per action.
+      {% if !arguments.empty? || options.empty? %}
+        {% raise "ingress takes keywords: body:, limit:, csrf: and authenticate:" + where +
+                 "\nRemediation: write, for example, `#{example.id}`.\n" %}
+      {% end %}
+      {% if @type.constants.map(&.stringify).includes?("CARAMEL_INGRESS") %}
+        {% raise "#{@type} declares ingress twice#{where.id}" +
+                 "\nRemediation: combine the keywords into one `ingress` declaration.\n" %}
+      {% end %}
+      {% for key, value in options %}
+        {% unless keywords.includes?(key.id.stringify) %}
+          {% value.raise "unknown ingress keyword '#{key}'; " +
+                         "use body:, limit:, csrf: or authenticate:#{where.id}" %}
+        {% end %}
+      {% end %}
+
+      # body: :form or :raw
+      {% body = options[:body] %}
+      {% kind = body.is_a?(SymbolLiteral) ? body.id.stringify : nil %}
+      {% if given.includes?("body") && !["form", "raw"].includes?(kind) %}
+        {% body.raise "ingress body: must be :form or :raw, got #{body}#{where.id}" %}
+      {% end %}
+      {% raw = kind == "raw" %}
+      {% if !raw && @type.ancestors.any?(&.has_method?("raw_body")) %}
+        {% raise "#{@type} declares a form ingress but inherits raw_body" + where +
+                 "\nRemediation: add `body: :raw` to its ingress, or inherit from " +
+                 "an action that does not read raw bodies.\n" %}
+      {% end %}
+
+      # limit: a whole number of bytes, N.kilobytes or N.megabytes
+      {% limit = options[:limit] %}
+      {% if given.includes?("limit") %}
+        {% count = limit %}
+        {% scale = 1 %}
+        {% if limit.is_a?(Call) %}
+          {% count = limit.receiver %}
+          {% scale = limit.args.empty? ? units[limit.name.stringify] : nil %}
+        {% end %}
+        {% whole = count.is_a?(NumberLiteral) && !count.kind.id.starts_with?("f") %}
+        {% bytes = whole && scale && count <= max ? count * scale : 0 %}
+        {% unless 1 <= bytes && bytes <= max %}
+          {% limit.raise "ingress limit: must be a whole number of bytes, " +
+                         "N.kilobytes or N.megabytes from 1 byte to 64 MiB, " +
+                         "got #{limit}#{where.id}" %}
+        {% end %}
+      {% end %}
+
+      # csrf: true or false
+      {% csrf = options[:csrf] %}
+      {% if given.includes?("csrf") && !csrf.is_a?(BoolLiteral) %}
+        {% csrf.raise "ingress csrf: must be true or false, got #{csrf}#{where.id}" %}
+      {% end %}
+      {% csrf = !given.includes?("csrf") || csrf %}
+
+      # authenticate: :method?, required once csrf is off
+      {% authenticate = options[:authenticate] %}
+      {% if given.includes?("authenticate") %}
+        {% method = authenticate.is_a?(SymbolLiteral) && authenticate.id.stringify %}
+        {% named = method && method =~ /\A[a-z_]\w*[?!]?\z/ %}
+        {% unless named && !method.starts_with?("__") %}
+          {% authenticate.raise "ingress authenticate: must name an instance method, " +
+                                "as in :signed?, got #{authenticate}#{where.id}" %}
+        {% end %}
+      {% end %}
+      # A subtype may not drop its parent's authenticator by redeclaring.
+      {% guard = nil %}
+      {% for ancestor in @type.ancestors %}
+        {% unless guard %}
+          {% guard = ancestor.methods.find(&.name.==("__caramel_authenticated?")) %}
+        {% end %}
+      {% end %}
+      {% if guard && !guard.body.is_a?(BoolLiteral) && !given.includes?("authenticate") %}
+        {% raise "#{@type} redeclares ingress without authenticate:, " +
+                 "but its parent authenticates with :#{guard.body.name}" + where +
+                 "\nRemediation: add `authenticate: :#{guard.body.name}` to its ingress, " +
+                 "or inherit from an action without an authenticator.\n" %}
+      {% end %}
+      {% if !csrf && !given.includes?("authenticate") %}
+        {% raise "ingress csrf: false needs authenticate: :method? that verifies " +
+                 "a credential a browser does not attach on its own, " +
+                 "such as a signature or a bearer token" + where +
+                 "\nRemediation: add `authenticate: :signed?` " +
+                 "and define `private def signed? : Bool`.\n" %}
+      {% end %}
+
+      CARAMEL_INGRESS = ::Caramel::Ingress.new(
+        body: ::Caramel::Ingress::Body::{{ raw ? "Raw".id : "Form".id }},
+        limit: ({{ limit || "::Caramel::Ingress::DEFAULT_LIMIT".id }}).to_i64,
+        csrf: {{ csrf }},
+        authenticate: {{ authenticate ? authenticate.id.stringify : nil }},
+      )
+
+      # :nodoc:
+      # `self.` keeps a keyword such as `:true` from standing in for a method.
+      def __caramel_authenticated? : Bool
+        {{ authenticate ? "self.#{authenticate.id}".id : true }}
+      end
+
+      {% if raw %}
+        # The request body exactly as sent; empty for GET and HEAD.
+        def raw_body : Bytes
+          @context.input.raw_body
+        end
+      {% end %}
     end
 
     # The full HTML document around a page body. Applications override it
@@ -145,16 +304,40 @@ module Caramel
     end
 
     def contract_failure_page(contract : RequestContract) : Response
-      html = String.build do |io|
-        io << %(<section class="contract-errors" role="alert"><h1>Check your request</h1><ul>)
-        contract.errors.each do |field, messages|
+      page("Check your request", errors_html(contract.errors), 422)
+    end
+
+    # Answers errors found after the contract, such as a changeset's, the way
+    # a contract failure is answered: JSON `{"errors": …}` for JSON clients, a
+    # page listing them for browsers, and MRDP text for everyone else.
+    def render_errors(errors : Hash(String, Array(String)),
+                      status : Int32 = 422) : Response
+      return json({errors: errors}, status) if @context.wants_json?
+      return page("Check your request", errors_html(errors), status) if @context.browser?
+
+      text = String.build do |io|
+        io << "ERR INVALID:" << status
+        io << " at " << @context.method << ' ' << request.path << '\n'
+        errors.each do |field, messages|
+          messages.each { |message| io << "FIELD " << field << ": " << message << '\n' }
+        end
+      end
+      headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
+      Response.new(status, text, headers)
+    end
+
+    private def errors_html(errors : Hash(String, Array(String))) : String
+      String.build do |io|
+        io << %(<section class="contract-errors" role="alert">)
+        io << %(<h1>Check your request</h1><ul>)
+        errors.each do |field, messages|
           messages.each do |message|
-            io << "<li><code>" << HTML.escape(field) << "</code>: " << HTML.escape(message) << "</li>"
+            io << "<li><code>" << HTML.escape(field) << "</code>: "
+            io << HTML.escape(message) << "</li>"
           end
         end
         io << "</ul></section>"
       end
-      page("Check your request", html, 422)
     end
 
     private def html_headers : HTTP::Headers

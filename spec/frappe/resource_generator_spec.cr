@@ -2,6 +2,8 @@ require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/resource_generator"
+require "../../src/caramel/external_url"
+require "../../src/caramel/html"
 
 private def resource_project(&)
   parent = File.tempname("caramel-resource-")
@@ -52,6 +54,15 @@ describe Caramel::Frappe::ResourceGenerator do
         expect_raises(Caramel::Frappe::Error) { generator.generate(project, "Book", fields) }
       end
       expect_raises(Caramel::Frappe::Error, "cannot be :unique") { generator.generate(project, "Book", ["flag:bool:unique"]) }
+      url_refusals = {
+        "link:int32:url"         => "Only a string field holds a URL",
+        "link:string:server:url" => "cannot be :url",
+      }
+      url_refusals.each do |field, message|
+        expect_raises(Caramel::Frappe::Error, message) do
+          generator.generate(project, "Book", [field])
+        end
+      end
       expect_raises(Caramel::Frappe::Error, "63-byte") { generator.generate(project, "Book", ["#{"a" * 50}:string:unique"]) }
       File.write(File.join(project.root, "config/routes.cr"), "# custom routes without a generation marker\n")
       expect_raises(Caramel::Frappe::Error, "marker") { generator.generate(project, "Book", ["title:string"]) }
@@ -89,6 +100,110 @@ describe Caramel::Frappe::ResourceGenerator do
       spec = read.call("spec/requests/invites_spec.cr")
       spec.should contain(%(App::Invite.create(email: persisted.email, token: Random::Secure.urlsafe_base64(8), number: Random::Secure.rand(Int32::MAX)).errors["email"]?.should eq(["has already been taken"])))
       spec.should contain(%(App::Invite.create(email: "Example <email>", token: persisted.token, number: Random::Secure.rand(Int32::MAX)).errors["token"]?.should eq(["has already been taken"])))
+    end
+  end
+
+  it "carries :url into the changeset, the form and the request spec's samples" do
+    resource_project do |project, package|
+      fields = ["original_url:string:url:unique", "homepage:string?:url"]
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Link", fields, version: 20260919000006_i64)
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+
+      read.call("app/changesets/link.cr").should contain(<<-CRYSTAL)
+              cs.validate_presence(:original_url)
+              cs.validate_url(:original_url) unless cs.errors.has_key?("original_url")
+              cs.validate_url(:homepage)
+              cs.unique_constraint(:original_url)
+        CRYSTAL
+
+      form = read.call("app/views/links/form.cr")
+      url_input = %(input type: "url", id: id, name:)
+      form.should contain(%(#{url_input} "original_url", required: true))
+      form.should contain(%(#{url_input} "homepage", aria_describedby))
+
+      original = "https://example.com/original_url?first=1&second=2"
+      homepage = "https://example.org/homepage?first=2&second=3"
+      spec = read.call("spec/requests/links_spec.cr")
+      spec.should contain(%("original_url" => #{original.inspect}))
+      spec.should contain(%("homepage" => #{homepage.inspect}))
+      spec.should contain(%(blank.errors["original_url"]?.should eq(["can't be blank"])))
+
+      # Valid links that still need escaping, so the spec's escaping check holds.
+      [original, homepage].each do |sample|
+        Caramel::ExternalURL.valid?(sample).should be_true
+        Caramel::HTML.escape(sample).should_not eq(sample)
+      end
+    end
+  end
+
+  it "generates only the actions --only names, and the lines they need" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      refusals = {
+        "index,show"              => "create and show",
+        "create,show,edit,update" => "add new and update",
+        "create,show,archive"     => "Unknown resource action: archive",
+      }
+      refusals.each do |only, message|
+        expect_raises(Caramel::Frappe::Error, message) do
+          generator.generate(project, "Link", ["original_url:string:url"], only: only)
+        end
+      end
+
+      fields = ["original_url:string:url", "code:string:unique"]
+      files = generator.generate(project, "Link", fields,
+        only: "create,show", version: 20260919000007_i64)
+      files.should eq(%w[
+        app/actions/links/create.cr
+        app/actions/links/show.cr
+        app/changesets/link.cr
+        app/models/link.cr
+        app/views/links/show.cr
+        config/paths.cr
+        config/routes.cr
+        db/migrations/20260919000007_create_links.cr
+        spec/requests/links_spec.cr
+      ])
+      read = ->(relative : String) { File.read(File.join(project.root, relative)) }
+      files.each { |relative| read.call(relative).should_not contain("frappe:") }
+
+      routes = read.call("config/routes.cr")
+      routes.should contain(<<-CRYSTAL)
+            post "/links", App::Links::Create
+            get "/links/:id", App::Links::Show
+        CRYSTAL
+      routes.should_not contain("App::Links::Index")
+
+      create = read.call("app/actions/links/create.cr")
+      create.should_not contain("include Form")
+      create.should contain("return render_errors(changes.errors) unless changes.saved?")
+
+      show = read.call("app/views/links/show.cr")
+      show.should_not contain("links_path")
+      show.should_not contain("actions")
+
+      # The unique check saves a copy with the updated URL and the same code.
+      url = "https://example.org/original_url?first=2&second=3"
+      duplicate = %(App::Link.create(original_url: #{url.inspect}, code: persisted.code))
+      spec = read.call("spec/requests/links_spec.cr")
+      spec.should contain(%(it "creates and reads through CSRF-protected requests"))
+      spec.should contain(%(client.post("/links", headers: forged, params: sample)))
+      spec.should contain(%(rejected.should_not render_page("New link")))
+      spec.should_not contain("client.patch")
+      spec.should_not contain("client.delete")
+      spec.should contain(duplicate)
+    end
+  end
+
+  it "loads the saved row in the request spec only when a check reads it" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      fields = ["points:int32", "rating:float64?"]
+      generator.generate(project, "Score", fields,
+        only: "create,show", version: 20260919000008_i64)
+      spec = File.read(File.join(project.root, "spec/requests/scores_spec.cr"))
+      spec.should_not contain("persisted")
     end
   end
 

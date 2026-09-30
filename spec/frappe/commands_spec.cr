@@ -55,7 +55,7 @@ describe Caramel::Frappe::Commands do
       ["db", "restore"]                               => {"missing FILE", "frappe db restore FILE"},
       ["routes", "a", "b"]                            => {"unexpected argument \"b\"", "frappe routes [FILTER]"},
       ["expand"]                                      => {"missing FILE:LINE:COL", "frappe expand FILE:LINE:COL"},
-      ["make", "resource", "Book"]                    => {"missing FIELD:TYPE", "frappe make resource NAME FIELD:TYPE... [--plural=NAME]"},
+      ["make", "resource", "Book"]                    => {"missing FIELD:TYPE", "frappe make resource NAME FIELD:TYPE... [--plural=NAME] [--only=ACTIONS]"},
     }.each do |arguments, (message, syntax)|
       error = expect_raises(Caramel::Frappe::Commands::Usage) { Caramel::Frappe::Commands.parse(arguments) }
       {error.message, error.syntax}.should eq({message, syntax})

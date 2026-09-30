@@ -1,6 +1,7 @@
 require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
+require "../../src/frappe/dev_files"
 
 describe Caramel::Frappe::NewProject do
   it "creates a portable application that depends on this checkout, with no copied framework or secrets" do
@@ -12,7 +13,7 @@ describe Caramel::Frappe::NewProject do
       generator = Caramel::Frappe::NewProject.new(framework)
       project = generator.create("reading-list", target)
       project.origin.should eq("https://reading-list.caramel")
-      %w[app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/.keep app/changesets/.keep app/views/application_view.cr app/views/layouts/application.cr app/views/home/index.cr config/application.cr config/environment.yml config/routes.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .env.example .gitignore .zed/settings.json README.md public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js].each do |name|
+      %w[app/actions/application_action.cr app/actions/home/show.cr app/actions/health/show.cr app/models/.keep app/changesets/.keep app/views/application_view.cr app/views/layouts/application.cr app/views/home/index.cr config/application.cr config/environment.yml config/routes.cr db/seeds.cr src/reading_list.cr spec/spec_helper.cr spec/requests/home_spec.cr shard.yml shard.lock .env.example .env.test .gitignore .zed/settings.json README.md public/assets/htmx-4.0.0.min.js public/assets/caramel-islands.js].each do |name|
         File.file?(File.join(target, name)).should be_true
       end
       %w[.env .caramel-version vendor config/database.yml].each { |name| File.exists?(File.join(target, name)).should be_false }
@@ -27,6 +28,23 @@ describe Caramel::Frappe::NewProject do
       Caramel::Frappe::Project.pin(target).should eq(Caramel::VERSION)
       File.read(File.join(target, ".gitignore")).should contain(".env\n")
       File.read(File.join(target, "config/routes.cr")).should contain("Frappé resource routes")
+    ensure
+      FileUtils.rm_rf(parent)
+    end
+  end
+
+  it "records the assets it publishes, so an edit before the first frappe dev publishes" do
+    parent = File.tempname("caramel-new-assets-")
+    Dir.mkdir(parent)
+    target = File.join(parent, "notes")
+    begin
+      framework = File.expand_path("../..", __DIR__)
+      Caramel::Frappe::NewProject.new(framework).create("notes", target)
+      File.file?(File.join(target, ".caramel/assets.json")).should be_true
+      source = File.join(target, "app/assets/javascript/app.js")
+      File.write(source, File.read(source) + "\n// an edit before frappe dev\n")
+      Caramel::Frappe::DevFiles.new(File.realpath(target)).publish_assets
+      File.read(File.join(target, "public/assets/app.js")).should eq(File.read(source))
     ensure
       FileUtils.rm_rf(parent)
     end

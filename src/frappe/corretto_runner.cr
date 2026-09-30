@@ -36,6 +36,37 @@ module Caramel::Frappe
       relative
     end
 
+    # Keys Corretto, the toolchain or the dynamic loader own; .env.test may
+    # not set them.
+    RESERVED_TEST_KEYS = %w[
+      APP_ORIGIN APP_SECRET DATABASE_URL MIGRATION_DATABASE_URL
+      PATH HOME USER LOGNAME TMPDIR LANG
+    ]
+    RESERVED_TEST_PREFIXES = %w[SPEC_ CARAMEL_ CORRETTO_ CRYSTAL_ LD_ DYLD_]
+
+    # The application's own test settings, such as a webhook secret, from the
+    # committed `.env.test`: test-only values every spec worker receives.
+    # Development `.env` values never reach specs.
+    def self.test_environment(root : String) : Hash(String, String)
+      path = File.join(root, ".env.test")
+      info = File.info?(path, follow_symlinks: false) || return {} of String => String
+      raise Error.new(".env.test must be a regular file") unless info.file?
+      raise Error.new(".env.test exceeds 64 KiB") if info.size > 65_536
+
+      values = LocalEnvironment.parse(File.read(path))
+      reserved = values.keys.select { |key| reserved_test_key?(key) }
+      return values if reserved.empty?
+
+      raise Error.new(".env.test cannot set #{reserved.join(", ")}; " +
+                      "Corretto and the toolchain supply these")
+    end
+
+    private def self.reserved_test_key?(key : String) : Bool
+      return true if RESERVED_TEST_KEYS.includes?(key)
+
+      RESERVED_TEST_PREFIXES.any? { |prefix| key.starts_with?(prefix) }
+    end
+
     # Deals files to at most `workers` groups like cards, so every group gets work.
     def self.split(files : Array(String), workers : Int32) : Array(Array(String))
       groups = Array.new(Math.min(workers, files.size)) { [] of String }
@@ -63,6 +94,7 @@ module Caramel::Frappe
 
     def run(paths : Array(String), concurrency : Int32) : Nil
       files = self.class.spec_files(@project.root, paths)
+      settings = self.class.test_environment(@project.root)
       refuse_mocks
       client = LatteClient.new
       client.ready!
@@ -76,16 +108,16 @@ module Caramel::Frappe
       secret = Random::Secure.hex(32)
       created = [] of Int32
       results = begin
-        tools.app_command(@project, ["migrate"], {
+        tools.app_command(@project, ["migrate"], settings.merge({
           "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => Caramel::Database::Config.parse(template["SPEC_DATABASE_URL"]).database,
           "SPEC_DATABASE_URL" => template["SPEC_DATABASE_URL"], "SPEC_MIGRATION_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
           "CARAMEL_EXPECTED_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
-        })
+        }))
         environments = groups.map_with_index do |_, offset|
           index = offset + 1
           worker = client.test_worker(id, index)
           created << index
-          worker_environment(client, id, index, worker, secret)
+          settings.merge(worker_environment(client, id, index, worker, secret))
         end
         @output.puts("Corretto: #{files.size} spec file#{files.size == 1 ? "" : "s"} across #{groups.size} worker#{groups.size == 1 ? "" : "s"}")
         run_workers(tools, builds, environments)
