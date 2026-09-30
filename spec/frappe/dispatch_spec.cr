@@ -3,7 +3,14 @@ require "file_utils"
 require "../../src/frappe/dispatch"
 
 private def pin(project : String, version : String) : Nil
-  File.write(File.join(project, "shard.lock"), "version: 2.0\nshards:\n  caramel:\n    git: https://github.com/caramelizedev/caramel.git\n    version: #{version}\n")
+  lock = <<-YAML
+    version: 2.0
+    shards:
+      caramel:
+        git: https://github.com/caramelizedev/caramel.git
+        version: #{version}\n
+    YAML
+  File.write(File.join(project, "shard.lock"), lock)
 end
 
 describe Caramel::Frappe::Dispatch do
@@ -29,12 +36,19 @@ describe Caramel::Frappe::Dispatch do
     # A commit pin names its release without the build metadata.
     pin(project, "9.9.9+git.commit.0123456789abcdef")
     Caramel::Frappe::Dispatch.target(["routes"], project, env).should eq(binary)
-    Caramel::Frappe::Dispatch.target(["routes"], project, env.merge({"CARAMEL_FRAPPE_DISPATCHED" => "1"})).should be_nil
-    %w[new sites installations services agent-manifest help].each { |command| Caramel::Frappe::Dispatch.target([command], project, env).should be_nil }
+    dispatched = env.merge({"CARAMEL_FRAPPE_DISPATCHED" => "1"})
+    Caramel::Frappe::Dispatch.target(["routes"], project, dispatched).should be_nil
+    %w[new sites installations services agent-manifest help].each do |command|
+      Caramel::Frappe::Dispatch.target([command], project, env).should be_nil
+    end
     Caramel::Frappe::Dispatch.target(["lsp", "install"], project, env).should be_nil
     # Project commands, including malformed ones, run under the pinned release,
     # which validates them with its own command table.
-    [["check", "--agent"], ["corretto"], ["expand", "x"], ["db", "branch", "create", "x"], ["db", "bogus"], ["lsp", "crystalline"]].each do |arguments|
+    project_commands = [
+      ["check", "--agent"], ["corretto"], ["expand", "x"],
+      ["db", "branch", "create", "x"], ["db", "bogus"], ["lsp", "crystalline"],
+    ]
+    project_commands.each do |arguments|
       Caramel::Frappe::Dispatch.target(arguments, project, env).should eq(binary)
     end
     pin(project, "not-a-release")

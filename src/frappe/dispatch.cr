@@ -10,13 +10,16 @@ module Caramel::Frappe::Dispatch
     getter release : String
 
     def initialize(@release : String)
-      super("Project requires Caramel #{@release}, but no Caramel installation is registered for it. Install it: frappe installations install #{@release}")
+      super("Project requires Caramel #{@release}, but no Caramel installation is " \
+            "registered for it. Install it: frappe installations install #{@release}")
     end
   end
 
   # The `frappe` of the release a project pins in its shard.lock, when that
   # is another release than this one.
-  def self.target(arguments : Array(String), directory : String = Dir.current, environment : ENV.class | Hash(String, String) = ENV) : String?
+  def self.target(arguments : Array(String),
+                  directory : String = Dir.current,
+                  environment : ENV.class | Hash(String, String) = ENV) : String?
     return if environment[ENVIRONMENT_KEY]? == "1"
     return unless Commands.project?(arguments)
     pin = Project.pin(directory)
@@ -27,7 +30,9 @@ module Caramel::Frappe::Dispatch
     binary = File.join(root, "bin/frappe")
     target = File.info?(binary, follow_symlinks: false)
     unless target && target.file? && File::Info.executable?(binary)
-      raise Error.new("Registered Caramel #{pin} installation has no executable #{binary}; run scripts/build-frappe there, then frappe installations register.")
+      raise Error.new("Registered Caramel #{pin} installation has no " \
+                      "executable #{binary}; run scripts/build-frappe there, " \
+                      "then frappe installations register.")
     end
     binary
   end

@@ -7,7 +7,8 @@ module Caramel::Frappe
   # files these commands write or delete there.
   class Launchers
     NAMES  = {"frappe", "latte"}
-    MARKER = "# Managed by Caramel: frappe installations register writes this file and frappe installations remove deletes it."
+    MARKER = "# Managed by Caramel: frappe installations register writes this file " \
+             "and frappe installations remove deletes it."
 
     getter directory : String
 
@@ -25,7 +26,8 @@ module Caramel::Frappe
       prepare_directory
       NAMES.each do |name|
         if foreign?(path(name))
-          raise Error.new("#{path(name)} exists and was not created by Caramel; move it aside and run frappe installations register again")
+          raise Error.new("#{path(name)} exists and was not created by Caramel; " \
+                          "move it aside and run frappe installations register again")
         end
       end
       NAMES.each { |name| publish(path(name), script(root, name)) }
@@ -85,7 +87,8 @@ module Caramel::Frappe
     # Replaces a launcher Caramel wrote, or creates one where no file exists:
     # the link fails instead of replacing a file that appeared meanwhile.
     private def publish(destination : String, content : String) : Nil
-      temporary = File.join(@directory, ".#{File.basename(destination)}.#{Random::Secure.hex(6)}.tmp")
+      name = File.basename(destination)
+      temporary = File.join(@directory, ".#{name}.#{Random::Secure.hex(6)}.tmp")
       begin
         File.write(temporary, content, perm: 0o755)
         File.chmod(temporary, 0o755)
