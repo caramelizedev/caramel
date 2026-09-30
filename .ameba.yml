@@ -67,7 +67,6 @@ Layout/LineLength:
     - "scripts/checks/route_compilation.cr"
     - "scripts/checks/schema_diff.cr"
     - "scripts/checks/support/latte_fixture.cr"
-    - "scripts/checks/support/lsp.cr"
     - "scripts/cut/cut.cr"
     - "spec/caramel/action_spec.cr"
     - "spec/caramel/application_spec.cr"
