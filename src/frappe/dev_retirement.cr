@@ -5,6 +5,8 @@ module Caramel::Frappe
   # Retired commands remain owned until termination and cleanup finish. Waiting
   # happens at shutdown, not on the path to compiling the next edit.
   class DevRetirement
+    UNFINISHED = "Retired development commands did not finish cleanup"
+
     @pending = Set(DevCommand).new
     @failures = [] of Exception
 
@@ -36,7 +38,7 @@ module Caramel::Frappe
       @pending.to_a.each(&.request_stop)
       deadline = Time.instant + 10.seconds
       until @pending.empty?
-        raise Error.new("Retired development commands did not finish cleanup") if Time.instant >= deadline
+        raise Error.new(UNFINISHED) if Time.instant >= deadline
         sleep 25.milliseconds
       end
       check!
