@@ -23,7 +23,7 @@ Code follows Caramel's RFC-0008 rule set ([ADR 0017](docs/decisions/0017-formatt
 
 The formatter owns layout, and the linter owns what it can check ([ADR 0017](docs/decisions/0017-formatting-and-linting.md), [ADR 0021](docs/decisions/0021-line-length.md)). The rest is judgment. It is written down here so that people and agents make the same calls. Code reads as short sentences, one thought each.
 
-- **Keep lines short.** The framework's limit is 100 characters, and most lines should be well under it. When a line grows, name its parts instead of nesting them:
+- **Keep lines short.** The framework's limit is 100 characters for every file, with no exclusions or inline disables, and most lines should be well under it. When a line grows, name its parts instead of nesting them:
 
   ```crystal
   # A run-on sentence
@@ -58,7 +58,7 @@ The formatter owns layout, and the linter owns what it can check ([ADR 0017](doc
   - name their inputs and expectations;
   - test one concern per example;
   - share setup through small helpers named for what they return, such as `signed(body)`.
-- **Leave listed files better.** Under `Layout/LineLength`, `.ameba.yml` lists the files that predate the limit. Add no long line to them. When a change rewrites a listed file's long lines, remove it from the list in the same change.
+- **Templates read as the code they generate.** Resource templates mark optional code with whole lines: `# frappe:only a,b`, `# frappe:unless a,b`, `# frappe:else` and `# frappe:end`. They never tag the end of a code line.
 
 ## Commits
 

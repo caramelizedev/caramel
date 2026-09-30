@@ -10,8 +10,7 @@ A Crystal framework and its tools: Caramel core, SugarORM, Cold Brew, Corretto, 
 
 Code reads as short sentences, one thought each (RFC-0008, and the Style section of `CONTRIBUTING.md`).
 
-- **Line length.** Every line of Crystal you add holds at most 100 characters, and most are far shorter.
-- **Listed files.** `.ameba.yml` lists older files under `Layout/LineLength`. Add no long line to them. When you rewrite a listed file's long lines, remove it from the list.
+- **Line length.** Every line of Crystal holds at most 100 characters, and most are far shorter. No file is exempt: never add an `Excluded` entry or an `ameba:disable` for `Layout/LineLength`.
 - **Stacking.** Put a long signature or call one argument per line, and build records with named arguments.
 - **Early returns.** Use guard clauses: `return … if …`, `value = … || return`.
 - **Named steps.** Use small private methods named for what they do, and constants for tables and messages. Name headers, bodies and expected values as locals instead of nesting them.
