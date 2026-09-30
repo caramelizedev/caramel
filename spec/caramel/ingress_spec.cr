@@ -82,9 +82,9 @@ struct IngressSpecDeleteNote < IngressSpecApi
   end
 end
 
-# Its own ingress replaces the API's entirely, authenticator included.
+# Its own ingress replaces the API's, naming the authenticator again.
 struct IngressSpecNoteForm < IngressSpecApi
-  ingress limit: 1.kilobyte
+  ingress limit: 1.kilobyte, csrf: false, authenticate: :token?
 
   contract do
     field title : String
@@ -250,13 +250,16 @@ describe "Caramel::Action ingress" do
     refused.headers["Allow"].should eq("GET, HEAD, DELETE")
   end
 
-  it "lets a subtype's own ingress replace its parent's, authenticator included" do
-    ingress_of("IngressSpecNoteForm").summary.should eq("1 KiB")
-    body = "title=Dune"
-    browser_form = ingress_request("POST", "/notes/form", body, browser(FORM_TYPE))
-    {browser_form.status, browser_form.body}.should eq({201, "Dune"})
+  it "lets a subtype's own ingress replace its parent's limit, keeping its guard" do
+    ingress_of("IngressSpecNoteForm").summary
+      .should eq("1 KiB, csrf off, authenticate token?")
     tokened = HTTP::Headers{"Content-Type" => FORM_TYPE, "Authorization" => BEARER}
-    ingress_request("POST", "/notes/form", body, tokened).status.should eq(403)
+    created = ingress_request("POST", "/notes/form", "title=Dune", tokened.dup)
+    {created.status, created.body}.should eq({201, "Dune"})
+    long = "title=#{"x" * 1_024}"
+    ingress_request("POST", "/notes/form", long, tokened.dup).status.should eq(413)
+    anonymous = HTTP::Headers{"Content-Type" => FORM_TYPE}
+    ingress_request("POST", "/notes/form", "title=Dune", anonymous).status.should eq(401)
   end
 
   it "lists a route's non-default ingress" do

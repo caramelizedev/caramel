@@ -21,9 +21,9 @@ A token-authenticated JSON API has the same needs as the webhook, except that it
    - `csrf: false` skips the browser CSRF check.
    - `authenticate: :method?` names an instance method returning `Bool`.
 
-   Everything is checked at compile time: unknown or positional keywords, non-literal values, limits out of range, a second declaration in one type, `raw_body` on a form action, an authenticator that does not exist, does not return `Bool`, or is a keyword or a reserved name (the macro calls it as `self.name`), a form declaration under a raw parent, and `csrf: false` without `authenticate:`.
+   Everything is checked at compile time: unknown or positional keywords, non-literal values, limits out of range, a second declaration in one type, `raw_body` on a form action, an authenticator that does not exist, does not return `Bool`, or is a keyword or a reserved name (the macro calls it as `self.name`), a form declaration under a raw parent, a redeclaration that drops the parent's authenticator, and `csrf: false` without `authenticate:`.
 
-   An action inherits its parent's ingress, so an API base declares it once. A subtype's own declaration replaces it entirely, authenticator included: a subtype that names no authenticator runs none.
+   An action inherits its parent's ingress, so an API base declares it once. A subtype's own declaration replaces it, and must name an authenticator when its parent has one: redeclaring without `authenticate:` under an authenticating parent is a compile error, so changing a limit can never drop authentication.
 2. **Routing before reading.** `Application#handle` asks the router for a `Router::Match` on the request's real method (HEAD as GET) and path before it reads the body.
    - The matched route's ingress decides how the body is read and whether CSRF is checked.
    - A request that matches no route, or matches on another method, reads and is checked with the default ingress. A route's CSRF setting therefore never applies to a request it did not match.

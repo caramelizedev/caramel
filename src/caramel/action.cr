@@ -67,9 +67,9 @@ module Caramel
     #   credential a browser does not attach on its own, such as a signature
     #   or a bearer token, can stand in for the check.
     #
-    # A subtype inherits its parent's ingress. Its own declaration replaces it
-    # entirely, authenticator included, and cannot turn a raw parent's body
-    # back into a form.
+    # A subtype inherits its parent's ingress. Its own declaration replaces
+    # it, but must name the parent's authenticator again (or its own) and
+    # cannot turn a raw parent's body back into a form.
     macro ingress(*arguments, **options)
       {% site = @caller ? @caller.first : nil %}
       {% where = "" %}
@@ -146,6 +146,19 @@ module Caramel
           {% authenticate.raise "ingress authenticate: must name an instance method, " +
                                 "as in :signed?, got #{authenticate}#{where.id}" %}
         {% end %}
+      {% end %}
+      # A subtype may not drop its parent's authenticator by redeclaring.
+      {% guard = nil %}
+      {% for ancestor in @type.ancestors %}
+        {% unless guard %}
+          {% guard = ancestor.methods.find(&.name.==("__caramel_authenticated?")) %}
+        {% end %}
+      {% end %}
+      {% if guard && !guard.body.is_a?(BoolLiteral) && !given.includes?("authenticate") %}
+        {% raise "#{@type} redeclares ingress without authenticate:, " +
+                 "but its parent authenticates with :#{guard.body.name}" + where +
+                 "\nRemediation: add `authenticate: :#{guard.body.name}` to its ingress, " +
+                 "or inherit from an action without an authenticator.\n" %}
       {% end %}
       {% if !csrf && !given.includes?("authenticate") %}
         {% raise "ingress csrf: false needs authenticate: :method? that verifies " +

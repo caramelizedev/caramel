@@ -39,6 +39,7 @@ ingress = {
   "keyword_authenticator"  => ["undefined method 'true'"],
   "reserved_authenticator" => ["ingress authenticate: must name an instance method"],
   "form_under_raw"         => ["declares a form ingress but inherits raw_body", "Remediation:"],
+  "dropped_authenticator"  => ["redeclares ingress without authenticate:", "authenticates with :token?"],
 }
 ingress.each do |name, required|
   cases["compile_ingress_#{name}"] = {required, [] of String}
