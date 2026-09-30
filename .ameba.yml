@@ -170,7 +170,6 @@ Layout/LineLength:
     - "src/caramel/corretto/matchers.cr"
     - "src/caramel/corretto/wire.cr"
     - "src/caramel/corretto/worker.cr"
-    - "src/caramel/csrf.cr"
     - "src/caramel/database.cr"
     - "src/caramel/development_error.cr"
     - "src/caramel/http/request_context.cr"
