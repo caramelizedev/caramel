@@ -9,8 +9,10 @@ class Fiber
 end
 
 module SugarORM
-  # Every bind value SugarORM sends: crystal-db scalars plus the arrays used by `= ANY($n)`.
-  alias Value = ::DB::Any | Array(String) | Array(Int32) | Array(Int64) | Array(Float64) | Array(Bool) | Array(Time)
+  # Every bind value SugarORM sends: crystal-db scalars plus the arrays used by
+  # `= ANY($n)`.
+  alias Value = ::DB::Any | Array(String) | Array(Int32) | Array(Int64) |
+                Array(Float64) | Array(Bool) | Array(Time)
 
   # An explicit database handle for the `(db, ...)` overloads.
   alias Handle = ::DB::Database | ::DB::Connection
@@ -33,20 +35,27 @@ module SugarORM
     getter constraint : String?
     getter columns : Array(String)
 
-    def initialize(message : String?, @table : String?, @constraint : String?, @columns : Array(String), cause : Exception? = nil)
+    def initialize(message : String?,
+                   @table : String?,
+                   @constraint : String?,
+                   @columns : Array(String),
+                   cause : Exception? = nil)
       super(message, cause)
     end
 
     def self.from(error : PQ::PQError) : self
       detail = error.field_message(:detail) || ""
       columns = detail.match(/\AKey \(([^)]*)\)=/).try(&.[1].split(", ")) || [] of String
-      new(error.message, error.field_message(:table_name), error.field_message(:constraint_name), columns, error)
+      table = error.field_message(:table_name)
+      constraint = error.field_message(:constraint_name)
+      new(error.message, table, constraint, columns, error)
     end
 
     # True when the violated index or constraint leads with `column` of `table`.
     def on?(table : String, column : String) : Bool
       return false unless @table.nil? || @table == table
-      @columns.first? == column || @constraint.in?("index_#{table}_on_#{column}", "#{table}_#{column}_key")
+      return true if @columns.first? == column
+      @constraint.in?("index_#{table}_on_#{column}", "#{table}_#{column}_key")
     end
   end
 
@@ -65,7 +74,11 @@ module SugarORM
     end
 
     def self.database : ::DB::Database
-      @@database || raise ConfigurationError.new("SugarORM::Repo.database is not configured.\nRemediation: set `SugarORM::Repo.database = Caramel::Database.open(url)` once during boot.")
+      @@database || raise ConfigurationError.new(
+        "SugarORM::Repo.database is not configured.\n" \
+        "Remediation: set `SugarORM::Repo.database = Caramel::Database.open(url)` " \
+        "once during boot."
+      )
     end
 
     # Statements SugarORM has sent in this process. Specs compare deltas to
@@ -114,7 +127,9 @@ module SugarORM
         current.transaction { |nested| within(nested.connection, nested) { yield } }
       else
         connection do |connection|
-          connection.transaction { |transaction| within(connection, transaction) { yield } }
+          connection.transaction do |transaction|
+            within(connection, transaction) { yield }
+          end
         end
       end
     end
@@ -132,13 +147,17 @@ module SugarORM
     end
 
     # Yields the open result set, positioned before the first row.
-    def self.query(sql : String, args : Array(Value), & : ::DB::ResultSet -> R) : R forall R
+    def self.query(sql : String,
+                   args : Array(Value),
+                   & : ::DB::ResultSet -> R) : R forall R
       connection do |connection|
         statement { connection.query(sql, args: args) { |rows| yield rows } }
       end
     end
 
-    def self.query_all(sql : String, args : Array(Value), & : ::DB::ResultSet -> R) : Array(R) forall R
+    def self.query_all(sql : String,
+                       args : Array(Value),
+                       & : ::DB::ResultSet -> R) : Array(R) forall R
       query(sql, args) do |rows|
         results = [] of R
         rows.each { results << yield rows }
@@ -146,7 +165,9 @@ module SugarORM
       end
     end
 
-    def self.query_one?(sql : String, args : Array(Value), & : ::DB::ResultSet -> R) : R? forall R
+    def self.query_one?(sql : String,
+                        args : Array(Value),
+                        & : ::DB::ResultSet -> R) : R? forall R
       query(sql, args) do |rows|
         rows.move_next ? yield rows : nil
       end
@@ -169,7 +190,9 @@ module SugarORM
     end
 
     def self.delete(record : Schema) : Bool
-      sql = "DELETE FROM #{record.class.__sugar_quoted_table} WHERE \"#{record.class.__sugar_primary_key}\" = $1"
+      schema = record.class
+      sql = "DELETE FROM #{schema.__sugar_quoted_table} " \
+            "WHERE \"#{schema.__sugar_primary_key}\" = $1"
       exec(sql, [record.__sugar_primary_value] of Value).rows_affected == 1
     end
 
@@ -186,7 +209,9 @@ module SugarORM
       raise error.field_message(:code) == "23505" ? UniqueViolation.from(error) : error
     end
 
-    private def self.within(connection : ::DB::Connection, transaction : ::DB::Transaction?, &)
+    private def self.within(connection : ::DB::Connection,
+                            transaction : ::DB::Transaction?,
+                            &)
       fiber = Fiber.current
       previous_connection = fiber.__sugar_connection
       previous_transaction = fiber.__sugar_transaction
