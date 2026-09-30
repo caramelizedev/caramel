@@ -37,7 +37,12 @@ module Caramel
     record WorkOptions,
       queues : String? = nil,
       concurrency : String? = nil,
-      scheduler : Bool = true do
+      scheduler : Bool = true
+
+    # Crystal 1.21's `tool expand`, which `frappe expand` runs, cannot parse a
+    # documented private or protected method inside a `record` block, so the
+    # methods live in the reopened struct.
+    struct WorkOptions
       # Nil for an unknown or repeated flag, or a flag missing its value.
       def self.parse(arguments : Array(String)) : WorkOptions?
         names = arguments.map(&.partition('=')[0])
