@@ -158,7 +158,6 @@ Layout/LineLength:
     - "src/caramel/cold_brew.cr"
     - "src/caramel/cold_brew/job.cr"
     - "src/caramel/cold_brew/queue.cr"
-    - "src/caramel/cold_brew/scheduler.cr"
     - "src/caramel/command_line.cr"
     - "src/caramel/contracts/request_contract.cr"
     - "src/caramel/corretto.cr"
