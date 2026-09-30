@@ -89,7 +89,6 @@ Layout/LineLength:
     - "spec/caramel/streaming_spec.cr"
     - "spec/cold_brew/configuration_spec.cr"
     - "spec/corretto/client_spec.cr"
-    - "spec/fixtures/latte_ipc.cr"
     - "spec/fixtures/latte_network.cr"
     - "spec/frappe/cli_spec.cr"
     - "spec/frappe/commands_spec.cr"
