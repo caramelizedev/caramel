@@ -9,13 +9,17 @@ describe Caramel::Frappe::SchemaDiff do
   # An unquoted heredoc would interpolate `#{…}` and decode escapes such as
   # `\n`, so the compiled migration would differ from the derived SQL.
   it "quotes a migration's SQL heredoc exactly when interpolation or escapes must stay literal" do
-    migration_source(%(CREATE TABLE "notes" ("body" text NOT NULL))).should contain(%(  <<-SQL,\n    CREATE TABLE "notes"))
-    migration_source(%(ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb')).should contain(%(  <<-'SQL',\n    ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb'\n))
-    migration_source(%(COMMENT ON TABLE "notes" IS '\#{title}')).should contain(%(  <<-'SQL',\n    COMMENT ON TABLE "notes" IS '\#{title}'\n))
+    plain = %(CREATE TABLE "notes" ("body" text NOT NULL))
+    migration_source(plain).should contain(%(  <<-SQL,\n    CREATE TABLE "notes"))
+    escape = %(ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb')
+    migration_source(escape).should contain("  <<-'SQL',\n    #{escape}\n")
+    interpolation = %(COMMENT ON TABLE "notes" IS '\#{title}')
+    migration_source(interpolation).should contain("  <<-'SQL',\n    #{interpolation}\n")
     # A backslash that is no escape sequence still stays literal; Ameba would
     # ask for an unquoted heredoc, which would drop it.
     lone = migration_source(%(ALTER TABLE "notes" ALTER COLUMN "path" SET DEFAULT 'a\\_b'))
-    lone.should contain(%(  # ameba:disable Style/HeredocEscape -- its backslashes stay literal\n  <<-'SQL',\n))
-    migration_source(%(ALTER TABLE "notes" ALTER COLUMN "body" SET DEFAULT E'a\\nb')).should_not contain("ameba:disable")
+    disable = "  # ameba:disable Style/HeredocEscape -- its backslashes stay literal\n"
+    lone.should contain("#{disable}  <<-'SQL',\n")
+    migration_source(escape).should_not contain("ameba:disable")
   end
 end
