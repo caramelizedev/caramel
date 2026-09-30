@@ -86,7 +86,6 @@ Layout/LineLength:
     - "spec/caramel/request_contract_spec.cr"
     - "spec/caramel/request_input_spec.cr"
     - "spec/caramel/router_spec.cr"
-    - "spec/caramel/session_spec.cr"
     - "spec/caramel/streaming_spec.cr"
     - "spec/caramel/validate_url_spec.cr"
     - "spec/caramel/view_spec.cr"
