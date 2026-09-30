@@ -161,7 +161,6 @@ Layout/LineLength:
     - "src/caramel/cold_brew/migrations.cr"
     - "src/caramel/cold_brew/scheduler.cr"
     - "src/caramel/cold_brew/worker.cr"
-    - "src/caramel/corretto/client.cr"
     - "src/caramel/corretto/matchers.cr"
     - "src/caramel/corretto/wire.cr"
     - "src/caramel/corretto/worker.cr"

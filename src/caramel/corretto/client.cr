@@ -37,6 +37,7 @@ module Corretto
     LOCAL_PATH = "Corretto requests take a local path such as /books"
     ONE_BODY   = "Send one body: params: (with files: for multipart), json: or body:"
     GET_BODY   = "GET sends params: in the query and takes no body"
+    NO_HOST    = "Corretto needs an application origin with a host"
 
     getter cookies = {} of String => String
     @origin : String
@@ -45,7 +46,8 @@ module Corretto
 
     def initialize(@application : Caramel::Application)
       @origin = @application.csrf.origin
-      @host = URI.parse(@origin).authority || raise ArgumentError.new("Corretto needs an application origin with a host, not #{@origin}")
+      @host = URI.parse(@origin).authority ||
+              raise ArgumentError.new("#{NO_HOST}, not #{@origin}")
     end
 
     {% for verb in %w[get post put patch delete] %}
@@ -78,7 +80,9 @@ module Corretto
         sent["X-CSRF-Token"] = csrf_token
         payload = encode(sent, params, files, json, body)
       end
-      sent["Cookie"] = @cookies.join("; ") { |name, value| "#{name}=#{value}" } unless @cookies.empty?
+      unless @cookies.empty?
+        sent["Cookie"] = @cookies.join("; ") { |name, value| "#{name}=#{value}" }
+      end
       headers.each { |name, value| sent[name] = value }
       respond(HTTP::Request.new(method, path, sent, payload))
     end
@@ -86,15 +90,19 @@ module Corretto
     # Requests the Location (or htmx's HX-Location) of the last response.
     def follow_redirect : Caramel::Response
       last = @last || raise Error.new("follow_redirect needs a previous response")
-      location = last.headers["HX-Location"]? || ((300..399).includes?(last.status) ? last.headers["Location"]? : nil)
-      raise Error.new("The last response (status #{last.status}) is not a redirect") unless location
+      location = last.headers["HX-Location"]? || redirect_location(last)
+      unless location
+        raise Error.new("The last response (status #{last.status}) is not a redirect")
+      end
       get(location)
     end
 
-    # Signs `user` in the way the application does: `user_id` in the signed session cookie.
+    # Signs `user` in the way the application does: `user_id` in the signed
+    # session cookie.
     def sign_in(user) : Nil
       sessions = @application.sessions
-      session = @cookies[Caramel::Session::COOKIE_NAME]?.try { |value| sessions.decode(value) } || {} of String => String
+      cookie = @cookies[Caramel::Session::COOKIE_NAME]?
+      session = cookie.try { |value| sessions.decode(value) } || {} of String => String
       session["user_id"] = user.id.to_s
       @cookies[Caramel::Session::COOKIE_NAME] = sessions.encode(session)
     end
@@ -108,6 +116,11 @@ module Corretto
 
     private def local?(path : String) : Bool
       path.starts_with?('/') && !path.starts_with?("//")
+    end
+
+    # A 3xx response's Location, if it sends one.
+    private def redirect_location(response : Caramel::Response) : String?
+      response.headers["Location"]? if (300..399).includes?(response.status)
     end
 
     # The token a page from this application would submit, kept as its cookie.
