@@ -11,7 +11,10 @@ module Caramel::Latte
     def self.check!(path : String, version : Int, supported : Int) : Nil
       return if version == supported
       if version > supported
-        raise Newer.new("#{path} was written by a newer Caramel (format #{version}); Caramel #{Caramel::VERSION} reads format #{supported}. Use the newest installed Caramel.")
+        message = "#{path} was written by a newer Caramel (format #{version}); " \
+                  "Caramel #{Caramel::VERSION} reads format #{supported}. " \
+                  "Use the newest installed Caramel."
+        raise Newer.new(message)
       end
       raise ArgumentError.new("#{path} has an unknown format version #{version}")
     end

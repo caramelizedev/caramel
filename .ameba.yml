@@ -226,7 +226,6 @@ Layout/LineLength:
     - "src/latte/registry.cr"
     - "src/latte/server.cr"
     - "src/latte/site.cr"
-    - "src/latte/state_format.cr"
     - "src/latte/supervisor.cr"
     - "src/latte/toolchain.cr"
     - "src/latte/trust.cr"
