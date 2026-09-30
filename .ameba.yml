@@ -213,7 +213,6 @@ Layout/LineLength:
     - "src/frappe/schema_diff.cr"
     - "src/frappe/tools.cr"
     - "src/latte.cr"
-    - "src/latte/daemon.cr"
     - "src/latte/login_item.cr"
     - "src/latte/paths.cr"
     - "src/latte/postgres.cr"

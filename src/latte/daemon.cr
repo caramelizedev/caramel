@@ -18,7 +18,7 @@ module Caramel::Latte
       LibC.setsid
       log = File.join(paths.logs_dir, Paths::DAEMON_LOG)
       if info = File.info?(log, follow_symlinks: false)
-        unless info.file? && info.owner_id.to_i64? == LibC.getuid.to_i64 && info.permissions.value == 0o600
+        unless StateSecurity.private_file?(info)
           raise ArgumentError.new("Latte log is not a private owned file")
         end
       end
@@ -48,22 +48,34 @@ module Caramel::Latte
     # keep running. Returns false when no daemon was running.
     def self.stop(paths : Paths, timeout : Time::Span = 20.seconds) : Bool
       return false unless running?(paths)
+      request_stop(paths, timeout)
+      deadline = Time.instant + timeout
+      while running?(paths)
+        if Time.instant >= deadline
+          message = "Latte did not stop within #{timeout.total_seconds.to_i} seconds"
+          raise PublicError.new("stop_failed", message)
+        end
+        sleep 50.milliseconds
+      end
+      true
+    end
+
+    private def self.request_stop(paths : Paths, timeout : Time::Span) : Nil
       socket = Socket.unix
       begin
         socket.connect(Socket::UNIXAddress.new(paths.control_socket), timeout: 2.seconds)
         socket.read_timeout = timeout
-        HTTP::Client.new(socket, "latte").post("/v1/daemon/stop", HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}, "{}")
+        headers = HTTP::Headers{
+          "Content-Type" => "application/json",
+          "Connection"   => "close",
+        }
+        HTTP::Client.new(socket, "latte").post("/v1/daemon/stop", headers, "{}")
       rescue ex : IO::Error
-        raise PublicError.new("stop_failed", "Latte did not accept the stop request: #{ex.message}")
+        message = "Latte did not accept the stop request: #{ex.message}"
+        raise PublicError.new("stop_failed", message)
       ensure
         socket.close
       end
-      deadline = Time.instant + timeout
-      while running?(paths)
-        raise PublicError.new("stop_failed", "Latte did not stop within #{timeout.total_seconds.to_i} seconds") if Time.instant >= deadline
-        sleep 50.milliseconds
-      end
-      true
     end
 
     def run : Nil
