@@ -147,17 +147,24 @@ module Caramel::Frappe
     # Compiles and runs each group's specs in parallel, prefixing every line
     # of output with its worker, and returns whether each worker passed.
     # `crystal spec` would link every worker to the same temporary executable
-    # in the shared compiler cache, so each worker builds its own binary.
+    # in the shared compiler cache, so each worker builds its own binary. It
+    # compiles a generated `.caramel/corretto/w<N>.cr` that requires the
+    # group's files in order: the compiler names a program's cache directory
+    # after that stable path, not after whichever spec file sorts first, so a
+    # run over other files reuses the worker's objects.
     private def run_workers(tools : Tools, groups : Array(Array(String)), environments : Array(Hash(String, String))) : Array(Bool)
       directory = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
+      entries = Latte::StateSecurity.ensure_owned_directory(File.join(directory, "corretto"))
       finished = Channel({Int32, Bool}).new
       groups.each_with_index do |group, offset|
         spawn do
           prefix = "[w#{offset + 1}] "
           env = tools.environment(environments[offset])
           binary = File.join(directory, "corretto-w#{offset + 1}")
+          entry = File.join(entries, "w#{offset + 1}.cr")
           passed = begin
-            relayed(File.join(@framework_root, "scripts/crystal"), ["build", *group, "-o", binary], env, prefix) &&
+            File.write(entry, group.join { |file| "require #{("../../" + file.rchop(".cr")).inspect}\n" })
+            relayed(File.join(@framework_root, "scripts/crystal"), ["build", entry, "-o", binary], env, prefix) &&
             relayed(binary, [] of String, env, prefix)
           rescue ex : IO::Error | File::Error
             @error.puts("#{prefix}#{ex.message}")

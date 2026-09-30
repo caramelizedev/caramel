@@ -1,6 +1,6 @@
 # Optional Crystal editor tools
 
-Caramel pins two Crystal language servers per installation and runs them through `frappe lsp`. They use the installation's private toolchain root and pinned Crystal 1.21.0 compiler, never a global Crystal or Homebrew.
+Caramel pins two Crystal language servers per installation and runs them through `frappe lsp`. They use the installation's private toolchain root and pinned Crystal 1.21.1 compiler, never a global Crystal or Homebrew.
 
 ## What you get
 

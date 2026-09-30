@@ -33,6 +33,8 @@ module Caramel::Frappe
 
     getter status : Process::Status? = nil
     getter output : Output
+    # Closed when the command exits, so a waiter wakes at once.
+    getter finished = Channel(Nil).new
     getter pid : Int64
     @process : Process
 
@@ -42,7 +44,10 @@ module Caramel::Frappe
       @process = Process.new(launcher, ["__caramel_dev_child", *command], env: environment, clear_env: true,
         chdir: directory, input: Process::Redirect::Pipe, output: @output, error: @output)
       @pid = @process.pid.to_i64
-      spawn { @status = @process.wait }
+      spawn do
+        @status = @process.wait
+        @finished.close
+      end
     end
 
     def running? : Bool
@@ -56,10 +61,10 @@ module Caramel::Frappe
 
     def stop : Nil
       request_stop
-      deadline = Time.instant + 5.seconds
-      while running?
-        raise Error.new("Development child did not close its owned process group") if Time.instant >= deadline
-        sleep 25.milliseconds
+      select
+      when @finished.receive?
+      when timeout(5.seconds)
+        raise Error.new("Development child did not close its owned process group") if running?
       end
     end
   end

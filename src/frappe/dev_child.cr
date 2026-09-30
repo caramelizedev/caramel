@@ -30,7 +30,6 @@ module Caramel::Frappe
       Signal::INT.ignore
       LibC.kill(-group, Signal::TERM.value)
       if status
-        sleep 50.milliseconds
         status.normal_exit? ? status.exit_code : 1
       else
         # Keep the group leader alive until escalation so its ID cannot be

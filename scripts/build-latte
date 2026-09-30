@@ -3,6 +3,9 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 mkdir -p "$ROOT/bin"
+. "$ROOT/scripts/lib/jobs.sh"
+# The Swift menu app and port relay compile alongside latte itself.
+job menu "$ROOT/scripts/build-latte-menu"
+job relay "$ROOT/scripts/build-latte-relay"
 "$ROOT/scripts/crystal" build "$ROOT/src/latte.cr" --error-on-warnings -o "$ROOT/bin/latte"
-"$ROOT/scripts/build-latte-menu"
-"$ROOT/scripts/build-latte-relay"
+finish_jobs

@@ -20,8 +20,9 @@ cases = {
   "compile_non_literal_default"       => ["compile_non_literal_default.cr:6:11", "Default `Time.utc.year` for field 'year : Int32' is not a compile-time Int32 literal", "Remediation: write a literal default"],
   "compile_missing_primary_key"       => ["compile_missing_primary_key.cr:4:10", "Keyless has no primary key", "Remediation: add `field id : Int64, primary: true`"],
 }
-cases.each do |name, required|
-  result = Caramel::Checks.crystal(["build", "spec/fixtures/sugar_orm/#{name}.cr", "--no-codegen"], timeout: 90.seconds)
+results = Caramel::Checks.type_check(cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" })
+cases.each_with_index do |(name, required), index|
+  result = results[index]
   output = "#{name}\n#{result.stdout}#{result.stderr}"
   Caramel::Checks.fail("#{name}\ncompiler timed out") if result.timed_out?
   if required

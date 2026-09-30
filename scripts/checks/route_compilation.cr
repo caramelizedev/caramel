@@ -18,8 +18,9 @@ cases = {
   "compile_unknown_verb"     => {["accepts only get, post, put, patch and delete", "resources :books"], ["__caramel_router_draw"]},
   "compile_wrong_path_id"    => {["expected argument #1"], [] of String},
 }
-cases.each do |name, expectation|
-  result = Caramel::Checks.crystal(["build", "spec/fixtures/routes/#{name}.cr", "--no-codegen"], timeout: 90.seconds)
+results = Caramel::Checks.type_check(cases.keys.map { |name| "spec/fixtures/routes/#{name}.cr" })
+cases.each_with_index do |(name, expectation), index|
+  result = results[index]
   output = "#{name}\n#{result.stdout}#{result.stderr}"
   Caramel::Checks.fail("#{name}\ncompiler timed out") if result.timed_out?
   if expectation
