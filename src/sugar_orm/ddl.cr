@@ -16,13 +16,21 @@ module SugarORM
 
     def self.create_table(table : Catalog::Table) : String
       primary = table.columns.select(&.primary)
-      lines = table.columns.map { |column| column_definition(column, inline_primary: primary.size == 1) }
-      lines << "PRIMARY KEY (#{primary.join(", ") { |column| quote(column.name) }})" if primary.size > 1
-      table.foreign_keys.each { |key| lines << "CONSTRAINT #{quote(key.name)} #{references(key)}" }
-      "CREATE TABLE #{quote(table.name)} (\n#{lines.join(",\n") { |line| "  #{line}" }}\n)"
+      inline = primary.size == 1
+      lines = table.columns.map do |column|
+        column_definition(column, inline_primary: inline)
+      end
+      if primary.size > 1
+        keys = primary.join(", ") { |column| quote(column.name) }
+        lines << "PRIMARY KEY (#{keys})"
+      end
+      table.foreign_keys.each { |key| lines << constraint(key) }
+      body = lines.join(",\n") { |line| "  #{line}" }
+      "CREATE TABLE #{quote(table.name)} (\n#{body}\n)"
     end
 
-    def self.column_definition(column : Catalog::Column, inline_primary : Bool = true) : String
+    def self.column_definition(column : Catalog::Column,
+                               inline_primary : Bool = true) : String
       String.build do |sql|
         sql << quote(column.name) << ' ' << column.sql_type
         if column.identity
@@ -40,31 +48,38 @@ module SugarORM
     end
 
     def self.render(operation : Differ::AddColumn) : String
-      "ALTER TABLE #{quote(operation.table)} ADD COLUMN #{column_definition(operation.column)}"
+      definition = column_definition(operation.column)
+      "ALTER TABLE #{quote(operation.table)} ADD COLUMN #{definition}"
     end
 
     def self.render(operation : Differ::RenameColumn) : String
+      from = quote(operation.from)
+      to = quote(operation.to)
       "-- caramel:allow-rename #{operation.table}.#{operation.from}\n" \
-      "ALTER TABLE #{quote(operation.table)} RENAME COLUMN #{quote(operation.from)} TO #{quote(operation.to)}"
+      "ALTER TABLE #{quote(operation.table)} RENAME COLUMN #{from} TO #{to}"
     end
 
     def self.render(operation : Differ::DropColumn) : String
       sql = "ALTER TABLE #{quote(operation.table)} DROP COLUMN #{quote(operation.column)}"
-      operation.explicit ? "-- caramel:allow-drop #{operation.table}.#{operation.column}\n#{sql}" : sql
+      return sql unless operation.explicit
+      "-- caramel:allow-drop #{operation.table}.#{operation.column}\n#{sql}"
     end
 
     def self.render(operation : Differ::AlterNull) : String
-      "ALTER TABLE #{quote(operation.table)} ALTER COLUMN #{quote(operation.column)} #{operation.nullable ? "DROP" : "SET"} NOT NULL"
+      change = operation.nullable ? "DROP" : "SET"
+      "#{alter_column(operation.table, operation.column)} #{change} NOT NULL"
     end
 
     def self.render(operation : Differ::AlterDefault) : String
       change = operation.default.try { |default| "SET DEFAULT #{default}" } || "DROP DEFAULT"
-      "ALTER TABLE #{quote(operation.table)} ALTER COLUMN #{quote(operation.column)} #{change}"
+      "#{alter_column(operation.table, operation.column)} #{change}"
     end
 
     def self.render(operation : Differ::AlterType) : String
+      alter = alter_column(operation.table, operation.column)
       column = quote(operation.column)
-      "ALTER TABLE #{quote(operation.table)} ALTER COLUMN #{column} TYPE #{operation.sql_type} USING #{column}::#{operation.sql_type}"
+      type = operation.sql_type
+      "#{alter} TYPE #{type} USING #{column}::#{type}"
     end
 
     # Online builds are idempotent so an interrupted autocommit migration can
@@ -84,8 +99,9 @@ module SugarORM
     end
 
     def self.render(operation : Differ::AddForeignKey) : String
-      key = operation.foreign_key
-      "ALTER TABLE #{quote(operation.table)} ADD CONSTRAINT #{quote(key.name)} #{references(key)}#{" NOT VALID" if operation.not_valid}"
+      table = quote(operation.table)
+      sql = "ALTER TABLE #{table} ADD #{constraint(operation.foreign_key)}"
+      operation.not_valid ? "#{sql} NOT VALID" : sql
     end
 
     def self.render(operation : Differ::ValidateForeignKey) : String
@@ -96,10 +112,23 @@ module SugarORM
       "ALTER TABLE #{quote(operation.table)} DROP CONSTRAINT #{quote(operation.name)}"
     end
 
+    # The start of a statement that changes `column` of `table`.
+    private def self.alter_column(table : String, column : String) : String
+      "ALTER TABLE #{quote(table)} ALTER COLUMN #{quote(column)}"
+    end
+
+    private def self.constraint(key : Catalog::ForeignKey) : String
+      "CONSTRAINT #{quote(key.name)} #{references(key)}"
+    end
+
     private def self.references(key : Catalog::ForeignKey) : String
-      raise ArgumentError.new("unsupported ON DELETE action: #{key.on_delete}") unless ON_DELETE.includes?(key.on_delete)
-      clause = "FOREIGN KEY (#{quote(key.column)}) REFERENCES #{quote(key.references_table)} (#{quote(key.references_column)})"
-      key.on_delete == "NO ACTION" ? clause : "#{clause} ON DELETE #{key.on_delete}"
+      action = key.on_delete
+      unless ON_DELETE.includes?(action)
+        raise ArgumentError.new("unsupported ON DELETE action: #{action}")
+      end
+      target = "#{quote(key.references_table)} (#{quote(key.references_column)})"
+      clause = "FOREIGN KEY (#{quote(key.column)}) REFERENCES #{target}"
+      action == "NO ACTION" ? clause : "#{clause} ON DELETE #{action}"
     end
   end
 end

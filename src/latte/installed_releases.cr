@@ -22,7 +22,10 @@ module Caramel::Latte
     def self.read(path : String) : Hash(String, String)
       entries = {} of String => String
       return entries unless info = File.info?(path, follow_symlinks: false)
-      raise Invalid.new("Caramel installation registry must be a private owned file: #{path}") unless StateSecurity.private_file?(info)
+      unless StateSecurity.private_file?(info)
+        message = "Caramel installation registry must be a private owned file: #{path}"
+        raise Invalid.new(message)
+      end
       document = JSON.parse(File.read(path))
       StateFormat.check!(path, document["version"].as_i, FORMAT)
       document["installations"].as_h.each do |release, value|

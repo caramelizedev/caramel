@@ -8,17 +8,37 @@ module SugarORM
     NAME       = "(?:#{IDENTIFIER}\\.)?(#{IDENTIFIER})"
     ANNOTATION = /^\s*--\s*caramel:allow-(drop|rename)\s+([^\s.]+)\.(\S+)\s*$/
 
-    CREATE_TABLE  = /\ACREATE\s+(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?#{NAME}/i
-    CREATE_INDEX  = /\ACREATE\s+(?:UNIQUE\s+)?INDEX\s+(CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?:(#{IDENTIFIER})\s+)?ON\s+(?:ONLY\s+)?#{NAME}/i
+    # Optional clauses of the statements below, each with its trailing space.
+    IF_EXISTS     = %q((?:IF\s+EXISTS\s+)?)
+    IF_NOT_EXISTS = %q((?:IF\s+NOT\s+EXISTS\s+)?)
+    ONLY          = %q((?:ONLY\s+)?)
+    COLUMN        = %q((?:COLUMN\s+)?)
+    PERSISTENCE   = %q((?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?)
+    # ADD starts a column unless a table constraint follows it.
+    NOT_CONSTRAINT = %q((?!(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)\b))
+    # `[IF NOT EXISTS] [name] ON [ONLY] table` in CREATE INDEX: captures the
+    # index name and the table.
+    INDEX_ON = "#{IF_NOT_EXISTS}(?:(#{IDENTIFIER})\\s+)?ON\\s+#{ONLY}#{NAME}"
+
+    CREATE_TABLE  = /\ACREATE\s+#{PERSISTENCE}TABLE\s+#{IF_NOT_EXISTS}#{NAME}/i
+    CREATE_INDEX  = /\ACREATE\s+(?:UNIQUE\s+)?INDEX\s+(CONCURRENTLY\s+)?#{INDEX_ON}/i
     DROP_INDEX    = /\ADROP\s+INDEX\s+CONCURRENTLY\s/i
     REINDEX       = /\AREINDEX\s.*\bCONCURRENTLY\b/i
-    ALTER_TABLE   = /\AALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?#{NAME}\s+(.+)\z/im
+    ALTER_TABLE   = /\AALTER\s+TABLE\s+#{IF_EXISTS}#{ONLY}#{NAME}\s+(.+)\z/im
     VALIDATE      = /\AVALIDATE\s+CONSTRAINT\s+#{IDENTIFIER}\s*;?\z/i
-    ADD_COLUMN    = /\AADD\s+(?!(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)\b)(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(#{IDENTIFIER})\s/i
-    DROP_COLUMN   = /\ADROP\s+(?!CONSTRAINT\b)(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(#{IDENTIFIER})/i
-    RENAME_COLUMN = /\ARENAME\s+(?!(?:TO|CONSTRAINT)\b)(?:COLUMN\s+)?(#{IDENTIFIER})\s+TO\s/i
+    ADD_COLUMN    = /\AADD\s+#{NOT_CONSTRAINT}#{COLUMN}#{IF_NOT_EXISTS}(#{IDENTIFIER})\s/i
+    DROP_COLUMN   = /\ADROP\s+(?!CONSTRAINT\b)#{COLUMN}#{IF_EXISTS}(#{IDENTIFIER})/i
+    RENAME_COLUMN = /\ARENAME\s+(?!(?:TO|CONSTRAINT)\b)#{COLUMN}(#{IDENTIFIER})\s+TO\s/i
+    NOT_NULL      = /\bNOT\s+NULL\b/i
+    DEFAULTED     = /\b(?:DEFAULT|GENERATED)\b/i
 
-    record Violation, rule : String, message : String, remediation : String, migration : String, statement : String, file : String do
+    record Violation,
+      rule : String,
+      message : String,
+      remediation : String,
+      migration : String,
+      statement : String,
+      file : String do
       def to_s(io : IO) : Nil
         io << "LINT " << rule << ": " << message << '\n'
         io << "  in " << migration << ":\n"
@@ -38,11 +58,15 @@ module SugarORM
     class Refused < Exception
       getter violations : Array(Violation)
 
-      def initialize(@violations : Array(Violation), dev_override : Bool, environment : String)
+      def initialize(@violations : Array(Violation),
+                     dev_override : Bool,
+                     environment : String)
         note = if dev_override
-                 "--dev-override was ignored: it applies only when CARAMEL_ENV=development (current: #{environment})."
+                 "--dev-override was ignored: it applies only when " \
+                 "CARAMEL_ENV=development (current: #{environment})."
                else
-                 "Migration refused. In development only, --dev-override downgrades these violations to warnings."
+                 "Migration refused. In development only, " \
+                 "--dev-override downgrades these violations to warnings."
                end
         super((@violations.map(&.to_s) << note).join("\n\n"))
       end
@@ -70,32 +94,77 @@ module SugarORM
         code = code(statement)
         if match = code.match(CREATE_TABLE)
           created << identifier(match[1])
-        elsif (match = code.match(CREATE_INDEX)) && match[1]?.nil? && !created.includes?(identifier(match[3]))
+        elsif (match = code.match(CREATE_INDEX)) && match[1]?.nil? &&
+              !created.includes?(identifier(match[3]))
           table = identifier(match[3])
-          violations << Violation.new("concurrent-index", "CREATE INDEX on existing table #{table} blocks its writes while the index builds.",
-            "use CREATE INDEX CONCURRENTLY in a migration of its own; frappe db diff emits it that way.", label, statement, migration.file)
+          violations << Violation.new(
+            rule: "concurrent-index",
+            message: "CREATE INDEX on existing table #{table} " \
+                     "blocks its writes while the index builds.",
+            remediation: "use CREATE INDEX CONCURRENTLY in a migration of its own; " \
+                         "frappe db diff emits it that way.",
+            migration: label,
+            statement: statement,
+            file: migration.file,
+          )
         elsif match = code.match(ALTER_TABLE)
           table = identifier(match[1])
           actions(match[2]).each do |action|
-            if (column = action.match(ADD_COLUMN)) && !created.includes?(table) && action.matches?(/\bNOT\s+NULL\b/i) && !action.matches?(/\b(?:DEFAULT|GENERATED)\b/i)
-              violations << Violation.new("not-null-default", "ADD COLUMN #{identifier(column[1])} NOT NULL without a DEFAULT fails on a populated #{table} table.",
-                "give the column a DEFAULT, or add it nullable, backfill it, and tighten it later.", label, statement, migration.file)
-            elsif (column = action.match(DROP_COLUMN)) && !allowed.includes?({"drop", table, identifier(column[1])})
+            if (column = action.match(ADD_COLUMN)) && !created.includes?(table) &&
+               action.matches?(NOT_NULL) && !action.matches?(DEFAULTED)
+              violations << Violation.new(
+                rule: "not-null-default",
+                message: "ADD COLUMN #{identifier(column[1])} NOT NULL " \
+                         "without a DEFAULT fails on a populated #{table} table.",
+                remediation: "give the column a DEFAULT, or add it nullable, " \
+                             "backfill it, and tighten it later.",
+                migration: label,
+                statement: statement,
+                file: migration.file,
+              )
+            elsif (column = action.match(DROP_COLUMN)) &&
+                  !allowed.includes?({"drop", table, identifier(column[1])})
               name = identifier(column[1])
-              violations << Violation.new("destructive-column", "DROP COLUMN #{name} destroys the data in #{table}.#{name}.",
-                "declare drop_column :#{name} in the schema and diff again; hand-written SQL needs the line -- caramel:allow-drop #{table}.#{name}", label, statement, migration.file)
-            elsif (column = action.match(RENAME_COLUMN)) && !allowed.includes?({"rename", table, identifier(column[1])})
+              violations << Violation.new(
+                rule: "destructive-column",
+                message: "DROP COLUMN #{name} destroys the data in #{table}.#{name}.",
+                remediation: "declare drop_column :#{name} in the schema " \
+                             "and diff again; hand-written SQL needs the line " \
+                             "-- caramel:allow-drop #{table}.#{name}",
+                migration: label,
+                statement: statement,
+                file: migration.file,
+              )
+            elsif (column = action.match(RENAME_COLUMN)) &&
+                  !allowed.includes?({"rename", table, identifier(column[1])})
               name = identifier(column[1])
-              violations << Violation.new("destructive-column", "RENAME COLUMN #{name} breaks code that still reads #{table}.#{name}.",
-                "declare renamed_from: :#{name} on the new field and diff again; hand-written SQL needs the line -- caramel:allow-rename #{table}.#{name}", label, statement, migration.file)
+              violations << Violation.new(
+                rule: "destructive-column",
+                message: "RENAME COLUMN #{name} breaks code " \
+                         "that still reads #{table}.#{name}.",
+                remediation: "declare renamed_from: :#{name} on the new field " \
+                             "and diff again; hand-written SQL needs the line " \
+                             "-- caramel:allow-rename #{table}.#{name}",
+                migration: label,
+                statement: statement,
+                file: migration.file,
+              )
             end
           end
         end
       end
       if concurrent = migration.statements.find { |statement| concurrent?(statement) }
         unless migration.statements.all? { |statement| online?(statement) }
-          violations << Violation.new("mixed-concurrency", "CONCURRENTLY statements cannot run inside the transaction this migration's other statements need.",
-            "move the CONCURRENTLY statements into a migration of their own; frappe db diff splits them for you.", label, concurrent, migration.file)
+          violations << Violation.new(
+            rule: "mixed-concurrency",
+            message: "CONCURRENTLY statements cannot run inside the transaction " \
+                     "this migration's other statements need.",
+            remediation: "move the CONCURRENTLY statements into a migration " \
+                         "of their own; frappe db diff splits them for you.",
+            migration: label,
+            statement: concurrent,
+            file: migration.file,
+          )
         end
       end
       violations
@@ -103,16 +172,21 @@ module SugarORM
 
     # Downgrades violations to warnings only for --dev-override in development;
     # test, production and staging (which runs as production) always refuse.
-    def self.enforce(violations : Array(Violation), dev_override : Bool, environment : String = self.environment, warnings : IO = STDERR) : Nil
+    def self.enforce(violations : Array(Violation),
+                     dev_override : Bool,
+                     environment : String = self.environment,
+                     warnings : IO = STDERR) : Nil
       return if violations.empty?
-      raise Refused.new(violations, dev_override, environment) unless dev_override && environment == "development"
+      overridden = dev_override && environment == "development"
+      raise Refused.new(violations, dev_override, environment) unless overridden
       violations.each { |violation| warnings.puts("WARN (--dev-override) #{violation}") }
     end
 
     # CONCURRENTLY statements must run outside a transaction block.
     def self.concurrent?(statement : String) : Bool
       code = code(statement)
-      !!(code.match(CREATE_INDEX).try(&.[1]?) || code.matches?(DROP_INDEX) || code.matches?(REINDEX))
+      return true if code.match(CREATE_INDEX).try(&.[1]?)
+      code.matches?(DROP_INDEX) || code.matches?(REINDEX)
     end
 
     # Online statements may run in autocommit: CONCURRENTLY statements and

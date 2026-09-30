@@ -14,7 +14,10 @@ module Caramel::Latte
     getter stderr : String
     getter? timed_out : Bool
 
-    def initialize(@status : Process::Status, @stdout : String, @stderr : String, @timed_out : Bool = false)
+    def initialize(@status : Process::Status,
+                   @stdout : String,
+                   @stderr : String,
+                   @timed_out : Bool = false)
     end
 
     def success? : Bool
@@ -94,8 +97,12 @@ module Caramel::Latte
       timeout = OperationDeadline.limit(timeout)
       command = argv.to_a
       raise ArgumentError.new("managed command must not be empty") if command.empty?
-      raise ArgumentError.new("managed command output limit must be positive") unless output_limit > 0
-      raise ArgumentError.new("managed command deadline must be positive") unless timeout > Time::Span.zero
+      unless output_limit > 0
+        raise ArgumentError.new("managed command output limit must be positive")
+      end
+      unless timeout > Time::Span.zero
+        raise ArgumentError.new("managed command deadline must be positive")
+      end
 
       output_capture = BoundedOutput.new(output_limit)
       error_capture = BoundedOutput.new(output_limit)
@@ -201,7 +208,12 @@ module Caramel::Latte
       getter owner_token : String
       getter start_time : String
 
-      def initialize(@name : String, @pid : Int64, @executable : String, @argument_digest : String, @owner_token : String, @start_time : String)
+      def initialize(@name : String,
+                     @pid : Int64,
+                     @executable : String,
+                     @argument_digest : String,
+                     @owner_token : String,
+                     @start_time : String)
       end
     end
 
@@ -240,11 +252,7 @@ module Caramel::Latte
 
     def identity : Identity?
       return unless File.exists?(@record_path)
-      info = File.info(@record_path, follow_symlinks: false)
-      raise OwnershipError.new("managed process record is a symlink") if info.symlink?
-      raise OwnershipError.new("managed process record is not a regular file") unless info.file?
-      raise OwnershipError.new("managed process record has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
-      raise OwnershipError.new("managed process record must be private") if (info.permissions.value & 0o077) != 0
+      check_record(File.info(@record_path, follow_symlinks: false))
       Identity.from_json(File.read(@record_path))
     rescue JSON::ParseException
       raise OwnershipError.new("managed process record is corrupt; it was preserved")
@@ -261,7 +269,8 @@ module Caramel::Latte
         if verify_identity(saved)
           return saved
         elsif Process.exists?(saved.pid)
-          raise OwnershipError.new("managed process PID is live but does not match its owner record")
+          message = "managed process PID is live but does not match its owner record"
+          raise OwnershipError.new(message)
         else
           File.delete(@record_path)
         end
@@ -283,15 +292,30 @@ module Caramel::Latte
       output = File.open(@log_path, "a", 0o600)
       child : Process? = nil
       begin
-        launched = Process.new([@executable, *@args], env: @environment, output: output, error: output, chdir: @working_directory)
+        launched = Process.new(
+          [@executable, *@args],
+          env: @environment,
+          output: output,
+          error: output,
+          chdir: @working_directory,
+        )
         child = launched
         snapshot = process_snapshot(launched.pid)
-        raise ProcessFailure.new(ProcessResult.new(Process::Status[1], "", "managed child exited before identity could be recorded")) unless snapshot
+        unless snapshot
+          raise launch_failure("managed child exited before identity could be recorded")
+        end
         uid, start_time, command_line = snapshot
         unless uid == LibC.getuid.to_i64 && command_line == expected_command
-          raise ProcessFailure.new(ProcessResult.new(Process::Status[1], "", "managed child identity did not match its launch command"))
+          raise launch_failure("managed child identity did not match its launch command")
         end
-        identity = Identity.new(@name, launched.pid, @executable, digest_args(@args), owner_token, start_time)
+        identity = Identity.new(
+          name: @name,
+          pid: launched.pid,
+          executable: @executable,
+          argument_digest: digest_args(@args),
+          owner_token: owner_token,
+          start_time: start_time,
+        )
         write_identity(identity)
         @process = launched
         wait_for_start(launched, timeout)
@@ -343,14 +367,18 @@ module Caramel::Latte
 
       # Re-check identity immediately before escalation so a reused PID can
       # never receive a signal from an old record.
-      raise OwnershipError.new("managed process did not stop before its deadline") unless verify_identity(saved)
+      unless verify_identity(saved)
+        raise OwnershipError.new("managed process did not stop before its deadline")
+      end
       begin
         Process.signal(Signal::KILL, saved.pid)
       rescue ex
         raise OwnershipError.new("could not terminate the verified managed process: #{ex.message}")
       end
       wait_for_exit(saved.pid, 2.seconds)
-      raise OwnershipError.new("managed process remains after termination") if Process.exists?(saved.pid)
+      if Process.exists?(saved.pid)
+        raise OwnershipError.new("managed process remains after termination")
+      end
       File.delete(@record_path) if File.exists?(@record_path)
       @process = nil
       true
@@ -363,10 +391,7 @@ module Caramel::Latte
 
     private def write_identity(value : Identity) : Nil
       if info = File.info?(@record_path, follow_symlinks: false)
-        raise OwnershipError.new("managed process record is a symlink") if info.symlink?
-        raise OwnershipError.new("managed process record is not a regular file") unless info.file?
-        raise OwnershipError.new("managed process record has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
-        raise OwnershipError.new("managed process record must be private") if (info.permissions.value & 0o077) != 0
+        check_record(info)
       end
       temporary = File.tempfile("caramel-process-record", ".tmp", dir: File.dirname(@record_path))
       begin
@@ -381,6 +406,26 @@ module Caramel::Latte
         temporary.close unless temporary.closed?
         File.delete(temporary.path) if File.exists?(temporary.path)
       end
+    end
+
+    # A process record is a regular file of this user's that no one else can
+    # use, never a symlink.
+    private def check_record(info : File::Info) : Nil
+      raise OwnershipError.new("managed process record is a symlink") if info.symlink?
+      raise OwnershipError.new("managed process record is not a regular file") unless info.file?
+      unless owned?(info)
+        raise OwnershipError.new("managed process record has foreign ownership")
+      end
+      raise OwnershipError.new("managed process record must be private") if shared?(info)
+    end
+
+    private def owned?(info : File::Info) : Bool
+      info.owner_id.to_i64? == LibC.getuid.to_i64
+    end
+
+    # Whether the group or other users hold any permission on it.
+    private def shared?(info : File::Info) : Bool
+      (info.permissions.value & 0o077) != 0
     end
 
     private def verify_identity(saved : Identity) : Bool
@@ -402,7 +447,11 @@ module Caramel::Latte
            else
              "/usr/bin/ps"
            end
-      result = ProcessRunner.run([ps, "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="], timeout: 2.seconds, output_limit: 16 * 1024)
+      result = ProcessRunner.run(
+        [ps, "-ww", "-p", pid.to_s, "-o", "uid=,lstart=,command="],
+        timeout: 2.seconds,
+        output_limit: 16 * 1024,
+      )
       return unless result.success?
       fields = result.stdout.strip.split(/\s+/, 7)
       return if fields.size < 7
@@ -413,7 +462,7 @@ module Caramel::Latte
       {uid, start_time, command_line}
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity -- verifies each process-listing field before adopting
+    # ameba:disable Metrics/CyclomaticComplexity -- verifies each listing field before adopting
     private def adopt_existing_identity : Identity?
       ps = if File.exists?("/bin/ps")
              "/bin/ps"
@@ -423,9 +472,17 @@ module Caramel::Latte
       # Keep the listing bounded by selecting only the executable name. Full
       # argv is fetched for the small candidate set below and compared exactly
       # before a process can be adopted.
-      result = ProcessRunner.run([ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="], timeout: 2.seconds, output_limit: PROCESS_LISTING_LIMIT)
+      result = ProcessRunner.run(
+        [ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="],
+        timeout: 2.seconds,
+        output_limit: PROCESS_LISTING_LIMIT,
+      )
       return unless result.success?
-      raise OwnershipError.new("process listing exceeded 1 MiB; refusing to guess managed child ownership") if result.stdout.bytesize >= PROCESS_LISTING_LIMIT
+      if result.stdout.bytesize >= PROCESS_LISTING_LIMIT
+        message = "process listing exceeded 1 MiB; " \
+                  "refusing to guess managed child ownership"
+        raise OwnershipError.new(message)
+      end
       candidates = [] of Int64
       result.stdout.each_line do |line|
         fields = line.strip.split(/\s+/, 3)
@@ -435,16 +492,26 @@ module Caramel::Latte
         next unless uid && pid && uid == LibC.getuid.to_i64 && pid > 1
         executable_name = fields[2]
         expected_name = File.basename(@executable)
-        candidates << pid if executable_name == @executable || File.basename(executable_name) == expected_name
+        exact = executable_name == @executable
+        candidates << pid if exact || File.basename(executable_name) == expected_name
       end
-      raise OwnershipError.new("multiple unrecorded managed children match this identity") if candidates.size > 1
+      if candidates.size > 1
+        raise OwnershipError.new("multiple unrecorded managed children match this identity")
+      end
       return unless candidates.size == 1
       pid = candidates.first
       snapshot = process_snapshot(pid)
       return unless snapshot
       uid, start_time, command_line = snapshot
       return unless uid == LibC.getuid.to_i64 && command_line == expected_command
-      Identity.new(@name, pid, @executable, digest_args(@args), Random::Secure.hex(24), start_time)
+      Identity.new(
+        name: @name,
+        pid: pid,
+        executable: @executable,
+        argument_digest: digest_args(@args),
+        owner_token: Random::Secure.hex(24),
+        start_time: start_time,
+      )
     rescue ex : OwnershipError
       raise ex
     rescue
@@ -457,8 +524,14 @@ module Caramel::Latte
       # remains alive after its exact command identity was recorded.
       _ = timeout
       if child.terminated? || !Process.exists?(child.pid)
-        raise ProcessFailure.new(ProcessResult.new(Process::Status[1], "", "managed child exited before readiness"))
+        raise launch_failure("managed child exited before readiness")
       end
+    end
+
+    # A launch that failed before Latte could own the child; *reason* is its
+    # stderr, and its exception says only that the command failed.
+    private def launch_failure(reason : String) : ProcessFailure
+      ProcessFailure.new(ProcessResult.new(Process::Status[1], "", reason))
     end
 
     private def wait_for_exit(pid : Int64, timeout : Time::Span) : Nil
@@ -478,13 +551,17 @@ module Caramel::Latte
 
       # Re-check identity immediately before escalation so a reused PID can
       # never receive a signal from an old record.
-      raise OwnershipError.new("managed process did not stop before its deadline") unless verify_identity(saved)
+      unless verify_identity(saved)
+        raise OwnershipError.new("managed process did not stop before its deadline")
+      end
       begin
         child.terminate(graceful: false)
       rescue ex
         raise OwnershipError.new("could not terminate the verified managed process: #{ex.message}")
       end
-      raise OwnershipError.new("managed process remains after termination") unless receive_child(completion, 2.seconds)
+      unless receive_child(completion, 2.seconds)
+        raise OwnershipError.new("managed process remains after termination")
+      end
       File.delete(@record_path) if File.exists?(@record_path)
       @process = nil
       true
@@ -500,7 +577,8 @@ module Caramel::Latte
       completion
     end
 
-    private def receive_child(completion : Channel(Process::Status | Exception), timeout : Time::Span) : Bool
+    private def receive_child(completion : Channel(Process::Status | Exception),
+                              timeout : Time::Span) : Bool
       select
       when item = completion.receive
         raise item if item.is_a?(Exception)
@@ -525,8 +603,10 @@ module Caramel::Latte
         info = File.info(parent, follow_symlinks: false)
         raise OwnershipError.new("managed process parent is a symlink") if info.symlink?
         raise OwnershipError.new("managed process parent is not a directory") unless info.directory?
-        raise OwnershipError.new("managed process parent has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
-        raise OwnershipError.new("managed process parent must be private") if (info.permissions.value & 0o077) != 0
+        unless owned?(info)
+          raise OwnershipError.new("managed process parent has foreign ownership")
+        end
+        raise OwnershipError.new("managed process parent must be private") if shared?(info)
         File.chmod(parent, 0o700) if info.permissions.value != 0o700
       rescue
         raise OwnershipError.new("managed process parent is not a private owned directory")
@@ -537,8 +617,10 @@ module Caramel::Latte
       if info = File.info?(@log_path, follow_symlinks: false)
         raise OwnershipError.new("managed process log is a symlink") if info.symlink?
         raise OwnershipError.new("managed process log is not a regular file") unless info.file?
-        raise OwnershipError.new("managed process log has foreign ownership") unless info.owner_id.to_i64? == LibC.getuid.to_i64
-        raise OwnershipError.new("managed process log must be private") if (info.permissions.value & 0o077) != 0
+        unless owned?(info)
+          raise OwnershipError.new("managed process log has foreign ownership")
+        end
+        raise OwnershipError.new("managed process log must be private") if shared?(info)
         File.chmod(@log_path, 0o600) if info.permissions.value != 0o600
         if info.size > 1024 * 1024
           File.open(@log_path, "r+", &.truncate(0))

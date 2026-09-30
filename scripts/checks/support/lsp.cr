@@ -71,8 +71,9 @@ module Caramel::Checks
           },
         }, 60.seconds)
         if @name == "crystalline"
-          sync = initialized.try { |value| value["capabilities"]?.try { |capabilities| capabilities["textDocumentSync"]? } }
-          unless sync && sync.as_h? && sync["save"]?.try(&.as_bool?) == true && sync["change"]?.try(&.as_i?) == 2
+          capabilities = initialized.try(&.["capabilities"]?)
+          sync = capabilities.try(&.["textDocumentSync"]?)
+          unless incremental_sync?(sync)
             fail("crystalline did not advertise incremental sync and didSave: #{sync.inspect}")
           end
         end
@@ -84,6 +85,13 @@ module Caramel::Checks
         File.delete(@stderr.path) if File.exists?(@stderr.path)
         raise ex
       end
+    end
+
+    # Whether *sync* offers incremental changes (kind 2) and didSave.
+    private def incremental_sync?(sync : JSON::Any?) : Bool
+      return false unless sync && sync.as_h?
+
+      sync["save"]?.try(&.as_bool?) == true && sync["change"]?.try(&.as_i?) == 2
     end
 
     private def read_messages : Nil
@@ -141,7 +149,10 @@ module Caramel::Checks
         {false, nil}
       end
       received, message = event
-      fail("server exited#{@reader_error.try { |error| ": #{error}" } || ""}") if received && message.nil?
+      if received && message.nil?
+        detail = @reader_error.try { |error| ": #{error}" } || ""
+        fail("server exited#{detail}")
+      end
       if message && message["method"]?.try(&.as_s?) == "textDocument/publishDiagnostics"
         params = message["params"]
         @diagnostics[LSPClient.path_of(params["uri"].as_s)] = params["diagnostics"].as_a
@@ -177,30 +188,48 @@ module Caramel::Checks
     end
 
     def open(path : String, text : String = File.read(path)) : String
-      notify("textDocument/didOpen", {"textDocument" => {"uri" => LSPClient.uri(path), "languageId" => "crystal", "version" => 1, "text" => text}})
+      document = {
+        "uri"        => LSPClient.uri(path),
+        "languageId" => "crystal",
+        "version"    => 1,
+        "text"       => text,
+      }
+      notify("textDocument/didOpen", {"textDocument" => document})
       text
     end
 
     def save(path : String) : Nil
-      notify("textDocument/didSave", {"textDocument" => {"uri" => LSPClient.uri(path)}, "text" => File.read(path)})
+      document = {"uri" => LSPClient.uri(path)}
+      text = File.read(path)
+      notify("textDocument/didSave", {"textDocument" => document, "text" => text})
     end
 
-    def at(method : String, path : String, position : Hash(String, Int32), timeout : Time::Span = 30.seconds) : JSON::Any?
-      request(method, {"textDocument" => {"uri" => LSPClient.uri(path)}, "position" => position}, timeout)
+    def at(method : String,
+           path : String,
+           position : Hash(String, Int32),
+           timeout : Time::Span = 30.seconds) : JSON::Any?
+      document = {"uri" => LSPClient.uri(path)}
+      request(method, {"textDocument" => document, "position" => position}, timeout)
     end
 
-    def definition_until(path : String, position : Hash(String, Int32), timeout : Time::Span, & : String -> Bool) : Array(String)
+    def definition_until(path : String,
+                         position : Hash(String, Int32),
+                         timeout : Time::Span,
+                         & : String -> Bool) : Array(String)
       deadline = Time.instant + timeout
       found = [] of String
       while Time.instant < deadline
-        remaining = deadline - Time.instant
-        response = at("textDocument/definition", path, position, remaining < 1.second ? 1.second : remaining)
+        # Each request waits at least a second.
+        request_timeout = {deadline - Time.instant, 1.second}.max
+        response = at("textDocument/definition", path, position, request_timeout)
         locations = case response
                     when Nil then [] of JSON::Any
                     else
                       response.as_a? || [response]
                     end
-        found = locations.map { |location| LSPClient.path_of((location["targetUri"]? || location["uri"]).as_s) }
+        found = locations.map do |location|
+          LSPClient.path_of((location["targetUri"]? || location["uri"]).as_s)
+        end
         return found if found.any? { |item| yield item }
         sleep 2.seconds if Time.instant < deadline
       end

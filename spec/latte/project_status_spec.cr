@@ -24,14 +24,17 @@ describe Caramel::Latte::ProjectStatus do
       spawn { serving.listen }
       site = registry.set_upstream(site.id, socket)
       Caramel::Latte::ProjectStatus.write_session(directory, socket, gateway.owner_token)
-      Caramel::Latte::ProjectStatus.read(paths, site).should eq({state: "building", owner: "terminal"})
+      building = {state: "building", owner: "terminal"}
+      Caramel::Latte::ProjectStatus.read(paths, site).should eq(building)
       gateway.ready("/private/fixture-app.sock")
-      Caramel::Latte::ProjectStatus.read(paths, site).should eq({state: "running", owner: "terminal"})
+      running = {state: "running", owner: "terminal"}
+      Caramel::Latte::ProjectStatus.read(paths, site).should eq(running)
       gateway.failed("A compiler error with private details")
       status = Caramel::Latte::ProjectStatus.read(paths, site)
       status.should eq({state: "build-error", owner: "terminal"})
       status.to_json.should_not contain("private details")
-      Caramel::Latte::ProjectStatus.remove_session(directory, "/another/session.sock").should be_false
+      other_session = "/another/session.sock"
+      Caramel::Latte::ProjectStatus.remove_session(directory, other_session).should be_false
       Caramel::Latte::ProjectStatus.read(paths, site).should eq(status)
       File.chmod(File.join(directory, "dev-session.json"), 0o644)
       Caramel::Latte::ProjectStatus.read(paths, site)[:state].should eq("unknown")

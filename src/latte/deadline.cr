@@ -9,10 +9,13 @@ module Caramel::Latte
   end
 
   module OperationDeadline
+    EXCEEDED = "Managed service operation exceeded its deadline"
+
     def self.run(duration : Time::Span, &)
       previous = Fiber.current.caramel_operation_deadline
       proposed = Time.instant + duration
-      Fiber.current.caramel_operation_deadline = previous && previous < proposed ? previous : proposed
+      earlier = previous && previous < proposed ? previous : proposed
+      Fiber.current.caramel_operation_deadline = earlier
       yield
     ensure
       Fiber.current.caramel_operation_deadline = previous
@@ -27,12 +30,10 @@ module Caramel::Latte
     end
 
     def self.limit(duration : Time::Span) : Time::Span
-      if deadline = Fiber.current.caramel_operation_deadline
-        remaining = deadline - Time.instant
-        raise DeadlineExceeded.new("Managed service operation exceeded its deadline") if remaining <= Time::Span.zero
-        return remaining < duration ? remaining : duration
-      end
-      duration
+      deadline = Fiber.current.caramel_operation_deadline || return duration
+      remaining = deadline - Time.instant
+      raise DeadlineExceeded.new(EXCEEDED) if remaining <= Time::Span.zero
+      remaining < duration ? remaining : duration
     end
 
     def self.check! : Nil

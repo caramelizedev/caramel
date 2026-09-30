@@ -10,7 +10,8 @@ builders.each do |builder|
   STDERR.print result.stderr
   exit result.status.exit_code unless result.success?
 end
-result = Caramel::Checks.run([File.join(Caramel::Checks::REPO, "scripts/build-installers"), "--test"], timeout: 300.seconds)
+installers = File.join(Caramel::Checks::REPO, "scripts/build-installers")
+result = Caramel::Checks.run([installers, "--test"], timeout: 300.seconds)
 STDOUT.print result.stdout
 STDERR.print result.stderr
 exit result.status.exit_code unless result.success?

@@ -64,17 +64,43 @@ module SugarORM
 
     def self.from_json(text : String) : Array(Table)
       document = JSON.parse(text)
-      raise ArgumentError.new("unsupported schema document version") unless document["version"].as_i == 1
+      version = document["version"].as_i
+      raise ArgumentError.new("unsupported schema document version") unless version == 1
       document["tables"].as_a.map do |table|
         columns = table["columns"].as_a.map do |column|
-          Column.new(column["name"].as_s, column["sql_type"].as_s, column["nullable"].as_bool, column["default"].as_s?,
-            column["primary"].as_bool, column["identity"].as_bool, column["renamed_from"].as_s?)
+          Column.new(
+            name: column["name"].as_s,
+            sql_type: column["sql_type"].as_s,
+            nullable: column["nullable"].as_bool,
+            default: column["default"].as_s?,
+            primary: column["primary"].as_bool,
+            identity: column["identity"].as_bool,
+            renamed_from: column["renamed_from"].as_s?,
+          )
         end
-        indexes = table["indexes"].as_a.map { |index| Index.new(index["name"].as_s, index["columns"].as_a.map(&.as_s), index["unique"].as_bool) }
+        indexes = table["indexes"].as_a.map do |index|
+          Index.new(
+            name: index["name"].as_s,
+            columns: index["columns"].as_a.map(&.as_s),
+            unique: index["unique"].as_bool,
+          )
+        end
         foreign_keys = table["foreign_keys"].as_a.map do |key|
-          ForeignKey.new(key["name"].as_s, key["column"].as_s, key["references_table"].as_s, key["references_column"].as_s, key["on_delete"].as_s)
+          ForeignKey.new(
+            name: key["name"].as_s,
+            column: key["column"].as_s,
+            references_table: key["references_table"].as_s,
+            references_column: key["references_column"].as_s,
+            on_delete: key["on_delete"].as_s,
+          )
         end
-        Table.new(table["name"].as_s, columns, indexes, foreign_keys, table["drops"].as_a.map(&.as_s))
+        Table.new(
+          name: table["name"].as_s,
+          columns: columns,
+          indexes: indexes,
+          foreign_keys: foreign_keys,
+          drops: table["drops"].as_a.map(&.as_s),
+        )
       end
     rescue ex : JSON::ParseException | KeyError | TypeCastError
       raise ArgumentError.new("invalid schema document: #{ex.message}")
@@ -85,10 +111,22 @@ module SugarORM
   # normalized so that a table created from a declared Catalog::Table reads
   # back equal to it; indexes and foreign keys are ordered by name.
   module Introspection
-    record Snapshot, tables : Array(Catalog::Table), invalid_indexes : Array(String) = [] of String, skipped : Array(String) = [] of String
+    record Snapshot,
+      tables : Array(Catalog::Table),
+      invalid_indexes : Array(String) = [] of String,
+      skipped : Array(String) = [] of String
 
-    ON_DELETE = {"a" => "NO ACTION", "r" => "RESTRICT", "c" => "CASCADE", "n" => "SET NULL", "d" => "SET DEFAULT"}
-    NUMERIC   = {"integer", "bigint", "smallint", "double precision", "real", "numeric"}
+    ON_DELETE = {
+      "a" => "NO ACTION",
+      "r" => "RESTRICT",
+      "c" => "CASCADE",
+      "n" => "SET NULL",
+      "d" => "SET DEFAULT",
+    }
+    NUMERIC = {"integer", "bigint", "smallint", "double precision", "real", "numeric"}
+
+    # A plain or scientific decimal number, as a numeric default is spelled.
+    NUMBER_LITERAL = /\A-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\z/i
 
     TABLES = <<-SQL
       SELECT c.relname::text
@@ -101,19 +139,22 @@ module SugarORM
       SELECT c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod), a.attnotnull,
              CASE WHEN a.attgenerated = '' THEN pg_get_expr(d.adbin, d.adrelid) END,
              a.attidentity IN ('a', 'd'),
-             EXISTS (SELECT 1 FROM pg_index x WHERE x.indrelid = a.attrelid AND x.indisprimary AND a.attnum = ANY (x.indkey))
+             EXISTS (SELECT 1 FROM pg_index x WHERE x.indrelid = a.attrelid \
+                       AND x.indisprimary AND a.attnum = ANY (x.indkey))
       FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
       LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped
+      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') \
+        AND a.attnum > 0 AND NOT a.attisdropped
       ORDER BY c.relname, a.attnum
       SQL
 
     INDEXES = <<-SQL
       SELECT t.relname::text, i.relname::text, x.indisunique, x.indisvalid,
              x.indexprs IS NOT NULL OR x.indpred IS NOT NULL
-               OR EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = x.indexrelid AND con.contype IN ('p', 'u', 'x')),
+               OR EXISTS (SELECT 1 FROM pg_constraint con \
+                 WHERE con.conindid = x.indexrelid AND con.contype IN ('p', 'u', 'x')),
              ARRAY(SELECT a.attname::text
                    FROM unnest(x.indkey::int2[]) WITH ORDINALITY AS k(attnum, position)
                    JOIN pg_attribute a ON a.attrelid = x.indrelid AND a.attnum = k.attnum
@@ -140,34 +181,22 @@ module SugarORM
       ORDER BY 1, 2
       SQL
 
-    def self.read(db : DB::Database | DB::Connection) : Snapshot
-      columns = Hash(String, Array(Catalog::Column)).new { |hash, key| hash[key] = [] of Catalog::Column }
-      indexes = Hash(String, Array(Catalog::Index)).new { |hash, key| hash[key] = [] of Catalog::Index }
-      keys = Hash(String, Array(Catalog::ForeignKey)).new { |hash, key| hash[key] = [] of Catalog::ForeignKey }
-      invalid, skipped = [] of String, [] of String
+    COLUMN_ROW      = {String, String, String, Bool, String?, Bool, Bool}
+    INDEX_ROW       = {String, String, Bool, Bool, Bool, Array(String)}
+    FOREIGN_KEY_ROW = {String, String, Int32, String, String, String, String}
 
-      db.query_all(COLUMNS, as: {String, String, String, Bool, String?, Bool, Bool}).each do |table, name, type, not_null, default, identity, primary|
-        columns[table] << Catalog::Column.new(name, type, !not_null, identity ? nil : normalize_default(default, type), primary, identity)
-      end
-      db.query_all(INDEXES, as: {String, String, Bool, Bool, Bool, Array(String)}).each do |table, name, unique, valid, special, names|
-        if !valid
-          invalid << name
-        elsif special
-          # The differ ignores Caramel-owned tables whole, indexes included.
-          skipped << "skipped index #{name} on #{table} (expression, partial or constraint index)" unless table.starts_with?("caramel_")
-        else
-          indexes[table] << Catalog::Index.new(name, names, unique)
-        end
-      end
-      db.query_all(FOREIGN_KEYS, as: {String, String, Int32, String, String, String, String}).each do |table, name, size, column, target, target_column, action|
-        if size == 1
-          keys[table] << Catalog::ForeignKey.new(name, column, target, target_column, ON_DELETE[action])
-        else
-          skipped << "skipped foreign key #{name} on #{table} (multi-column)" unless table.starts_with?("caramel_")
-        end
-      end
+    def self.read(db : DB::Database | DB::Connection) : Snapshot
+      invalid, skipped = [] of String, [] of String
+      columns = read_columns(db)
+      indexes = read_indexes(db, invalid, skipped)
+      keys = read_foreign_keys(db, skipped)
       tables = db.query_all(TABLES, as: String).map do |table|
-        Catalog::Table.new(table, columns.fetch(table) { [] of Catalog::Column }, indexes.fetch(table) { [] of Catalog::Index }, keys.fetch(table) { [] of Catalog::ForeignKey })
+        Catalog::Table.new(
+          name: table,
+          columns: columns.fetch(table) { [] of Catalog::Column },
+          indexes: indexes.fetch(table) { [] of Catalog::Index },
+          foreign_keys: keys.fetch(table) { [] of Catalog::ForeignKey },
+        )
       end
       Snapshot.new(tables, invalid, skipped)
     end
@@ -180,14 +209,78 @@ module SugarORM
       return "CURRENT_TIMESTAMP" if expression == "now()"
       if match = expression.match(/\A'((?:[^']|'')*)'::(.+)\z/)
         literal, type = match[1], match[2]
-        if NUMERIC.includes?(sql_type) && NUMERIC.includes?(type) && literal.matches?(/\A-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\z/i)
-          return literal
-        end
+        numeric = NUMERIC.includes?(sql_type) && NUMERIC.includes?(type)
+        return literal if numeric && literal.matches?(NUMBER_LITERAL)
         return expression unless type == sql_type
         return literal if sql_type == "boolean" && {"true", "false"}.includes?(literal)
         return "'#{literal}'"
       end
       expression
+    end
+
+    # The columns of each table, in attribute order.
+    private def self.read_columns(db : DB::Database | DB::Connection)
+      columns = by_table(Catalog::Column)
+      rows = db.query_all(COLUMNS, as: COLUMN_ROW)
+      rows.each do |table, name, type, not_null, default, identity, primary|
+        columns[table] << Catalog::Column.new(
+          name: name,
+          sql_type: type,
+          nullable: !not_null,
+          default: identity ? nil : normalize_default(default, type),
+          primary: primary,
+          identity: identity,
+        )
+      end
+      columns
+    end
+
+    # Valid plain indexes by table; an invalid index, or one the differ cannot
+    # compare, is reported instead.
+    private def self.read_indexes(db : DB::Database | DB::Connection,
+                                  invalid : Array(String),
+                                  skipped : Array(String))
+      indexes = by_table(Catalog::Index)
+      rows = db.query_all(INDEXES, as: INDEX_ROW)
+      rows.each do |table, name, unique, valid, special, names|
+        if !valid
+          invalid << name
+        elsif special
+          # The differ ignores Caramel-owned tables whole, indexes included.
+          next if table.starts_with?("caramel_")
+          skipped << "skipped index #{name} on #{table} " \
+                     "(expression, partial or constraint index)"
+        else
+          indexes[table] << Catalog::Index.new(name, names, unique)
+        end
+      end
+      indexes
+    end
+
+    # Single-column foreign keys by table; a multi-column one is reported.
+    private def self.read_foreign_keys(db : DB::Database | DB::Connection,
+                                       skipped : Array(String))
+      keys = by_table(Catalog::ForeignKey)
+      rows = db.query_all(FOREIGN_KEYS, as: FOREIGN_KEY_ROW)
+      rows.each do |table, name, size, column, target, target_column, action|
+        if size == 1
+          keys[table] << Catalog::ForeignKey.new(
+            name: name,
+            column: column,
+            references_table: target,
+            references_column: target_column,
+            on_delete: ON_DELETE[action],
+          )
+        elsif !table.starts_with?("caramel_")
+          skipped << "skipped foreign key #{name} on #{table} (multi-column)"
+        end
+      end
+      keys
+    end
+
+    # A hash that starts an empty list for each table on first use.
+    private def self.by_table(type : T.class) : Hash(String, Array(T)) forall T
+      Hash(String, Array(T)).new { |hash, table| hash[table] = [] of T }
     end
   end
 end

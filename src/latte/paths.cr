@@ -133,7 +133,9 @@ module Caramel
         unless info.owner_id.to_i64? == current_uid
           raise ArgumentError.new("socket path has foreign ownership")
         end
-        raise ArgumentError.new("upstream is not a Unix socket") if require_socket && !info.type.socket?
+        if require_socket && !info.type.socket?
+          raise ArgumentError.new("upstream is not a Unix socket")
+        end
         if (info.permissions.value & 0o077) != 0
           raise ArgumentError.new("socket path must be private")
         end
@@ -168,8 +170,9 @@ module Caramel
           raise ArgumentError.new("state root must not be empty")
         end
         StateSecurity.reject_controls!(selected, "state root")
-        expanded = StateSecurity.canonical_creation_path(Path[selected].expand(home: Path.home).normalize.to_s)
-        @root = StateSecurity.ensure_owned_directory(expanded)
+        expanded = Path[selected].expand(home: Path.home).normalize.to_s
+        canonical = StateSecurity.canonical_creation_path(expanded)
+        @root = StateSecurity.ensure_owned_directory(canonical)
         @root = File.realpath(@root)
         runtime = StateSecurity.canonical_creation_path(StateSecurity.runtime_root(@root))
         @run_dir = StateSecurity.ensure_owned_directory(runtime)
@@ -230,7 +233,9 @@ module Caramel
         StateSecurity.reject_controls!(path, "socket path")
         if info = File.info?(path, follow_symlinks: false)
           raise ArgumentError.new("socket path contains a symlink") if info.symlink?
-          raise ArgumentError.new("socket path has foreign ownership") unless info.owner_id.to_i64? == StateSecurity.current_uid
+          unless info.owner_id.to_i64? == StateSecurity.current_uid
+            raise ArgumentError.new("socket path has foreign ownership")
+          end
         end
         path
       end
