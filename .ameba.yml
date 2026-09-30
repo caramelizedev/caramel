@@ -197,7 +197,6 @@ Layout/LineLength:
     - "src/frappe/editor_tools.cr"
     - "src/frappe/latte_client.cr"
     - "src/frappe/new_project.cr"
-    - "src/frappe/release.cr"
     - "src/frappe/resource_generator.cr"
     - "src/frappe/schema_diff.cr"
     - "src/frappe/tools.cr"
