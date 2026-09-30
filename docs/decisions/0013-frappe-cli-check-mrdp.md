@@ -25,6 +25,7 @@ The shipped CLI is Frappé (`frappe`). It exited 2 on bad input and had no agent
    - `N_PLUS_ONE` patches insert `.preload(:name)` after the query.
    - Usage errors, migration lint refusals (`LINT_<RULE>`) and `db diff` halts (`DIFF_HALT`) use the same MRDP.
 5. **Tier 2.** Native builds serve the running application: `frappe dev`, `routes`, `migrate`, `seed`, `corretto` and `db diff`'s headless `schema` binary, because Crystal has no interpreter for whole applications. Deployment builds belong to RFC-0007 and are out of scope. Tier 1 remains the agent's verification loop.
+   - Since 2026-09-30, commands share the development build. A command reuses a build of the same inputs: the source signature `frappe dev` hashes, the toolchain, the framework version and the development flags. It takes `frappe dev`'s build, hard-linked into `.caramel/application` so the session's cleanup cannot delete it, or else the previous command's, and builds into `.caramel/application` only when neither matches. `.caramel/build.lock` serializes the application's builds: a command waits while `frappe dev` or another command builds, and `frappe dev` waits for a command's build, so no two builds write the program's compiler cache at once.
 6. **`frappe expand FILE:LINE:COL`** prints the plain Crystal that a macro call expands to (RFC-0008 §3's `caramel expand`).
 
 ## Reasons
@@ -45,6 +46,8 @@ Principles followed:
 - `spec/frappe/diagnostics_spec.cr` covers the parser against 29 captured real compiler outputs, plus the MRDP and ANSI formatting.
 - `spec/frappe/cli_spec.cr` covers the CLI surface.
 - `scripts/check route-compilation` covers the `Contract:` locations.
+- `spec/frappe/build_slot_spec.cr` covers when a kept build is reused: only for its fingerprint, toolchain and mode, with its bytes intact. It also covers a linked build outliving the original.
+- `scripts/check frappe-project --dev` asserts that `frappe migrate` beside a running session runs the session's build of the same sources rather than a new one.
 - `scripts/check frappe-project`:
   - `agent-manifest` lists every command, and unknown input exits 1 with the syntax;
   - the `routes` filter;

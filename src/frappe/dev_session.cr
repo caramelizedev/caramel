@@ -2,6 +2,7 @@ require "./dev_command"
 require "./dev_retirement"
 require "./dev_gateway"
 require "./dev_files"
+require "./build_slot"
 require "./tools"
 require "./latte_client"
 require "./site_log"
@@ -180,45 +181,16 @@ module Caramel::Frappe
         return
       end
       directory = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel/dev"))
-      binary = File.join(directory, "application-#{fingerprint[0, 16]}")
-      metadata = File.join(directory, "build.json")
-      cached = cached?(metadata, binary, fingerprint)
-      unless cached
-        # Tier 1: semantic feedback before paying for code generation.
-        checked = Time.instant
-        command = compile(["--no-codegen"], "check")
-        return if @stopping || @pending
-        elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
-        unless command.status.try(&.success?)
-          @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
-          @output.puts("Type check failed in #{elapsed} ms")
-          @output.flush
-          return
-        end
-        @output.puts("Type check passed in #{elapsed} ms")
-        temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
-        begin
-          @output.puts("Building #{@project.name}…")
-          @output.flush
-          command = compile(["-o", temporary], "build")
-          return if @stopping || @pending
-          unless command.status.try(&.success?)
-            @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
-            return
-          end
-          reject_symlink(binary)
-          {% if flag?(:darwin) %}
-            reject_symlink(binary + ".dwarf")
-            raise Error.new("Compiler did not produce development debug information") unless File.file?(temporary + ".dwarf")
-            File.rename(temporary + ".dwarf", binary + ".dwarf")
-          {% end %}
-          File.rename(temporary, binary)
-          write_metadata(metadata, {source: fingerprint, binary: Digest::SHA256.hexdigest(File.read(binary)), debug: debug_checksum(binary), toolchain: @tools.toolchain.root, framework: Caramel::VERSION, mode: "caramel_development"}.to_json)
-        ensure
-          File.delete?(temporary)
-          File.delete?(temporary + ".dwarf")
-        end
+      slot = BuildSlot.development(@project.root, fingerprint, @tools.toolchain.root)
+      lock = BuildLock.new(@project.root)
+      begin
+        return unless acquired?(lock)
+        cached = slot.holds?(fingerprint)
+        return unless cached || compiled?(slot, directory, fingerprint)
+      ensure
+        lock.release
       end
+      binary = slot.binary
       @binary = binary
       return if @stopping || @pending
       if boot(binary)
@@ -227,6 +199,52 @@ module Caramel::Frappe
         @output.flush
         cleanup_binaries
       end
+    end
+
+    # Type-checks, builds and installs *fingerprint* into *slot*; false when
+    # either step fails, a newer change supersedes it, or the session stops.
+    private def compiled?(slot : BuildSlot, directory : String, fingerprint : String) : Bool
+      # Tier 1: semantic feedback before paying for code generation.
+      checked = Time.instant
+      command = compile(["--no-codegen"], "check")
+      return false if @stopping || @pending
+      elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
+      unless command.status.try(&.success?)
+        @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
+        @output.puts("Type check failed in #{elapsed} ms")
+        @output.flush
+        return false
+      end
+      @output.puts("Type check passed in #{elapsed} ms")
+      temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
+      begin
+        @output.puts("Building #{@project.name}…")
+        @output.flush
+        command = compile(["-o", temporary], "build")
+        return false if @stopping || @pending
+        unless command.status.try(&.success?)
+          @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
+          return false
+        end
+        slot.install(temporary, fingerprint)
+        true
+      ensure
+        File.delete?(temporary)
+        File.delete?(temporary + ".dwarf")
+      end
+    end
+
+    # Takes the build lock, waiting while a command builds (ADR 0013 §5);
+    # false when the session stops or a newer change arrives first.
+    private def acquired?(lock : BuildLock) : Bool
+      return true if lock.acquire?
+      @output.puts("Waiting for another build of #{@project.name}…")
+      @output.flush
+      until lock.acquire?
+        return false if @stopping || @pending
+        sleep 100.milliseconds
+      end
+      true
     end
 
     # Runs the dev build command with *arguments* until it exits, the session
@@ -343,49 +361,6 @@ module Caramel::Frappe
     ensure
       client.try(&.close)
       socket.try(&.close)
-    end
-
-    private def cached?(metadata : String, binary : String, fingerprint : String) : Bool
-      reject_symlink(metadata)
-      reject_symlink(binary)
-      return false unless File.file?(metadata) && File.file?(binary)
-      debug = debug_checksum(binary)
-      {% if flag?(:darwin) %}
-        return false unless debug
-      {% end %}
-      saved = JSON.parse(File.read(metadata))
-      saved["source"].as_s == fingerprint && saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) && saved["debug"].as_s? == debug && saved["toolchain"].as_s == @tools.toolchain.root && saved["framework"].as_s == Caramel::VERSION && saved["mode"].as_s == "caramel_development"
-    rescue JSON::ParseException | KeyError | TypeCastError
-      false
-    end
-
-    private def debug_checksum(binary : String) : String?
-      {% if flag?(:darwin) %}
-        path = binary + ".dwarf"
-        reject_symlink(path)
-        Digest::SHA256.hexdigest(File.read(path)) if File.file?(path)
-      {% else %}
-        nil
-      {% end %}
-    end
-
-    private def write_metadata(path : String, contents : String) : Nil
-      reject_symlink(path)
-      temporary = File.tempfile("build-", dir: File.dirname(path))
-      begin
-        temporary << contents
-        temporary.close
-        File.rename(temporary.path, path)
-      ensure
-        temporary.close
-        File.delete?(temporary.path)
-      end
-    end
-
-    private def reject_symlink(path : String) : Nil
-      if info = File.info?(path, follow_symlinks: false)
-        raise Error.new("Development artifacts must be owned regular files") unless Latte::StateSecurity.owned_file?(info)
-      end
     end
 
     private def remove_stale_sockets : Nil

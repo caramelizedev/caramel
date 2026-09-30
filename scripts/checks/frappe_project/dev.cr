@@ -80,6 +80,9 @@ module Caramel::Checks
         # Let the session retry a few times before the migration is applied.
         sleep 3.seconds
         p.command([File.join(p.repo, "bin/frappe"), "migrate"], chdir: @clone)
+        # frappe migrate reused the build the session made of the same sources.
+        command_build = File.join(@clone, ".caramel/application")
+        assert!(Dir.glob(File.join(@clone, ".caramel/dev/application-*")).any? { |build| File.same?(build, command_build) }, "frappe migrate rebuilt the sources frappe dev had built")
         wait_for("bookshelf-clone") { |code, content| code == 200 && content.includes?("A little less setup.") }
         clone_log = File.read(File.join(p.root, "bookshelf-clone-dev.log"))
         assert!(clone_log.scan("Pending migrations").size == 1 && clone_log.includes?("Application ready"), "frappe dev did not report the pending migration exactly once:\n#{clone_log}")

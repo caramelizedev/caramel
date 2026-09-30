@@ -1,4 +1,6 @@
 require "./project"
+require "./build_slot"
+require "./dev_files"
 require "../latte/toolchain"
 
 module Caramel::Frappe
@@ -38,16 +40,53 @@ module Caramel::Frappe
       raise Error.new("Locked dependencies are missing or inconsistent; run frappe setup") unless result.success?
     end
 
-    # Builds the application for a one-shot command (ADR 0013 §5) with the
+    # Builds the application for a one-shot command (ADR 0013 §5), or reuses
+    # a build of the same sources: `frappe dev`'s, hard-linked so its cleanup
+    # cannot delete it, or the previous command's. Commands build with the
     # dev build's define, so both reuse one object set in the compiler cache
     # instead of recompiling about 170 modules at each switch. The
     # development error page it adds serves only HTTP requests, and only
     # under `CARAMEL_ENV=development`.
     def compile(project : Project) : String
-      directory = Latte::StateSecurity.ensure_owned_directory(File.join(project.root, ".caramel"))
-      binary = File.join(directory, "application")
-      run(File.join(@framework_root, "scripts/crystal"), ["build", project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", binary], project.root)
-      binary
+      slot = BuildSlot.command(project.root, @toolchain.root)
+      lock = BuildLock.new(project.root)
+      begin
+        lock.acquire { @error.puts("Waiting for another build of #{project.name}…") }
+        fingerprint = source_fingerprint(project)
+        build(project, slot, fingerprint) unless fingerprint && reused?(project, slot, fingerprint)
+      ensure
+        lock.release
+      end
+      slot.binary
+    end
+
+    # The source signature `frappe dev` builds from. Sources it cannot hash,
+    # such as a symlink under src/, still build, but the build is not reused.
+    private def source_fingerprint(project : Project) : String?
+      DevFiles.new(project.root).snapshot.source
+    rescue Error
+      nil
+    end
+
+    private def reused?(project : Project, slot : BuildSlot, fingerprint : String) : Bool
+      return true if slot.holds?(fingerprint)
+      development = BuildSlot.development(project.root, fingerprint, @toolchain.root)
+      return false unless development.holds?(fingerprint)
+      slot.link(development, fingerprint)
+      true
+    rescue File::Error
+      false
+    end
+
+    private def build(project : Project, slot : BuildSlot, fingerprint : String?) : Nil
+      temporary = "#{slot.binary}-building-#{Random::Secure.hex(8)}"
+      begin
+        run(File.join(@framework_root, "scripts/crystal"), ["build", project.entrypoint, "-D", "caramel_development", "--error-trace", "-o", temporary], project.root)
+        slot.install(temporary, fingerprint)
+      ensure
+        File.delete?(temporary)
+        File.delete?(temporary + ".dwarf")
+      end
     end
 
     def app_command(project : Project, args : Array(String), values : Hash(String, String)) : Nil
