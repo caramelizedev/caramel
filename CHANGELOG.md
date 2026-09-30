@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-30
+
+### Upgrade notes
+
 - Routes now bind a JSON object where they answered 415 ([ADR 0020](docs/decisions/0020-action-ingress-and-json-bodies.md)). Each member must have its field's JSON type, and same-origin `fetch` sends the page's CSRF token as `X-CSRF-Token`. An application that reopened `Caramel::RequestInput` to parse JSON, or `Caramel::Application#handle` to receive a webhook, should delete the reopen: bind JSON through the contract, or declare `ingress body: :raw, limit: 256.kilobytes, csrf: false, authenticate: :signed?` on the webhook's action.
 - `Caramel::RequestInput.read(request, max_form_bytes: n)` still works for 1 byte to 64 MiB, and raises `ArgumentError` outside that range. It is deprecated; pass the route's policy instead, as `Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: n))`. A body that is neither a form nor a JSON object now answers 415 with "Expected a URL-encoded form, multipart form or JSON object".
 - A custom `Caramel::Router::Dispatcher` must implement `match(request)` and `dispatch(context, match)`. Routers from `Caramel::Router.draw` already do.
@@ -15,6 +19,37 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - If `frappe dev` in an existing project stops on an asset output conflict, delete the public file it names to republish it from `app/assets`.
 - `scripts/crystal`, the compiler launcher, changed, so installing this release sets up a new toolchain directory and its first builds start with an empty compiler cache. If you use the editor tools, run `frappe lsp install` again after installing; rebuilding crystalline takes up to about 20 minutes. In the first editor session afterwards, go to definition into Crystal's standard library can find nothing until you save the file once.
 - Each compile now starts with a 1 GB heap, which uses about 250 MB more memory per compiler and saves most of its early garbage collections. Set `GC_INITIAL_HEAP_SIZE` yourself to choose another size.
+
+### Features
+
+- **frappe:** give specs the application's test settings from .env.test (cb7c730)
+- **core:** run Cold Brew without HTTP with the work command (e0c83d2)
+- **core:** report job status and call hooks after a failure is written (788b26c)
+- **core:** let an action declare how its route reads the request (7740df1)
+- **core:** send JSON, uploads and raw bodies from Corretto's client (3c8a9c1)
+- **frappe:** mark URL resource fields with :url (0283a82)
+- **core:** answer errors found after the contract with render_errors (2119c5d)
+- **frappe:** generate only the resource actions --only names (ace706e)
+
+### Fixes
+
+- **frappe:** forward bodiless responses through the dev gateway (8a29a35)
+- **core:** treat a closed stream as a disconnect, not an error (986c29b)
+- **frappe:** record the assets a new project publishes (c918e2f)
+- **release:** skip the migration probes when nothing they compile changed (f9cedf9)
+- **core:** hold every ingress to the authenticator it names (b1f72b1)
+- **checks:** verify the session's compiler and keep the lint proofs strict (8e17b8b)
+- **frappe:** load the saved row in a request spec only when a check reads it (f82fe02)
+- **core:** refuse a subtype ingress that drops its parent's authenticator (9fcafe0)
+- **frappe:** run frappe dev's build for commands over the same sources (831971c)
+- **corretto:** keep each worker's spec binary while its inputs are unchanged (58135a2)
+- **corretto:** build spec binaries while the application migrates (b4f4fae)
+- **core:** let crystal tool expand read the work command's options (e10b6dc)
+- **core:** let frappe expand parse the work command's options again (551b9dc)
+- **frappe:** make the dev build's semantic phase its Tier-1 type check (93365c6)
+- **toolchain:** start the compiler with a 1 GB heap (e7d8ee6)
+- **toolchain:** skip scripts/crystal's metadata rewrite when nothing changed (7b54d5a)
+- **toolchain:** give each checkout program its own compiler cache root (ccaa191)
 
 ## 0.4.3 - 2026-09-29
 
