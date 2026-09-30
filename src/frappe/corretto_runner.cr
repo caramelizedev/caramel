@@ -1,5 +1,8 @@
+require "digest/sha256"
 require "./project"
 require "./tools"
+require "./build_slot"
+require "./dev_files"
 require "./latte_client"
 require "../caramel/database"
 require "../latte/postgres"
@@ -151,27 +154,26 @@ module Caramel::Frappe
     # compiles a generated `.caramel/corretto/w<N>.cr` that requires the
     # group's files in order: the compiler names a program's cache directory
     # after that stable path, not after whichever spec file sorts first, so a
-    # run over other files reuses the worker's objects.
+    # run over other files reuses the worker's objects. The binary stays in
+    # `.caramel/corretto/` and runs again while the application's sources,
+    # spec/, the group's files, the toolchain and the framework are unchanged.
+    # It builds in the development build's environment; the worker's
+    # database settings apply only when it runs.
     private def run_workers(tools : Tools, groups : Array(Array(String)), environments : Array(Hash(String, String))) : Array(Bool)
-      directory = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
-      entries = Latte::StateSecurity.ensure_owned_directory(File.join(directory, "corretto"))
+      Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
+      entries = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel/corretto"))
+      remove_idle_workers(entries, groups.size)
+      signature = source_signature
       finished = Channel({Int32, Bool}).new
       groups.each_with_index do |group, offset|
         spawn do
           prefix = "[w#{offset + 1}] "
-          env = tools.environment(environments[offset])
-          binary = File.join(directory, "corretto-w#{offset + 1}")
-          entry = File.join(entries, "w#{offset + 1}.cr")
           passed = begin
-            File.write(entry, group.join { |file| "require #{("../../" + file.rchop(".cr")).inspect}\n" })
-            relayed(File.join(@framework_root, "scripts/crystal"), ["build", entry, "-o", binary], env, prefix) &&
-            relayed(binary, [] of String, env, prefix)
-          rescue ex : IO::Error | File::Error
+            binary = worker_binary(tools, entries, offset + 1, group, signature, prefix)
+            binary ? relayed(binary, [] of String, tools.environment(environments[offset]), prefix) : false
+          rescue ex : IO::Error | File::Error | Error
             @error.puts("#{prefix}#{ex.message}")
             false
-          ensure
-            File.delete?(binary)
-            File.delete?("#{binary}.dwarf")
           end
           finished.send({offset, passed})
         end
@@ -182,6 +184,45 @@ module Caramel::Frappe
         results[offset] = passed
       end
       results
+    end
+
+    # The application's and spec/'s sources, hashed as `frappe dev` hashes
+    # them. Nil when they cannot be hashed; no spec binary is then reused.
+    private def source_signature : String?
+      files = DevFiles.new(@project.root)
+      "#{files.snapshot.source}\n#{files.spec_signature}"
+    rescue Error
+      nil
+    end
+
+    # Worker *index*'s spec binary: the one it kept when that was built from
+    # the same sources and files, or a new build. Nil when the build fails.
+    private def worker_binary(tools : Tools, entries : String, index : Int32, group : Array(String), signature : String?, prefix : String) : String?
+      name = "w#{index}"
+      entry = File.join(entries, "#{name}.cr")
+      requires = group.join { |file| "require #{("../../" + file.rchop(".cr")).inspect}\n" }
+      File.write(entry, requires)
+      slot = BuildSlot.new(File.join(entries, name), File.join(entries, "#{name}.json"), tools.toolchain.root, "corretto")
+      fingerprint = signature.try { |value| Digest::SHA256.hexdigest("#{value}\n#{requires}") }
+      return slot.binary if fingerprint && slot.holds?(fingerprint)
+      temporary = File.join(entries, "building-#{name}-#{Random::Secure.hex(4)}")
+      begin
+        return unless relayed(File.join(@framework_root, "scripts/crystal"), ["build", entry, "-o", temporary], tools.environment, prefix)
+        slot.install(temporary, fingerprint)
+        slot.binary
+      ensure
+        File.delete?(temporary)
+        File.delete?(temporary + ".dwarf")
+      end
+    end
+
+    # Deletes the spec binaries of workers beyond this run's.
+    private def remove_idle_workers(entries : String, workers : Int32) : Nil
+      Dir.children(entries).each do |name|
+        match = name.match(/\Aw(\d+)(?:\.dwarf|\.json)?\z/) || next
+        path = File.join(entries, name)
+        File.delete(path) if match[1].to_i > workers && File.file?(path) && !File.symlink?(path)
+      end
     end
 
     private def relayed(command : String, args : Array(String), env : Hash(String, String), prefix : String) : Bool

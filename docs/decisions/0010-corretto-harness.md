@@ -25,6 +25,7 @@ Several pieces were missing before this work: Caramel had no session to sign in 
    - **Tier 2.** A global `Spec.around_each` opens a transaction and SAVEPOINT on the worker's single connection and binds it with `SugarORM::Repo.bind(transaction)`. The example, including its in-process requests, runs on that connection, and the savepoint is rolled back afterwards.
    - **Tier 3.** At boot Corretto records a catalog fingerprint: a hash of `pg_class`, `pg_attribute`, `pg_index` and `pg_constraint` rows in the public schema. If an example leaves the catalog changed, meaning DDL escaped the transaction, Corretto resets the worker database from the migrated template through Latte and reports which example did it. Examples tagged `catalog` run without the savepoint, on a migration-role connection so that they may run DDL, and always reset afterwards.
    - **Tier 1 and §3.** `frappe corretto [SPEC_PATHS…] [--concurrency=1..8]` migrates the spec database once and asks Latte (`POST|DELETE /v1/sites/:id/test-workers/:n`) to clone one worker database per worker from it, behind the connection guard. It splits spec files round-robin and runs each worker as its own compiled spec binary, which avoids the compiler-cache clash. It prefixes and aggregates output and exit statuses, then drops the workers.
+   - Since 2026-09-30, each worker's spec binary stays in `.caramel/corretto/`. It runs again while the application's sources, `spec/`, the worker's files, the toolchain and the framework version are unchanged, so a rerun with no change compiles nothing. Spec binaries build in the development build's environment; a worker's database settings apply when its binary runs, not when it compiles.
    - `frappe test` is replaced, not aliased.
 5. **Drain.** Specs call `Caramel::ColdBrew.drain_queue!(db, "default")` (ADR 0009). No worker fibers run under `CARAMEL_ENV=test`.
 6. **Wire fakes.**
@@ -52,6 +53,7 @@ Principles followed:
 - `spec/caramel/session_spec.cr` covers tampering, oversize input and re-issue.
 - `spec/corretto/*_spec.cr` covers the client, the matchers against real responses, wire request parsing and the mocking scan.
 - `spec/integration/corretto_spec.cr` (`scripts/check integration`) covers savepoint rollback with a bound Repo, fingerprint detection and reset, and wire stubs through a real `Caramel::Outbound` request.
+- `spec/frappe/build_slot_spec.cr` covers when a kept spec binary is reused.
 - `scripts/check latte-postgres` covers the test-worker endpoint.
 - `scripts/check frappe-project` covers these, and runs the generated specs through `frappe corretto --concurrency=2`:
   - savepoint isolation between examples;
