@@ -161,7 +161,6 @@ Layout/LineLength:
     - "src/caramel/contracts/request_contract.cr"
     - "src/caramel/corretto.cr"
     - "src/caramel/corretto/client.cr"
-    - "src/caramel/corretto/matchers.cr"
     - "src/caramel/corretto/wire.cr"
     - "src/caramel/corretto/worker.cr"
     - "src/caramel/http/request_context.cr"
