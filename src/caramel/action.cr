@@ -37,8 +37,9 @@ module Caramel
     CARAMEL_INGRESS = ::Caramel::Ingress::DEFAULT
 
     # :nodoc:
-    # The router calls this before the contract binds; `ingress authenticate:`
-    # replaces it with a call to the named method.
+    # The router calls this before the contract binds. Every `ingress`
+    # replaces it: with a call to the method `authenticate:` names, or with
+    # `true` when it names none.
     def __caramel_authenticated? : Bool
       true
     end
@@ -55,14 +56,20 @@ module Caramel
     # * `body: :raw` keeps the bytes exactly as sent, of any content type, for
     #   `raw_body`; the contract then binds only the route and the query. The
     #   default, `:form`, binds a form or a JSON object.
-    # * `limit:` caps the body at a whole number of bytes, `N.kilobytes` or
-    #   `N.megabytes`, up to 64 MiB. The default is 2 MiB.
+    # * `limit:` caps a URL-encoded, JSON or raw body, or a multipart body's
+    #   text fields, at a whole number of bytes, `N.kilobytes` or
+    #   `N.megabytes`, up to 64 MiB. The default is 2 MiB. Uploaded files keep
+    #   their own 64 MiB budget.
     # * `authenticate: :method?` names an instance method returning `Bool`.
     #   It runs before the contract binds, and false answers 401.
     # * `csrf: false` skips the browser CSRF check. It requires an
     #   authenticator, and the session reads empty and is never saved: only a
     #   credential a browser does not attach on its own, such as a signature
     #   or a bearer token, can stand in for the check.
+    #
+    # A subtype inherits its parent's ingress. Its own declaration replaces it
+    # entirely, authenticator included, and cannot turn a raw parent's body
+    # back into a form.
     macro ingress(*arguments, **options)
       {% site = @caller ? @caller.first : nil %}
       {% where = "" %}
@@ -99,6 +106,11 @@ module Caramel
         {% body.raise "ingress body: must be :form or :raw, got #{body}#{where.id}" %}
       {% end %}
       {% raw = kind == "raw" %}
+      {% if !raw && @type.ancestors.any?(&.has_method?("raw_body")) %}
+        {% raise "#{@type} declares a form ingress but inherits raw_body" + where +
+                 "\nRemediation: add `body: :raw` to its ingress, or inherit from " +
+                 "an action that does not read raw bodies.\n" %}
+      {% end %}
 
       # limit: a whole number of bytes, N.kilobytes or N.megabytes
       {% limit = options[:limit] %}
@@ -129,7 +141,8 @@ module Caramel
       {% authenticate = options[:authenticate] %}
       {% if given.includes?("authenticate") %}
         {% method = authenticate.is_a?(SymbolLiteral) && authenticate.id.stringify %}
-        {% unless method && method =~ /\A[a-z_]\w*[?!]?\z/ %}
+        {% named = method && method =~ /\A[a-z_]\w*[?!]?\z/ %}
+        {% unless named && !method.starts_with?("__") %}
           {% authenticate.raise "ingress authenticate: must name an instance method, " +
                                 "as in :signed?, got #{authenticate}#{where.id}" %}
         {% end %}
@@ -149,12 +162,11 @@ module Caramel
         authenticate: {{ authenticate ? authenticate.id.stringify : nil }},
       )
 
-      {% if authenticate %}
-        # :nodoc:
-        def __caramel_authenticated? : Bool
-          {{ authenticate.id }}
-        end
-      {% end %}
+      # :nodoc:
+      # `self.` keeps a keyword such as `:true` from standing in for a method.
+      def __caramel_authenticated? : Bool
+        {{ authenticate ? "self.#{authenticate.id}".id : true }}
+      end
 
       {% if raw %}
         # The request body exactly as sent; empty for GET and HEAD.

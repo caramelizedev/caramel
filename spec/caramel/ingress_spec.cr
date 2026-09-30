@@ -82,6 +82,19 @@ struct IngressSpecDeleteNote < IngressSpecApi
   end
 end
 
+# Its own ingress replaces the API's entirely, authenticator included.
+struct IngressSpecNoteForm < IngressSpecApi
+  ingress limit: 1.kilobyte
+
+  contract do
+    field title : String
+  end
+
+  def handle(contract : Contract)
+    Caramel::Response.new(201, contract.title)
+  end
+end
+
 # The browser default, which now also binds same-origin JSON.
 struct IngressSpecCreateBook < IngressSpecAction
   contract do
@@ -101,6 +114,7 @@ module IngressSpecApp
     get "/notes/:id", IngressSpecShowNote
     delete "/notes/:id", IngressSpecDeleteNote
     post "/books", IngressSpecCreateBook
+    post "/notes/form", IngressSpecNoteForm
   end
 end
 
@@ -234,6 +248,15 @@ describe "Caramel::Action ingress" do
     refused = ingress_request("POST", "/notes/5", "_method=DELETE", headers)
     refused.status.should eq(405)
     refused.headers["Allow"].should eq("GET, HEAD, DELETE")
+  end
+
+  it "lets a subtype's own ingress replace its parent's, authenticator included" do
+    ingress_of("IngressSpecNoteForm").summary.should eq("1 KiB")
+    body = "title=Dune"
+    browser_form = ingress_request("POST", "/notes/form", body, browser(FORM_TYPE))
+    {browser_form.status, browser_form.body}.should eq({201, "Dune"})
+    tokened = HTTP::Headers{"Content-Type" => FORM_TYPE, "Authorization" => BEARER}
+    ingress_request("POST", "/notes/form", body, tokened).status.should eq(403)
   end
 
   it "lists a route's non-default ingress" do
