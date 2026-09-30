@@ -72,7 +72,6 @@ Layout/LineLength:
     - "scripts/checks/latte_postgres.cr"
     - "scripts/checks/native.cr"
     - "scripts/checks/orm_compilation.cr"
-    - "scripts/checks/route_compilation.cr"
     - "scripts/checks/runtime_diagnostics.cr"
     - "scripts/checks/schema_diff.cr"
     - "scripts/checks/support/harness.cr"
