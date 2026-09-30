@@ -106,7 +106,6 @@ Layout/LineLength:
     - "spec/fixtures/generate_project.cr"
     - "spec/fixtures/latte_ipc.cr"
     - "spec/fixtures/latte_network.cr"
-    - "spec/frappe/cli_spec.cr"
     - "spec/frappe/commands_spec.cr"
     - "spec/frappe/corretto_runner_spec.cr"
     - "spec/frappe/dev_files_spec.cr"
