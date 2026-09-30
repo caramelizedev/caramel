@@ -214,7 +214,6 @@ Layout/LineLength:
     - "src/frappe/tools.cr"
     - "src/latte.cr"
     - "src/latte/login_item.cr"
-    - "src/latte/paths.cr"
     - "src/latte/postgres.cr"
     - "src/latte/process.cr"
     - "src/latte/project_status.cr"
