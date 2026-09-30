@@ -11,7 +11,8 @@ private class TestServices < Caramel::Latte::ServiceControl
   end
 
   def status_json : String
-    %({"version":1,"services":{"postgres":{"state":"stopped"},"dns":{"state":"stopped"},"proxy":{"state":"stopped"}}})
+    stopped = {state: "stopped"}
+    {version: 1, services: {postgres: stopped, dns: stopped, proxy: stopped}}.to_json
   end
 
   def start_services : Nil
@@ -40,22 +41,42 @@ private class TestServices < Caramel::Latte::ServiceControl
 
   def environment_json(id : String, directory : String) : String
     site = @registry.find(id)
-    raise Caramel::Latte::PublicError.new("not_found", "Project is not registered", 404) unless site
-    raise ArgumentError.new("Project directory differs from registration") unless site.directory == File.realpath(directory)
-    {version: 1, environment: {DATABASE_URL: "private-test-connection", SPEC_DATABASE_URL: "private-test-spec"}}.to_json
+    unless site
+      raise Caramel::Latte::PublicError.new("not_found", "Project is not registered", 404)
+    end
+    unless site.directory == File.realpath(directory)
+      raise ArgumentError.new("Project directory differs from registration")
+    end
+    environment = {
+      DATABASE_URL:      "private-test-connection",
+      SPEC_DATABASE_URL: "private-test-spec",
+    }
+    {version: 1, environment: environment}.to_json
   end
 
   getter branches = [] of String
 
   def create_branch_json(id : String, name : String) : String
     database = Caramel::Latte::Postgres.branch_database(id, name)
-    raise Caramel::Latte::PublicError.new("branch_exists", "Branch #{name} already exists; delete it first", 409) if @branches.includes?(name)
+    if @branches.includes?(name)
+      message = "Branch #{name} already exists; delete it first"
+      raise Caramel::Latte::PublicError.new("branch_exists", message, 409)
+    end
     @branches << name
-    {version: 1, branch: {name: name, database: database, migration_url: "private-migration", runtime_url: "private-runtime"}}.to_json
+    branch = {
+      name:          name,
+      database:      database,
+      migration_url: "private-migration",
+      runtime_url:   "private-runtime",
+    }
+    {version: 1, branch: branch}.to_json
   end
 
   def branches_json(id : String) : String
-    {version: 1, branches: @branches.map { |name| {name: name, database: Caramel::Latte::Postgres.branch_database(id, name)} }}.to_json
+    branches = @branches.map do |name|
+      {name: name, database: Caramel::Latte::Postgres.branch_database(id, name)}
+    end
+    {version: 1, branches: branches}.to_json
   end
 
   def drop_branch(id : String, name : String) : Bool
@@ -68,13 +89,38 @@ private class TestServices < Caramel::Latte::ServiceControl
   def test_worker_json(id : String, index : Int32) : String
     database = Caramel::Latte::Postgres.test_worker_database(id, index)
     @workers << index unless @workers.includes?(index)
-    {version: 1, worker: {index: index, database: database, migration_url: "private-migration-w#{index}", runtime_url: "private-runtime-w#{index}"}}.to_json
+    worker = {
+      index:         index,
+      database:      database,
+      migration_url: "private-migration-w#{index}",
+      runtime_url:   "private-runtime-w#{index}",
+    }
+    {version: 1, worker: worker}.to_json
   end
 
   def drop_test_worker(id : String, index : Int32) : Bool
     Caramel::Latte::Postgres.test_worker_database(id, index)
     !@workers.delete(index).nil?
   end
+end
+
+# A control API request. A body is sent as JSON unless *headers* are given.
+private def control_request(method : String,
+                            path : String,
+                            body : String? = nil,
+                            headers : HTTP::Headers? = nil) : HTTP::Request
+  json = HTTP::Headers{"Content-Type" => "application/json"}
+  headers ||= body ? json : HTTP::Headers.new
+  HTTP::Request.new(method, path, headers, body)
+end
+
+# The server's answer to a control API request.
+private def answer(server : Caramel::Latte::Server,
+                   method : String,
+                   path : String,
+                   body : String? = nil,
+                   headers : HTTP::Headers? = nil) : Caramel::Response
+  server.handle(control_request(method, path, body, headers))
 end
 
 describe Caramel::Latte::Server do
@@ -85,7 +131,7 @@ describe Caramel::Latte::Server do
     begin
       services = TestServices.new(registry)
       server = Caramel::Latte::Server.new(registry, services)
-      request = HTTP::Request.new("POST", "/v1/services/start", HTTP::Headers{"Content-Type" => "application/json"}, "{}")
+      request = control_request("POST", "/v1/services/start", "{}")
       Caramel::Latte::OperationDeadline.run(1.millisecond) do
         sleep 5.milliseconds
         server.handle(request).status.should eq(503)
@@ -120,41 +166,52 @@ describe Caramel::Latte::Server do
     begin
       services = TestServices.new(registry)
       server = Caramel::Latte::Server.new(registry, services)
-      headers = HTTP::Headers{"Content-Type" => "application/json"}
-      response = server.handle(HTTP::Request.new("POST", "/v1/sites", headers, {name: "bookshelf", directory: root}.to_json))
+      registration = {name: "bookshelf", directory: root}.to_json
+      response = answer(server, "POST", "/v1/sites", registration)
       response.status.should eq(201)
       site = JSON.parse(response.body)["site"]
       site["origin"].as_s.should eq("https://bookshelf.caramel")
       site["domain"].as_s.should eq("bookshelf.caramel")
-      clear = server.handle(HTTP::Request.new("DELETE", "/v1/sites/#{site["id"].as_s}/upstream", headers, {socket: "/private/nonmatching.sock"}.to_json))
+      site_path = "/v1/sites/#{site["id"].as_s}"
+      nonmatching = {socket: "/private/nonmatching.sock"}.to_json
+      clear = answer(server, "DELETE", "#{site_path}/upstream", nonmatching)
       clear.status.should eq(200)
       JSON.parse(clear.body)["cleared"].as_bool.should be_false
-      endpoint = "/v1/sites/#{site["id"].as_s}/environment"
-      secrets = server.handle(HTTP::Request.new("POST", endpoint, headers, {directory: root}.to_json))
+      endpoint = "#{site_path}/environment"
+      secrets = answer(server, "POST", endpoint, {directory: root}.to_json)
       secrets.status.should eq(200)
-      JSON.parse(secrets.body)["environment"]["DATABASE_URL"].as_s.should eq("private-test-connection")
+      environment = JSON.parse(secrets.body)["environment"]
+      environment["DATABASE_URL"].as_s.should eq("private-test-connection")
       secrets.headers["Cache-Control"].should eq("no-store")
-      server.handle(HTTP::Request.new("GET", endpoint)).status.should eq(404)
-      server.handle(HTTP::Request.new("POST", endpoint, headers, %({"directory":"/private/tmp"}))).status.should eq(400)
-      server.handle(HTTP::Request.new("GET", "/v1/sites")).body.should_not contain("private-test-connection")
-      JSON.parse(server.handle(HTTP::Request.new("GET", "/v1/sites")).body)["sites"].as_a.size.should eq(1)
-      server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, "{}")).status.should eq(200)
+      answer(server, "GET", endpoint).status.should eq(404)
+      answer(server, "POST", endpoint, %({"directory":"/private/tmp"})).status.should eq(400)
+      sites = answer(server, "GET", "/v1/sites").body
+      sites.should_not contain("private-test-connection")
+      JSON.parse(sites)["sites"].as_a.size.should eq(1)
+      answer(server, "POST", "/v1/services/start", "{}").status.should eq(200)
       services.starts.should eq(1)
-      server.handle(HTTP::Request.new("POST", "/v1/services/stop", headers, "{}")).status.should eq(200)
+      answer(server, "POST", "/v1/services/stop", "{}").status.should eq(200)
       services.stops.should eq(1)
-      other = server.handle(HTTP::Request.new("GET", "/v2/status"))
+      other = answer(server, "GET", "/v2/status")
       other.status.should eq(404)
-      answer = JSON.parse(other.body)
-      {answer["error"]["code"].as_s, answer["latte"].as_s, answer["api"].as_a.map(&.as_i)}.should eq({"unsupported_api", Caramel::VERSION, [1]})
-      server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, "{" + " " * 16384)).status.should eq(413)
+      refusal = JSON.parse(other.body)
+      reported = {
+        refusal["error"]["code"].as_s,
+        refusal["latte"].as_s,
+        refusal["api"].as_a.map(&.as_i),
+      }
+      reported.should eq({"unsupported_api", Caramel::VERSION, [1]})
+      oversized = "{" + " " * 16384
+      answer(server, "POST", "/v1/services/start", oversized).status.should eq(413)
       services.starts.should eq(1)
-      server.handle(HTTP::Request.new("POST", "/v1/services/start", headers, %({"extra":true}))).status.should eq(400)
-      server.handle(HTTP::Request.new("POST", "/v1/sites", headers, %({"name":"bad","directory":"/missing","admin":true}))).status.should eq(400)
-      server.handle(HTTP::Request.new("POST", "/v1/sites", HTTP::Headers.new, "{}")).status.should eq(415)
-      server.handle(HTTP::Request.new("DELETE", "/v1/sites/#{site["id"].as_s}")).status.should eq(200)
+      answer(server, "POST", "/v1/services/start", %({"extra":true})).status.should eq(400)
+      privileged = %({"name":"bad","directory":"/missing","admin":true})
+      answer(server, "POST", "/v1/sites", privileged).status.should eq(400)
+      answer(server, "POST", "/v1/sites", "{}", HTTP::Headers.new).status.should eq(415)
+      answer(server, "DELETE", site_path).status.should eq(200)
       Dir.exists?(root).should be_true
       registry.list.should be_empty
-      server.handle(HTTP::Request.new("GET", "/unknown")).status.should eq(404)
+      answer(server, "GET", "/unknown").status.should eq(404)
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)
@@ -168,22 +225,24 @@ describe Caramel::Latte::Server do
     begin
       services = TestServices.new(registry)
       server = Caramel::Latte::Server.new(registry, services)
-      headers = HTTP::Headers{"Content-Type" => "application/json"}
       endpoint = "/v1/sites/0123456789abcdef/branches"
-      created = server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "diff_1a2b"}.to_json))
+      diff = {name: "diff_1a2b"}.to_json
+      created = answer(server, "POST", endpoint, diff)
       created.status.should eq(201)
       JSON.parse(created.body)["branch"]["runtime_url"].as_s.should eq("private-runtime")
       created.headers["Cache-Control"].should eq("no-store")
-      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "diff_1a2b"}.to_json)).status.should eq(409)
-      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "Feat-Stripe"}.to_json)).status.should eq(400)
-      server.handle(HTTP::Request.new("POST", endpoint, headers, {name: "x", template: "postgres"}.to_json)).status.should eq(400)
-      listed = JSON.parse(server.handle(HTTP::Request.new("GET", endpoint)).body)["branches"].as_a
+      answer(server, "POST", endpoint, diff).status.should eq(409)
+      invalid = {name: "Feat-Stripe"}.to_json
+      answer(server, "POST", endpoint, invalid).status.should eq(400)
+      templated = {name: "x", template: "postgres"}.to_json
+      answer(server, "POST", endpoint, templated).status.should eq(400)
+      listed = JSON.parse(answer(server, "GET", endpoint).body)["branches"].as_a
       listed.map(&.["name"].as_s).should eq(["diff_1a2b"])
       listed.to_json.should_not contain("private-")
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/diff_1a2b")).status.should eq(200)
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/diff_1a2b")).status.should eq(404)
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/DROP%20DATABASE")).status.should eq(400)
-      server.handle(HTTP::Request.new("GET", "#{endpoint}/diff_1a2b")).status.should eq(404)
+      answer(server, "DELETE", "#{endpoint}/diff_1a2b").status.should eq(200)
+      answer(server, "DELETE", "#{endpoint}/diff_1a2b").status.should eq(404)
+      answer(server, "DELETE", "#{endpoint}/DROP%20DATABASE").status.should eq(400)
+      answer(server, "GET", "#{endpoint}/diff_1a2b").status.should eq(404)
       services.branches.should be_empty
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
@@ -198,9 +257,8 @@ describe Caramel::Latte::Server do
     begin
       services = TestServices.new(registry)
       server = Caramel::Latte::Server.new(registry, services)
-      headers = HTTP::Headers{"Content-Type" => "application/json"}
       endpoint = "/v1/sites/0123456789abcdef/test-workers"
-      created = server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, "{}"))
+      created = answer(server, "POST", "#{endpoint}/2", "{}")
       created.status.should eq(200)
       worker = JSON.parse(created.body)["worker"]
       worker["database"].as_s.should eq("caramel_spec_0123456789abcdef_w2")
@@ -208,17 +266,18 @@ describe Caramel::Latte::Server do
       worker["migration_url"].as_s.should eq("private-migration-w2")
       created.headers["Cache-Control"].should eq("no-store")
       # Posting again resets the same worker.
-      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, "{}")).status.should eq(200)
+      answer(server, "POST", "#{endpoint}/2", "{}").status.should eq(200)
       services.workers.should eq([2])
-      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", headers, %({"template":"caramel_dev_0123456789abcdef"}))).status.should eq(400)
-      server.handle(HTTP::Request.new("POST", "#{endpoint}/2", HTTP::Headers.new, "{}")).status.should eq(415)
+      templated = %({"template":"caramel_dev_0123456789abcdef"})
+      answer(server, "POST", "#{endpoint}/2", templated).status.should eq(400)
+      answer(server, "POST", "#{endpoint}/2", "{}", HTTP::Headers.new).status.should eq(415)
       %w[0 9 two 100].each do |index|
-        server.handle(HTTP::Request.new("POST", "#{endpoint}/#{index}", headers, "{}")).status.should eq(400)
+        answer(server, "POST", "#{endpoint}/#{index}", "{}").status.should eq(400)
       end
-      server.handle(HTTP::Request.new("GET", "#{endpoint}/2")).status.should eq(404)
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/2")).status.should eq(200)
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/2")).status.should eq(404)
-      server.handle(HTTP::Request.new("DELETE", "#{endpoint}/9")).status.should eq(400)
+      answer(server, "GET", "#{endpoint}/2").status.should eq(404)
+      answer(server, "DELETE", "#{endpoint}/2").status.should eq(200)
+      answer(server, "DELETE", "#{endpoint}/2").status.should eq(404)
+      answer(server, "DELETE", "#{endpoint}/9").status.should eq(400)
       services.workers.should be_empty
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
@@ -242,7 +301,11 @@ describe Caramel::Latte::Server do
         sleep 10.milliseconds
       end
       socket = UNIXSocket.new(socket_path)
-      response = HTTP::Client.new(socket).post("/v1/daemon/stop", HTTP::Headers{"Content-Type" => "application/json", "Connection" => "close"}, "{}")
+      headers = HTTP::Headers{
+        "Content-Type" => "application/json",
+        "Connection"   => "close",
+      }
+      response = HTTP::Client.new(socket).post("/v1/daemon/stop", headers, "{}")
       response.status_code.should eq(200)
       JSON.parse(response.body)["stopping"].as_bool.should be_true
       select

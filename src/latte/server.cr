@@ -130,7 +130,10 @@ module Caramel::Latte
     getter idle_timeout : Time::Span
     getter request_deadline : Time::Span
 
-    def initialize(@registry : Registry, @services : ServiceControl, @idle_timeout : Time::Span = 5.seconds, @request_deadline : Time::Span = 12.seconds)
+    def initialize(@registry : Registry,
+                   @services : ServiceControl,
+                   @idle_timeout : Time::Span = 5.seconds,
+                   @request_deadline : Time::Span = 12.seconds)
     end
 
     def listen : Nil
@@ -164,9 +167,9 @@ module Caramel::Latte
     def handle(request : HTTP::Request) : Caramel::Response
       OperationDeadline.check!
       path = request.path
-      if (requested = path.match(/\A\/v(\d+)\//)) && !ControlAPI::VERSIONS.includes?(requested[1].to_i?)
-        message = "Latte #{Caramel::VERSION} serves control API #{ControlAPI::VERSIONS.join(", ")}, not #{requested[1]}"
-        return json({version: ControlAPI::VERSIONS.max, latte: Caramel::VERSION, api: ControlAPI::VERSIONS, error: {code: "unsupported_api", message: message}}.to_json, 404)
+      requested = path.match(/\A\/v(\d+)\//).try(&.[1])
+      if requested && !ControlAPI::VERSIONS.includes?(requested.to_i?)
+        return unsupported_api(requested)
       end
       case {request.method, path}
       when {"GET", "/v1/status"}
@@ -177,7 +180,10 @@ module Caramel::Latte
         fields = body(request, %w[name directory suffix])
         OperationDeadline.check!
         site = OperationDeadline.run(12.seconds) do
-          @services.register(string(fields, "name"), string(fields, "directory"), fields["suffix"]?.try(&.as_s) || "caramel")
+          site_name = string(fields, "name")
+          directory = string(fields, "directory")
+          suffix = fields["suffix"]?.try(&.as_s) || "caramel"
+          @services.register(site_name, directory, suffix)
         end
         return json({version: 1, site: summary(site)}.to_json, 201)
       when {"POST", "/v1/services/start"}
@@ -208,7 +214,10 @@ module Caramel::Latte
         elsif name.nil? && request.method == "POST"
           fields = body(request, %w[name])
           OperationDeadline.check!
-          return json(OperationDeadline.run(12.seconds) { @services.create_branch_json(id, string(fields, "name")) }, 201)
+          branch = OperationDeadline.run(12.seconds) do
+            @services.create_branch_json(id, string(fields, "name"))
+          end
+          return json(branch, 201)
         end
       end
       # POST creates or resets Corretto test worker N; DELETE drops it. The
@@ -235,7 +244,9 @@ module Caramel::Latte
         elsif request.method == "POST" && match[2]? == "/upstream"
           fields = body(request, %w[socket])
           OperationDeadline.check!
-          site = OperationDeadline.run(12.seconds) { @services.set_upstream(id, string(fields, "socket")) }
+          site = OperationDeadline.run(12.seconds) do
+            @services.set_upstream(id, string(fields, "socket"))
+          end
           return json({version: 1, site: summary(site)}.to_json)
         elsif request.method == "POST" && match[2]? == "/environment"
           fields = body(request, %w[directory])
@@ -244,7 +255,9 @@ module Caramel::Latte
         elsif request.method == "DELETE" && match[2]? == "/upstream"
           fields = body(request, %w[socket])
           OperationDeadline.check!
-          cleared = OperationDeadline.run(12.seconds) { @services.clear_upstream(id, string(fields, "socket")) }
+          cleared = OperationDeadline.run(12.seconds) do
+            @services.clear_upstream(id, string(fields, "socket"))
+          end
           return json({version: 1, cleared: cleared}.to_json)
         end
       end
@@ -265,15 +278,32 @@ module Caramel::Latte
       failure("internal_error", "Service operation failed; check Latte logs (#{request_id})", 500)
     end
 
+    # The latest API version this Latte serves, and a message naming the rest.
+    private def unsupported_api(requested : String) : Caramel::Response
+      versions = ControlAPI::VERSIONS
+      message = "Latte #{Caramel::VERSION} serves control API #{versions.join(", ")}, " \
+                "not #{requested}"
+      document = {
+        version: versions.max,
+        latte:   Caramel::VERSION,
+        api:     versions,
+        error:   {code: "unsupported_api", message: message},
+      }
+      json(document.to_json, 404)
+    end
+
     private def body(request : HTTP::Request, allowed : Array(String)) : Hash(String, JSON::Any)
-      unless request.headers["Content-Type"]?.try(&.split(';').first.strip.downcase) == "application/json"
+      media_type = request.headers["Content-Type"]?.try(&.split(';').first.strip.downcase)
+      unless media_type == "application/json"
         raise PublicError.new("unsupported_media_type", "Use application/json", 415)
       end
       bytes = Bytes.new(MAX_BODY + 1)
       length = request.body.try(&.read_greedy(bytes)) || 0
       raise PublicError.new("request_too_large", "Request exceeds 16 KiB", 413) if length > MAX_BODY
       fields = JSON.parse(String.new(bytes[0, length])).as_h
-      raise ArgumentError.new("Request contains unsupported fields") unless (fields.keys - allowed).empty?
+      unless (fields.keys - allowed).empty?
+        raise ArgumentError.new("Request contains unsupported fields")
+      end
       fields
     end
 
@@ -285,8 +315,17 @@ module Caramel::Latte
 
     private def summary(site : Site)
       status = ProjectStatus.read(@registry.paths, site)
-      {id: site.id, name: site.name, directory: site.directory, suffix: site.suffix,
-       domain: site.domain, origin: site.origin, upstream: site.upstream, state: status[:state], owner: status[:owner]}
+      {
+        id:        site.id,
+        name:      site.name,
+        directory: site.directory,
+        suffix:    site.suffix,
+        domain:    site.domain,
+        origin:    site.origin,
+        upstream:  site.upstream,
+        state:     status[:state],
+        owner:     status[:owner],
+      }
     end
 
     private def json(content : String, status : Int32 = 200) : Caramel::Response
