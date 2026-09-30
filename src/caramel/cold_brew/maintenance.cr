@@ -19,8 +19,14 @@ module Caramel::ColdBrew
       UPDATE caramel_jobs SET locked_at = NULL, locked_by = NULL
       WHERE locked_at < now() - make_interval(secs => $1)
         AND finished_at IS NULL AND failed_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM pg_stat_activity activity WHERE activity.pid::text = caramel_jobs.locked_by)
+        AND NOT EXISTS (SELECT 1 FROM pg_stat_activity activity \
+          WHERE activity.pid::text = caramel_jobs.locked_by)
       SQL
+
+    CREATE_PARTITIONS = "SELECT caramel_jobs_create_partitions(" \
+                        "(now() AT TIME ZONE 'UTC')::date, $1) AS created"
+    DROP_PARTITIONS = "SELECT caramel_jobs_drop_partitions(" \
+                      "make_interval(secs => $1)) AS dropped"
 
     def initialize(@db : DB::Database = SugarORM::Repo.database, @retention : Time::Span = 7.days,
                    @stale_after : Time::Span = 15.minutes, @interval : Time::Span = 60.seconds)
@@ -61,10 +67,20 @@ module Caramel::ColdBrew
       SugarORM::Repo.using(@db) do
         released = SugarORM.sql_exec(RELEASE, @stale_after.total_seconds)
         expired = Cache.vacuum
-        created = SugarORM.sql("SELECT caramel_jobs_create_partitions((now() AT TIME ZONE 'UTC')::date, $1) AS created", DAYS_AHEAD, as: {created: Int32}).first[:created]
-        dropped = SugarORM.sql("SELECT caramel_jobs_drop_partitions(make_interval(secs => $1)) AS dropped", @retention.total_seconds, as: {dropped: Int32}).first[:dropped]
+        created = create_partitions
+        dropped = drop_partitions
         Report.new(released, expired, created, dropped)
       end
+    end
+
+    private def create_partitions : Int32
+      rows = SugarORM.sql(CREATE_PARTITIONS, DAYS_AHEAD, as: {created: Int32})
+      rows.first[:created]
+    end
+
+    private def drop_partitions : Int32
+      rows = SugarORM.sql(DROP_PARTITIONS, @retention.total_seconds, as: {dropped: Int32})
+      rows.first[:dropped]
     end
   end
 end
