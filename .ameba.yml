@@ -111,7 +111,6 @@ Layout/LineLength:
     - "spec/frappe/dev_files_spec.cr"
     - "spec/frappe/dev_gateway_spec.cr"
     - "spec/frappe/new_project_spec.cr"
-    - "spec/frappe/project_spec.cr"
     - "spec/frappe/resource_generator_spec.cr"
     - "spec/frappe/schema_diff_spec.cr"
     - "spec/integration/cold_brew_spec.cr"
