@@ -6,6 +6,9 @@ module Caramel::ColdBrew
   # leaves them alone. Partition DDL runs through SECURITY DEFINER functions:
   # the application's runtime role may not create or drop tables, yet its
   # maintenance fiber must.
+  #
+  # Their SQL is checksummed and must not change. A trailing backslash joins
+  # a long line to the next one at parse time, dropping that line's indent.
   MIGRATIONS = [
     SugarORM::Migration.new(20260927000001_i64, "create_caramel_jobs", [
       <<-SQL,
@@ -49,8 +52,10 @@ module Caramel::ColdBrew
             partition := 'caramel_jobs_p' || to_char(target_day, 'YYYY_MM_DD');
             CONTINUE WHEN to_regclass(partition) IS NOT NULL;
             BEGIN
-              EXECUTE format('CREATE TABLE %I PARTITION OF caramel_jobs FOR VALUES FROM (%L) TO (%L)',
-                partition, target_day::timestamp AT TIME ZONE 'UTC', (target_day + 1)::timestamp AT TIME ZONE 'UTC');
+              EXECUTE format('CREATE TABLE %I PARTITION OF caramel_jobs \
+                  FOR VALUES FROM (%L) TO (%L)',
+                partition, target_day::timestamp AT TIME ZONE 'UTC', \
+                  (target_day + 1)::timestamp AT TIME ZONE 'UTC');
               created := created + 1;
             EXCEPTION WHEN check_violation THEN
               NULL;
@@ -75,18 +80,22 @@ module Caramel::ColdBrew
           END IF;
           FOR partition IN
             SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
-            WHERE i.inhparent = 'caramel_jobs'::regclass AND c.relname ~ '^caramel_jobs_p[0-9]{4}_[0-9]{2}_[0-9]{2}$'
-              AND (to_date(substring(c.relname FROM 15), 'YYYY_MM_DD') + 1)::timestamp AT TIME ZONE 'UTC' <= now() - retention
+            WHERE i.inhparent = 'caramel_jobs'::regclass \
+                AND c.relname ~ '^caramel_jobs_p[0-9]{4}_[0-9]{2}_[0-9]{2}$'
+              AND (to_date(substring(c.relname FROM 15), 'YYYY_MM_DD') + 1)::timestamp \
+                AT TIME ZONE 'UTC' <= now() - retention
             ORDER BY c.relname
           LOOP
             EXECUTE format('LOCK TABLE %I IN ACCESS EXCLUSIVE MODE', partition);
-            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I WHERE finished_at IS NULL AND failed_at IS NULL)', partition) INTO pending;
+            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I \
+                WHERE finished_at IS NULL AND failed_at IS NULL)', partition) INTO pending;
             CONTINUE WHEN pending;
             EXECUTE format('DROP TABLE %I', partition);
             dropped := dropped + 1;
           END LOOP;
           DELETE FROM caramel_jobs_default
-          WHERE enqueued_at <= now() - retention AND (finished_at IS NOT NULL OR failed_at IS NOT NULL);
+          WHERE enqueued_at <= now() - retention \
+            AND (finished_at IS NOT NULL OR failed_at IS NOT NULL);
           RETURN dropped;
         END
         $$
@@ -101,7 +110,8 @@ module Caramel::ColdBrew
           expires_at timestamptz
         )
         SQL
-      "CREATE INDEX caramel_cache_expires_at ON caramel_cache (expires_at) WHERE expires_at IS NOT NULL",
+      "CREATE INDEX caramel_cache_expires_at ON caramel_cache (expires_at) " \
+      "WHERE expires_at IS NOT NULL",
     ]),
     SugarORM::Migration.new(20260927000003_i64, "create_caramel_schedules", [
       <<-SQL,
