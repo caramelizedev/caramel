@@ -194,7 +194,6 @@ Layout/LineLength:
     - "src/frappe/lint.cr"
     - "src/frappe/lint/service_noun.cr"
     - "src/frappe/mrdp.cr"
-    - "src/frappe/new_project.cr"
     - "src/frappe/project.cr"
     - "src/frappe/release.cr"
     - "src/frappe/resource_generator.cr"
