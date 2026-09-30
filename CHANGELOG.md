@@ -13,6 +13,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - Instead of querying `caramel_jobs`, read a job with `Caramel::ColdBrew.status(id)` and learn of retries and failures with `on_retry_scheduled` and `on_failed` ([ADR 0019](docs/decisions/0019-cold-brew-status-hooks-and-work.md)). Jobs run at least once, so a job that calls another service should send it a stable identifier to deduplicate.
 - To run workers without a web server, start the application binary with `work`, optionally with `--queues=`, `--concurrency=` and `--no-scheduler`.
 - If `frappe dev` in an existing project stops on an asset output conflict, delete the public file it names to republish it from `app/assets`.
+- `scripts/crystal`, the compiler launcher, changed, so installing this release sets up a new toolchain directory and its first builds start with an empty compiler cache. If you use the editor tools, run `frappe lsp install` again after installing; rebuilding crystalline takes up to about 20 minutes. In the first editor session afterwards, go to definition into Crystal's standard library can find nothing until you save the file once.
+- Each compile now starts with a 1 GB heap, which uses about 250 MB more memory per compiler and saves most of its early garbage collections. Set `GC_INITIAL_HEAP_SIZE` yourself to choose another size.
 
 ## 0.4.3 - 2026-09-29
 
