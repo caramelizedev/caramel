@@ -54,7 +54,6 @@ Layout/LineLength:
   MaxLength: 100
   Excluded:
     - "scripts/checks/browser.cr"
-    - "scripts/checks/editor_tools.cr"
     - "scripts/checks/frappe_project.cr"
     - "scripts/checks/frappe_project/benchmark.cr"
     - "scripts/checks/frappe_project/dev.cr"
