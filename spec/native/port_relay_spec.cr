@@ -84,7 +84,10 @@ private class RelayFixture
     @stream = nil
   end
 
-  def restart(target_http : Int32, target_https : Int32, *, stream : RelayStreamingServer? = nil) : Nil
+  def restart(target_http : Int32,
+              target_https : Int32,
+              *,
+              stream : RelayStreamingServer? = nil) : Nil
     stop_relay
     @stream = stream
     @http_port = Caramel::Checks.free_tcp_port if stream
@@ -119,9 +122,17 @@ private class RelayFixture
     @stream.try &.close
   end
 
-  private def launch(http_port : Int32, https_port : Int32, target_http : Int32, target_https : Int32) : Process
-    Process.new([RELAY_BINARY, "--test-listen", http_port.to_s, https_port.to_s, target_http.to_s, target_https.to_s],
-      chdir: Caramel::Checks::REPO, output: Process::Redirect::Close, error: Process::Redirect::Close)
+  private def launch(http_port : Int32,
+                     https_port : Int32,
+                     target_http : Int32,
+                     target_https : Int32) : Process
+    ports = [http_port, https_port, target_http, target_https].map(&.to_s)
+    Process.new(
+      [RELAY_BINARY, "--test-listen"] + ports,
+      chdir: Caramel::Checks::REPO,
+      output: Process::Redirect::Close,
+      error: Process::Redirect::Close,
+    )
   end
 end
 
@@ -231,7 +242,8 @@ private class LaunchdRelay
   private def bootstrap(plist : String) : String
     uid = LibC.getuid
     failures = ["gui/#{uid}", "user/#{uid}"].map do |domain|
-      result = Caramel::Checks.run(["/bin/launchctl", "bootstrap", domain, plist], timeout: 15.seconds)
+      command = ["/bin/launchctl", "bootstrap", domain, plist]
+      result = Caramel::Checks.run(command, timeout: 15.seconds)
       return domain if result.success?
       "#{domain}: #{result.stderr.strip}"
     end
@@ -239,17 +251,23 @@ private class LaunchdRelay
   end
 
   private def plist(target_http : Int32, target_https : Int32) : String
-    arguments = [RELAY_BINARY, "--test-launchd", @http_port.to_s, @https_port.to_s, target_http.to_s, target_https.to_s]
+    ports = [@http_port, @https_port, target_http, target_https].map(&.to_s)
+    arguments = [RELAY_BINARY, "--test-launchd"] + ports
+    program = arguments.map { |argument| "<string>#{HTML.escape(argument)}</string>" }.join
     sockets = {"http" => @http_port, "https" => @https_port}.map do |name, port|
-      "<key>#{name}</key><dict><key>SockNodeName</key><string>127.0.0.1</string><key>SockServiceName</key><string>#{port}</string>" \
-      "<key>SockFamily</key><string>IPv4</string><key>SockType</key><string>stream</string></dict>"
+      "<key>#{name}</key><dict>" \
+      "<key>SockNodeName</key><string>127.0.0.1</string>" \
+      "<key>SockServiceName</key><string>#{port}</string>" \
+      "<key>SockFamily</key><string>IPv4</string>" \
+      "<key>SockType</key><string>stream</string></dict>"
     end
     <<-PLIST
       <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
+        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
       <plist version="1.0"><dict>
       <key>Label</key><string>#{@label}</string>
-      <key>ProgramArguments</key><array>#{arguments.map { |argument| "<string>#{HTML.escape(argument)}</string>" }.join}</array>
+      <key>ProgramArguments</key><array>#{program}</array>
       <key>Sockets</key><dict>#{sockets.join}</dict>
       <key>RunAtLoad</key><true/>
       <key>StandardOutPath</key><string>#{HTML.escape(@log)}</string>
@@ -262,8 +280,11 @@ end
 describe "native Latte port relay" do
   it "round trips clear and TLS-like opaque bytes with half-closes" do
     with_relay_fixture do |fixture|
-      { {fixture.http_port, "http-ready", "GET /opaque HTTP/1.1\r\n\x16\x03\x01", "http-eof"},
-       {fixture.https_port, "tls-ready", "\x16\x03\x03clienthello\x00", "tls-eof"} }.each do |port, ready, payload, eof_reply|
+      exchanges = {
+        {fixture.http_port, "http-ready", "GET /opaque HTTP/1.1\r\n\x16\x03\x01", "http-eof"},
+        {fixture.https_port, "tls-ready", "\x16\x03\x03clienthello\x00", "tls-eof"},
+      }
+      exchanges.each do |port, ready, payload, eof_reply|
         client = fixture.connect(port)
         begin
           client.read_timeout = 2.seconds
@@ -321,10 +342,16 @@ describe "native Latte port relay" do
       client.read_timeout = 100.milliseconds
       churn = RelayChurn.new(client, fixture.https_port, fixture.relay)
       begin
-        Caramel::Checks.wait_until(1.second, 10.milliseconds) { churn.bytes_received > 256 * 1024 }.should be_true
+        streaming = Caramel::Checks.wait_until(1.second, 10.milliseconds) do
+          churn.bytes_received > 256 * 1024
+        end
+        streaming.should be_true
         started = Time.instant
         fixture.relay.terminate
-        Caramel::Checks.wait_until(2.seconds, 10.milliseconds) { fixture.relay.terminated? }.should be_true
+        stopped = Caramel::Checks.wait_until(2.seconds, 10.milliseconds) do
+          fixture.relay.terminated?
+        end
+        stopped.should be_true
         (Time.instant - started).should be < 1.5.seconds
       ensure
         churn.close
@@ -336,8 +363,13 @@ describe "native Latte port relay" do
     with_relay_fixture do |fixture|
       fixture.connect.close
       fixture.relay.terminate
-      Caramel::Checks.wait_until(3.seconds, 10.milliseconds) { fixture.relay.terminated? }.should be_true
-      expect_raises(Socket::Error) { TCPSocket.new("127.0.0.1", fixture.http_port, connect_timeout: 0.4) }
+      stopped = Caramel::Checks.wait_until(3.seconds, 10.milliseconds) do
+        fixture.relay.terminated?
+      end
+      stopped.should be_true
+      expect_raises(Socket::Error) do
+        TCPSocket.new("127.0.0.1", fixture.http_port, connect_timeout: 0.4)
+      end
     end
   end
 
@@ -354,7 +386,8 @@ describe "native Latte port relay" do
           begin
             client.read_fully(initial)
           rescue ex : IO::Error
-            fail "the relay did not serve launchd's listener on 127.0.0.1:#{port} (#{ex.message}); relay output: #{relay.log.inspect}"
+            fail "the relay did not serve launchd's listener on 127.0.0.1:#{port} " \
+                 "(#{ex.message}); relay output: #{relay.log.inspect}"
           end
           String.new(initial).should eq(ready)
           client << "launchd-payload"
