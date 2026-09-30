@@ -127,7 +127,6 @@ Layout/LineLength:
     - "spec/integration/database_spec.cr"
     - "spec/integration/migrations_spec.cr"
     - "spec/integration/sugar_orm_spec.cr"
-    - "spec/latte/login_item_spec.cr"
     - "spec/latte/network_config_spec.cr"
     - "spec/latte/postgres_spec.cr"
     - "spec/latte/project_status_spec.cr"
