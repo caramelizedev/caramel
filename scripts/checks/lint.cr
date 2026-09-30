@@ -19,7 +19,7 @@ module Caramel::Checks::Lint
     end
     service_nouns
     line_length
-    exemptions
+    no_exemptions
     framework = Checks.run([LINTER, "--format", "flycheck"], timeout: 300.seconds)
     unless framework.success?
       Checks.fail("The framework does not pass its rule set:\n" \
@@ -66,22 +66,34 @@ module Caramel::Checks::Lint
     puts "PASS: Layout/LineLength reports a 101-character line, not a 100-character one"
   end
 
-  # ADR 0021: a file the rule excludes leaves the list once its long lines
-  # are rewritten.
-  private def exemptions : Nil
+  # ADR 0021: no file is exempt from the line limit, by the configuration or
+  # by an inline directive.
+  private def no_exemptions : Nil
     rule = YAML.parse(File.read(CONFIG))["Layout/LineLength"]?
-    listed = rule.try(&.["Excluded"]?).try(&.as_a.map(&.as_s)) || [] of String
-    stale = listed.reject { |path| long_line?(File.join(Checks::REPO, path)) }
-    unless stale.empty?
-      Checks.fail("Layout/LineLength excludes files without a long line; " \
-                  "remove them from .ameba.yml:\n#{stale.join('\n')}")
+    if rule.try(&.["Excluded"]?)
+      Checks.fail("Layout/LineLength excludes files in .ameba.yml; " \
+                  "rewrite their long lines instead (ADR 0021)")
     end
-    puts "PASS: each of the #{listed.size} files Layout/LineLength excludes " \
-         "still has a line to rewrite"
+    disabled = linted_sources.select do |path|
+      File.read_lines(path).any? { |line| disables_line_length?(line) }
+    end
+    unless disabled.empty?
+      Checks.fail("These files disable Layout/LineLength inline; " \
+                  "rewrite their long lines instead (ADR 0021):\n#{disabled.join('\n')}")
+    end
+    puts "PASS: Layout/LineLength exempts no file, by configuration or inline directive"
   end
 
-  private def long_line?(path : String) : Bool
-    File.exists?(path) && File.read_lines(path).any? { |line| line.size > LIMIT }
+  # The Crystal files .ameba.yml lints: fixture data is excluded there too.
+  private def linted_sources : Array(String)
+    Dir.glob(File.join(Checks::REPO, "{src,spec,scripts}/**/*.cr")).reject do |path|
+      path.lchop("#{Checks::REPO}/").matches?(%r{\Aspec/fixtures/[^/]+/})
+    end
+  end
+
+  private def disables_line_length?(line : String) : Bool
+    rules = line[/#\s*ameba:disable\s+([\w\/, ]+)/, 1]? || return false
+    rules.split(/[\s,]+/).any?(&.in?("Layout", "Layout/LineLength"))
   end
 
   # The linter's run over `source`, alone, under the framework's configuration.

@@ -47,8 +47,7 @@ Lint/SpecFilename:
     - "spec/**/spec_helper.cr"
 
 # A line holds at most 100 characters (ADR 0021). The formatter never breaks
-# a line, so this rule does. The files listed predate the rule: each leaves
-# the list in the change that rewrites its long lines, and none joins it.
+# a line, so this rule does. No file is exempt.
 Layout/LineLength:
   Enabled: true
   MaxLength: 100

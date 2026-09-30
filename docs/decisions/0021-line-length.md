@@ -2,7 +2,7 @@
 
 Date: 2026-09-29
 
-Status: accepted. Amends [ADR 0017](0017-formatting-and-linting.md) decisions 4 and 6 for the framework's own code. Applications keep ADR 0017's rule set.
+Status: accepted. Amends [ADR 0017](0017-formatting-and-linting.md) decisions 4 and 6 for the framework's own code. Applications keep ADR 0017's rule set. The exclusion list emptied on 2026-09-30, so no file is exempt.
 
 ## Context
 
@@ -14,20 +14,24 @@ Status: accepted. Amends [ADR 0017](0017-formatting-and-linting.md) decisions 4 
 ## Decision
 
 1. **The framework's `.ameba.yml` enables `Layout/LineLength` at 100 characters**, so `scripts/check lint` enforces it. Ameba counts characters, not bytes.
-2. **The limit ratchets.** The rule's `Excluded` list names every file that had a longer line when the rule was adopted.
-   - New files must pass.
-   - A file leaves the list in the change that rewrites its long lines, and no file joins it.
-   - `scripts/checks/lint.cr` left the list in this change.
+2. **No file is exempt.** The limit started as a ratchet:
+   - The rule's `Excluded` list named the 190 files that still had a longer line once `scripts/checks/lint.cr` was rewritten with the rule.
+   - Those files were then rewritten one commit per file, each taking its file off the list (caramelizedev/caramel#9–#14 and #16). The list emptied on 2026-09-30.
+   - The rule now excludes no file, and no file may disable it with an inline directive.
 3. **Applications are unchanged.** `templates/application/.ameba.yml` keeps the rule off, because generated resources still write lines that grow with their fields.
 4. **What a linter cannot check is written down**: in the Style section of `CONTRIBUTING.md` for people, and in `CLAUDE.md` for agents. This covers named steps, early returns, stacked arguments, heredocs for multi-line text, and specs that name their inputs.
-5. **`scripts/check lint` proves the limit is on and the list is honest.** Under the framework's configuration, a 101-character line must be reported and a 100-character line must not. Every listed file must still have a line to rewrite, so a cleaned file cannot stay on the list.
+5. **`scripts/check lint` proves the limit is on and exempts nothing.**
+   - Under the framework's configuration, a 101-character line must be reported and a 100-character line must not.
+   - The rule must have no `Excluded` key.
+   - No linted file may carry an `# ameba:disable Layout/LineLength` (or `Layout`) directive.
 
 ## Reasons
 
 - A limit that no tool checks drifts. The limit belongs in the rule set that already runs in `scripts/check lint` and before every release.
 - 100 characters leaves room for lines that a shorter limit would split for no gain, such as a spec's description or a row of an aligned table. The Style section asks for lines that read as one thought, which are usually far shorter.
-- A per-file list is what Ameba's `Excluded` supports. Its weakness is that a listed file can still gain a long line. Review catches that, and each cleaned file loses its exception for good. A line-level baseline would need a Caramel rule and a stored record of every existing long line.
-- Rewriting all 191 files at once would bury real changes in the history, and would risk changing behaviour in code no one is working on. Files are cleaned as they are touched.
+- A per-file list is what Ameba's `Excluded` supports, and it let the limit hold for new files at once. Its weakness was that a listed file could still gain a long line, so the list was worked down rather than left to shrink as files were touched.
+- One commit per file kept each rewrite reviewable on its own. Every rewrite kept the strings the code emits or compares byte-identical, proven with probes before and after; code that only runs on macOS was type-checked for that target.
+- An exception, once allowed, invites the next. With none left, the proof refuses any new one, in the configuration or inline.
 
 Principles followed:
 
@@ -37,5 +41,15 @@ Principles followed:
 
 ## Verification
 
-- `scripts/check lint` first proves that `Caramel/ServiceNoun` reports service nouns. It then proves that `Layout/LineLength` reports a 101-character line and not a 100-character one under the framework's configuration, and that every excluded file still has a long line. Finally it lints the framework, which must pass. Each proof fails if the linter exits 0 or reports anything else, and shows the linter's own output.
-- The proofs were mutation-checked. Raising `MaxLength` to 140 fails the line-length proof, and so does disabling the rule. Listing a file without a long line fails the list proof. A 110-character comment added to a file not on the list fails the framework lint.
+- `scripts/check lint` proves, in order:
+  - that `Caramel/ServiceNoun` reports service nouns;
+  - that `Layout/LineLength` reports a 101-character line and not a 100-character one under the framework's configuration;
+  - that the rule exempts no file, by configuration or inline directive.
+
+  It then lints the framework, which must pass. Each linter proof fails if the linter exits 0 or reports anything else, and shows the linter's own output.
+- The proofs were mutation-checked, and each of these fails the check:
+  - raising `MaxLength` to 140, or disabling the rule;
+  - adding an `Excluded` entry;
+  - adding an inline `# ameba:disable Layout/LineLength` to a source file.
+
+  An inline disable of another Layout rule does not fail it.
