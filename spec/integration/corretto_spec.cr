@@ -3,8 +3,15 @@ require "random/secure"
 require "../../src/caramel/corretto"
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
-private CORRETTO_ADMIN_URL = ENV["CARAMEL_OWNED_ADMIN_URL"]? || raise "Run scripts/check integration; no owned admin connection provided"
-private CORRETTO_OWNER_URL = ENV["CARAMEL_OWNED_SPEC_URL"]? || raise "Run scripts/check integration; no owned test database provided"
+private def owned_url(name : String, what : String) : String
+  ENV[name]? || raise "Run scripts/check integration; no owned #{what} provided"
+end
+
+private CORRETTO_ADMIN_URL = owned_url("CARAMEL_OWNED_ADMIN_URL", "admin connection")
+private CORRETTO_OWNER_URL = owned_url("CARAMEL_OWNED_SPEC_URL", "test database")
+private NOTES_TABLE        = "CREATE TABLE corretto_notes " \
+                             "(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
+                             "title text NOT NULL, customer text)"
 
 module CorrettoIntegration
   struct Note < SugarORM::Schema
@@ -17,7 +24,8 @@ module CorrettoIntegration
 
   abstract struct Action < Caramel::Action
     def layout(page : Caramel::Page) : String
-      "<!DOCTYPE html><html><head><title>#{Caramel::HTML.escape(page.title)}</title></head><body>#{page.body}</body></html>"
+      head = "<head><title>#{Caramel::HTML.escape(page.title)}</title></head>"
+      "<!DOCTYPE html><html>#{head}<body>#{page.body}</body></html>"
     end
   end
 
@@ -28,7 +36,10 @@ module CorrettoIntegration
     end
 
     def handle(contract : Contract)
-      stripe = Caramel::Outbound.post("https://api.stripe.com/v1/customers", HTTP::Headers{"Content-Type" => "application/x-www-form-urlencoded"}, URI::Params.encode({"description" => contract.title}))
+      customers = "https://api.stripe.com/v1/customers"
+      urlencoded = HTTP::Headers{"Content-Type" => "application/x-www-form-urlencoded"}
+      description = URI::Params.encode({"description" => contract.title})
+      stripe = Caramel::Outbound.post(customers, urlencoded, description)
       customer = stripe.success? ? JSON.parse(stripe.body)["id"].as_s : nil
       note = Note.create!(title: contract.title, customer: customer)
       morph("#notes", Caramel::HTML.escape("#{note.title} #{note.customer || "without customer"}"))
@@ -42,6 +53,11 @@ end
 
 private def corretto_url(database : String) : String
   CORRETTO_OWNER_URL.sub("/caramel_spec?", "/#{database}?")
+end
+
+# The relation named `name` in the running example's database, if it exists.
+private def corretto_relation(worker : Corretto::Worker, name : String) : String?
+  worker.connection.query_one("SELECT to_regclass('#{name}')::text", as: String?)
 end
 
 private def corretto_count(database : String, sql : String) : Int64
@@ -63,7 +79,7 @@ private def with_corretto_worker(&)
     admin.exec(%(CREATE DATABASE "#{template}" OWNER caramel_spec))
     owner = Caramel::Database.open(corretto_url(template), 1)
     begin
-      owner.exec("CREATE TABLE corretto_notes (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text NOT NULL, customer text)")
+      owner.exec(NOTES_TABLE)
     ensure
       owner.close
     end
@@ -92,7 +108,9 @@ describe Corretto::Worker do
     with_corretto_worker do |worker, database|
       worker.run do
         CorrettoIntegration::Note.create!(title: "first")
-        SugarORM::Repo.connection { |connection| connection.same?(worker.connection).should be_true }
+        SugarORM::Repo.connection do |connection|
+          connection.same?(worker.connection).should be_true
+        end
         SugarORM::Repo.in_transaction?.should be_true
         SugarORM::Repo.transaction do
           CorrettoIntegration::Note.create!(title: "nested")
@@ -104,7 +122,7 @@ describe Corretto::Worker do
       end.should be_false
       worker.run do
         CorrettoIntegration::Note.query.count.should eq(0)
-        worker.connection.query_one("SELECT to_regclass('rolled_back_ddl')::text", as: String?).should be_nil
+        corretto_relation(worker, "rolled_back_ddl").should be_nil
       end.should be_false
       corretto_count(database, "SELECT count(*) FROM corretto_notes").should eq(0)
       worker.resets.should eq(0)
@@ -124,20 +142,21 @@ describe Corretto::Worker do
       worker.resets.should eq(1)
       worker.current_fingerprint.should eq(booted)
       worker.run do
-        worker.connection.query_one("SELECT to_regclass('leaked_ddl')::text", as: String?).should be_nil
+        corretto_relation(worker, "leaked_ddl").should be_nil
       end.should be_false
 
       worker.run(catalog: true) do
         SugarORM::Repo.in_transaction?.should be_false
         # CONCURRENTLY is refused inside a transaction block: catalog examples run unwrapped.
-        worker.connection.exec("CREATE INDEX CONCURRENTLY corretto_notes_title ON corretto_notes (title)")
+        index = "CREATE INDEX CONCURRENTLY corretto_notes_title ON corretto_notes (title)"
+        worker.connection.exec(index)
         CorrettoIntegration::Note.create!(title: "committed")
         corretto_count(database, "SELECT count(*) FROM corretto_notes").should eq(1)
       end.should be_false
       worker.resets.should eq(2)
       worker.run do
         CorrettoIntegration::Note.query.count.should eq(0)
-        worker.connection.query_one("SELECT to_regclass('corretto_notes_title')::text", as: String?).should be_nil
+        corretto_relation(worker, "corretto_notes_title").should be_nil
       end.should be_false
       worker.current_fingerprint.should eq(booted)
     end
@@ -145,27 +164,35 @@ describe Corretto::Worker do
 
   it "serves in-process requests on the example's connection with wire-stubbed outbound calls" do
     with_corretto_worker do |worker, database|
-      application = Caramel::Application.new(CorrettoIntegration::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://notes.caramel"))
+      csrf = Caramel::CSRF.new("s" * 64, "https://notes.caramel")
+      application = Caramel::Application.new(CorrettoIntegration::AppRouter.new, csrf)
       worker.run do
-        Corretto.stub_wire("https://api.stripe.com/v1/customers", method: "POST").to_return(status: 200, fixture: "stripe/customer_created.json")
+        customers = "https://api.stripe.com/v1/customers"
+        Corretto.stub_wire(customers, method: "POST")
+          .to_return(status: 200, fixture: "stripe/customer_created.json")
         client = Corretto::Client.new(application)
         db = worker.connection
-        created = client.post("/notes", headers: {"HX-Request" => "true"}, params: {"title" => "Acme <Corp>"})
+        htmx = {"HX-Request" => "true"}
+        created = client.post("/notes", headers: htmx, params: {"title" => "Acme <Corp>"})
         created.should have_status(200)
         created.should render_partial("#notes", swap: "innerMorph")
         created.body.should contain("Acme &lt;Corp&gt; cus_Corretto123")
-        db.should have_row(CorrettoIntegration::Note, title: "Acme <Corp>", customer: "cus_Corretto123")
+        db.should have_row(CorrettoIntegration::Note,
+          title: "Acme <Corp>", customer: "cus_Corretto123")
         db.should_not have_row(CorrettoIntegration::Note, title: "Acme <Corp>", customer: nil)
-        expect_raises(Spec::AssertionFailed, %(Expected CorrettoIntegration::Note to have a row where title: "Other"; none matched among 1 rows)) do
+        unmatched = %(Expected CorrettoIntegration::Note to have a row ) \
+                    %(where title: "Other"; none matched among 1 rows)
+        expect_raises(Spec::AssertionFailed, unmatched) do
           db.should have_row(CorrettoIntegration::Note, title: "Other")
         end
         sent = Corretto.wire_requests.last
-        {sent.method, sent.url, sent.body}.should eq({"POST", "https://api.stripe.com/v1/customers", "description=Acme+%3CCorp%3E"})
+        form = "description=Acme+%3CCorp%3E"
+        {sent.method, sent.url, sent.body}.should eq({"POST", customers, form})
 
         Corretto.wire.reset
         client.post("/notes", params: {"title" => "Offline"}).should render_partial("#notes")
         db.should have_row(CorrettoIntegration::Note, title: "Offline", customer: nil)
-        Corretto.wire_requests.map(&.url).should eq(["https://api.stripe.com/v1/customers"])
+        Corretto.wire_requests.map(&.url).should eq([customers])
         corretto_count(database, "SELECT count(*) FROM corretto_notes").should eq(0)
       end.should be_false
       worker.run { CorrettoIntegration::Note.query.count.should eq(0) }
