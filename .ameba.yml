@@ -192,7 +192,6 @@ Layout/LineLength:
     - "src/frappe/corretto_runner.cr"
     - "src/frappe/dev_files.cr"
     - "src/frappe/dev_gateway.cr"
-    - "src/frappe/dev_session.cr"
     - "src/frappe/editor_tools.cr"
     - "src/frappe/new_project.cr"
     - "src/frappe/resource_generator.cr"
