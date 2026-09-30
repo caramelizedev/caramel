@@ -10,6 +10,10 @@ require "../latte/watcher"
 
 module Caramel::Frappe
   class DevSession
+    # Quiet time after the last source change before a check starts (ADR
+    # 0012). A multi-file save that outlasts it only cancels a check.
+    DEBOUNCE = 50.milliseconds
+
     @compiler : DevCommand? = nil
     @application : DevCommand? = nil
     @app_log : SiteLog? = nil
@@ -95,9 +99,12 @@ module Caramel::Frappe
           @retirement.check!
           cleanup_binaries if @cleanup_pending && @retirement.empty?
           begin
+            # Wake at the debounce deadline while a source change waits.
+            wait = 100.milliseconds
+            wait = (changed_at + DEBOUNCE - Time.instant).clamp(Time::Span.zero, wait) if !@busy && @pending
             # A kernel event is only a hint: hashing confirms a real change and
             # whether it touched sources, assets or both.
-            if watcher.changed?(100.milliseconds)
+            if watcher.changed?(wait)
               current = files.snapshot
               if current.source != observed.source
                 @pending = current.source
@@ -118,7 +125,7 @@ module Caramel::Frappe
                 @files_failed = false
               end
             end
-            if !@busy && (source = @pending) && Time.instant - changed_at >= 200.milliseconds
+            if !@busy && (source = @pending) && Time.instant - changed_at >= DEBOUNCE
               @pending = nil
               launch_build(source)
             elsif !@busy && (retry_at = @retry_at) && Time.instant >= retry_at && (binary = @binary)
@@ -230,7 +237,12 @@ module Caramel::Frappe
       @compiler = command
       deadline = Time.instant + 180.seconds
       while command.running? && !@stopping && !@pending && Time.instant < deadline
-        sleep 50.milliseconds
+        # Wakes as soon as the compiler exits; the timeout re-checks for a
+        # stop or a newer change.
+        select
+        when command.finished.receive?
+        when timeout(50.milliseconds)
+        end
       end
       command.stop if command.running?
       @compiler = nil
@@ -280,7 +292,7 @@ module Caramel::Frappe
             end
             return true
           end
-          sleep 50.milliseconds
+          sleep 10.milliseconds
         end
         unless @stopping
           message = candidate.output.contents

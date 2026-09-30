@@ -13,7 +13,7 @@ scripts/build-frappe && scripts/build-latte
 scripts/check all
 ```
 
-`scripts/check all` builds everything, runs the spec suite and every check in sequence, and keeps the full output of any failure in a log named on its FAIL line. Checks share one compiler cache, so never run two at once. `scripts/check NAME` runs one; the README lists what each needs. The browser check needs an unlocked screen and Safari's Allow Remote Automation. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first (`frappe services stop`, then `latte stop`).
+`scripts/check all` builds everything, runs the spec suite and every check in sequence, and keeps the full output of any failure in a log named on its FAIL line. Checks share one compiler cache, so never run two at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep full builds to two at a time to bound memory. `scripts/check NAME` runs one; the README lists what each needs. The browser check needs an unlocked screen and Safari's Allow Remote Automation. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first (`frappe services stop`, then `latte stop`).
 
 ## Formatting and linting
 

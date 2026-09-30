@@ -1,6 +1,6 @@
 name: caramel
-version: 0.4.1
-crystal: ">= 1.21.0"
+version: 0.4.3
+crystal: ">= 1.21.1"
 license: MIT
 dependencies:
   pg:

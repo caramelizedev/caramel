@@ -1,0 +1,156 @@
+/* Documentation occupies the window; only prose has a reading-width limit. */
+html { scroll-padding-top:0 }
+#caramel-site.c-documentation {
+  max-width: none;
+  min-height: 100svh;
+  --docs-header: 85px;
+  --docs-rail: 272px;
+  --docs-outline: 224px;
+}
+#caramel-site.c-documentation .c-header {
+  display: grid;
+  grid-template-columns: calc(var(--docs-rail) - 32px) minmax(180px,1fr) auto;
+  padding: 22px 32px;
+  gap: 32px;
+}
+#caramel-site.c-documentation .c-brand { grid-column:1; grid-row:1; justify-self:start; padding:0; line-height:1 }
+#caramel-site.c-documentation .c-search-open {
+  grid-column:2; grid-row:1; width:100%; max-width:640px; justify-self:center;
+  justify-content:space-between; padding:12px 16px; font-size:14px;
+  margin:0; background:var(--wash);
+}
+#caramel-site.c-documentation .c-nav { grid-column:3; grid-row:1; gap:20px; margin:0 }
+#caramel-site.c-documentation .c-nav a[data-page] {
+  position:relative; display:inline-flex; align-items:center; min-height:44px;
+  border:0; padding:10px 2px; background:transparent;
+  font:14px/1.5 'DM Sans',Arial,sans-serif; text-decoration:none;
+}
+#caramel-site.c-documentation .c-nav a[data-page]::after {
+  content:''; position:absolute; left:2px; right:2px; bottom:3px;
+  height:2px; border-radius:2px; background:var(--caramel); opacity:0;
+}
+#caramel-site.c-documentation .c-nav a[data-page][aria-current] {
+  background:transparent; border:0; color:var(--caramel);
+}
+#caramel-site.c-documentation .c-nav a[data-page][aria-current]::after { opacity:1 }
+#caramel-site.c-documentation .c-nav a:hover { color:var(--caramel) }
+#caramel-site.c-documentation .c-search-area {
+  position:fixed; top:calc(var(--docs-header) + 12px); left:50%; transform:translateX(-50%);
+  width:min(760px,calc(100% - 32px)); max-height:calc(100dvh - var(--docs-header) - 32px);
+  overflow:auto; border:1px solid var(--line); border-radius:8px; z-index:30;
+  box-shadow:0 20px 70px #0004;
+}
+#caramel-site.c-documentation .c-results a { font-size:15px }
+#caramel-site.c-documentation .c-docgrid {
+  display:grid; grid-template-columns:var(--docs-rail) minmax(0,1fr) var(--docs-outline);
+  min-height:calc(100svh - var(--docs-header) - 64px); align-items:start;
+}
+#caramel-site.c-documentation .c-docnav {
+  position:sticky; top:var(--docs-header); align-self:start;
+  height:calc(100dvh - var(--docs-header)); overflow-y:auto;
+  border-right:1px solid var(--line); scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+}
+#caramel-site.c-documentation .c-docnav > summary { display:none }
+#caramel-site.c-documentation .c-sidebar { display:block; border:0; padding:32px 20px 48px; background:transparent }
+#caramel-site.c-documentation .c-sidebar-edition { display:grid; gap:7px; padding:0 12px 16px }
+#caramel-site.c-documentation .c-sidebar-edition strong { font-weight:500; font-size:16px }
+#caramel-site.c-documentation .c-sidebar-edition span { font:12px/1.5 var(--mono); color:var(--subtle) }
+#caramel-site.c-documentation .c-sidebar h3 {
+  display:block; font:500 14px/1.5 'DM Sans',Arial,sans-serif;
+  color:var(--ink); text-transform:none; letter-spacing:0; margin:28px 12px 10px;
+}
+#caramel-site.c-documentation .c-sidebar a[data-page] {
+  display:block; width:100%; padding:9px 12px; margin:3px 0;
+  font:14px/1.55 'DM Sans',Arial,sans-serif; color:var(--subtle);
+  border-radius:0; border-left:2px solid transparent;
+}
+#caramel-site.c-documentation .c-sidebar a[data-page]:hover { color:var(--ink); background:var(--wash) }
+#caramel-site.c-documentation .c-sidebar a[aria-current="page"] {
+  color:var(--caramel); border-left-color:var(--caramel); background:var(--accentwash);
+}
+#caramel-site.c-documentation .c-doccontent {
+  width:100%; max-width:900px; justify-self:center; padding:56px 56px 96px;
+}
+#caramel-site.c-documentation .c-doccontent h1 { font-size:clamp(34px,3vw,48px); line-height:1.15; letter-spacing:-1.5px; margin:18px 0 24px }
+#caramel-site.c-documentation .c-doccontent .c-lede { font-size:19px; line-height:1.75; margin-bottom:36px }
+#caramel-site.c-documentation .c-doccontent h2 { font-size:28px; line-height:1.3; margin:48px 0 20px; scroll-margin-top:calc(var(--docs-header) + 24px) }
+#caramel-site.c-documentation .c-doccontent h3 { font-size:20px; margin:32px 0 16px }
+#caramel-site.c-documentation .c-doccontent p { font-size:17px; line-height:1.85; margin-bottom:20px }
+#caramel-site.c-documentation .c-doccontent code { font-size:14px }
+#caramel-site.c-documentation .c-note { padding:20px 24px; margin:28px 0; font-size:15px }
+#caramel-site.c-documentation .c-note p { font-size:15px; margin:8px 0 0 }
+#caramel-site.c-documentation .c-snippet { margin:24px 0; border-radius:7px }
+#caramel-site.c-documentation .c-snippet header { font-size:13px; padding:12px 20px }
+#caramel-site.c-documentation .c-snippet pre { padding:22px; font-size:14px; line-height:1.8; white-space:pre; overflow-x:auto }
+#caramel-site.c-documentation .c-file { padding:16px 0 }
+#caramel-site.c-documentation :is(.c-file small,.c-route-map small,.c-components span,.c-status-list small) { font-size:14px }
+#caramel-site.c-documentation .c-components strong { font-size:16px; margin-bottom:4px }
+#caramel-site.c-documentation .c-components div { padding:18px 0 }
+#caramel-site.c-documentation :is(.c-status-list li,.c-task-picker button,.c-secondary) { font-size:15px }
+#caramel-site.c-documentation .c-task-picker button { padding:10px 14px }
+#caramel-site.c-documentation .c-route-map { padding:24px; margin:20px 0 }
+#caramel-site.c-documentation .c-route-map strong { font-size:18px; font-weight:500 }
+#caramel-site.c-documentation .c-next { margin-top:48px; padding-top:24px }
+#caramel-site.c-documentation .c-next a[data-page] { font-size:14px; color:var(--caramel) }
+#caramel-site.c-documentation .c-tag { font-size:12px; padding:5px 9px }
+#caramel-site.c-documentation .c-toc {
+  display:block; position:sticky; top:var(--docs-header); max-height:calc(100dvh - var(--docs-header));
+  overflow:auto; padding:56px 24px 32px 16px; scrollbar-width:thin;
+}
+#caramel-site.c-documentation .c-toc p { font:500 13px/1.5 var(--mono); margin-bottom:20px }
+#caramel-site.c-documentation .c-toc a {
+  font:14px/1.6 'DM Sans',Arial,sans-serif; padding:8px 0 8px 16px;
+  border-left:1px solid var(--line); color:var(--subtle); text-decoration:none;
+}
+#caramel-site.c-documentation .c-toc a[aria-current="location"] { color:var(--caramel); border-left-color:var(--caramel) }
+#caramel-site.c-documentation .c-footer { padding:20px 32px; font-size:12px; min-height:64px }
+#caramel-site.c-documentation .c-skip { position:fixed; top:-100px; left:16px; z-index:40; padding:12px 20px; background:var(--ink); color:var(--paper) }
+#caramel-site.c-documentation .c-skip:focus { top:12px }
+#caramel-site.c-documentation .c-catalog-layout { display:grid; grid-template-columns:var(--docs-rail) minmax(0,1fr); min-height:calc(100svh - var(--docs-header) - 64px) }
+#caramel-site.c-documentation .c-catalog { width:100%; max-width:1280px; justify-self:center; padding:56px clamp(28px,4vw,72px) 80px; min-width:0 }
+#caramel-site.c-documentation .c-book-intro { padding:0 0 36px }
+#caramel-site.c-documentation .c-book-intro h1 { font-size:clamp(34px,3vw,48px); line-height:1.2; margin:16px 0 24px }
+#caramel-site.c-documentation .c-book-intro p { font-size:18px; line-height:1.8; max-width:720px }
+#caramel-site.c-documentation .c-book-tools { padding:0 0 28px; flex-wrap:wrap }
+#caramel-site.c-documentation .c-book-tools :is(input,button) { font-size:14px; padding:12px }
+#caramel-site.c-documentation .c-recipe-grid { padding:0; gap:20px }
+#caramel-site.c-documentation .c-recipe { padding:26px; min-width:0 }
+#caramel-site.c-documentation .c-recipe h2 { font-size:24px }
+#caramel-site.c-documentation .c-recipe p { font-size:16px; line-height:1.75 }
+#caramel-site.c-documentation .c-recipe footer { font-size:13px }
+#caramel-site.c-documentation .c-empty { padding:20px 0 }
+@media (max-width:1199px) {
+  #caramel-site.c-documentation { --docs-rail:240px }
+  #caramel-site.c-documentation .c-docgrid { grid-template-columns:var(--docs-rail) minmax(0,1fr) }
+  #caramel-site.c-documentation .c-toc { display:none }
+  #caramel-site.c-documentation .c-doccontent { padding:44px 40px 80px }
+  #caramel-site.c-documentation .c-header { gap:24px }
+  #caramel-site.c-documentation .c-nav { gap:16px }
+}
+@media (max-width:899px) {
+  #caramel-site.c-documentation .c-header { display:flex; padding:18px 24px; gap:20px; flex-wrap:wrap }
+  #caramel-site.c-documentation .c-brand { margin-right:auto }
+  #caramel-site.c-documentation .c-search-open { width:auto; order:0; padding:10px 14px }
+  #caramel-site.c-documentation .c-search-open kbd { display:none }
+  #caramel-site.c-documentation .c-nav { order:1; width:100%; justify-content:space-between }
+  #caramel-site.c-documentation :is(.c-docgrid,.c-catalog-layout) { display:block }
+  #caramel-site.c-documentation .c-docnav { height:auto; max-height:calc(100dvh - var(--docs-header)); z-index:9; background:var(--paper); border:0; border-bottom:1px solid var(--line) }
+  #caramel-site.c-documentation .c-docnav > summary { display:flex; justify-content:space-between; align-items:center; padding:14px 24px; font-size:14px; cursor:pointer; list-style:none }
+  #caramel-site.c-documentation .c-docnav > summary::-webkit-details-marker { display:none }
+  #caramel-site.c-documentation .c-docnav[open] > summary span { transform:rotate(45deg) }
+  #caramel-site.c-documentation .c-sidebar { padding:16px 20px 32px; max-height:55dvh; overflow:auto }
+  #caramel-site.c-documentation .c-doccontent { max-width:800px; margin:auto; padding:36px 28px 64px }
+  #caramel-site.c-documentation .c-doccontent h2 { scroll-margin-top:calc(var(--docs-header) + 76px) }
+  #caramel-site.c-documentation .c-doccontent h1 { font-size:36px }
+  #caramel-site.c-documentation .c-catalog { padding:36px 28px 64px }
+  #caramel-site.c-documentation .c-footer { padding:20px 24px }
+}
+@media (max-width:580px) {
+  #caramel-site.c-documentation .c-recipe-grid { grid-template-columns:1fr }
+  #caramel-site.c-documentation .c-book-tools input { flex-basis:100% }
+  #caramel-site.c-documentation .c-doccontent { padding-inline:24px }
+  #caramel-site.c-documentation .c-doccontent h1 { font-size:34px }
+  #caramel-site.c-documentation .c-doccontent .c-lede { font-size:18px }
+  #caramel-site.c-documentation .c-note { padding:18px }
+  #caramel-site.c-documentation .c-components { grid-template-columns:1fr }
+}

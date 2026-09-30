@@ -1,6 +1,6 @@
 name: @@SHARD@@
 version: 0.1.0
-crystal: ">= 1.21.0"
+crystal: ">= 1.21.1"
 license: MIT
 targets:
   @@SHARD@@:

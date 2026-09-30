@@ -9,10 +9,27 @@ private def corretto_compile(fixture : String) : {Bool, String}
   {status.success?, error.to_s}
 end
 
+# The three fixtures type-check side by side when the first example needs
+# them: `--no-codegen` builds create no program cache directory and run no
+# cache cleanup, so they may overlap (CONTRIBUTING.md).
+private CORRETTO_COMPILES = begin
+  fixtures = %w[compile_mocks compile_spectator_mocks compile_valid]
+  compiled = Channel({String, Bool, String}).new(fixtures.size)
+  fixtures.each do |fixture|
+    spawn do
+      success, diagnostic = corretto_compile(fixture)
+      compiled.send({fixture, success, diagnostic})
+    rescue ex
+      compiled.send({fixture, false, "could not run the compiler: #{ex.message}"})
+    end
+  end
+  Array.new(fixtures.size) { compiled.receive }.to_h { |(fixture, success, diagnostic)| {fixture, {success, diagnostic}} }
+end
+
 describe "Corretto's mocking refusal" do
   it "fails the build, with a remedy, when a mocking library is loaded before or after Corretto" do
     {"compile_mocks" => "`Mocks` from a mocking library is loaded", "compile_spectator_mocks" => "Spectator::Mocks is loaded"}.each do |fixture, reason|
-      success, diagnostic = corretto_compile(fixture)
+      success, diagnostic = CORRETTO_COMPILES[fixture]
       success.should be_false
       diagnostic.should contain("Corretto forbids mocking")
       diagnostic.should contain(reason)
@@ -21,7 +38,7 @@ describe "Corretto's mocking refusal" do
   end
 
   it "accepts application types that merely share a mocking library's constant names" do
-    success, diagnostic = corretto_compile("compile_valid")
+    success, diagnostic = CORRETTO_COMPILES["compile_valid"]
     diagnostic.should eq("")
     success.should be_true
   end

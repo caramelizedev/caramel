@@ -41,8 +41,9 @@ ingress.each do |name, required|
   cases["compile_ingress_#{name}"] = {required, [] of String}
 end
 
-cases.each do |name, expectation|
-  result = Caramel::Checks.crystal(["build", "spec/fixtures/routes/#{name}.cr", "--no-codegen"], timeout: 90.seconds)
+results = Caramel::Checks.type_check(cases.keys.map { |name| "spec/fixtures/routes/#{name}.cr" })
+cases.each_with_index do |(name, expectation), index|
+  result = results[index]
   output = "#{name}\n#{result.stdout}#{result.stderr}"
   Caramel::Checks.fail("#{name}\ncompiler timed out") if result.timed_out?
   if expectation

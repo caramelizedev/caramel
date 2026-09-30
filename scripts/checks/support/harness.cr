@@ -37,6 +37,35 @@ module Caramel::Checks
     run([File.join(REPO, "scripts/crystal")] + args, **options)
   end
 
+  # Type-checks each source (`crystal build SOURCE --no-codegen`) and returns
+  # the results in order. The first runs alone, so it builds any macro-run
+  # helper that the others then reuse; the rest run *workers* at a time. Type
+  # checks create no program cache directory and run no cache cleanup, so
+  # they may overlap (CONTRIBUTING.md).
+  def self.type_check(sources : Array(String), workers : Int32 = 4) : Array(Caramel::Latte::ProcessResult)
+    check = ->(source : String) { crystal(["build", source, "--no-codegen"], timeout: 90.seconds) }
+    return sources.map { |source| check.call(source) } if sources.size < 2
+    results = Array(Caramel::Latte::ProcessResult?).new(sources.size, nil)
+    results[0] = check.call(sources[0])
+    queue = Channel(Int32).new(sources.size)
+    (1...sources.size).each { |index| queue.send(index) }
+    queue.close
+    done = Channel(Exception?).new(workers)
+    workers.times do
+      spawn do
+        while index = queue.receive?
+          results[index] = check.call(sources[index])
+        end
+        done.send(nil)
+      rescue ex
+        done.send(ex)
+      end
+    end
+    failures = Array.new(workers) { done.receive }.compact
+    raise failures.first unless failures.empty?
+    results.map(&.not_nil!)
+  end
+
   def self.shards(args : Array(String), **options)
     run([File.join(REPO, "scripts/shards")] + args, **options)
   end

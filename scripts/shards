@@ -23,7 +23,7 @@ if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
 fi
 
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
-CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.0
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
 BINARY=$CRYSTAL_ROOT/embedded/bin/shards
 PATH=$CRYSTAL_ROOT/bin:${PATH-}
 SHARDS_CACHE_PATH=$BASE/shards-cache

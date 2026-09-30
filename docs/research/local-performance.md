@@ -2,6 +2,8 @@
 
 Status: measured on 2026-09-28 at commit `5dcf865` (tag `v0.4.0`) on an Apple M3 Pro (12 CPUs, 36 GiB RAM, macOS 26.6.2) with the managed Crystal 1.21.0 toolchain (LLVM 15.0.7, Apple ld-1230.1, Swift 6.2.4). These numbers supersede the edit-latency, readiness, semantic-check, spec-command, release-build and compiler-profile figures in [development-performance.md](development-performance.md), because that baseline predates the Tier-1 type check, kqueue watching and Blueprint views. The owner skipped the instrumented full-suite run, so suite attribution rests on the 0.4.0 release log's per-run times and suite savings are estimates unless marked measured. Every number below comes from one observation unless a range is given.
 
+Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, and Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2 the same day. The release gates' runs took 548 s (v0.4.1) and 473 s (v0.4.2) against 738 s at 0.4.0, and the whole releases 553.6 s and 481.3 s against 747 s (one observation each). Each implemented opportunity's section starts with its status.
+
 ## Summary
 
 - **Where release time goes.** The 0.4.0 release took 747 s: 738 s of `scripts/check all` runs and about 9 s of release-tool work. The four checks that drive an app on a private Latte (frappe-project-dev 177 s, frappe-project 128 s, schema-diff 78 s, browser 28 s) are 411 s (56%). Installations take 79 s (11%), the build step 46 s, three spec-program runs 47 s (6%), lint 36 s and native (Swift rebuilds plus its specs) 26 s (0.4.0 release log, no attribution).
@@ -157,6 +159,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 1. E4-1: Run the frappe-project flow once in `check all` (keep only the `--dev` run)
 
+- **Status.** Implemented in v0.4.1 (`af68d1d`). The v0.4.1 release gate ran no standalone frappe-project run (0.4.0: 128 s); frappe-project-dev took 169 s (0.4.0: 177 s).
 - **Mechanism.** `scripts/checks/all.cr` lists `frappe-project` from the check glob and appends `frappe-project --dev` (`scripts/checks/all.cr:61-63`). The `--dev` run executes the whole plain flow, then its dev phase (`scripts/checks/frappe_project.cr:125`, `Dev.new(self, clone).check if args.includes?("--dev")`), then the plain run's final serve-and-fetch step (`:128-131`), so every step and assertion of the plain run already runs inside frappe-project-dev. Change: register frappe-project only once, with `--dev`. `scripts/check frappe-project` stays available on its own.
 - **Evidence.** `scripts/checks/all.cr:61-63`; `scripts/checks/frappe_project.cr:125`; 0.4.0 log: frappe-project 128 s, frappe-project-dev 177 s; m3 contains one fixture flow of ≈117 s (711.02 s total − 594 s sampled benchmark span).
 - **Savings.**
@@ -181,6 +184,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 3. E4-4: Lint check reuses a fresh `bin/frappe-lint` instead of rebuilding it
 
+- **Status.** Implemented in v0.4.1 (`28770aa`) with a different trigger: once `check all`'s build step passes it sets `CARAMEL_CHECK_ALL_BUILT`, and the lint check then skips `scripts/build-lint`. A standalone `scripts/check lint` always rebuilds. Unlike the staleness rule, this cannot miss a toolchain change or a require outside the glob. lint took 3 s in the v0.4.1 release gate (0.4.0: 36 s).
 - **Mechanism.** `scripts/checks/lint.cr:11` always runs `scripts/build-lint`, though the build step built the same `bin/frappe-lint` minutes earlier (`scripts/checks/all.cr:30`). By the lint run (17th of 24) the linter's and Ameba's `read_type_doc` cache dirs have been evicted, so the rebuild is cold: 34.83 s, of which 26.28 s is the -O3 `read_type_doc` macro-run helper (`lib/ameba/src/ameba/rule/base.cr:157-161`). Change: apply the staleness rule `frappe lint` already uses (`src/frappe/lint.cr:56-61`: rebuild only when `src/frappe/lint/*.cr`, `src/frappe_lint.cr` or `shard.lock` is newer than the binary).
 - **Evidence.** `scripts/checks/lint.cr:11`; `src/frappe/lint.cr:56-61`; m5-lint-1 36.02 s (created the three evicted entries) vs m5-lint-2 6.91 s; fq-Com-4 linter cold 34.83 s (`read_type_doc` 26.28 s), warm 4.70 s; 0.4.0 lint 36 s.
 - **Savings.**
@@ -193,6 +197,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 4. E4-3: LatteFixture reuses the build step's `bin/frappe` and one prebuilt environment daemon under `check all`
 
+- **Status.** Implemented in v0.4.1 (`173258e`). The build step also builds the daemon, into `bin/checks/frappe-environment`, and fixtures skip both builds under `CARAMEL_CHECK_ALL_BUILT`. A partial `check all` built `src/frappe.cr` and `frappe_environment.cr` once each outside installations. In the v0.4.1 release gate schema-diff took 72 s (0.4.0: 78 s) and browser 23 s (28 s).
 - **Mechanism.** `LatteFixture#start` runs `scripts/build-frappe` and compiles `spec/fixtures/frappe_environment.cr` (`scripts/checks/support/latte_fixture.cr:112-113`) in browser, frappe-project, schema-diff and frappe-project-dev, though the build step already built `bin/frappe` from the same tree (`scripts/checks/all.cr:30`, `scripts/build-frappe:6`). Change: `check all` builds the environment daemon once after the build step and sets a flag that makes fixtures skip both builds. Standalone checks keep building. Each fixture keeps its fresh initdb and CA.
 - **Evidence.** `scripts/checks/support/latte_fixture.cr:112-113`; `scripts/build-frappe:6`; fq-Com-4: `src/frappe.cr` 3.70 s cold / 2.65 s warm, `frappe_environment.cr` 2.42 s / 1.72 s.
 - **Savings.**
@@ -245,6 +250,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 8. E4-8: Parametrise the IPC read timeout and request deadline so latte-ipc's trickle proof takes ≈2.6 s instead of 12.4 s
 
+- **Status.** Implemented in v0.4.1 (`8dc625b`) with a 2 s idle timeout, a 2.5 s deadline and 0.7 s gaps. A spec pins the daemon's 5 s and 12 s, and with a 10 s deadline the check fails. latte-ipc took 8 s in the v0.4.1 release gate (0.4.0: 20 s), which includes E4-5.
 - **Mechanism.** latte-ipc trickles four headers 3.1 s apart (`scripts/checks/latte_ipc.cr:42-45`). Each gap stays under the 5 s read timeout (`src/latte/server.cr:89-90`) while the total passes the 12 s request deadline (`src/latte/server.cr:110`), which proves the deadline cuts off a trickled request. Change: make both values constructor parameters with the production defaults, pass e.g. 1 s and 2.5 s from the fixture, trickle 4 × 0.65 s, and pin the defaults with a unit spec.
 - **Evidence.** `scripts/checks/latte_ipc.cr:42-45`; `src/latte/server.cr:89-90`, `:110`; 0.4.0 latte-ipc 20 s.
 - **Savings.**
@@ -256,6 +262,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 9. E4-5: Incremental Swift builds so latte-ipc, native and the dev phase stop rebuilding Latte.app and the relay
 
+- **Status.** Implemented in v0.4.1 (`722ae34`) with a different trigger: under `CARAMEL_CHECK_ALL_BUILT`, latte-ipc, native and the dev phase skip the Swift builds the build step just made, so nothing rewrites `bin/Latte.app` after it. The build step still always compiles, so no stamp is needed. A partial `check all` compiled `Latte.swift` and `PortRelay.swift` once each outside installations; native took 23 s in the v0.4.1 release gate (0.4.0: 26 s).
 - **Mechanism.** Latte.app is rebuilt with `swiftc -O` by the build step, latte-ipc (`scripts/checks/latte_ipc.cr:19`), native (`scripts/checks/native.cr:3`) and the dev phase (`scripts/checks/frappe_project/dev.cr:114`); the relay by the build step and native (`scripts/build-latte-menu:14-22`, `scripts/build-latte-relay`). Change: wrap each `swiftc` call in the repo's existing `find … -newer` test (as `scripts/install-toolchain:5` does), and make the bundle step conditional too (`scripts/build-latte-menu:24-41`: Info.plist copy, two `plutil` version edits, icon copy, `chmod`), running it only when `latte/macos/Info.plist` or `shard.yml` is newer, so a no-op call writes nothing into `bin/Latte.app`.
 - **Evidence.** fq-Sui-6 with a warm module cache: Latte.app 2.38 s, relay 1.77 s; `scripts/build-latte-menu:14-22`.
 - **Savings.**
@@ -268,6 +275,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 10. E4-9: Build independent artifacts concurrently in `build-release`, the build step and `build-installers`
 
+- **Status.** Implemented in v0.4.2 (`9ce40a9`, `0f7f163`, with `a0be089`): `scripts/crystal build` touches its program's cache dir before compiling, `scripts/lib/jobs.sh` runs the build scripts' jobs, and the build step runs the linter alongside frappe, latte and the fixture daemon, two Crystal builds at a time. Measured the same session: cold build-release 46.3 → 36.6 s, build-installers 7.5 → 3.2 s, build-latte 5.8 → 2.7 s, installations 83.05 → 66.53 s. In the v0.4.2 release gate the build step took 34 s (0.4.0: 46 s) and installations 63 s (79 s). Editing `scripts/crystal` changes the toolchain selection (`tools/installer/install_toolchain.swift:190`), so every install of that release creates a new toolchain root; this one shipped with Crystal 1.21.1, which changes it anyway.
 - **Mechanism.** `scripts/build-release:9-12` runs shards install, `build-frappe`, `build-latte` (Crystal plus the menu and relay `swiftc`) and `build-lint` one after another; `build-installers` builds three installers in sequence; the build step chains the same three (`scripts/checks/all.cr:30`). After shards install these are independent programs with separate cache dirs. Change: run them as parallel jobs with buffered output, capped at 2–3 Crystal compiles by memory. The cold linter (34.83 s) becomes the critical path. These builds share one compiler cache: the installations check and a user install reuse the checkout's toolchain (`scripts/checks/installations.cr:33-36`, `scripts/crystal:88`), which is why `scripts/checks/all.cr:3-4` and `CONTRIBUTING.md:16` forbid concurrent compiles. Every build ends with the unlocked keep-10 cleanup (`codegen/cache_dir.cr:122-129`), and a warm build that only reads its objects keeps an old directory mtime, so a concurrent build's dir could be deleted mid-build. Mitigation: touch each program's cache dir just before starting it, so the two or three in-flight dirs are the newest and survive the keep-10 cleanup, or make E1-1 a prerequisite. The fq-Sui-5 evidence ran in a fresh private prefix, where the race cannot happen.
 - **Evidence.** `scripts/build-release:9-12`; `scripts/checks/all.cr:30`; three cold Crystal builds: 48.62 s sequential (fq-Sui-4) vs 33.11 s concurrent (fq-Sui-5); per-build times fq-Com-4 and fq-Sui-6.
 - **Savings.**
@@ -282,6 +290,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 11. E4-6: Run the 31 compile-only `--no-codegen` cases with bounded concurrency
 
+- **Status.** Implemented in v0.4.2 (`8618b06`): `Checks.type_check` runs the first case alone and the rest four at a time. Measured the same session: route-compilation 7.33 → 3.90 s, orm-compilation 10.74 → 4.80 s, contract-compilation 2.99 → 2.56 s; in the v0.4.2 release gate 4 s, 5 s and 3 s (0.4.0: 8, 11 and 4 s).
 - **Mechanism.** route (12 cases), orm (15), contract (3) and cold-brew (1) compile their fixtures one after another with `--no-codegen` (`scripts/checks/route_compilation.cr:21-22`). 27 of them must each fail with their own diagnostic, so they cannot share one compiler process, but `--no-codegen` never reaches the code-generation path that creates program cache dirs and runs the keep-10 cleanup (`compiler.cr:365`, `:398`); only a cold macro-run helper creates its own dir, with cleanup disabled (`macros/macros.cr:164-170`). Change: run the first case alone (warming any macro-run helper), then the rest with 4 workers, reporting in case order.
 - **Evidence.** `scripts/checks/route_compilation.cr:21-22`; `compiler.cr:365`, `:398`; fq-Sui-2 5.96 s sequential vs fq-Sui-3 2.19 s with 4 workers.
 - **Savings.**
@@ -294,6 +303,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 12. E4-10: Run the release's two migration probes concurrently and extract only `src/` from the tag archive
 
+- **Status.** Implemented in v0.4.1 (`061ec9a`). A tag without the migrations file is read with `git ls-tree` instead of being archived. `scripts/release --dry-run` with both probes, in clones with a `fix:` commit after `v0.4.0`, took 7.51–8.20 s before and 5.49–6.00 s after (four runs each).
 - **Mechanism.** `Cut.run` runs the two migration probes one after the other (`scripts/cut/cut.cr:101`). Each is a cold `crystal run` of a new temp path (`scripts/cut/cut.cr:138`, `:159`), and the tag probe extracts the whole tree though it reads only `src/caramel/cold_brew/migrations.cr` (`scripts/cut/cut.cr:146-151`). Change: run both probes concurrently, each compiled to its own output (`crystal build -o <work>/probe`, then run it), and pass `src` as a pathspec to `git archive`. Separate outputs are required: both probe files are named `probe.cr` (`scripts/cut/cut.cr:155`), and `crystal run` links every run of a file with that name to the same `crystal-run-probe.tmp` in the shared compiler cache (compiler `util.cr:23-25`, `command.cr:287`) and deletes it afterwards. Two concurrent `crystal run` probes would link, run and delete one file, so the tag probe could run the working tree's binary and the edited-migration guard would compare the tree with itself. The two probes' new cache dirs are the newest, so the keep-10 cleanup leaves them alone.
 - **Evidence.** `scripts/cut/cut.cr:101`, `:146-151`, `:159`; fq-Sui-8 one probe 1.95 s, two concurrent 2.59 s; fq-Sui-9 archive + extract 0.16 s vs 0.02 s. fq-Sui-8's concurrent pair used `crystal run` on two `probe.cr` files, so it shared one temp executable (identical JSON hides a swap); its timing is a proxy.
 - **Savings.**
@@ -308,6 +318,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 13. E2-5: Run the unit spec's three nested mocking-fixture compiles concurrently
 
+- **Status.** Implemented in v0.4.2 (`6798969`): the three fixtures type-check together on first use. `scripts/crystal spec spec/corretto/mocking_spec.cr` took 2.19–2.26 s against 2.91–2.93 s before (three runs each).
 - **Mechanism.** `spec/corretto/mocking_spec.cr:5-10` runs three `--no-codegen` compiles of Corretto fixtures one after another inside the unit spec run. Change: start all three at once in a memoized helper, then assert per example. `--no-codegen` runs no cleanup and creates no program cache dir, and these fixtures ran no macro-run helper (fq-Fra-13).
 - **Evidence.** `spec/corretto/mocking_spec.cr:5-10`; fq-Fra-13: 0.82 s, 0.47 s, 0.47 s.
 - **Savings.**
@@ -571,7 +582,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 | E1 H2: `--no-debug` for builds whose `.dwarf` nobody reads (Tools#compile, Corretto workers, check binaries, `bin/release`, release probes) | Measured slower. With every object reused, warm `--no-debug` bc+obj takes 0.81–0.94 s (m2c-2, fq-Com-0) against 0.16 s with debug info, and the 0.25 s `dsymutil` saving is lost. Cold it saves 0.04 s (codegen stages 1.054 + 1.520 + 0.222 + 0.247 = 3.043 s in profile 22/cold vs 0.786 + 2.045 + 0.175 = 3.006 s in m2c-1). The debug level is not in the cache key, so alternating with debug builds of the same entry recompiles every object (m2c-1 4.41 s). It also drops file:line from backtraces. |
 | E1 H4: more codegen threads (`--threads`, `CRYSTAL_WORKERS`) | Codegen already uses 12 workers (`compiler.cr:100-101`). The parallel stage is 0.14 s of a 2.82 s warm build; 79% of it is single-threaded type checking and IR generation. |
 | E1 H5: a faster linker or `-no_deduplicate` | Warm linking is 0.21 s (7%) and already uses ld-prime (`ld-1230.1`). `-no_deduplicate` measured 0.232 s warm (fq-Com-8): no gain. |
-| E1 H7: move to a Crystal release after 1.21.0 for compile time | 1.21.1 (2026-09-26) and the 1.22.0 milestone have no compile-time changes ([1.21.1 release notes](https://crystal-lang.org/2026/09/26/1.21.1-released/), [Crystal milestones](https://github.com/crystal-lang/crystal/milestones); from the CompilerToolchainExpert's search). A new toolchain root restarts every cache cold. 1.21.1 is still worth taking for its macOS 26.7 socket fix. |
+| E1 H7: move to a Crystal release after 1.21.0 for compile time | 1.21.1 (2026-09-26) and the 1.22.0 milestone have no compile-time changes ([1.21.1 release notes](https://crystal-lang.org/2026/09/26/1.21.1-released/), [Crystal milestones](https://github.com/crystal-lang/crystal/milestones); from the CompilerToolchainExpert's search). A new toolchain root restarts every cache cold. 1.21.1 was taken in v0.4.2 for its macOS 26.7 socket fix and its `HTTP::Server` security fixes, not for compile time. |
 | E1 H8: remove or prebuild Ameba's `read_type_doc` helper | It costs 26.28 s only when evicted (fq-Com-4). E4-4 or E1-1 keep it off the suite's path without patching a pinned shard's private macro. |
 | E1 H9 alternatives: prewarm the ECR helper at install, or keep macro-run outputs outside the LRU | Prewarming moves the 6.37 s instead of removing it. The second needs a compiler patch (macro-run dirs share the keep-10 root). |
 | E1 H10: stop the 19 modules re-generated on the first warm build after a cold one | 0.21 s once per cache fill (bc+obj 0.355 vs 0.143 s). It comes from the in-process macro-run compile advancing a closure counter; E1-2 removes it for apps. |
