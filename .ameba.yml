@@ -217,7 +217,6 @@ Layout/LineLength:
     - "src/latte/process.cr"
     - "src/latte/proxy.cr"
     - "src/latte/server.cr"
-    - "src/latte/site.cr"
     - "src/latte/supervisor.cr"
     - "src/latte/toolchain.cr"
     - "src/latte/trust.cr"
