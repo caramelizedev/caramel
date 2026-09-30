@@ -69,15 +69,18 @@ module Caramel::Frappe
       id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
       template = verified_template(client, id)
       tools = Tools.new(@framework_root, @output, @error)
-      tools.app_command(@project, ["migrate"], {
-        "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => Caramel::Database::Config.parse(template["SPEC_DATABASE_URL"]).database,
-        "SPEC_DATABASE_URL" => template["SPEC_DATABASE_URL"], "SPEC_MIGRATION_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
-        "CARAMEL_EXPECTED_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
-      })
       groups = self.class.split(files, concurrency)
+      # Spec binaries need no database, so they build while the application
+      # builds and migrates the template and Latte clones the workers.
+      builds = start_builds(tools, groups)
       secret = Random::Secure.hex(32)
       created = [] of Int32
       results = begin
+        tools.app_command(@project, ["migrate"], {
+          "CARAMEL_ENV" => "test", "CARAMEL_SPEC_DATABASE" => Caramel::Database::Config.parse(template["SPEC_DATABASE_URL"]).database,
+          "SPEC_DATABASE_URL" => template["SPEC_DATABASE_URL"], "SPEC_MIGRATION_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
+          "CARAMEL_EXPECTED_DATABASE_URL" => template["SPEC_MIGRATION_DATABASE_URL"],
+        })
         environments = groups.map_with_index do |_, offset|
           index = offset + 1
           worker = client.test_worker(id, index)
@@ -85,8 +88,10 @@ module Caramel::Frappe
           worker_environment(client, id, index, worker, secret)
         end
         @output.puts("Corretto: #{files.size} spec file#{files.size == 1 ? "" : "s"} across #{groups.size} worker#{groups.size == 1 ? "" : "s"}")
-        run_workers(tools, groups, environments)
+        run_workers(tools, builds, environments)
       ensure
+        # A failed migration or clone still waits for the builds it started.
+        builds.each(&.receive?)
         created.each do |index|
           client.drop_test_worker(id, index)
         rescue ex : Error
@@ -147,8 +152,8 @@ module Caramel::Frappe
       }
     end
 
-    # Compiles and runs each group's specs in parallel, prefixing every line
-    # of output with its worker, and returns whether each worker passed.
+    # Starts building each group's spec binary in its own fiber. Each channel
+    # yields the binary, or nil when its build failed, and then closes.
     # `crystal spec` would link every worker to the same temporary executable
     # in the shared compiler cache, so each worker builds its own binary. It
     # compiles a generated `.caramel/corretto/w<N>.cr` that requires the
@@ -159,17 +164,37 @@ module Caramel::Frappe
     # spec/, the group's files, the toolchain and the framework are unchanged.
     # It builds in the development build's environment; the worker's
     # database settings apply only when it runs.
-    private def run_workers(tools : Tools, groups : Array(Array(String)), environments : Array(Hash(String, String))) : Array(Bool)
+    private def start_builds(tools : Tools, groups : Array(Array(String))) : Array(Channel(String?))
       Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
       entries = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel/corretto"))
       remove_idle_workers(entries, groups.size)
       signature = source_signature
+      groups.map_with_index do |group, offset|
+        build = Channel(String?).new(1)
+        spawn do
+          prefix = "[w#{offset + 1}] "
+          binary = begin
+            worker_binary(tools, entries, offset + 1, group, signature, prefix)
+          rescue ex
+            @error.puts("#{prefix}#{ex.message}")
+            nil
+          end
+          build.send(binary)
+          build.close
+        end
+        build
+      end
+    end
+
+    # Runs each worker's spec binary once it is built, in parallel, prefixing
+    # every line of output with its worker, and returns whether each passed.
+    private def run_workers(tools : Tools, builds : Array(Channel(String?)), environments : Array(Hash(String, String))) : Array(Bool)
       finished = Channel({Int32, Bool}).new
-      groups.each_with_index do |group, offset|
+      builds.each_with_index do |build, offset|
         spawn do
           prefix = "[w#{offset + 1}] "
           passed = begin
-            binary = worker_binary(tools, entries, offset + 1, group, signature, prefix)
+            binary = build.receive?
             binary ? relayed(binary, [] of String, tools.environment(environments[offset]), prefix) : false
           rescue ex : IO::Error | File::Error | Error
             @error.puts("#{prefix}#{ex.message}")
@@ -178,8 +203,8 @@ module Caramel::Frappe
           finished.send({offset, passed})
         end
       end
-      results = Array(Bool).new(groups.size, false)
-      groups.size.times do
+      results = Array(Bool).new(builds.size, false)
+      builds.size.times do
         offset, passed = finished.receive
         results[offset] = passed
       end
