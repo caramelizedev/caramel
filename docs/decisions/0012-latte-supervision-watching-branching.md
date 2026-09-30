@@ -29,7 +29,7 @@ The implementation has to survive terminal sessions, several projects and daemon
    - `frappe dev` hashes the tree only after a kernel event, then waits out a 50 ms debounce before the type check. It was 200 ms until 2026-09-29; a multi-file save that outlasts the shorter window only cancels a check and costs CPU, since a newer change stops an obsolete check or build.
    - Crystal 1.21's event loop cannot wait on a kqueue descriptor, so the watcher drains with a zero-timeout `kevent` every 25 ms and never blocks the scheduler.
    - There is no `inotify` backend, because Latte is macOS-only.
-4. **Tier-1 feedback first.** Every uncached source change first runs `crystal build --no-codegen` with the development flags.
+4. **Tier-1 feedback first.** Every uncached source change runs one `crystal build --stats` with the development flags, and its semantic phase is the Tier-1 check: `frappe dev` reports the check when the compiler reports its last semantic stage, before code generation starts. Until 2026-09-30 a separate `crystal build --no-codegen` ran first, which repeated the type check on every save that passed it.
    - On failure, `frappe dev` shows the diagnostics immediately on the site's error page and in the terminal (`Type check failed in N ms`) and skips code generation.
    - On success, it continues to the native build.
 5. **Branching.**

@@ -201,37 +201,47 @@ module Caramel::Frappe
       end
     end
 
-    # Type-checks, builds and installs *fingerprint* into *slot*; false when
-    # either step fails, a newer change supersedes it, or the session stops.
+    # Builds and installs *fingerprint* into *slot*; false when the build
+    # fails, a newer change supersedes it, or the session stops. The build's
+    # semantic phase is Tier 1 (ADR 0012): a type error stops it before code
+    # generation, and a pass is reported as soon as the compiler says so.
     private def compiled?(slot : BuildSlot, directory : String, fingerprint : String) : Bool
-      # Tier 1: semantic feedback before paying for code generation.
-      checked = Time.instant
-      command = compile(["--no-codegen"], "check")
-      return false if @stopping || @pending
-      elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
-      unless command.status.try(&.success?)
-        @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
-        @output.puts("Type check failed in #{elapsed} ms")
-        @output.flush
-        return false
-      end
-      @output.puts("Type check passed in #{elapsed} ms")
+      started = Time.instant
+      checked = false
       temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
       begin
-        @output.puts("Building #{@project.name}…")
-        @output.flush
-        command = compile(["-o", temporary], "build")
+        command = compile(["-o", temporary]) do
+          checked = true
+          type_checked(started)
+        end
         return false if @stopping || @pending
         unless command.status.try(&.success?)
-          @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
+          if checked
+            @gateway.failed(command.output.contents.empty? ? "Compiler stopped before completing. Save a source file to retry." : command.output.contents)
+          else
+            @gateway.failed(command.output.contents.empty? ? "Type check stopped before completing. Save a source file to retry." : command.output.contents)
+            @output.puts("Type check failed in #{(Time.instant - started).total_milliseconds.round.to_i64} ms")
+            @output.flush
+          end
           return false
         end
+        # A compiler that reports no stages has still passed its type check.
+        type_checked(started) unless checked
         slot.install(temporary, fingerprint)
         true
       ensure
         File.delete?(temporary)
         File.delete?(temporary + ".dwarf")
       end
+    end
+
+    # Tier 1 passed: the compiler finished its semantic stages and is
+    # generating code.
+    private def type_checked(started : Time::Instant) : Nil
+      @output.puts("Type check passed in #{(Time.instant - started).total_milliseconds.round.to_i64} ms")
+      @compiler_log.try(&.mark("build #{@project.name}"))
+      @output.puts("Building #{@project.name}…")
+      @output.flush
     end
 
     # Takes the build lock, waiting while a command builds (ADR 0013 §5);
@@ -247,24 +257,49 @@ module Caramel::Frappe
       true
     end
 
-    # Runs the dev build command with *arguments* until it exits, the session
-    # stops, a newer source change supersedes it, or 180 seconds pass.
-    private def compile(arguments : Array(String), event : String) : DevCommand
-      @compiler_log.try(&.mark("#{event} #{@project.name}"))
-      command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace"] + arguments, @tools.environment, @project.root, @error, log: @compiler_log)
+    # Runs the dev build with *arguments* and yields once, when its type
+    # check passes, unless the build became obsolete first.
+    private def compile(arguments : Array(String), &) : DevCommand
+      @compiler_log.try(&.mark("check #{@project.name}"))
+      command = DevCommand.new([File.join(@tools.framework_root, "scripts/crystal"), "build", @project.entrypoint, "-D", "caramel_development", "--error-trace", "--stats"] + arguments, @tools.environment, @project.root, @error, log: @compiler_log, stages: true)
       @compiler = command
-      deadline = Time.instant + 180.seconds
-      while command.running? && !@stopping && !@pending && Time.instant < deadline
-        # Wakes as soon as the compiler exits; the timeout re-checks for a
-        # stop or a newer change.
+      reported = watch(command) { yield }
+      command.stop if command.running?
+      @compiler = nil
+      # The compiler may pass its type check and exit between two wakes.
+      yield if !reported && command.checked? && !@stopping && !@pending
+      command
+    end
+
+    # Waits until *command* exits, the session stops, a newer source change
+    # supersedes it, or 360 seconds pass (the check and the build each had
+    # 180 before they became one command). Yields once, when the type check
+    # passes, and returns whether it did.
+    private def watch(command : DevCommand, &) : Bool
+      deadline = Time.instant + 360.seconds
+      reported = false
+      # Each wait wakes as soon as the compiler exits or reports; the timeout
+      # re-checks for a stop or a newer change.
+      while !reported && current?(command, deadline)
+        select
+        when command.finished.receive?
+        when command.checked.receive?
+          reported = true
+          yield
+        when timeout(50.milliseconds)
+        end
+      end
+      while current?(command, deadline)
         select
         when command.finished.receive?
         when timeout(50.milliseconds)
         end
       end
-      command.stop if command.running?
-      @compiler = nil
-      command
+      reported
+    end
+
+    private def current?(command : DevCommand, deadline : Time::Instant) : Bool
+      command.running? && !@stopping && !@pending && Time.instant < deadline
     end
 
     # A quiet boot retries a start that stopped on pending migrations. It does
