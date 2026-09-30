@@ -155,7 +155,6 @@ Layout/LineLength:
     - "spec/sugar_orm/support/unit_schemas.cr"
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
-    - "src/caramel/cache.cr"
     - "src/caramel/cold_brew.cr"
     - "src/caramel/cold_brew/broker.cr"
     - "src/caramel/cold_brew/drain.cr"
