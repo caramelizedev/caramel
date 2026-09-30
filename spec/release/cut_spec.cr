@@ -80,6 +80,36 @@ describe Caramel::Cut do
     end
   end
 
+  it "skips the migration probes only when nothing they compile changed since the tag" do
+    release_repository do |repository|
+      directory = File.join(repository, "src/caramel/cold_brew")
+      Dir.mkdir_p(File.join(directory, "extra"))
+      File.write(File.join(directory, "migrations.cr"), "require \"./checksums\"\n\nmodule Caramel::ColdBrew\n  record Migration, version : Int64, name : String, checksum : String\n  MIGRATIONS = [Migration.new(1_i64, \"create_jobs\", CHECKSUM)]\nend\n")
+      checksums = File.join(directory, "checksums.cr")
+      File.write(checksums, "CHECKSUM = \"aa\"\n")
+      commit(repository, "feat: jobs")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "fix: words")
+      Caramel::Cut.migration_sources_unchanged?(repository, "v0.1.0").should be_true
+      File.write(checksums, "CHECKSUM = \"zz\"\n")
+      commit(repository, "fix: checksum")
+      Caramel::Cut.migration_sources_unchanged?(repository, "v0.1.0").should be_false
+
+      # A wildcard require or a file-reading macro could reach a file the list
+      # misses, such as one deleted since the tag, so both are always probed.
+      File.write(File.join(directory, "extra/one.cr"), "# one\n")
+      File.write(checksums, "require \"./extra/*\"\nCHECKSUM = \"zz\"\n")
+      commit(repository, "fix: extra")
+      git(repository, "tag", "v0.1.1")
+      Caramel::Cut.migration_sources_unchanged?(repository, "v0.1.1").should be_false
+      File.write(File.join(directory, "checksum.txt"), "\"zz\"\n")
+      File.write(checksums, "CHECKSUM = {{ read_file(\"\#{__DIR__}/checksum.txt\").id }}\n")
+      commit(repository, "fix: read")
+      git(repository, "tag", "v0.1.2")
+      Caramel::Cut.migration_sources_unchanged?(repository, "v0.1.2").should be_false
+    end
+  end
+
   it "cuts releases from the commits since the last tag, with upgrade notes, and tags only after the checks pass" do
     release_repository do |repository|
       day = Time.utc(2026, 9, 28)
