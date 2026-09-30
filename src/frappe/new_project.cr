@@ -1,6 +1,7 @@
 require "file_utils"
 require "yaml"
 require "./project"
+require "./dev_files"
 require "../latte/process"
 
 module Caramel::Frappe
@@ -32,6 +33,9 @@ module Caramel::Frappe
         preflight_destination(destination)
         Dir.delete(destination) if Dir.exists?(destination)
         File.rename(stage, destination)
+        # Records the public asset copies as published, so the first
+        # frappe dev after an asset edit republishes instead of refusing.
+        DevFiles.new(destination).publish_assets
         Project.load(destination)
       ensure
         FileUtils.rm_rf(stage) if Dir.exists?(stage)

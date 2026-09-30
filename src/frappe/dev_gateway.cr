@@ -69,8 +69,8 @@ module Caramel::Frappe
       if streamer = response.streamer
         begin
           streamer.call(context.response)
-        rescue IO::Error
-          # The browser closed the stream.
+        rescue IO::Error | HTTP::Server::ClientError
+          # The browser closed the stream; the server wraps socket errors in ClientError.
         end
       else
         context.response.print(response.body)
@@ -115,6 +115,8 @@ module Caramel::Frappe
     #
     # Buffered responses (everything except event streams) are read whole
     # under a 30-second read timeout; full HTML gets the refresh script.
+    # HEAD answers and 1xx, 204 and 304 statuses have no body, so none is
+    # read or decorated.
     #
     # A non-HEAD response whose Content-Type starts with `text/event-stream`
     # is returned as a streaming `Caramel::Response` instead: bytes are copied
@@ -146,9 +148,16 @@ module Caramel::Frappe
         client.exec(request.method, request.resource, headers, request.body) do |upstream|
           returned = upstream.headers.dup
           remove_hop_headers(returned)
-          returned.delete("Content-Length")
+          # A HEAD answer keeps the upstream's length: it describes the app's
+          # page, before the development script a GET would add.
+          returned.delete("Content-Length") unless request.method == "HEAD"
           returned["Cache-Control"] = "no-store"
-          if request.method != "HEAD" && returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
+          if bodiless?(request, upstream.status_code)
+            # HEAD, 1xx, 204 and 304 carry no body to read or decorate.
+            response = Caramel::Response.new(upstream.status_code, "", returned)
+            add_cookie(response)
+            outcome.send(response)
+          elsif returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
             socket.read_timeout = nil
             body_io = upstream.body_io
             response = Caramel::Response.stream(upstream.status_code, returned) do |io|
@@ -172,7 +181,7 @@ module Caramel::Frappe
             # client from draining it after this block.
             socket.close
           else
-            body = upstream.body_io.gets_to_end
+            body = upstream.body_io?.try(&.gets_to_end) || ""
             if returned["Content-Type"]?.try(&.starts_with?("text/html")) && !returned.has_key?("Content-Encoding") && request.headers["HX-Request-Type"]? != "partial"
               body = body.includes?("</body>") ? body.sub("</body>", script(generation) + "</body>") : body + script(generation)
               returned.delete("ETag")
@@ -202,6 +211,10 @@ module Caramel::Frappe
       end
     ensure
       socket.try(&.close) unless spawned
+    end
+
+    private def bodiless?(request : HTTP::Request, status : Int32) : Bool
+      request.method == "HEAD" || status < 200 || status == 204 || status == 304
     end
 
     private def script(generation : Int64) : String

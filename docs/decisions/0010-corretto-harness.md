@@ -19,7 +19,9 @@ Several pieces were missing before this work: Caramel had no session to sign in 
 ## Decision
 
 1. **Sessions and sign-in.** `Caramel::Session` is an HMAC-SHA256 signed `__Host-caramel_session` cookie (HttpOnly, Secure, SameSite=Lax, at most 4 KB, verified in constant time). Its key is derived from the application secret. Actions read and write `session`, and `sign_out` clears it. `client.sign_in(user)` writes `user_id` into the client's session cookie.
-2. **In-process client.** `Corretto.session { |client, db| … }` yields a client that drives `Caramel::Application#handle` directly. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, encodes form params and follows redirects. It also yields the example's database connection.
+2. **In-process client.** `Corretto.session { |client, db| … }` yields a client that drives `Caramel::Application#handle` directly. It keeps a cookie jar, attaches CSRF, `Origin` and `Host` automatically, and follows redirects. It also yields the example's database connection.
+   - A request's body is URL-encoded `params:`; `params:` with `files:` of `Corretto::Upload` values, which is multipart; `json:`; or a raw `body:` typed by a `Content-Type` header.
+   - `Corretto.tmpdir` is a private directory for the files an example writes, removed when the example ends, because the rollback does not undo filesystem writes.
 3. **Matchers** assert against observable egress and state: `have_status`, `render_partial(target, swap:)`, `redirect_to`, `have_header`, `render_page` and `have_row(Schema, **conditions)`. `have_row` is a macro, so unknown fields fail compilation.
 4. **Isolation.**
    - **Tier 2.** A global `Spec.around_each` opens a transaction and SAVEPOINT on the worker's single connection and binds it with `SugarORM::Repo.bind(transaction)`. The example, including its in-process requests, runs on that connection, and the savepoint is rolled back afterwards.
@@ -32,7 +34,8 @@ Several pieces were missing before this work: Caramel had no session to sign in 
    - Corretto starts a local TCP proxy for the suite. `Corretto.stub_wire(url, method:).to_return(status:, fixture:, body:, headers:)` matches real request bytes by method and absolute URL. Unmatched requests get a 502 `Unstubbed outbound request: METHOD URL`, so no test reaches the real network.
    - `Corretto.wire_requests` records traffic. Stubs reset after each example.
 7. **No mocks.** Loading a mocking library is a compile error. `frappe corretto` also scans spec files for mocking APIs (`allow(`, `receive(`, `double(`, `instance_double(`, `.stub(`, `mock(`) and refuses to run, naming the file and line.
-8. **Connection limits.** Parallel and catalog examples need more connections, so Latte raises the spec migration role's limit to 8 and the runtime role's limit to 24. The runtime limit also covers Cold Brew's pool and listener.
+8. **Application test settings.** Spec workers start from a cleared environment and never receive the development `.env`. Settings the application reads itself come from the committed `.env.test`, in the `.env` format, which Corretto merges under its own keys. It refuses keys it or the toolchain supplies: `APP_ORIGIN`, `APP_SECRET`, `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `PATH`, `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `LANG` and the `SPEC_`, `CARAMEL_`, `CORRETTO_`, `CRYSTAL_`, `LD_` and `DYLD_` prefixes.
+9. **Connection limits.** Parallel and catalog examples need more connections, so Latte raises the spec migration role's limit to 8 and the runtime role's limit to 24. The runtime limit also covers Cold Brew's pool and listener.
 
 ## Reasons
 

@@ -47,6 +47,46 @@ describe "Caramel::ColdBrew.start settings" do
   end
 end
 
+private alias WorkOptions = Caramel::CommandLine::WorkOptions
+
+describe WorkOptions do
+  it "reads work's flags and refuses unknown, repeated or empty ones" do
+    WorkOptions.parse([] of String).should eq(WorkOptions.new)
+    flags = ["--queues=mailers,default", "--concurrency=8", "--no-scheduler"]
+    WorkOptions.parse(flags).should eq(WorkOptions.new("mailers,default", "8", false))
+
+    refused = [
+      %w[--queues=],
+      %w[--queues],
+      %w[--concurrency=],
+      %w[--no-scheduler=yes],
+      %w[--threads=2],
+      %w[--queues=a --queues=b],
+      %w[serve],
+    ]
+    refused.each { |arguments| WorkOptions.parse(arguments).should be_nil }
+  end
+
+  it "applies its flags over the worker settings ColdBrew.start validates" do
+    env = {
+      "CARAMEL_WORKER_QUEUES"      => "default",
+      "CARAMEL_WORKER_CONCURRENCY" => "4",
+      "APP_SECRET"                 => "kept",
+    }
+    WorkOptions.new.environment(env).should eq(env)
+
+    applied = WorkOptions.new("mailers", "32").environment(env)
+    applied.should eq({
+      "CARAMEL_WORKER_QUEUES"      => "mailers",
+      "CARAMEL_WORKER_CONCURRENCY" => "32",
+      "APP_SECRET"                 => "kept",
+    })
+    expect_raises(Caramel::ColdBrew::ConfigurationError, "from 1 to 31 for 1 queue(s)") do
+      Caramel::ColdBrew.start(UNREACHABLE, applied, scheduler: false)
+    end
+  end
+end
+
 describe "Caramel::ColdBrew.every" do
   it "refuses spans under a second, blank names and duplicate names" do
     expect_raises(ArgumentError, "at least 1 second") { Caramel::ColdBrew.every(500.milliseconds, "too-fast") { } }

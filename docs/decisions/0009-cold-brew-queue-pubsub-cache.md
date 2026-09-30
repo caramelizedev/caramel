@@ -2,7 +2,7 @@
 
 Date: 2026-09-27
 
-Status: accepted. Amends [RFC-0003](../rfc.md) §2.1–2.4 and §3.
+Status: accepted. Amends [RFC-0003](../rfc.md) §2.1–2.4 and §3. Decisions 3 and 8 are amended by [ADR 0019](0019-cold-brew-status-hooks-and-work.md).
 
 ## Context
 

@@ -18,6 +18,33 @@ cases = {
   "compile_unknown_verb"     => {["accepts only get, post, put, patch and delete", "resources :books"], ["__caramel_router_draw"]},
   "compile_wrong_path_id"    => {["expected argument #1"], [] of String},
 }
+
+# ADR 0020: an action's ingress declaration.
+ingress = {
+  "csrf_without_authenticate" => [
+    "ingress csrf: false needs authenticate:",
+    "compile_ingress_csrf_without_authenticate.cr:5:5",
+    "Remediation:",
+  ],
+  "unknown_keyword"        => ["unknown ingress keyword 'max'"],
+  "positional"             => ["ingress takes keywords", "Remediation:"],
+  "bad_body"               => ["ingress body: must be :form or :raw, got :json"],
+  "limit"                  => ["ingress limit:", "64 MiB, got 128.megabytes"],
+  "limit_constant"         => ["ingress limit:", "got LIMIT"],
+  "csrf_not_literal"       => ["ingress csrf: must be true or false, got CHECK"],
+  "twice"                  => ["declares ingress twice", "compile_ingress_twice.cr:6:5"],
+  "raw_body_on_form"       => ["undefined local variable or method 'raw_body'"],
+  "unknown_authenticator"  => ["undefined method 'signd?'"],
+  "authenticator_nilable"  => ["must return Bool but it is returning (Bool | Nil)"],
+  "keyword_authenticator"  => ["undefined method 'true'"],
+  "reserved_authenticator" => ["ingress authenticate: must name an instance method"],
+  "form_under_raw"         => ["declares a form ingress but inherits raw_body", "Remediation:"],
+  "dropped_authenticator"  => ["redeclares ingress without authenticate:", "authenticates with :token?"],
+}
+ingress.each do |name, required|
+  cases["compile_ingress_#{name}"] = {required, [] of String}
+end
+
 results = Caramel::Checks.type_check(cases.keys.map { |name| "spec/fixtures/routes/#{name}.cr" })
 cases.each_with_index do |(name, expectation), index|
   result = results[index]

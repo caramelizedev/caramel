@@ -2,7 +2,7 @@
 
 Date: 2026-09-27
 
-Status: accepted. Amends [RFC-0001](../rfc.md) §2.1, §2.2 and §3.
+Status: accepted. Amends [RFC-0001](../rfc.md) §2.1, §2.2 and §3. Decisions 3 and 4 are amended by [ADR 0020](0020-action-ingress-and-json-bodies.md).
 
 ## Context
 

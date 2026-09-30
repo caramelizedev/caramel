@@ -47,6 +47,39 @@ describe Caramel::Frappe::CorrettoRunner do
     end
   end
 
+  it "reads .env.test for the app's test settings, refusing keys Corretto owns" do
+    corretto_project do |root|
+      settings = File.join(root, ".env.test")
+      read = -> { Caramel::Frappe::CorrettoRunner.test_environment(root) }
+      read.call.should be_empty
+
+      File.write(settings, <<-ENV)
+        # Test-only values
+        WEBHOOK_SECRET=test-webhook-secret
+        DELIVERY_TARGET="https://receiver.example/hooks"
+        ENV
+      read.call.should eq({
+        "WEBHOOK_SECRET"  => "test-webhook-secret",
+        "DELIVERY_TARGET" => "https://receiver.example/hooks",
+      })
+
+      File.write(settings, <<-ENV)
+        APP_SECRET=x
+        SPEC_DATABASE_URL=y
+        CRYSTAL_OPTS=z
+        WEBHOOK_SECRET=ok
+        ENV
+      owned = ".env.test cannot set APP_SECRET, SPEC_DATABASE_URL, CRYSTAL_OPTS"
+      expect_raises(Caramel::Frappe::Error, owned) { read.call }
+
+      File.delete(settings)
+      elsewhere = File.join(root, "elsewhere.env")
+      File.write(elsewhere, "WEBHOOK_SECRET=x\n")
+      File.symlink(elsewhere, settings)
+      expect_raises(Caramel::Frappe::Error, "regular file") { read.call }
+    end
+  end
+
   it "finds spec files inside the project and deals them round-robin" do
     corretto_project do |root|
       %w[a b c d e].each { |name| File.write(File.join(root, "spec/requests/#{name}_spec.cr"), "") }

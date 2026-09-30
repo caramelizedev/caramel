@@ -10,7 +10,7 @@ A Crystal framework and its tools: Caramel core, SugarORM, Cold Brew, Corretto, 
 
 Code reads as short sentences, one thought each (RFC-0008, and the Style section of `CONTRIBUTING.md`).
 
-- **Line length.** Every line you add holds at most 100 characters, and most are far shorter.
+- **Line length.** Every line of Crystal you add holds at most 100 characters, and most are far shorter.
 - **Listed files.** `.ameba.yml` lists older files under `Layout/LineLength`. Add no long line to them. When you rewrite a listed file's long lines, remove it from the list.
 - **Stacking.** Put a long signature or call one argument per line, and build records with named arguments.
 - **Early returns.** Use guard clauses: `return … if …`, `value = … || return`.
@@ -23,7 +23,7 @@ Code reads as short sentences, one thought each (RFC-0008, and the Style section
 ## Checks
 
 - **On macOS**, `scripts/check lint` lints the framework, and `scripts/check all` runs everything. The scripts need the managed toolchain from `scripts/install-toolchain`.
-- **In a Claude Code on the web session (Linux)**, `.claude/hooks/session-start.sh` installs Crystal 1.21.1, the shards and `bin/frappe-lint`. `scripts/crystal` and `scripts/check` do not run there, so use the plain tools:
+- **In a Claude Code on the web session (Linux)**, `.claude/hooks/session-start.sh` installs the pinned Crystal, the shards and `bin/frappe-lint`. `scripts/crystal` and `scripts/check` do not run there, so use the plain tools:
   - `bin/frappe-lint` from the repository root lints with `.ameba.yml`;
   - `crystal tool format --check FILES…` checks layout;
   - `crystal spec PATHS…` runs specs.
