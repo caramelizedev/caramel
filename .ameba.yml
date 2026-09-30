@@ -180,7 +180,6 @@ Layout/LineLength:
     - "src/frappe/check.cr"
     - "src/frappe/cli.cr"
     - "src/frappe/commands.cr"
-    - "src/frappe/corretto_runner.cr"
     - "src/frappe/dev_command.cr"
     - "src/frappe/dev_gateway.cr"
     - "src/frappe/dev_retirement.cr"
