@@ -147,7 +147,6 @@ Layout/LineLength:
     - "spec/native/version_spec.cr"
     - "spec/release/cut_spec.cr"
     - "spec/sugar_orm/differ_spec.cr"
-    - "spec/sugar_orm/linter_spec.cr"
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
     - "src/caramel/cache.cr"
