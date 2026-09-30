@@ -216,7 +216,6 @@ Layout/LineLength:
     - "src/latte/daemon.cr"
     - "src/latte/deadline.cr"
     - "src/latte/dns.cr"
-    - "src/latte/installed_releases.cr"
     - "src/latte/login_item.cr"
     - "src/latte/paths.cr"
     - "src/latte/postgres.cr"
