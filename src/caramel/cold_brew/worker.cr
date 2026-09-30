@@ -13,8 +13,14 @@ module Caramel::ColdBrew
     getter queue : String
     getter concurrency : Int32
 
-    def initialize(@queue : String = "default", @concurrency : Int32 = 16, @db : DB::Database = SugarORM::Repo.database, @idle : Time::Span = 50.milliseconds)
-      raise ArgumentError.new("queue must be 1-63 characters from [a-z0-9_.:-]: #{@queue.inspect}") unless @queue.matches?(QUEUE_NAME)
+    def initialize(@queue : String = "default",
+                   @concurrency : Int32 = 16,
+                   @db : DB::Database = SugarORM::Repo.database,
+                   @idle : Time::Span = 50.milliseconds)
+      unless @queue.matches?(QUEUE_NAME)
+        raise ArgumentError.new("queue must be 1-63 characters from [a-z0-9_.:-]: " \
+                                "#{@queue.inspect}")
+      end
       raise ArgumentError.new("concurrency must be at least 1") if @concurrency < 1
       @stopping = Channel(Nil).new
       @done = WaitGroup.new
@@ -57,7 +63,10 @@ module Caramel::ColdBrew
     private def work : Bool
       job = Queue.claim(@queue) || return false
       if error = Queue.run(job)
-        Log.warn { "queue=#{@queue} job=#{job.id} class=#{job.class_name} attempt=#{job.attempts} error_type=#{error.class}" }
+        Log.warn do
+          "queue=#{@queue} job=#{job.id} class=#{job.class_name} " \
+          "attempt=#{job.attempts} error_type=#{error.class}"
+        end
       end
       true
     end
