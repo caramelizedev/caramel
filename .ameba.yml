@@ -152,7 +152,6 @@ Layout/LineLength:
     - "spec/sugar_orm/linter_spec.cr"
     - "spec/sugar_orm/query_spec.cr"
     - "spec/sugar_orm/schema_spec.cr"
-    - "spec/sugar_orm/support/unit_schemas.cr"
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
     - "src/caramel/cache.cr"

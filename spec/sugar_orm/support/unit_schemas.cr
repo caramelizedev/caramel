@@ -66,6 +66,12 @@ module SugarUnit
   end
 
   def self.team(**overrides) : Team
-    Team.new(id: 7_i64, name: "Acme", created_at: Time.utc(2026, 1, 1), updated_at: Time.utc(2026, 1, 2)).with(**overrides)
+    team = Team.new(
+      id: 7_i64,
+      name: "Acme",
+      created_at: Time.utc(2026, 1, 1),
+      updated_at: Time.utc(2026, 1, 2),
+    )
+    team.with(**overrides)
   end
 end
