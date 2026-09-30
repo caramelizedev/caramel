@@ -4,25 +4,41 @@ root = Caramel::Checks.private_temp("caramel-dev-child-")
 child : Process? = nil
 begin
   runner = File.join(root, "runner")
-  build = Caramel::Checks.crystal(["build", "spec/fixtures/dev_child_runner.cr", "-o", runner], timeout: 180.seconds)
+  fixture = "spec/fixtures/dev_child_runner.cr"
+  build = Caramel::Checks.crystal(["build", fixture, "-o", runner], timeout: 180.seconds)
   raise "Could not build dev child runner: #{build.stderr}" unless build.success?
   command = Process.new([runner, "/bin/sh", "-c", "printf child-output; exit 7"],
     input: Process::Redirect::Pipe, output: Process::Redirect::Pipe)
-  raise "command did not exit" unless Caramel::Checks.wait_until(8.seconds, 30.milliseconds) { command.terminated? }
+  finished = Caramel::Checks.wait_until(8.seconds, 30.milliseconds) do
+    command.terminated?
+  end
+  raise "command did not exit" unless finished
   output = command.output.not_nil!.gets_to_end
   status = command.wait
-  raise "command output or exit status differed" unless status.normal_exit? && status.exit_code == 7 && output == "child-output"
+  passed = status.normal_exit? && status.exit_code == 7 && output == "child-output"
+  raise "command output or exit status differed" unless passed
   puts "PASS: command output and exit status"
 
-  child = Process.new([runner, "/bin/sh", "-c", "trap \"\" TERM; printf \"%s\" \"$$\" > descendant.pid; while :; do /bin/sleep 1; done"],
+  stubborn = "trap \"\" TERM; printf \"%s\" \"$$\" > descendant.pid; " \
+             "while :; do /bin/sleep 1; done"
+  child = Process.new([runner, "/bin/sh", "-c", stubborn],
     chdir: root, input: Process::Redirect::Pipe, output: Process::Redirect::Inherit)
   pid_file = File.join(root, "descendant.pid")
-  raise "descendant did not start" unless Caramel::Checks.wait_until(8.seconds, 30.milliseconds) { File.exists?(pid_file) || child.not_nil!.terminated? } && File.exists?(pid_file)
+  started = Caramel::Checks.wait_until(8.seconds, 30.milliseconds) do
+    File.exists?(pid_file) || child.not_nil!.terminated?
+  end
+  raise "descendant did not start" unless started && File.exists?(pid_file)
   pid = File.read(pid_file).to_i64
   child.input.not_nil!.close
-  raise "parent did not exit after lease closure" unless Caramel::Checks.wait_until(8.seconds, 30.milliseconds) { child.not_nil!.terminated? }
+  parent_exited = Caramel::Checks.wait_until(8.seconds, 30.milliseconds) do
+    child.not_nil!.terminated?
+  end
+  raise "parent did not exit after lease closure" unless parent_exited
   child.wait
-  raise "owned descendant survived parent lease closure" unless Caramel::Checks.wait_until(5.seconds, 50.milliseconds) { Caramel::Checks.gone?(pid) }
+  killed = Caramel::Checks.wait_until(5.seconds, 50.milliseconds) do
+    Caramel::Checks.gone?(pid)
+  end
+  raise "owned descendant survived parent lease closure" unless killed
   puts "PASS: closed parent lease kills TERM-resistant descendants"
 ensure
   if process = child
