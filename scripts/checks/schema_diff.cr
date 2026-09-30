@@ -6,7 +6,10 @@ module Caramel::Checks
   # End-to-end branch-and-diff: a generated project evolves a SugarORM schema
   # through frappe db diff and frappe migrate against a disposable Latte.
   class SchemaDiff < LatteFixture
-    COMPILE = 300.seconds
+    COMPILE    = 300.seconds
+    MATCHED    = "The database matches the declared schema."
+    DOWNGRADED = "WARN (--dev-override) LINT not-null-default"
+    NOT_NULL   = /^ERR LINT_NOT_NULL_DEFAULT at db\/migrations\/\d{14}_add_isbn\.cr$/m
 
     def initialize
       toolchain = Checks.toolchain_root
@@ -19,11 +22,24 @@ module Caramel::Checks
       uri = URI.parse(url)
       query = HTTP::Params.parse(uri.query || "")
       pg_env = environment({"PGPASSWORD" => URI.decode(uri.password || "")})
-      command([@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", query["host"], "-p", query["port"]? || "5432", "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')], environment: pg_env, input: statement, echo: false, timeout: 15.seconds).stdout.strip
+      psql = [@psql, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+              "-h", query["host"], "-p", query["port"]? || "5432",
+              "-U", URI.decode(uri.user.not_nil!), "-d", uri.path.lchop('/')]
+      result = command(psql,
+        environment: pg_env, input: statement, echo: false, timeout: 15.seconds)
+      result.stdout.strip
     end
 
+    # Writes the Book model with *body* inside its schema block.
     def schema(body : String) : Nil
-      File.write(File.join(@project, "app/models/book.cr"), "struct Book < SugarORM::Schema\n  schema \"books\" do\n#{body.lines.map { |line| "    #{line}\n" }.join}  end\nend\n")
+      fields = body.lines.map { |line| "    #{line}\n" }.join
+      File.write(File.join(@project, "app/models/book.cr"), <<-CR)
+        struct Book < SugarORM::Schema
+          schema "books" do
+        #{fields}  end
+        end
+
+        CR
     end
 
     def migrations : Array(String)
@@ -32,10 +48,16 @@ module Caramel::Checks
 
     def diff(name : String, flags : Array(String) = [] of String) : Array(String)
       before = migrations
-      result = command([@frappe, "db", "diff", "--name", name] + flags, chdir: @project, timeout: COMPILE)
+      argv = [@frappe, "db", "diff", "--name", name] + flags
+      result = command(argv, chdir: @project, timeout: COMPILE)
       added = migrations - before
       assert!(result.stdout.lines.count(&.starts_with?("Wrote ")) == added.size, result.stdout)
-      added.map { |file| File.read(File.join(@project, "db/migrations", file)).tap { |source| assert!(file.matches?(/\A\d{14}_#{name}(_concurrently)?\.cr\z/), file); assert!(source.includes?("SugarORM::Migration.new"), source) } }
+      added.map do |file|
+        source = File.read(File.join(@project, "db/migrations", file))
+        assert!(file.matches?(/\A\d{14}_#{name}(_concurrently)?\.cr\z/), file)
+        assert!(source.includes?("SugarORM::Migration.new"), source)
+        source
+      end
     end
 
     def refused(args : Array(String), expected : Array(String)) : String
@@ -43,13 +65,21 @@ module Caramel::Checks
       result = attempt([@frappe] + args, chdir: @project, timeout: COMPILE)
       output = result.stdout + result.stderr
       assert!(result.status.exit_code == 1, "#{args.join(" ")} must exit 1:\n#{output}")
-      expected.each { |text| assert!(output.includes?(text), "missing #{text.inspect} in:\n#{output}") }
-      assert!(migrations == before, "a refused command left migration files: #{migrations - before}")
+      expected.each do |text|
+        assert!(output.includes?(text), "missing #{text.inspect} in:\n#{output}")
+      end
+      after = migrations
+      assert!(after == before, "a refused command left migration files: #{after - before}")
       output
     end
 
     def branches(id : String) : Array(JSON::Any)
       rpc("GET", "/v1/sites/#{id}/branches")["branches"].as_a
+    end
+
+    # Asserts that *output* includes every one of *parts*.
+    private def assert_includes!(output : String, *parts : String) : Nil
+      assert!(parts.all? { |part| output.includes?(part) }, output)
     end
 
     def execute : Nil
@@ -69,15 +99,26 @@ module Caramel::Checks
           timestamps
           CRYSTAL
         created = diff("create_books")
-        assert!(created.size == 1 && created[0].includes?("    CREATE TABLE \"books\" (\n      \"id\" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n      \"title\" text NOT NULL,"), created.inspect)
+        create_table = <<-SQL
+              CREATE TABLE "books" (
+                "id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                "title" text NOT NULL,
+          SQL
+        assert!(created.size == 1 && created[0].includes?(create_table), created.inspect)
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
-        # frappe new applied Caramel's three Cold Brew migrations; this applies the application's first.
-        assert!(migrated.includes?("Applied 1 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
+        # frappe new applied Caramel's three Cold Brew migrations; this applies
+        # the application's first.
+        assert_includes!(migrated, "Applied 1 migrations.", MATCHED)
         assert!(sql(runtime_url, "SELECT count(*) FROM books") == "0")
-        unchanged = command([@frappe, "db", "diff", "--name", "nothing"], chdir: @project, timeout: COMPILE).stdout
-        assert!(unchanged.includes?("already matches the declared schema") && unchanged.includes?("ignored table caramel_migrations") && unchanged.includes?("ignored table caramel_jobs (owned by Caramel)"), unchanged)
+        nothing = [@frappe, "db", "diff", "--name", "nothing"]
+        unchanged = command(nothing, chdir: @project, timeout: COMPILE).stdout
+        assert_includes!(unchanged,
+          "already matches the declared schema",
+          "ignored table caramel_migrations",
+          "ignored table caramel_jobs (owned by Caramel)")
         assert!(branches(id).empty?, "scratch branches remain: #{branches(id)}")
-        puts "PASS: frappe db diff wrote a CREATE TABLE migration from the schema, frappe migrate applied it, and a second diff found nothing"
+        puts "PASS: frappe db diff wrote a CREATE TABLE migration from the schema, " \
+             "frappe migrate applied it, and a second diff found nothing"
 
         sql(migration_url, "INSERT INTO books (title) VALUES ('Dune')")
         schema(<<-CRYSTAL)
@@ -89,13 +130,25 @@ module Caramel::Checks
           CRYSTAL
         evolved = diff("evolve_books")
         assert!(evolved.size == 2, evolved.inspect)
-        assert!(evolved[0].includes?(%(-- caramel:allow-rename books.title\n    ALTER TABLE "books" RENAME COLUMN "title" TO "name")) && evolved[0].includes?(%(ALTER TABLE "books" ADD COLUMN "pages" integer NOT NULL DEFAULT 0)), evolved[0])
-        assert!(evolved[1].includes?(%(CREATE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_pages" ON "books" ("pages"))) && !evolved[1].includes?("ALTER TABLE"), evolved[1])
+        rename = <<-SQL
+          -- caramel:allow-rename books.title
+              ALTER TABLE "books" RENAME COLUMN "title" TO "name"
+          SQL
+        add_pages = %(ALTER TABLE "books" ADD COLUMN "pages" integer NOT NULL DEFAULT 0)
+        assert_includes!(evolved[0], rename, add_pages)
+        index = %(CREATE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_pages" ) \
+                %(ON "books" ("pages"))
+        separate = evolved[1].includes?(index) && !evolved[1].includes?("ALTER TABLE")
+        assert!(separate, evolved[1])
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
         assert!(migrated.includes?("Applied 2 migrations."), migrated)
         assert!(sql(runtime_url, "SELECT name || ':' || pages FROM books") == "Dune:0")
-        assert!(sql(runtime_url, "SELECT indisvalid FROM pg_index WHERE indexrelid = 'index_books_on_pages'::regclass") == "t")
-        puts "PASS: a default-bearing field, a renamed_from rename (data kept) and an index diffed into a transactional and a separate CONCURRENTLY migration"
+        validity = "SELECT indisvalid FROM pg_index " \
+                   "WHERE indexrelid = 'index_books_on_pages'::regclass"
+        assert!(sql(runtime_url, validity) == "t")
+        puts "PASS: a default-bearing field, a renamed_from rename (data kept) " \
+             "and an index diffed into a transactional " \
+             "and a separate CONCURRENTLY migration"
 
         sql(migration_url, "DELETE FROM books")
         schema(<<-CRYSTAL)
@@ -107,21 +160,50 @@ module Caramel::Checks
           index :pages
           CRYSTAL
         # Piped output is agent mode: halts and lint refusals print as MRDP.
-        refused(%w[db diff --name add_isbn], ["ERR DIFF_HALT at books.isbn\nMSG: NOT NULL column without a default", "\nFIX: give the field a default"])
+        refused(%w[db diff --name add_isbn], [
+          "ERR DIFF_HALT at books.isbn\nMSG: NOT NULL column without a default",
+          "\nFIX: give the field a default",
+        ])
         overridden = diff("add_isbn", ["--dev-override"])
-        assert!(overridden.size == 1 && overridden[0].includes?(%(ALTER TABLE "books" ADD COLUMN "isbn" text NOT NULL\n)), overridden.inspect)
-        lint = refused(%w[migrate], ["\nMSG: ADD COLUMN isbn NOT NULL without a DEFAULT", "\nFIX: give the column a DEFAULT"])
-        assert!(lint.matches?(/^ERR LINT_NOT_NULL_DEFAULT at db\/migrations\/\d{14}_add_isbn\.cr$/m), lint)
-        refused(%w[migrate --human], ["LINT not-null-default: ADD COLUMN isbn NOT NULL without a DEFAULT", "--dev-override downgrades"])
+        add_isbn = %(ALTER TABLE "books" ADD COLUMN "isbn" text NOT NULL\n)
+        derived = overridden.size == 1 && overridden[0].includes?(add_isbn)
+        assert!(derived, overridden.inspect)
+        lint = refused(%w[migrate], [
+          "\nMSG: ADD COLUMN isbn NOT NULL without a DEFAULT",
+          "\nFIX: give the column a DEFAULT",
+        ])
+        assert!(lint.matches?(NOT_NULL), lint)
+        refused(%w[migrate --human], [
+          "LINT not-null-default: ADD COLUMN isbn NOT NULL without a DEFAULT",
+          "--dev-override downgrades",
+        ])
         app = File.join(@project, ".caramel/application")
-        app_env = environment(values.merge({"CARAMEL_ENV" => "development", "CARAMEL_EXPECTED_DATABASE_URL" => runtime_url}))
+        development = {
+          "CARAMEL_ENV"                   => "development",
+          "CARAMEL_EXPECTED_DATABASE_URL" => runtime_url,
+        }
+        app_env = environment(values.merge(development))
         linted = attempt([app, "lint"], chdir: @project, environment: app_env)
-        assert!(!linted.success? && linted.stderr.includes?("LINT not-null-default") && sql(runtime_url, "SELECT count(*) FROM caramel_migrations") == "6", linted.stdout + linted.stderr)
-        linted = command([app, "lint", "--dev-override"], chdir: @project, environment: app_env, echo: false)
-        assert!(linted.stdout.includes?("Pending migrations pass the zero-lock linter.") && linted.stderr.includes?("WARN (--dev-override) LINT not-null-default"), linted.stdout + linted.stderr)
-        applied = command([@frappe, "migrate", "--dev-override"], chdir: @project, timeout: COMPILE)
-        assert!(applied.stdout.includes?("Applied 1 migrations.") && applied.stderr.includes?("WARN (--dev-override) LINT not-null-default"), applied.stdout + applied.stderr)
-        puts "PASS: a NOT NULL field without a default halts the diff (MRDP ERR DIFF_HALT when piped); --dev-override derives it, and lint and frappe migrate (MRDP ERR LINT_NOT_NULL_DEFAULT at its migration file, human text with --human) accept it only with --dev-override"
+        linted_output = linted.stdout + linted.stderr
+        blocked = !linted.success? && linted.stderr.includes?("LINT not-null-default")
+        assert!(blocked, linted_output)
+        recorded = sql(runtime_url, "SELECT count(*) FROM caramel_migrations")
+        assert!(recorded == "6", linted_output)
+        linted = command([app, "lint", "--dev-override"],
+          chdir: @project, environment: app_env, echo: false)
+        passed = linted.stdout.includes?("Pending migrations pass the zero-lock linter.")
+        downgraded = linted.stderr.includes?(DOWNGRADED)
+        assert!(passed && downgraded, linted.stdout + linted.stderr)
+        applied = command([@frappe, "migrate", "--dev-override"],
+          chdir: @project, timeout: COMPILE)
+        applied_one = applied.stdout.includes?("Applied 1 migrations.")
+        warned = applied.stderr.includes?(DOWNGRADED)
+        assert!(applied_one && warned, applied.stdout + applied.stderr)
+        puts "PASS: a NOT NULL field without a default halts the diff " \
+             "(MRDP ERR DIFF_HALT when piped); --dev-override derives it, " \
+             "and lint and frappe migrate (MRDP ERR LINT_NOT_NULL_DEFAULT " \
+             "at its migration file, human text with --human) " \
+             "accept it only with --dev-override"
 
         schema(<<-CRYSTAL)
           field id : Int64, primary: true
@@ -129,7 +211,10 @@ module Caramel::Checks
           field isbn : String
           timestamps
           CRYSTAL
-        refused(%w[db diff --name drop_pages --human], ["HALT books.pages: column exists in the database but no field declares it", "drop_column :pages"])
+        refused(%w[db diff --name drop_pages --human], [
+          "HALT books.pages: column exists in the database but no field declares it",
+          "drop_column :pages",
+        ])
         schema(<<-CRYSTAL)
           field id : Int64, primary: true
           field name : String, renamed_from: :title
@@ -138,19 +223,34 @@ module Caramel::Checks
           drop_column :pages
           CRYSTAL
         dropped = diff("drop_pages")
-        assert!(dropped.size == 1 && dropped[0].includes?(%(-- caramel:allow-drop books.pages\n    ALTER TABLE "books" DROP COLUMN "pages")) && !dropped[0].includes?("DROP INDEX"), dropped.inspect)
+        drop = <<-SQL
+          -- caramel:allow-drop books.pages
+              ALTER TABLE "books" DROP COLUMN "pages"
+          SQL
+        annotated = dropped.size == 1 && dropped[0].includes?(drop)
+        assert!(annotated && !dropped[0].includes?("DROP INDEX"), dropped.inspect)
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
-        assert!(migrated.includes?("Applied 1 migrations.") && migrated.includes?("The database matches the declared schema."), migrated)
-        assert!(sql(runtime_url, "SELECT count(*) FROM pg_attribute WHERE attrelid = 'books'::regclass AND attname = 'pages' AND NOT attisdropped") == "0")
-        puts "PASS: an undeclared column halts the diff; drop_column derives an annotated DROP COLUMN that passes the linter"
+        assert_includes!(migrated, "Applied 1 migrations.", MATCHED)
+        columns = "SELECT count(*) FROM pg_attribute " \
+                  "WHERE attrelid = 'books'::regclass " \
+                  "AND attname = 'pages' AND NOT attisdropped"
+        assert!(sql(runtime_url, columns) == "0")
+        puts "PASS: an undeclared column halts the diff; " \
+             "drop_column derives an annotated DROP COLUMN that passes the linter"
 
         sql(migration_url, "ALTER TABLE books ADD COLUMN sneaky text")
         drift = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE)
         assert!(drift.stdout.includes?("Applied 0 migrations."), drift.stdout)
-        assert!(drift.stderr.includes?("WARNING: schema drift") && drift.stderr.includes?("HALT books.sneaky") && drift.stderr.includes?("Remediation: run frappe db diff"), drift.stdout + drift.stderr)
+        warnings = ["WARNING: schema drift", "HALT books.sneaky",
+                    "Remediation: run frappe db diff"]
+        warned = warnings.all? { |text| drift.stderr.includes?(text) }
+        assert!(warned, drift.stdout + drift.stderr)
         assert!(branches(id).empty?, "scratch branches remain: #{branches(id)}")
-        assert!(sql(runtime_url, "SELECT datallowconn FROM pg_database WHERE datname = current_database()") == "t")
-        puts "PASS: frappe migrate reports schema drift read-only as a warning, and every scratch branch was dropped"
+        allowed = "SELECT datallowconn FROM pg_database " \
+                  "WHERE datname = current_database()"
+        assert!(sql(runtime_url, allowed) == "t")
+        puts "PASS: frappe migrate reports schema drift read-only as a warning, " \
+             "and every scratch branch was dropped"
         failed = false
       ensure
         finish(failed)

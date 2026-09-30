@@ -12,7 +12,10 @@ module Caramel::Checks::LatteDaemon
   LATTE  = File.join(Checks::REPO, "bin/latte")
   FRAPPE = File.join(Checks::REPO, "bin/frappe")
 
-  private def request(socket : String, method : String, path : String, body : JSON::Any? = nil) : JSON::Any
+  private def request(socket : String,
+                      method : String,
+                      path : String,
+                      body : JSON::Any? = nil) : JSON::Any
     Checks::UnixHTTP.json!(socket, method, path, body, timeout: 20.seconds)
   end
 
@@ -45,7 +48,10 @@ module Caramel::Checks::LatteDaemon
     dns.send(query.to_slice)
     answer = Bytes.new(512)
     count, _ = dns.receive(answer)
-    raise "Registration returned before DNS was ready" unless count >= 4 && (answer[3] & 15) == 0 && answer[count - 4, 4] == Bytes[127, 0, 0, 1]
+    # The low four bits of the fourth byte are the response code.
+    no_error = count >= 4 && (answer[3] & 15) == 0
+    loopback = no_error && answer[count - 4, 4] == Bytes[127, 0, 0, 1]
+    raise "Registration returned before DNS was ready" unless loopback
   ensure
     dns.try(&.close)
   end
@@ -59,7 +65,8 @@ module Caramel::Checks::LatteDaemon
   end
 
   private def launch(root : String, log : File, environment : Hash(String, String?)) : Process
-    Process.new([LATTE, "daemon"], env: environment, output: log, error: log, input: Process::Redirect::Close)
+    Process.new([LATTE, "daemon"],
+      env: environment, output: log, error: log, input: Process::Redirect::Close)
   end
 
   # The process holding the daemon's instance lock.
@@ -73,11 +80,15 @@ module Caramel::Checks::LatteDaemon
   # Runs *sql* as Latte's PostgreSQL administrator over the private socket.
   private def admin(root : String, runtime : String, sql : String) : String
     toolchain = Caramel::Latte::Toolchain.new(Caramel::Checks.toolchain_root)
-    password = JSON.parse(File.read(File.join(root, "secrets/postgres-admin.json")))["password"].as_s
+    secret = File.read(File.join(root, "secrets/postgres-admin.json"))
+    password = JSON.parse(secret)["password"].as_s
     passfile = File.join(root, "check-admin.pgpass")
     File.write(passfile, "*:*:*:#{Caramel::Latte::Postgres::ADMIN_USER}:#{password}\n", perm: 0o600)
-    result = Checks.run([toolchain.psql, "-X", "-v", "ON_ERROR_STOP=1", "-A", "-t", "-h", File.join(runtime, "postgres"), "-U", Caramel::Latte::Postgres::ADMIN_USER, "-d", "postgres"],
-      env: toolchain.environment({"PGPASSFILE" => passfile}), input: sql, timeout: 10.seconds)
+    psql = [toolchain.psql, "-X", "-v", "ON_ERROR_STOP=1", "-A", "-t",
+            "-h", File.join(runtime, "postgres"),
+            "-U", Caramel::Latte::Postgres::ADMIN_USER, "-d", "postgres"]
+    env = toolchain.environment({"PGPASSFILE" => passfile})
+    result = Checks.run(psql, env: env, input: sql, timeout: 10.seconds)
     raise "Administrator query failed: #{result.stderr}" unless result.success?
     result.stdout.strip
   ensure
@@ -86,16 +97,21 @@ module Caramel::Checks::LatteDaemon
 
   # Leaves *database* the way a guard interrupted before its release would.
   private def strand_guard(root : String, runtime : String, database : String) : Nil
-    admin(root, runtime, "ALTER DATABASE #{Caramel::Latte::Postgres.quote_identifier(database)} WITH ALLOW_CONNECTIONS false;")
-    raise "Could not disable connections to #{database}" unless connections_allowed(root, runtime, database) == "f"
+    name = Caramel::Latte::Postgres.quote_identifier(database)
+    admin(root, runtime, "ALTER DATABASE #{name} WITH ALLOW_CONNECTIONS false;")
+    allowed = connections_allowed(root, runtime, database)
+    raise "Could not disable connections to #{database}" unless allowed == "f"
   end
 
   private def connections_allowed(root : String, runtime : String, database : String) : String
-    admin(root, runtime, "SELECT datallowconn FROM pg_database WHERE datname = #{Caramel::Latte::Postgres.quote_literal(database)};")
+    name = Caramel::Latte::Postgres.quote_literal(database)
+    admin(root, runtime, "SELECT datallowconn FROM pg_database WHERE datname = #{name};")
   end
 
   def main : Int32
-    Checks.fail("run scripts/build-latte and scripts/build-frappe first") unless File.file?(LATTE) && File.file?(FRAPPE)
+    unless File.file?(LATTE) && File.file?(FRAPPE)
+      Checks.fail("run scripts/build-latte and scripts/build-frappe first")
+    end
     base = Checks.private_temp("latte-daemon-")
     home = File.join(base, "home")
     # The per-user state a plain `frappe` or `latte` uses under this HOME.
@@ -113,33 +129,44 @@ module Caramel::Checks::LatteDaemon
       wait_state(socket, "running")
       # ADR 0016: Latte reports its release and the control API window it serves.
       status = request(socket, "GET", "/v1/status")
-      unless status["latte"] == Caramel::VERSION && status["api"].as_a.map(&.as_i) == Caramel::Latte::ControlAPI::VERSIONS
+      window = Caramel::Latte::ControlAPI::VERSIONS
+      release = status["latte"] == Caramel::VERSION
+      unless release && status["api"].as_a.map(&.as_i) == window
         raise "Latte does not report its release and API window: #{status.to_json}"
       end
       reported = Checks.run([LATTE, "version"], env: environment)
-      raise "latte version printed #{reported.stdout.inspect}" unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1)\n"
+      unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1)\n"
+        raise "latte version printed #{reported.stdout.inspect}"
+      end
       duplicate = Checks.run([LATTE, "daemon"], env: environment, timeout: 5.seconds)
       raise "Two daemons acquired the same instance" if duplicate.success?
-      site = request(socket, "POST", "/v1/sites", JSON.parse({name: "bookshelf", directory: root}.to_json))["site"]
+      registration = JSON.parse({name: "bookshelf", directory: root}.to_json)
+      site = request(socket, "POST", "/v1/sites", registration)["site"]
       dns_ready!(site["domain"].as_s)
       before = caddy_pid(root) || raise "Caddy has no process record after startup"
       database = Caramel::Latte::Postgres.database_names(site["id"].as_s).development
       strand_guard(root, runtime, database)
       process.terminate
       raise "Daemon did not exit cleanly on SIGTERM" unless process.wait.success?
-      raise "SIGTERM left #{database} refusing connections" unless connections_allowed(root, runtime, database) == "t"
+      allowed = connections_allowed(root, runtime, database)
+      raise "SIGTERM left #{database} refusing connections" unless allowed == "t"
       process = launch(root, log, environment)
       wait_state(socket, "running")
       strand_guard(root, runtime, database)
       process.terminate(graceful: false)
       process.wait
-      raise "A killed daemon cannot release guards" unless connections_allowed(root, runtime, database) == "f"
+      allowed = connections_allowed(root, runtime, database)
+      raise "A killed daemon cannot release guards" unless allowed == "f"
       process = launch(root, log, environment)
       wait_state(socket, "running")
-      raise "Restart after SIGKILL left #{database} refusing connections" unless connections_allowed(root, runtime, database) == "t"
+      allowed = connections_allowed(root, runtime, database)
+      unless allowed == "t"
+        raise "Restart after SIGKILL left #{database} refusing connections"
+      end
       after = caddy_pid(root) || raise "Caddy has no process record after daemon restart"
       raise "Daemon restart should adopt its verified service" unless before == after
-      raise "Site registry was not preserved" unless request(socket, "GET", "/v1/sites")["sites"].as_a.first["id"] == site["id"]
+      registered = request(socket, "GET", "/v1/sites")["sites"].as_a.first
+      raise "Site registry was not preserved" unless registered["id"] == site["id"]
       certificate_path = File.join(root, "services/caddy/storage/pki/authorities/caramel/root.crt")
       certificate = File.read(certificate_path)
       Process.signal(Signal::KILL, after)
@@ -151,9 +178,11 @@ module Caramel::Checks::LatteDaemon
       end
       wait_state(socket, "running")
       raise "Proxy CA was not preserved" unless File.read(certificate_path) == certificate
-      menu = Checks.run([File.join(Checks::REPO, "bin/Latte.app/Contents/MacOS/Latte"), "--check"], env: environment, timeout: 10.seconds)
+      latte_app = File.join(Checks::REPO, "bin/Latte.app/Contents/MacOS/Latte")
+      menu = Checks.run([latte_app, "--check"], env: environment, timeout: 10.seconds)
       raise menu.stdout + menu.stderr unless menu.success?
-      Process.signal(Signal::KILL, caddy_pid(root) || raise "Caddy has no process record after recovery")
+      recovered = caddy_pid(root) || raise "Caddy has no process record after recovery"
+      Process.signal(Signal::KILL, recovered)
       deadline = Time.instant + 10.seconds
       loop do
         status = request(socket, "GET", "/v1/status")
@@ -168,25 +197,36 @@ module Caramel::Checks::LatteDaemon
       wait_state(socket, "running")
       request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
       wait_state(socket, "stopped")
-      raise "PostgreSQL cluster was not retained" unless File.exists?(File.join(root, "services/postgres/18/data/PG_VERSION"))
+      pg_version = File.join(root, "services/postgres/18/data/PG_VERSION")
+      raise "PostgreSQL cluster was not retained" unless File.exists?(pg_version)
       process.terminate
       raise "Daemon did not exit cleanly on SIGTERM" unless process.wait.success?
       # With no daemon running, Frappé starts `latte daemon --detach`, which
       # outlives Frappé in a session of its own and logs privately.
       started = Checks.run([FRAPPE, "services", "start"], env: user, timeout: 150.seconds)
-      raise started.stdout + started.stderr unless started.success? && started.stderr.includes?("Started Latte in the background")
+      backgrounded = started.stderr.includes?("Started Latte in the background")
+      raise started.stdout + started.stderr unless started.success? && backgrounded
       wait_state(socket, "running")
       detached = daemon_pid(root)
       raise "Frappé's Latte shares a session with Frappé" unless LibC.getsid(detached) == detached
-      raise "Detached Latte has no private log" unless File.info(File.join(root, "logs/latte.log")).permissions.value == 0o600
+      log_mode = File.info(File.join(root, "logs/latte.log")).permissions.value
+      raise "Detached Latte has no private log" unless log_mode == 0o600
       request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
       wait_state(socket, "stopped")
       stopped = Checks.run([LATTE, "stop"], env: user, timeout: 30.seconds)
-      raise stopped.stdout + stopped.stderr unless stopped.success? && stopped.stdout.includes?("Latte stopped")
-      raise "latte stop left the daemon running" unless Checks.wait_until(5.seconds, 50.milliseconds) { !Process.exists?(detached) }
+      confirmed = stopped.stdout.includes?("Latte stopped")
+      raise stopped.stdout + stopped.stderr unless stopped.success? && confirmed
+      exited = Checks.wait_until(5.seconds, 50.milliseconds) do
+        !Process.exists?(detached)
+      end
+      raise "latte stop left the daemon running" unless exited
       idle = Checks.run([LATTE, "stop"], env: user, timeout: 10.seconds)
-      raise idle.stdout + idle.stderr unless idle.success? && idle.stdout.includes?("Latte is not running")
-      puts "PASS: daemon singleton, crash recovery, service adoption, guard release on SIGTERM and on restart after SIGKILL, proxy recovery, CA/registry persistence, native menu, explicit stop, on-demand detached start from Frappé and latte stop"
+      not_running = idle.stdout.includes?("Latte is not running")
+      raise idle.stdout + idle.stderr unless idle.success? && not_running
+      puts "PASS: daemon singleton, crash recovery, service adoption, " \
+           "guard release on SIGTERM and on restart after SIGKILL, proxy recovery, " \
+           "CA/registry persistence, native menu, explicit stop, " \
+           "on-demand detached start from Frappé and latte stop"
       0
     rescue ex
       STDERR.puts ex.message
@@ -195,7 +235,8 @@ module Caramel::Checks::LatteDaemon
       # A detached daemon from the on-demand phase must not outlive the check.
       Checks.run([LATTE, "stop"], env: user, timeout: 30.seconds)
       # A failure while the daemon is down would otherwise leave services running.
-      if process && process.terminated? && File.exists?(File.join(root, "services/postgres/18/data/postmaster.pid"))
+      postmaster = File.join(root, "services/postgres/18/data/postmaster.pid")
+      if process && process.terminated? && File.exists?(postmaster)
         process = launch(root, log, environment)
       end
       if process && !process.terminated?
@@ -217,7 +258,7 @@ module Caramel::Checks::LatteDaemon
         Checks.stop(process)
       end
       log.close
-      if File.exists?(File.join(root, "services/postgres/18/data/postmaster.pid"))
+      if File.exists?(postmaster)
         puts "Preserved running cluster state: #{root}"
       else
         FileUtils.rm_rf(runtime) if Dir.exists?(runtime)
