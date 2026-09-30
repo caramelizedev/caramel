@@ -174,7 +174,6 @@ Layout/LineLength:
     - "src/caramel/database.cr"
     - "src/caramel/development_error.cr"
     - "src/caramel/external_url.cr"
-    - "src/caramel/http/router.cr"
     - "src/caramel/hypermedia.cr"
     - "src/caramel/islands.cr"
     - "src/caramel/outbound.cr"
