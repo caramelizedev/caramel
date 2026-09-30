@@ -58,7 +58,6 @@ Layout/LineLength:
     - "scripts/checks/frappe_project.cr"
     - "scripts/checks/frappe_project/benchmark.cr"
     - "scripts/checks/frappe_project/dev.cr"
-    - "scripts/checks/integration.cr"
     - "scripts/checks/latte_daemon.cr"
     - "scripts/checks/latte_network.cr"
     - "scripts/checks/route_compilation.cr"
