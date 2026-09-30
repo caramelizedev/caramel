@@ -197,7 +197,6 @@ Layout/LineLength:
     - "src/frappe/latte_client.cr"
     - "src/frappe/new_project.cr"
     - "src/frappe/resource_generator.cr"
-    - "src/frappe/schema_diff.cr"
     - "src/latte.cr"
     - "src/latte/daemon.cr"
     - "src/latte/deadline.cr"
