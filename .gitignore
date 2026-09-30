@@ -12,3 +12,6 @@
 .env.local
 /.caramel-toolchain
 /.caramel-toolchain-*
+
+# Claude Code agent worktrees
+/.claude/worktrees/
