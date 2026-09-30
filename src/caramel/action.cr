@@ -69,7 +69,9 @@ module Caramel
     #
     # A subtype inherits its parent's ingress. Its own declaration replaces
     # it, but must name the parent's authenticator again (or its own) and
-    # cannot turn a raw parent's body back into a form.
+    # cannot turn a raw parent's body back into a form. The macro checks
+    # the parent as compiled so far, so declare a base action's ingress
+    # where the base is first defined, before its subtypes.
     macro ingress(*arguments, **options)
       {% site = @caller ? @caller.first : nil %}
       {% where = "" %}
