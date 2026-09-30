@@ -53,21 +53,6 @@ Layout/LineLength:
   Enabled: true
   MaxLength: 100
   Excluded:
-    - "scripts/checks/route_compilation.cr"
-    - "spec/caramel/action_spec.cr"
-    - "spec/caramel/request_contract_spec.cr"
-    - "spec/caramel/request_input_spec.cr"
-    - "spec/caramel/router_spec.cr"
-    - "spec/caramel/streaming_spec.cr"
-    - "spec/cold_brew/configuration_spec.cr"
-    - "spec/corretto/client_spec.cr"
-    - "spec/frappe/commands_spec.cr"
-    - "spec/frappe/corretto_runner_spec.cr"
-    - "spec/frappe/dev_files_spec.cr"
-    - "spec/frappe/dev_gateway_spec.cr"
-    - "spec/frappe/new_project_spec.cr"
-    - "spec/frappe/resource_generator_spec.cr"
-    - "spec/integration/cold_brew_spec.cr"
     - "src/caramel/action.cr"
     - "src/caramel/application.cr"
     - "src/caramel/cold_brew.cr"

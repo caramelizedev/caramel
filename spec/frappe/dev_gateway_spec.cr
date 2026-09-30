@@ -6,7 +6,8 @@ describe Caramel::Frappe::DevGateway do
     secret = "b" * 64
     gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel", [secret])
     gateway.failed("a" * 32730 + secret)
-    page = gateway.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    page = gateway.handle(HTTP::Request.new("GET", "/", host))
     page.body.includes?("b" * 8).should be_false
   end
 
@@ -52,11 +53,12 @@ describe Caramel::Frappe::DevGateway do
     gateway.generation.should eq(initial + 3)
     gateway.failed("Build failed")
     gateway.generation.should eq(initial + 3)
-    page = gateway.handle(HTTP::Request.new("GET", "/", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    page = gateway.handle(HTTP::Request.new("GET", "/", host))
     page.body.should contain("data-generation=\"#{gateway.generation}\"")
   end
 
-  it "proxies the request and application cookies while adding development refresh only to full HTML" do
+  it "proxies the request and application cookies, adding dev refresh only to full HTML" do
     directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
     Dir.mkdir(directory, 0o700)
     socket_path = File.join(directory, "app.sock")
@@ -64,7 +66,9 @@ describe Caramel::Frappe::DevGateway do
       context.response.status_code = 201
       context.response.headers["Content-Type"] = "text/html; charset=utf-8"
       context.response.headers.add("Set-Cookie", "app_session=keep; Secure; HttpOnly")
-      context.response.print("<!DOCTYPE html><body>#{context.request.method} #{context.request.resource} #{context.request.body.try(&.gets_to_end)}</body>")
+      request = context.request
+      echo = "#{request.method} #{request.resource} #{request.body.try(&.gets_to_end)}"
+      context.response.print("<!DOCTYPE html><body>#{echo}</body>")
     end
     upstream.bind_unix(socket_path)
     spawn { upstream.listen }
@@ -143,7 +147,8 @@ describe Caramel::Frappe::DevGateway do
     begin
       gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
       gateway.ready(socket_path)
-      response = gateway.handle(HTTP::Request.new("GET", "/events", HTTP::Headers{"Host" => "bookshelf.caramel"}))
+      host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+      response = gateway.handle(HTTP::Request.new("GET", "/events", host))
       response.streamer.should_not be_nil
       response.headers["Content-Type"].should eq("text/event-stream")
       reader, writer = IO.pipe

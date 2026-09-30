@@ -6,7 +6,9 @@ require "../fixtures/app/actions/greetings/show"
 
 abstract struct ActionSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
-    "<!DOCTYPE html><html><head><title>#{Caramel::HTML.escape(title_for(page))}</title></head><body>#{page.body}</body></html>"
+    title = Caramel::HTML.escape(title_for(page))
+    head = "<head><title>#{title}</title></head>"
+    "<!DOCTYPE html><html>#{head}<body>#{page.body}</body></html>"
   end
 end
 
@@ -54,7 +56,9 @@ struct ActionSpecParts < ActionSpecAction
   end
 
   def handle(contract : Contract) : Caramel::Response
-    partials([Caramel::Partial.new("#a", "<p>A</p>"), Caramel::Partial.new("#b", "<p>B</p>", "outerHTML")])
+    first = Caramel::Partial.new("#a", "<p>A</p>")
+    second = Caramel::Partial.new("#b", "<p>B</p>", "outerHTML")
+    partials([first, second])
   end
 end
 
@@ -122,7 +126,9 @@ private def get(path : String, headers = HTTP::Headers.new) : Caramel::Response
   ACTION_SPEC_APP.handle(HTTP::Request.new("GET", path, headers))
 end
 
-private def post(body : String, headers = HTTP::Headers.new, token : String? = ACTION_SPEC_CSRF.issue) : Caramel::Response
+private def post(body : String,
+                 headers = HTTP::Headers.new,
+                 token : String? = ACTION_SPEC_CSRF.issue) : Caramel::Response
   headers["Host"] = "bookshelf.caramel"
   headers["Origin"] = "https://bookshelf.caramel"
   headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -173,10 +179,13 @@ describe Caramel::Action do
     json.headers.has_key?("Set-Cookie").should be_false
     JSON.parse(json.body).should eq(JSON.parse(%({"id":5,"name":"Item 5"})))
 
-    htmx = get("/items/5", HTTP::Headers{"Accept" => "application/json", "HX-Request" => "true"})
+    htmx_json = HTTP::Headers{"Accept" => "application/json", "HX-Request" => "true"}
+    htmx = get("/items/5", htmx_json)
     htmx.body.should start_with("<!DOCTYPE html>")
-    get("/items/5", HTTP::Headers{"Accept" => "text/html;q=0.9, application/json"}).headers["Content-Type"].should eq("application/json")
-    get("/items/5", HTTP::Headers{"Accept" => "text/html, application/json;q=0.5"}).body.should start_with("<!DOCTYPE html>")
+    prefers_json = HTTP::Headers{"Accept" => "text/html;q=0.9, application/json"}
+    get("/items/5", prefers_json).headers["Content-Type"].should eq("application/json")
+    prefers_html = HTTP::Headers{"Accept" => "text/html, application/json;q=0.5"}
+    get("/items/5", prefers_html).body.should start_with("<!DOCTYPE html>")
   end
 
   it "passes a Response from handle through unchanged" do
@@ -201,7 +210,11 @@ describe Caramel::Action do
     text = post("seats=0&extra=1", HTTP::Headers{"Accept" => "*/*"})
     text.status.should eq(422)
     text.headers["Content-Type"].should eq("text/plain; charset=utf-8")
-    text.body.should eq("ERR CONTRACT_INVALID:422 at POST /items\nFIELD seats: must be at least 1\nFIELD _base: Unknown field: extra\n")
+    text.body.should eq(<<-MRDP + "\n")
+      ERR CONTRACT_INVALID:422 at POST /items
+      FIELD seats: must be at least 1
+      FIELD _base: Unknown field: extra
+      MRDP
   end
 
   it "requires CSRF for writes and accepts the header token" do
@@ -224,11 +237,14 @@ describe Caramel::Action do
   end
 
   it "renders several targets in one response" do
-    get("/parts").body.should eq(%(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial><hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>))
+    first = %(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial>)
+    second = %(<hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>)
+    get("/parts").body.should eq(first + second)
   end
 
   it "morphs one target" do
-    get("/morph").body.should eq(%(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>))
+    morphed = %(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>)
+    get("/morph").body.should eq(morphed)
   end
 
   it "builds a small fragment inline with a view's escaping and the action's own methods" do
@@ -241,8 +257,12 @@ describe Caramel::Action do
   end
 
   it "wraps pages of actions without a layout in a minimal escaped document" do
-    bare = get("/bare")
-    bare.body.should eq(%(<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Tom &amp; Jerry</title></head><body><p>bare</p></body></html>))
-    get("/bare", HTTP::Headers{"HX-Request-Type" => "partial"}).body.should eq("<title>Tom &amp; Jerry</title><p>bare</p>")
+    head = %(<head><meta charset="utf-8"><title>Tom &amp; Jerry</title></head>)
+    document = %(<!DOCTYPE html><html lang="en">#{head}<body><p>bare</p></body></html>)
+    get("/bare").body.should eq(document)
+
+    partial = HTTP::Headers{"HX-Request-Type" => "partial"}
+    fragment = "<title>Tom &amp; Jerry</title><p>bare</p>"
+    get("/bare", partial).body.should eq(fragment)
   end
 end

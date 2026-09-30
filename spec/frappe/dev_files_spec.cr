@@ -44,7 +44,8 @@ describe Caramel::Frappe::DevFiles do
       File.delete(File.join(root, "lib/caramel"))
       FileUtils.cp_r(checkout, File.join(root, "lib/caramel"))
       released = watcher.snapshot
-      File.write(File.join(root, "lib/caramel/src/caramel/action.cr"), "module Caramel; VERSION = 3; end\n")
+      vendored = File.join(root, "lib/caramel/src/caramel/action.cr")
+      File.write(vendored, "module Caramel; VERSION = 3; end\n")
       watcher.snapshot.source.should eq(released.source)
     ensure
       FileUtils.rm_rf(root)
