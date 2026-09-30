@@ -13,7 +13,8 @@ begin
   result = Caramel::Checks.crystal(["build", source, "-o", binary], env: env, timeout: 90.seconds)
   raise result.stdout + result.stderr unless result.success?
   output = Caramel::Checks.run([binary], timeout: 5.seconds)
-  raise output.stdout + output.stderr unless output.success? && output.stdout.strip == "native path check"
+  printed = output.success? && output.stdout.strip == "native path check"
+  raise output.stdout + output.stderr unless printed
   loads = Caramel::Checks.run(["/usr/bin/otool", "-l", binary], timeout: 5.seconds)
   expected = File.join(root, "data/installs/conda-openssl/3.6.4/lib")
   raise loads.stdout + loads.stderr unless loads.success? && loads.stdout.includes?(expected)

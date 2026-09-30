@@ -76,7 +76,6 @@ Layout/LineLength:
     - "scripts/checks/support/lsp.cr"
     - "scripts/checks/support/unix_http.cr"
     - "scripts/checks/support/webdriver.cr"
-    - "scripts/checks/toolchain_paths.cr"
     - "scripts/cut/cut.cr"
     - "spec/caramel/action_spec.cr"
     - "spec/caramel/application_spec.cr"
