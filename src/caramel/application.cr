@@ -17,20 +17,29 @@ module Caramel
   # validation uses the configured origin; forwarded headers grant no trust.
   class Application
     include HTTP::Handler
+
+    EXPIRED_FORM = "This form has expired or came from another site. " \
+                   "Reload the page and try again."
+    CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; " \
+                              "img-src 'self' data:; base-uri 'self'; form-action 'self'; " \
+                              "frame-ancestors 'none'; object-src 'none'"
+
     getter csrf : CSRF
     getter sessions : Session
     @authority : String
     @public_root : String?
 
     def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
-      @authority = URI.parse(@csrf.origin).authority || raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
+      @authority = URI.parse(@csrf.origin).authority ||
+                   raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
       @public_root = public_root.try { |root| File.realpath(root) }
       @sessions = Session.new(@csrf.derive_key("session"))
     end
 
     def handle(request : HTTP::Request) : Response
       return secure(Response.new(400, "Malformed path")) unless request.path.starts_with?("/")
-      return secure(Response.new(421, "Unknown project host")) if request.headers["Host"]? != @authority
+      host = request.headers["Host"]?
+      return secure(Response.new(421, "Unknown project host")) if host != @authority
       if static = static_response(request)
         return secure(static)
       end
@@ -40,7 +49,8 @@ module Caramel
       input = RequestInput.read(request, match.ingress)
       context = RequestContext.new(request, @csrf, @sessions, input, match.ingress)
       if RequestInput::BODY_METHODS.includes?(request.method) && match.ingress.csrf?
-        raise Forbidden.new unless @csrf.valid?(request, input.csrf_token || request.headers["X-CSRF-Token"]?)
+        token = input.csrf_token || request.headers["X-CSRF-Token"]?
+        raise Forbidden.new unless @csrf.valid?(request, token)
       end
       response = @router.dispatch(context, match)
       if cookie = context.session_cookie
@@ -48,7 +58,7 @@ module Caramel
       end
       secure(response)
     rescue Forbidden
-      secure(Response.new(403, "This form has expired or came from another site. Reload the page and try again."))
+      secure(Response.new(403, EXPIRED_FORM))
     rescue RequestInput::TooLarge
       secure(Response.new(413, "Request body is too large"))
     rescue RequestInput::UnsupportedMediaType
@@ -65,7 +75,11 @@ module Caramel
           return secure(DevelopmentError.response(error, request_id, request))
         end
       {% end %}
-      headers = HTTP::Headers{"X-Request-ID" => request_id, "Cache-Control" => "no-store", "Content-Type" => "text/plain; charset=utf-8"}
+      headers = HTTP::Headers{
+        "X-Request-ID"  => request_id,
+        "Cache-Control" => "no-store",
+        "Content-Type"  => "text/plain; charset=utf-8",
+      }
       secure(Response.new(500, "Something went wrong. Reference: #{request_id}", headers))
     ensure
       input.try(&.cleanup)
@@ -92,7 +106,7 @@ module Caramel
     private def secure(response : Response) : Response
       response.headers["X-Content-Type-Options"] = "nosniff"
       response.headers["Referrer-Policy"] = "same-origin"
-      response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+      response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
       response
     end
 
@@ -102,7 +116,7 @@ module Caramel
       path = request.path
       return Response.new(400, "Malformed path") if path.matches?(/%(?![0-9a-fA-F]{2})/)
       decoded = URI.decode(path)
-      return Response.new(404, "Not found") if decoded.includes?('\0') || decoded.includes?('\\') || decoded.split('/').any?(&.starts_with?('.'))
+      return Response.new(404, "Not found") if unsafe_path?(decoded)
       candidate = File.expand_path(".#{decoded}", root)
       return unless candidate.starts_with?(root + "/") && File.file?(candidate)
       real = File.realpath(candidate)
@@ -110,8 +124,18 @@ module Caramel
       unless {"GET", "HEAD"}.includes?(request.method)
         return Response.new(405, "Method not allowed", HTTP::Headers{"Allow" => "GET, HEAD"})
       end
-      headers = HTTP::Headers{"Content-Type" => MIME.from_filename(real, "application/octet-stream"), "Content-Length" => File.size(real).to_s}
+      headers = HTTP::Headers{
+        "Content-Type"   => MIME.from_filename(real, "application/octet-stream"),
+        "Content-Length" => File.size(real).to_s,
+      }
       Response.new(200, request.method == "HEAD" ? "" : File.read(real), headers)
+    end
+
+    # A decoded path with a NUL byte, a backslash or a segment that starts
+    # with a dot is never served.
+    private def unsafe_path?(decoded : String) : Bool
+      return true if decoded.includes?('\0') || decoded.includes?('\\')
+      decoded.split('/').any?(&.starts_with?('.'))
     end
   end
 end
