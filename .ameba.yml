@@ -217,7 +217,6 @@ Layout/LineLength:
     - "src/latte/server.cr"
     - "src/latte/supervisor.cr"
     - "src/latte/toolchain.cr"
-    - "src/latte/trust.cr"
     - "src/sugar_orm/associations.cr"
     - "src/sugar_orm/catalog.cr"
     - "src/sugar_orm/changeset.cr"
