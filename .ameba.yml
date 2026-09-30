@@ -178,7 +178,6 @@ Layout/LineLength:
     - "src/caramel/version.cr"
     - "src/frappe.cr"
     - "src/frappe/check.cr"
-    - "src/frappe/cli.cr"
     - "src/frappe/dev_command.cr"
     - "src/frappe/dev_retirement.cr"
     - "src/frappe/dev_session.cr"
