@@ -1,5 +1,8 @@
+require "digest/sha256"
 require "./project"
 require "./tools"
+require "./build_slot"
+require "./dev_files"
 require "./latte_client"
 require "../caramel/database"
 require "../latte/postgres"
@@ -107,17 +110,20 @@ module Caramel::Frappe
       spec_url = template["SPEC_DATABASE_URL"]
       spec_database = Caramel::Database::Config.parse(spec_url).database
       migration_url = template["SPEC_MIGRATION_DATABASE_URL"]
-      tools.app_command(@project, ["migrate"], settings.merge({
-        "CARAMEL_ENV"                   => "test",
-        "CARAMEL_SPEC_DATABASE"         => spec_database,
-        "SPEC_DATABASE_URL"             => spec_url,
-        "SPEC_MIGRATION_DATABASE_URL"   => migration_url,
-        "CARAMEL_EXPECTED_DATABASE_URL" => migration_url,
-      }))
       groups = self.class.split(files, concurrency)
+      # Spec binaries need no database, so they build while the application
+      # builds and migrates the template and Latte clones the workers.
+      builds = start_builds(tools, groups)
       secret = Random::Secure.hex(32)
       created = [] of Int32
       results = begin
+        tools.app_command(@project, ["migrate"], settings.merge({
+          "CARAMEL_ENV"                   => "test",
+          "CARAMEL_SPEC_DATABASE"         => spec_database,
+          "SPEC_DATABASE_URL"             => spec_url,
+          "SPEC_MIGRATION_DATABASE_URL"   => migration_url,
+          "CARAMEL_EXPECTED_DATABASE_URL" => migration_url,
+        }))
         environments = groups.map_with_index do |_, offset|
           index = offset + 1
           worker = client.test_worker(id, index)
@@ -127,8 +133,10 @@ module Caramel::Frappe
         file_count = pluralize(files.size, "spec file")
         worker_count = pluralize(groups.size, "worker")
         @output.puts("Corretto: #{file_count} across #{worker_count}")
-        run_workers(tools, groups, environments)
+        run_workers(tools, builds, environments)
       ensure
+        # A failed migration or clone still waits for the builds it started.
+        builds.each(&.receive?)
         created.each do |index|
           client.drop_test_worker(id, index)
         rescue ex : Error
@@ -222,47 +230,114 @@ module Caramel::Frappe
       }
     end
 
-    # Compiles and runs each group's specs in parallel, prefixing every line
-    # of output with its worker, and returns whether each worker passed.
+    # Starts building each group's spec binary in its own fiber. Each channel
+    # yields the binary, or nil when its build failed, and then closes.
     # `crystal spec` would link every worker to the same temporary executable
     # in the shared compiler cache, so each worker builds its own binary. It
     # compiles a generated `.caramel/corretto/w<N>.cr` that requires the
     # group's files in order: the compiler names a program's cache directory
     # after that stable path, not after whichever spec file sorts first, so a
-    # run over other files reuses the worker's objects.
+    # run over other files reuses the worker's objects. The binary stays in
+    # `.caramel/corretto/` and runs again while the application's sources,
+    # spec/, the group's files, the toolchain and the framework are unchanged.
+    # It builds in the development build's environment; the worker's
+    # settings apply only when it runs.
+    private def start_builds(tools : Tools, groups : Array(Array(String))) : Array(Channel(String?))
+      Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
+      corretto = File.join(@project.root, ".caramel/corretto")
+      entries = Latte::StateSecurity.ensure_owned_directory(corretto)
+      remove_idle_workers(entries, groups.size)
+      signature = source_signature
+      groups.map_with_index do |group, offset|
+        build = Channel(String?).new(1)
+        spawn do
+          prefix = "[w#{offset + 1}] "
+          binary = begin
+            worker_binary(tools, entries, offset + 1, group, signature, prefix)
+          rescue ex
+            @error.puts("#{prefix}#{ex.message}")
+            nil
+          end
+          build.send(binary)
+          build.close
+        end
+        build
+      end
+    end
+
+    # Runs each worker's spec binary once it is built, in parallel, prefixing
+    # every line of output with its worker, and returns whether each passed.
     private def run_workers(tools : Tools,
-                            groups : Array(Array(String)),
+                            builds : Array(Channel(String?)),
                             environments : Array(Hash(String, String))) : Array(Bool)
-      directory = Latte::StateSecurity.ensure_owned_directory(File.join(@project.root, ".caramel"))
-      entries = Latte::StateSecurity.ensure_owned_directory(File.join(directory, "corretto"))
       finished = Channel({Int32, Bool}).new
-      groups.each_with_index do |group, offset|
+      builds.each_with_index do |build, offset|
         spawn do
           prefix = "[w#{offset + 1}] "
           env = tools.environment(environments[offset])
-          binary = File.join(directory, "corretto-w#{offset + 1}")
-          entry = File.join(entries, "w#{offset + 1}.cr")
           passed = begin
-            File.write(entry, entry_source(group))
-            compiler = File.join(@framework_root, "scripts/crystal")
-            relayed(compiler, ["build", entry, "-o", binary], env, prefix) &&
-            relayed(binary, [] of String, env, prefix)
-          rescue ex : IO::Error | File::Error
+            binary = build.receive?
+            binary ? relayed(binary, [] of String, env, prefix) : false
+          rescue ex : IO::Error | File::Error | Error
             @error.puts("#{prefix}#{ex.message}")
             false
-          ensure
-            File.delete?(binary)
-            File.delete?("#{binary}.dwarf")
           end
           finished.send({offset, passed})
         end
       end
-      results = Array(Bool).new(groups.size, false)
-      groups.size.times do
+      results = Array(Bool).new(builds.size, false)
+      builds.size.times do
         offset, passed = finished.receive
         results[offset] = passed
       end
       results
+    end
+
+    # The application's and spec/'s sources, hashed as `frappe dev` hashes
+    # them. Nil when they cannot be hashed; no spec binary is then reused.
+    private def source_signature : String?
+      files = DevFiles.new(@project.root)
+      "#{files.snapshot.source}\n#{files.spec_signature}"
+    rescue Error
+      nil
+    end
+
+    # Worker *index*'s spec binary: the one it kept when that was built from
+    # the same sources and files, or a new build. Nil when the build fails.
+    private def worker_binary(tools : Tools,
+                              entries : String,
+                              index : Int32,
+                              group : Array(String),
+                              signature : String?,
+                              prefix : String) : String?
+      name = "w#{index}"
+      entry = File.join(entries, "#{name}.cr")
+      requires = entry_source(group)
+      File.write(entry, requires)
+      record = File.join(entries, "#{name}.json")
+      slot = BuildSlot.new(File.join(entries, name), record, tools.toolchain.root, "corretto")
+      fingerprint = signature.try { |value| Digest::SHA256.hexdigest("#{value}\n#{requires}") }
+      return slot.binary if fingerprint && slot.holds?(fingerprint)
+      temporary = File.join(entries, "building-#{name}-#{Random::Secure.hex(4)}")
+      begin
+        compiler = File.join(@framework_root, "scripts/crystal")
+        arguments = ["build", entry, "-o", temporary]
+        return unless relayed(compiler, arguments, tools.environment, prefix)
+        slot.install(temporary, fingerprint)
+        slot.binary
+      ensure
+        File.delete?(temporary)
+        File.delete?(temporary + ".dwarf")
+      end
+    end
+
+    # Deletes the spec binaries of workers beyond this run's.
+    private def remove_idle_workers(entries : String, workers : Int32) : Nil
+      Dir.children(entries).each do |name|
+        match = name.match(/\Aw(\d+)(?:\.dwarf|\.json)?\z/) || next
+        path = File.join(entries, name)
+        File.delete(path) if match[1].to_i > workers && File.file?(path) && !File.symlink?(path)
+      end
     end
 
     # A program, in .caramel/corretto/, that requires the group's spec files

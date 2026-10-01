@@ -128,6 +128,23 @@ module Caramel::Cut
     end
   end
 
+  # Whether the migration probes would print the same migrations for *tag* and
+  # the working tree, so neither needs to compile: the migrations source, the
+  # files under src/ it requires, and shard.lock are unchanged since *tag*.
+  # The probes share the compiler, lib/ and the environment, so only those
+  # files differ between them. A wildcard require or a macro that reads files
+  # could reach a file the list misses, so either counts as a change, as does
+  # any error.
+  def self.migration_sources_unchanged?(repository : String, tag : String) : Bool
+    paths = migration_sources(repository)
+    sources = paths.map { |path| File.read(File.join(repository, path)) }
+    return false if sources.any? { |source| reaches_unlisted_files?(source) }
+    diff = ["/usr/bin/git", "-C", repository, "diff", "--quiet", tag, "--", "shard.lock"] + paths
+    Latte::ProcessRunner.run(diff, timeout: 120.seconds).success?
+  rescue
+    false
+  end
+
   def self.run(repository : String = REPO,
                check : Array(String) = [File.join(REPO, "scripts/check"), "all"],
                dry_run : Bool = false,
@@ -143,7 +160,9 @@ module Caramel::Cut
     # The first release is the version shard.yml already declares.
     version = tag ? next_version(SemanticVersion.parse(tag.lchop('v')), commits) : declared
     raise Refused.new("nothing to release: no features or fixes since #{tag}") unless version
-    check_migrations(*shipped_and_current(repository, tag), tag) if tag
+    if tag && !migration_sources_unchanged?(repository, tag)
+      check_migrations(*shipped_and_current(repository, tag), tag)
+    end
     path = File.join(repository, "CHANGELOG.md")
     head, notes, older = split(File.exists?(path) ? File.read(path) : CHANGELOG)
     section = section(version, today, notes, commits)
@@ -193,6 +212,34 @@ module Caramel::Cut
       hash, _, message = entry.strip.partition('\u{1f}')
       Commit.parse(hash, message.strip) unless hash.empty?
     end
+  end
+
+  # The migrations source and every file under src/ it requires, directly or
+  # not, relative to *repository*.
+  private def self.migration_sources(repository : String) : Array(String)
+    # --verbose also lists the files the tool did not follow, such as lib/ and
+    # the standard library, which the probes share.
+    dependencies = [File.join(REPO, "scripts/crystal"), "tool", "dependencies",
+                    File.join(repository, MIGRATIONS_SOURCE), "--format", "flat", "--verbose"]
+    result = Latte::ProcessRunner.run(dependencies, chdir: REPO, timeout: 120.seconds,
+      output_limit: 1024 * 1024)
+    unless result.success?
+      raise Refused.new("could not list the files the framework migrations require: " \
+                        "#{result.stderr.strip}")
+    end
+    source = File.join(repository, "src", "")
+    result.stdout.lines.compact_map do |line|
+      entry = line.rchop(" duplicate skipped")
+      path = File.expand_path(entry.rchop(" filtered"), REPO)
+      next unless path.starts_with?(source)
+      raise Refused.new("#{path} was not followed") if entry.ends_with?(" filtered")
+      Path[path].relative_to(repository).to_s
+    end.push(MIGRATIONS_SOURCE).uniq
+  end
+
+  private def self.reaches_unlisted_files?(source : String) : Bool
+    source.matches?(/\brequire\s+"[^"]*\*/) ||
+      source.scan(/\{\{.*?\}\}|\{%.*?%\}/m).any?(&.[0].matches?(/\b(?:read_file|run|system)\b|`/))
   end
 
   # The framework migrations *tag* shipped and the working tree's. The two

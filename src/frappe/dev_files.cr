@@ -28,6 +28,11 @@ module Caramel::Frappe
       Snapshot.new(signature(source), signature(tree("app/assets").merge(tree("public"))))
     end
 
+    # The signature of spec/, which Corretto's spec binaries also build from.
+    def spec_signature : String
+      signature(tree("spec"))
+    end
+
     # A path dependency (lib/caramel, a symlink Shards made to a checkout)
     # builds against that checkout's working tree, so its source is part of
     # every build. It is hashed but not watched: after editing it, save any

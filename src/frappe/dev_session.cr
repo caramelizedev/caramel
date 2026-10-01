@@ -2,6 +2,7 @@ require "./dev_command"
 require "./dev_retirement"
 require "./dev_gateway"
 require "./dev_files"
+require "./build_slot"
 require "./tools"
 require "./latte_client"
 require "./site_log"
@@ -207,55 +208,16 @@ module Caramel::Frappe
       end
       builds = File.join(@project.root, ".caramel/dev")
       directory = Latte::StateSecurity.ensure_owned_directory(builds)
-      binary = File.join(directory, "application-#{fingerprint[0, 16]}")
-      metadata = File.join(directory, "build.json")
-      cached = cached?(metadata, binary, fingerprint)
-      unless cached
-        # Tier 1: semantic feedback before paying for code generation.
-        checked = Time.instant
-        command = compile(["--no-codegen"], "check")
-        return if @stopping || @pending
-        elapsed = (Time.instant - checked).total_milliseconds.round.to_i64
-        unless command.status.try(&.success?)
-          @gateway.failed(failure(command, "Type check stopped before completing."))
-          @output.puts("Type check failed in #{elapsed} ms")
-          @output.flush
-          return
-        end
-        @output.puts("Type check passed in #{elapsed} ms")
-        temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
-        begin
-          @output.puts("Building #{@project.name}…")
-          @output.flush
-          command = compile(["-o", temporary], "build")
-          return if @stopping || @pending
-          unless command.status.try(&.success?)
-            @gateway.failed(failure(command, "Compiler stopped before completing."))
-            return
-          end
-          reject_symlink(binary)
-          {% if flag?(:darwin) %}
-            reject_symlink(binary + ".dwarf")
-            unless File.file?(temporary + ".dwarf")
-              raise Error.new("Compiler did not produce development debug information")
-            end
-            File.rename(temporary + ".dwarf", binary + ".dwarf")
-          {% end %}
-          File.rename(temporary, binary)
-          receipt = {
-            source:    fingerprint,
-            binary:    Digest::SHA256.hexdigest(File.read(binary)),
-            debug:     debug_checksum(binary),
-            toolchain: @tools.toolchain.root,
-            framework: Caramel::VERSION,
-            mode:      "caramel_development",
-          }
-          write_metadata(metadata, receipt.to_json)
-        ensure
-          File.delete?(temporary)
-          File.delete?(temporary + ".dwarf")
-        end
+      slot = BuildSlot.development(@project.root, fingerprint, @tools.toolchain.root)
+      lock = BuildLock.new(@project.root)
+      begin
+        return unless acquired?(lock)
+        cached = slot.holds?(fingerprint)
+        return unless cached || compiled?(slot, directory, fingerprint)
+      ensure
+        lock.release
       end
+      binary = slot.binary
       @binary = binary
       return if @stopping || @pending
       if boot(binary)
@@ -267,34 +229,117 @@ module Caramel::Frappe
       end
     end
 
+    # Builds and installs *fingerprint* into *slot*; false when the build
+    # fails, a newer change supersedes it, or the session stops. The build's
+    # semantic phase is Tier 1 (ADR 0012): a type error stops it before code
+    # generation, and a pass is reported as soon as the compiler says so.
+    private def compiled?(slot : BuildSlot, directory : String, fingerprint : String) : Bool
+      started = Time.instant
+      checked = false
+      temporary = File.join(directory, "building-#{Random::Secure.hex(8)}")
+      begin
+        command = compile(["-o", temporary]) do
+          checked = true
+          type_checked(started)
+        end
+        return false if @stopping || @pending
+        unless command.status.try(&.success?)
+          if checked
+            @gateway.failed(failure(command, "Compiler stopped before completing."))
+          else
+            @gateway.failed(failure(command, "Type check stopped before completing."))
+            elapsed = (Time.instant - started).total_milliseconds.round.to_i64
+            @output.puts("Type check failed in #{elapsed} ms")
+            @output.flush
+          end
+          return false
+        end
+        # A compiler that reports no stages has still passed its type check.
+        type_checked(started) unless checked
+        slot.install(temporary, fingerprint)
+        true
+      ensure
+        File.delete?(temporary)
+        File.delete?(temporary + ".dwarf")
+      end
+    end
+
+    # Tier 1 passed: the compiler finished its semantic stages and is
+    # generating code.
+    private def type_checked(started : Time::Instant) : Nil
+      elapsed = (Time.instant - started).total_milliseconds.round.to_i64
+      @output.puts("Type check passed in #{elapsed} ms")
+      @compiler_log.try(&.mark("build #{@project.name}"))
+      @output.puts("Building #{@project.name}…")
+      @output.flush
+    end
+
+    # Takes the build lock, waiting while a command builds (ADR 0013 §5);
+    # false when the session stops or a newer change arrives first.
+    private def acquired?(lock : BuildLock) : Bool
+      return true if lock.acquire?
+      @output.puts("Waiting for another build of #{@project.name}…")
+      @output.flush
+      until lock.acquire?
+        return false if @stopping || @pending
+        sleep 100.milliseconds
+      end
+      true
+    end
+
     # What a failed compiler run printed, or *stopped* when it printed nothing.
     private def failure(command : DevCommand, stopped : String) : String
       contents = command.output.contents
       contents.empty? ? "#{stopped} Save a source file to retry." : contents
     end
 
-    # Runs the dev build command with *arguments* until it exits, the session
-    # stops, a newer source change supersedes it, or 180 seconds pass.
-    private def compile(arguments : Array(String), event : String) : DevCommand
-      @compiler_log.try(&.mark("#{event} #{@project.name}"))
+    # Runs the dev build with *arguments* and yields once, when its type
+    # check passes, unless the build became obsolete first.
+    private def compile(arguments : Array(String), &) : DevCommand
+      @compiler_log.try(&.mark("check #{@project.name}"))
       crystal = File.join(@tools.framework_root, "scripts/crystal")
-      flags = ["-D", "caramel_development", "--error-trace"]
+      flags = ["-D", "caramel_development", "--error-trace", "--stats"]
       command_line = [crystal, "build", @project.entrypoint, *flags] + arguments
       command = DevCommand.new(command_line, @tools.environment, @project.root, @error,
-        log: @compiler_log)
+        log: @compiler_log, stages: true)
       @compiler = command
-      deadline = Time.instant + 180.seconds
-      while command.running? && !@stopping && !@pending && Time.instant < deadline
-        # Wakes as soon as the compiler exits; the timeout re-checks for a
-        # stop or a newer change.
+      reported = watch(command) { yield }
+      command.stop if command.running?
+      @compiler = nil
+      # The compiler may pass its type check and exit between two wakes.
+      yield if !reported && command.checked? && !@stopping && !@pending
+      command
+    end
+
+    # Waits until *command* exits, the session stops, a newer source change
+    # supersedes it, or 360 seconds pass (the check and the build each had
+    # 180 before they became one command). Yields once, when the type check
+    # passes, and returns whether it did.
+    private def watch(command : DevCommand, &) : Bool
+      deadline = Time.instant + 360.seconds
+      reported = false
+      # Each wait wakes as soon as the compiler exits or reports; the timeout
+      # re-checks for a stop or a newer change.
+      while !reported && current?(command, deadline)
+        select
+        when command.finished.receive?
+        when command.checked.receive?
+          reported = true
+          yield
+        when timeout(50.milliseconds)
+        end
+      end
+      while current?(command, deadline)
         select
         when command.finished.receive?
         when timeout(50.milliseconds)
         end
       end
-      command.stop if command.running?
-      @compiler = nil
-      command
+      reported
+    end
+
+    private def current?(command : DevCommand, deadline : Time::Instant) : Bool
+      command.running? && !@stopping && !@pending && Time.instant < deadline
     end
 
     # A quiet boot retries a start that stopped on pending migrations. It does
@@ -405,56 +450,6 @@ module Caramel::Frappe
     ensure
       client.try(&.close)
       socket.try(&.close)
-    end
-
-    private def cached?(metadata : String, binary : String, fingerprint : String) : Bool
-      reject_symlink(metadata)
-      reject_symlink(binary)
-      return false unless File.file?(metadata) && File.file?(binary)
-      debug = debug_checksum(binary)
-      {% if flag?(:darwin) %}
-        return false unless debug
-      {% end %}
-      saved = JSON.parse(File.read(metadata))
-      saved["source"].as_s == fingerprint &&
-        saved["binary"].as_s == Digest::SHA256.hexdigest(File.read(binary)) &&
-        saved["debug"].as_s? == debug &&
-        saved["toolchain"].as_s == @tools.toolchain.root &&
-        saved["framework"].as_s == Caramel::VERSION &&
-        saved["mode"].as_s == "caramel_development"
-    rescue JSON::ParseException | KeyError | TypeCastError
-      false
-    end
-
-    private def debug_checksum(binary : String) : String?
-      {% if flag?(:darwin) %}
-        path = binary + ".dwarf"
-        reject_symlink(path)
-        Digest::SHA256.hexdigest(File.read(path)) if File.file?(path)
-      {% else %}
-        nil
-      {% end %}
-    end
-
-    private def write_metadata(path : String, contents : String) : Nil
-      reject_symlink(path)
-      temporary = File.tempfile("build-", dir: File.dirname(path))
-      begin
-        temporary << contents
-        temporary.close
-        File.rename(temporary.path, path)
-      ensure
-        temporary.close
-        File.delete?(temporary.path)
-      end
-    end
-
-    private def reject_symlink(path : String) : Nil
-      if info = File.info?(path, follow_symlinks: false)
-        unless Latte::StateSecurity.owned_file?(info)
-          raise Error.new("Development artifacts must be owned regular files")
-        end
-      end
     end
 
     private def remove_stale_sockets : Nil

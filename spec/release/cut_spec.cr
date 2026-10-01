@@ -122,6 +122,48 @@ describe Caramel::Cut do
     end
   end
 
+  it "skips the migration probes only when nothing they compile changed since the tag" do
+    release_repository do |repository|
+      unchanged = ->(tag : String) { Caramel::Cut.migration_sources_unchanged?(repository, tag) }
+      directory = File.join(repository, "src/caramel/cold_brew")
+      Dir.mkdir_p(File.join(directory, "extra"))
+      File.write(File.join(directory, "migrations.cr"), <<-CR)
+        require "./checksums"
+
+        module Caramel::ColdBrew
+          record Migration, version : Int64, name : String, checksum : String
+          MIGRATIONS = [Migration.new(1_i64, "create_jobs", CHECKSUM)]
+        end
+
+        CR
+      checksums = File.join(directory, "checksums.cr")
+      File.write(checksums, %(CHECKSUM = "aa"\n))
+      commit(repository, "feat: jobs")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "fix: words")
+      unchanged.call("v0.1.0").should be_true
+      File.write(checksums, %(CHECKSUM = "zz"\n))
+      commit(repository, "fix: checksum")
+      unchanged.call("v0.1.0").should be_false
+
+      # A wildcard require or a file-reading macro could reach a file the list
+      # misses, such as one deleted since the tag, so both are always probed.
+      File.write(File.join(directory, "extra/one.cr"), "# one\n")
+      File.write(checksums, %(require "./extra/*"\nCHECKSUM = "zz"\n))
+      commit(repository, "fix: extra")
+      git(repository, "tag", "v0.1.1")
+      unchanged.call("v0.1.1").should be_false
+      File.write(File.join(directory, "checksum.txt"), %("zz"\n))
+      File.write(checksums, <<-'CR')
+        CHECKSUM = {{ read_file("#{__DIR__}/checksum.txt").id }}
+
+        CR
+      commit(repository, "fix: read")
+      git(repository, "tag", "v0.1.2")
+      unchanged.call("v0.1.2").should be_false
+    end
+  end
+
   it "cuts releases from the commits since the last tag, with upgrade notes, " \
      "and tags only after the checks pass" do
     release_repository do |repository|
