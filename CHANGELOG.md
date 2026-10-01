@@ -4,11 +4,23 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-01
+
+### Upgrade notes
+
 - Installing this release creates a new managed toolchain directory because its compiler and
   Shards launchers changed. The first builds start with an empty compiler cache. Editor users
   must run `frappe lsp install` again; rebuilding crystalline can take about 20 minutes.
 - Corretto adds Blueprint-shaped `have_html` expectations and content blocks for `render_partial`. Existing matcher calls still work; `render_page` now requires a real doctype. See [testing HTML](docs/testing.md). Lexbor 3.6.4 is a development dependency: existing applications must add it under `development_dependencies` and refresh `shard.lock` before `frappe setup`; generated apps include the pin. Development installs build it with `cc` and `ar` (Apple Command Line Tools on macOS or `build-essential` on Debian/Ubuntu). Production installs omit the parser entirely.
 - HTML expectations check numeric leaf values, accept conditional nested class arrays, and join direct text across comments. Unsupported leaf values raise with a `.to_s` remedy. Table rows and cells inside `hx-partial` envelopes use htmx's template parsing context. The [production case inventory](docs/research/corretto-html-testing.md) records the regression coverage and functional authoring exercises.
+
+### Features
+
+- **corretto:** add Blueprint-shaped HTML expectations (8decb18)
+
+### Fixes
+
+- **corretto:** cover production HTML and authoring edge cases (5fd7b51)
 
 ## 0.5.1 - 2026-09-30
 
