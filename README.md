@@ -115,9 +115,9 @@ scripts/check browser
 
 These checks use isolated temporary state and local listeners. Running the system integration installer or `latte trust install` is a separate, explicit operation; neither is part of the test commands.
 
-`scripts/check all` builds everything, then runs the spec suite and every check in sequence and reports each one; a release requires all of them. It runs frappe-project once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow. `scripts/check all --except latte-daemon` skips a check, for example while your own Latte holds its ports.
+`scripts/check all` builds everything, then runs the spec suite and every check in three lanes side by side and reports each one; a release requires all of them ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)). `--lanes 1` runs them one after another, for a machine with less memory. It runs frappe-project once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow. `scripts/check all --except latte-daemon` skips a check, for example while your own Latte holds its ports.
 
-`scripts/check latte-daemon` runs the real `bin/latte daemon`, which listens on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443. If you use Latte yourself, stop it first: run `frappe services stop`, then `latte stop`.
+`scripts/check latte-daemon` runs the real `bin/latte daemon`, which listens on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443. If you use Latte yourself, stop it first: run `frappe services stop`, wait until `frappe services` shows every service stopped, then run `latte stop`.
 
 `scripts/check browser` drives Safari through `safaridriver` against a generated app served by that isolated Latte stack to prove morph focus/scroll, `hx-partial`, islands, SSE behavior, and a Cold Brew job whose PubSub event reaches an `EventSource`; it needs Safari's "Allow Remote Automation", enabled once with `safaridriver --enable`.
 
