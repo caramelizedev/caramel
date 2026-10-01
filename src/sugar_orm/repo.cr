@@ -102,21 +102,26 @@ module SugarORM
     end
 
     # Runs the block against an explicit handle (the `(db, ...)` overloads).
+    # One `yield`, so each caller's block is compiled once.
     def self.using(db : Handle, &)
-      if db.is_a?(::DB::Connection)
-        bind(db) { yield }
-      else
-        db.using_connection { |connection| bind(connection) { yield } }
+      connection = db.is_a?(::DB::Connection) ? db : db.checkout
+      begin
+        bind(connection) { yield }
+      ensure
+        connection.release unless db.is_a?(::DB::Connection)
       end
     end
 
     # The only supported way to reach the current (bound or transaction)
-    # connection. Unbound work checks a connection out of the pool.
+    # connection. Unbound work checks a connection out of the pool and returns
+    # it afterwards, as `DB::Database#using_connection` does, with one `yield`.
     def self.connection(& : ::DB::Connection -> R) : R forall R
-      if bound = Fiber.current.__sugar_connection
-        yield bound
-      else
-        database.using_connection { |connection| yield connection }
+      bound = Fiber.current.__sugar_connection
+      connection = bound || database.checkout
+      begin
+        yield connection
+      ensure
+        connection.release unless bound
       end
     end
 

@@ -315,12 +315,13 @@ module SugarORM
 
     # Runs the write; inside a transaction a changeset with unique constraints
     # writes under a savepoint so a mapped violation leaves the transaction usable.
-    private def write(& : -> T?) : Nil
+    # The block is captured so its query is compiled once, not once per path.
+    private def write(&query : -> T?) : Nil
       stored = if @unique_constraints.empty?
-                 yield
+                 query.call
                else
                  begin
-                   Repo.in_transaction? ? Repo.transaction { yield } : yield
+                   Repo.in_transaction? ? Repo.transaction { query.call } : query.call
                  rescue ex : UniqueViolation
                    constraint = constraint_for(ex)
                    raise ex unless constraint

@@ -344,6 +344,26 @@ describe "SugarORM with PostgreSQL" do
     end
   end
 
+  it "returns the connections it checks out to the pool, and never a bound one" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |_, runtime|
+      checked_out = -> { runtime.pool.stats.open_connections - runtime.pool.stats.idle_connections }
+      SugarORM::Repo.exec("SELECT 1")
+      SugarSpec::Team.create!(name: "Pooled")
+      SugarSpec::Team.query.count(runtime).should eq(1)
+      checked_out.call.should eq(0)
+
+      held = runtime.checkout
+      begin
+        SugarORM::Repo.bind(held) { SugarSpec::Team.create!(name: "Bound") }
+        SugarSpec::Team.query.count(held).should eq(2)
+        checked_out.call.should eq(1)
+      ensure
+        held.release
+      end
+      checked_out.call.should eq(0)
+    end
+  end
+
   it "reads typed rows from CTEs, window functions and RETURNING, and checks the column shape" do
     SugarSpec.with_tables(owner_url, runtime_url) do
       acme = SugarSpec::Team.create!(name: "Acme")
