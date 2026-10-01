@@ -1,10 +1,13 @@
 require "./support/latte_fixture"
 require "../../src/frappe/commands"
+require "../../src/caramel"
+require "../../src/caramel/corretto/matchers"
 require "uri"
 require "http/params"
 
 module Caramel::Checks
   class FrappeProject < LatteFixture
+    include Corretto::Matchers
     getter project : String
 
     MATCHED         = "The database matches the declared schema."
@@ -198,8 +201,17 @@ module Caramel::Checks
                 "--resolve", "bookshelf.caramel:#{port}:127.0.0.1",
                 "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{port}/"]
         page = command(curl, echo: false)
-        welcome = page.stdout.includes?("A little less setup.")
-        assert!(welcome && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
+        welcome = have_html {
+          html {
+            h1 {
+              plain "A little less setup."
+              br
+              plain "A lot more possibility."
+            }
+            script(src: "/assets/htmx-4.0.0.min.js")
+          }
+        }
+        assert!(welcome.match(page.stdout), welcome.failure_message(page.stdout))
         puts "PASS: real frappe new/setup/migrate/routes/corretto, clone secrets, " \
              "failed-dependency recovery, source preservation, " \
              "spec refusal for development URL, retained development data, " \
@@ -223,7 +235,7 @@ module Caramel::Checks
             git: #{url.to_json}
             version: "~> #{Caramel::VERSION}"\n
         YAML
-      assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(dependency))
+      assert!(File.read(File.join(tagged, "shard.yml")).includes?(dependency))
       locked = <<-YAML
           caramel:
             git: #{url.to_json}
@@ -234,10 +246,28 @@ module Caramel::Checks
       checkout = File.info(library, follow_symlinks: false).directory? &&
                  File.file?(File.join(library, "src/caramel/command_line.cr"))
       assert!(checkout, "lib/caramel is not the tagged release")
+      production_dependencies(tagged)
       checked = command([@frappe, "check"], chdir: tagged, echo: false)
       assert!(checked.stdout.starts_with?("OK check "), checked.stdout)
       puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} " \
            "resolves the framework by git, migrates and type-checks"
+    end
+
+    private def production_dependencies(project) : Nil
+      FileUtils.rm_rf(File.join(project, "lib"))
+      shards = File.join(@repo, "scripts/shards")
+      result = command([shards, "install", "--frozen", "--production"], chdir: project)
+      assert!(!Dir.exists?(File.join(project, "lib/lexbor")), result.stdout + result.stderr)
+      output = (result.stdout + result.stderr).downcase
+      assert!(!output.includes?("lexbor"), result.stdout + result.stderr)
+      source = File.join(project, "src/tagged.cr")
+      command([File.join(@repo, "scripts/crystal"), "build", source, "--no-codegen"],
+        chdir: project, timeout: 120.seconds)
+      command([@frappe, "setup"], chdir: project)
+      assert!(Dir.exists?(File.join(project, "lib/lexbor")))
+      command([@frappe, "corretto"], chdir: project, timeout: 600.seconds)
+      puts "PASS: production installs omit Lexbor entirely; " \
+           "development setup restores the pinned parser and runs Corretto"
     end
 
     # RFC-0005 agent tooling on the generated project: the stateless manifest,

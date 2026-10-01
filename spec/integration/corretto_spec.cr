@@ -176,7 +176,9 @@ describe Corretto::Worker do
         created = client.post("/notes", headers: htmx, params: {"title" => "Acme <Corp>"})
         created.should have_status(200)
         created.should render_partial("#notes", swap: "innerMorph")
-        created.body.should contain("Acme &lt;Corp&gt; cus_Corretto123")
+        created.should have_html {
+          element("hx-partial", hx_target: "#notes") { "Acme <Corp> cus_Corretto123" }
+        }
         db.should have_row(CorrettoIntegration::Note,
           title: "Acme <Corp>", customer: "cus_Corretto123")
         db.should_not have_row(CorrettoIntegration::Note, title: "Acme <Corp>", customer: nil)

@@ -25,7 +25,19 @@ fi
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
 CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
 BINARY=$CRYSTAL_ROOT/embedded/bin/shards
-PATH=$CRYSTAL_ROOT/bin:${PATH-}
+# Dependency hooks invoke `crystal` too; use the managed compiler wrapper
+# so native shard builds receive the same OpenSSL paths as application builds.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CARAMEL_SHARD_COMPILER=$SCRIPT_DIR/crystal
+export CARAMEL_SHARD_COMPILER
+SHARD_HOOKS=$(/usr/bin/mktemp -d "${TMPDIR:-/private/tmp}/caramel-shard-hooks.XXXXXX")
+trap 'rm -rf -- "$SHARD_HOOKS"' 0
+cat > "$SHARD_HOOKS/crystal" <<'EOF'
+#!/bin/sh
+exec "$CARAMEL_SHARD_COMPILER" "$@"
+EOF
+chmod 700 "$SHARD_HOOKS/crystal"
+PATH=$SHARD_HOOKS:$BASE/bin:$CRYSTAL_ROOT/bin:${PATH-}
 SHARDS_CACHE_PATH=$BASE/shards-cache
 export PATH SHARDS_CACHE_PATH
 
@@ -33,4 +45,4 @@ if [ ! -f "$BINARY" ]; then
     echo "Managed Shards is missing from $BASE. Run scripts/install-toolchain." >&2
     exit 1
 fi
-exec "$BINARY" "$@"
+"$BINARY" "$@"

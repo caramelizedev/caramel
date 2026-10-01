@@ -252,6 +252,8 @@ describe Caramel::Frappe::ResourceGenerator do
       spec.should contain(%(it "creates and reads through CSRF-protected requests"))
       spec.should contain(%(client.post("/links", headers: forged, params: sample)))
       spec.should contain(%(rejected.should_not render_page("New link")))
+      spec.should contain(%(section(class: "contract-errors")))
+      spec.should_not contain(%(div(id: "form-errors")))
       spec.should_not contain("client.patch")
       spec.should_not contain("client.delete")
       spec.should contain(duplicate)

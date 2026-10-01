@@ -1,4 +1,8 @@
 require "./support/harness"
+require "../../src/caramel"
+require "../../src/caramel/corretto/matchers"
+
+include Corretto::Matchers
 
 PRODUCTION_LEAK = "development diagnostic code must be absent from production binary"
 REQUEST_ID      = /\A[0-9a-f-]{36}\z/
@@ -36,14 +40,26 @@ begin
           Caramel::Checks.fail("secret was reflected in diagnostics") if body.includes?(secret)
         end
         if mode == environment && environment == "development"
-          escaped = body.includes?("Missing helper &lt;unsafe&gt;")
-          Caramel::Checks.fail(body) unless body.includes?(marker) && escaped
-          Caramel::Checks.fail(body) unless body =~ /app\/controller\.cr:\d+/
-          summary = body.split("<details>", 2)[0]
-          Caramel::Checks.fail(body) unless summary =~ /app\/controller\.cr:\d+/
-          frames = body.includes?("Internal stack frames")
-          Caramel::Checks.fail(body) unless frames && body.includes?("<details>")
-          Caramel::Checks.fail(body) unless body.includes?("<!DOCTYPE html>") != partial
+          message = "Missing helper <unsafe> [credential redacted] " \
+                    "[credential redacted] [redacted]"
+          content = have_html {
+            section(class: "development-error") {
+              p { marker }
+              pre { message }
+              details { summary { "Internal stack frames" } }
+            }
+          }
+          unless content.match(body)
+            Caramel::Checks.fail(content.failure_message(body))
+          end
+          located = Corretto::HTML::Document.open(body) do |document|
+            document.select("section.development-error > ol > li > code").any? do |node|
+              node.inner_text.matches?(%r{app/controller\.cr:\d+})
+            end
+          end
+          Caramel::Checks.fail(body) unless located
+          page = render_page("Caramel development")
+          Caramel::Checks.fail(body) unless page.match(Caramel::Response.new(500, body)) != partial
         else
           revealed = body.includes?(marker) || body.includes?("Missing helper")
           Caramel::Checks.fail(body) if revealed

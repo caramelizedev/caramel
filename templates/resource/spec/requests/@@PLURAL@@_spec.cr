@@ -58,7 +58,31 @@ describe "@@COLLECTION_LABEL@@" do
       # frappe:else
       rejected.should_not render_page("New @@LABEL@@")
       # frappe:end
-      rejected.body.should contain("Unknown field: unexpected_field")
+      rejected.should have_html {
+        # frappe:only update
+        # frappe:only edit
+        div(id: "form-errors") { li { "Unknown field: unexpected_field" } }
+        # frappe:else
+        section(class: "contract-errors") {
+          li {
+            code { "_base" }
+            plain ": Unknown field: unexpected_field"
+          }
+        }
+        # frappe:end
+        # frappe:else
+        # frappe:only new
+        div(id: "form-errors") { li { "Unknown field: unexpected_field" } }
+        # frappe:else
+        section(class: "contract-errors") {
+          li {
+            code { "_base" }
+            plain ": Unknown field: unexpected_field"
+          }
+        }
+        # frappe:end
+        # frappe:end
+      }
       # frappe:only destroy
       # frappe:only index
       client.delete(path).should redirect_to("/@@PLURAL@@")

@@ -422,8 +422,7 @@ module Caramel::Frappe
     private def assert_escaping(inputs : Array(ResourceField)) : String
       checks = inputs.select { |field| field.kind == "string" }.map do |field|
         sample = field.sample.to_json
-        "      shown.body.should contain(Caramel::HTML.escape(#{sample}))\n" \
-        "      shown.body.should_not contain(#{sample})"
+        "      shown.should have_html { dl { dd { #{sample} } } }"
       end
       checks.join('\n')
     end

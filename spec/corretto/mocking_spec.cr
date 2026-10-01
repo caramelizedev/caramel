@@ -16,11 +16,14 @@ private def corretto_compile(fixture : String) : {Bool, String}
   {status.success?, error.to_s}
 end
 
-# The three fixtures type-check side by side when the first example needs
+# The fixtures type-check side by side when the first example needs
 # them: `--no-codegen` builds create no program cache directory and run no
 # cache cleanup, so they may overlap (CONTRIBUTING.md).
 private CORRETTO_COMPILES = begin
-  fixtures = %w[compile_mocks compile_spectator_mocks compile_valid]
+  fixtures = %w[
+    compile_mocks compile_spectator_mocks compile_valid
+    compile_html_valid compile_html_invalid compile_application
+  ]
   compiled = Channel({String, Bool, String}).new(fixtures.size)
   fixtures.each do |fixture|
     spawn do
@@ -53,5 +56,25 @@ describe "Corretto's mocking refusal" do
     success, diagnostic = CORRETTO_COMPILES["compile_valid"]
     diagnostic.should eq("")
     success.should be_true
+  end
+end
+
+describe "Corretto HTML vocabulary" do
+  it "keeps the parser out of ordinary application builds" do
+    success, diagnostic = CORRETTO_COMPILES["compile_application"]
+    diagnostic.should eq("")
+    success.should be_true
+  end
+
+  it "compiles captured locals, loops, standard elements and explicit custom elements" do
+    success, diagnostic = CORRETTO_COMPILES["compile_html_valid"]
+    diagnostic.should eq("")
+    success.should be_true
+  end
+
+  it "rejects a misspelled standard element at compile time" do
+    success, diagnostic = CORRETTO_COMPILES["compile_html_invalid"]
+    success.should be_false
+    diagnostic.should contain("undefined local variable or method 'h11'")
   end
 end

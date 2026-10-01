@@ -74,3 +74,10 @@ end
 ```
 
 `frappe make resource` generates a complete form view to start from, with labels, error summaries and `aria` attributes. htmx requests from the generated layout already send the token in `X-CSRF-Token`.
+
+## Testing rendered views
+
+Use Corretto’s [HTML expectations](testing.md) to describe elements and decoded
+text in the response. Expected values are recorded independently of Blueprint’s
+renderer, so a shared escaping defect cannot make both sides agree. Keep byte
+assertions when serialization itself is the behavior under test.
