@@ -158,7 +158,7 @@ Ameba editor integrations alone do not load it. The 100-character line limit
 still applies.
 
 The design and comparisons with Rails, Laravel, Phoenix, Phlex and Lucky are
-recorded in [ADR 0022](decisions/0022-html-expectations.md).
+recorded in [ADR 0023](decisions/0023-html-expectations.md).
 
 The [production case inventory and authoring evaluation](research/corretto-html-testing.md)
 records realistic edge cases, the functional request workflows, and the

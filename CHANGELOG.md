@@ -7,6 +7,12 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - Corretto adds Blueprint-shaped `have_html` expectations and content blocks for `render_partial`. Existing matcher calls still work; `render_page` now requires a real doctype. See [testing HTML](docs/testing.md). Lexbor 3.6.4 is a development dependency: existing applications must add it under `development_dependencies` and refresh `shard.lock` before `frappe setup`; generated apps include the pin. Development installs build it with `cc` and `ar` (Apple Command Line Tools on macOS or `build-essential` on Debian/Ubuntu). Production installs omit the parser entirely.
 - HTML expectations check numeric leaf values, accept conditional nested class arrays, and join direct text across comments. Unsupported leaf values raise with a `.to_s` remedy. Table rows and cells inside `hx-partial` envelopes use htmx's template parsing context. The [production case inventory](docs/research/corretto-html-testing.md) records the regression coverage and functional authoring exercises.
 
+## 0.5.1 - 2026-09-30
+
+### Fixes
+
+- **latte:** let only exact matches make a service adoption ambiguous (71c3916)
+
 ## 0.5.0 - 2026-09-30
 
 ### Upgrade notes

@@ -2,7 +2,7 @@
 
 Status: measured on 2026-09-28 at commit `5dcf865` (tag `v0.4.0`) on an Apple M3 Pro (12 CPUs, 36 GiB RAM, macOS 26.6.2) with the managed Crystal 1.21.0 toolchain (LLVM 15.0.7, Apple ld-1230.1, Swift 6.2.4). These numbers supersede the edit-latency, readiness, semantic-check, spec-command, release-build and compiler-profile figures in [development-performance.md](development-performance.md), because that baseline predates the Tier-1 type check, kqueue watching and Blueprint views. The owner skipped the instrumented full-suite run, so suite attribution rests on the 0.4.0 release log's per-run times and suite savings are estimates unless marked measured. Every number below comes from one observation unless a range is given.
 
-Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2, and Phase 3 (E3-7, E1-3, E3-5) in v0.4.3, all the same day. The release gates' runs took 548 s (v0.4.1), 473 s (v0.4.2) and 472 s (v0.4.3) against 738 s at 0.4.0, and the whole releases 553.6, 481.3 and 478.4 s against 747 s (one observation each). Each implemented opportunity's section starts with its status.
+Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2, and Phase 3 (E3-7, E1-3, E3-5) in v0.4.3, all the same day. Phase 4 (E4-11, E3-2, E3-6, E3-4, E3-1, E1-5, E1-4, E1-1) shipped in v0.5.0 on 2026-09-30; E4-2 is deferred until the lanes decision. The release gates' runs took 548 s (v0.4.1), 473 s (v0.4.2), 472 s (v0.4.3) and 417 s (v0.5.0) against 738 s at 0.4.0, and the whole releases 553.6, 481.3, 478.4 and 422.2 s against 747 s (one observation each). Phase 4 was measured while the machine was in heavy daytime use, so its before/after numbers are interleaved comparisons from the same session. Each implemented opportunity's section starts with its status.
 
 ## Summary
 
@@ -210,6 +210,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 5. E1-1: Give each checkout program its own `CRYSTAL_CACHE_DIR` root so the 10-slot LRU stops evicting framework builds
 
+- **Status.** Implemented in v0.5.0 (`ccaa191`). A developer checkout's programs (one with a toolchain pointer, outside temporary directories and Caramel's installed releases) each build in their own root under `crystal-cache-programs/`; type checks stay in the shared cache. The linter built cold in its new root in 41.73 s; after 12 builds turned over the shared cache it rebuilt warm in 5.28 s with its root intact. `check all` deletes roots unused for 30 days. The v0.5.0 gate's build step took 9 s (v0.4.3: 34 s) and lint 3 s.
 - **Mechanism.** Crystal keeps the 10 most recently modified program dirs in one cache and deletes the rest after every code generation (`codegen/cache_dir.cr:122-129`, called from `compiler.cr:398`). `scripts/crystal:88` sends every compile to one `crystal-cache`, shared by the developer's apps, the suite's random `/private/tmp` projects, the spec programs (all keyed `<cwd>/spec`, `command/spec.cr:92`) and about 23 check binaries. One suite creates far more than 10 dirs, so stable programs recur cold. Change: `scripts/crystal` keys checkout programs to their own root outside the shared cache, e.g. `$BASE/crystal-cache-repo/<program>`. Each root holds fewer than 10 dirs, so its own cleanup deletes nothing, and the parent is never a `CRYSTAL_CACHE_DIR`. The roots must not sit inside `crystal-cache`: a build in the shared root cleans every child of that root (`codegen/cache_dir.cr:54-58`, `:131-133`), so a nested `repo/` dir would be deleted once 10 newer entries exist. Transient and user programs stay in shared roots, because a new root per random path would recompile the ECR helper each time (6.37 s).
 - **Evidence.** `codegen/cache_dir.cr:122-129`; `scripts/crystal:88`; m5: lint cold 36.02 s vs warm 6.91 s; route-compilation evicted `spec-fixtures-frappe_dev.cr`; the owner's two app builds and M3's projects evicted the lint entries; 328 MB for 10 entries.
 - **Savings.**
@@ -222,6 +223,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 6. E4-2: Compile one multi-check binary per suite instead of 23 check binaries
 
+- **Status.** Measured after E1-1, deferred. The 22 check binaries rebuild warm in 30.8 s per suite (cold 42.7 s; median 1.36 s each, under daytime load). One multi-check binary would save about 17–18 s at night with a single lane but about 8 s with two lanes, and needs every check file wrapped in its own module. It is revisited once Phase 5 decides the lane default.
 - **Mechanism.** `scripts/check:17-18` compiles `scripts/checks/<name>.cr` before every exec, 23 times per suite (frappe_project twice), each into its own cache dir that the 10-entry LRU has evicted since the last suite. Change: each check becomes a `main(args)` in a table; `check all` compiles one `bin/checks/checks` and runs `bin/checks/checks NAME` in a separate process per check. `scripts/check NAME` can keep building one check.
 - **Evidence.** `scripts/check:17-18`; `scripts/checks/all.cr:62`; cold check-binary compiles 1.48 s (route_compilation, fq-Com-4) and 2.20 s (frappe_project, fq-Sui-1); m5-route-compilation created a fresh check-binary cache entry.
 - **Savings.**
@@ -234,6 +236,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 7. E1-4: `scripts/crystal` fast path: fewer processes per compiler call
 
+- **Status.** Implemented in v0.5.0 (`7b54d5a`). One `stat` checks the private directory, the alias and the three `.pc` files, and a private stamp names the toolchain and the unchanged `.pc` sources; any mismatch runs the full rewrite and its checks. Ten `--version` calls took 0.497 s instead of 1.421 s (direct 0.22 s): 120 → 28 ms of overhead per call, same load. A throwaway script confirmed that tampered, symlinked or group-readable files are still refused and that a missing or stale stamp takes the full path.
 - **Mechanism.** Before `exec`, every compiler call re-runs the wrapper's checks: pointer checks, `openssl dgst` of the toolchain path (`scripts/crystal:32`), runtime-dir and alias checks, and a three-file `.pc` rewrite loop with `grep`/`mktemp`/`sed`/`cmp` (`scripts/crystal:54-81`), about 35 process spawns. Change: cache the key, check ownership and modes with one `stat`, and skip the rewrite when a stamp in the private runtime dir matches. Keep every check, and fall back to the full path on any mismatch.
 - **Evidence.** m2h: 10 calls 0.94 s through the wrapper vs 0.14 s direct → 0.080 s per call; fq-Com-6: without the `.pc` loop 0.688 s vs 1.010 s per 10 calls → the loop is 0.032 s per call; `scripts/crystal:32`, `:54-81`.
 - **Savings.**
@@ -344,6 +347,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 15. E4-11: Skip the release probe compiles when nothing the probe requires changed since the tag
 
+- **Status.** Implemented in v0.5.0 (`f9cedf9`), with two guards beyond this design: a wildcard require or a file-reading macro in the closure counts as a change, as does a filtered file under `src/` in the tool's `--verbose` listing. In clones with a docs-only `fix:` after v0.4.3, `scripts/release --dry-run` took 2.72–2.84 s instead of 4.75–5.12 s (four runs each); an edited released migration is still refused.
 - **Mechanism.** The probes only compare framework migrations (version, name, checksum) between the tag and the working tree (`scripts/cut/cut.cr:101`, `:158`). If nothing in the probe's require closure (plus `shard.lock`) changed since the tag, both print the same JSON. Change: compute the closure with `crystal tool dependencies`, run `git diff --quiet <tag> HEAD -- <closure> shard.lock`, and run the probes only when it differs.
 - **Evidence.** `scripts/cut/cut.cr:101`, `:137-165`; fq-Sui-8 1.95 s per probe; fq-Sui-9 0.16 s archive.
 - **Savings.**
@@ -379,7 +383,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 1. E1-5: Start the compiler with a larger GC heap (`GC_INITIAL_HEAP_SIZE`) in `scripts/crystal`
 
-- **Status.** Measured, not yet implemented. A spike on Crystal 1.21.1 (22-resource app, five interleaved runs) gave a warm dev build of 3.13 s at the default heap, 2.84 s at 1G and 2.83 s at 2G, and a type check of 1.37, 0.97 and 0.99 s: about 0.69 s per compiled save at 1G, for about 250 MB more peak RSS (2G adds nothing). The framework spec suite with the variable exported took 16.67 s against 18.62 s (three runs each). Editing `scripts/crystal` changes the toolchain selection, so it ships in one release with E1-4 and E1-1.
+- **Status.** Implemented in v0.5.0 (`e7d8ee6`) as `GC_INITIAL_HEAP_SIZE=1G` unless the caller sets it, for `build`, `run` and `spec`. The spike on Crystal 1.21.1 (22-resource app, five interleaved runs) gave a warm dev build of 3.13 s at the default heap, 2.84 s at 1G and 2.83 s at 2G, and a type check of 1.37, 0.97 and 0.99 s, for about 250 MB more peak RSS (2G adds nothing). The framework spec suite with the variable exported took 16.67 s against 18.62 s (three runs each).
 - **Mechanism.** The compiler's Boehm GC starts small and grows. The default type check of the 22-resource app ran 13 full collections and 48 heap growths (`GC_PRINT_STATS`, fq-Com-7). The same pass with `GC_INITIAL_HEAP_SIZE=2G` took `Semantic (main)` 0.473 s and 1.046 s wall, against 0.741–0.821 s and 1.43–1.554 s with the default heap (m2a-1/2, fq-Com-7). Change: export a GC initial heap size with the other compiler environment in `scripts/crystal` (`scripts/crystal:83-89`), after measuring 1 GB against 2 GB and the peak memory. The CompilerToolchainExpert had rejected GC tuning as "at most ≈0.1 s per compile" before its own follow-up measured this.
 - **Evidence.** fq-Com-7: runs with `GC_PRINT_STATS`, plain and 2 GB, stage sums 1.388 / 1.439 / 0.935 s; `followup-gc-sem.err`: 13 collections. The debug and no-debug full-build GC logs show 15 and 22 collections (fq-Com-1, fq-Com-0).
 - **Savings.**
@@ -410,6 +414,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 3. E3-1: Fold the Tier-1 type check into the dev build and report it from the build's stage marker
 
+- **Status.** Implemented in v0.5.0 (`93365c6`) with ADR 0012 §4 amended. `DevCommand::Stages` reads the `--stats` stage lines from the compiler's standard output, passes other output on, and signals when `Semantic (recursive struct check)` completes. An interleaved A/B on the 22-resource app (six runs each, daytime load) timed the old flow (type check, then build) at 7.01 s median and the single build at 4.75 s: 2.26 s less per compiled save. The full edit benchmark was not comparable with Phase 3's night baseline because of the load.
 - **Mechanism.** Every compiled save runs `--no-codegen` and then a full build with the same flags (`src/frappe/dev_session.cr:182`, `:196`, `:229`). On a type error `build` stops at the same point, so the separate check only repeats the type check when the code is valid. Change: one `build … --stats -o <tmp>` per save. Print `Type check passed in N ms` when the last semantic stage line arrives, filter the stats lines out of error pages, and keep ADR 0012's messages.
 - **Evidence.** `src/frappe/dev_session.cr:182`, `:196`, `:229`; m2a-2 1.43 s, m2f-2 1.03 s; benchmark Crystal medians 5792 / 4868 ms.
 - **Savings.**
@@ -422,6 +427,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 4. E3-2: Give `Tools#compile` the dev fingerprint cache and build with the dev flags into the dev slot
 
+- **Status.** Implemented in v0.5.0 (`831971c`) with ADR 0013 §5 amended, with one deviation: a miss builds into the command's own slot (`.caramel/application` plus `application.json`), not the dev slot, whose cleanup deletes binaries the session is not running. A hit on `frappe dev`'s build is hard-linked. `.caramel/build.lock` serializes an application's builds. On the 22-resource app `frappe routes` with nothing changed ran in 0.09–0.10 s instead of rebuilding (5.2 s). `scripts/check frappe-project --dev` asserts that `frappe migrate` beside a running session runs the session's build.
 - **Mechanism.** `Tools#compile` always runs a full build without `-D` (`src/frappe/tools.cr:41-46`) for routes, migrate, seed, `db diff` and Corretto's migrate. Change: share the dev loop's `cached?` and `write_metadata` (`src/frappe/dev_session.cr:336-348`, `:209`). On a fingerprint hit, run the dev binary (hard-linked first, so dev cleanup cannot delete it). On a miss, build with the dev flags into the dev slot.
 - **Evidence.** `src/frappe/tools.cr:41-46`; `src/frappe/dev_session.cr:209`, `:336-348`; m2b-1 3.27 s; fingerprint check 29.8 ms snapshot + 10.3 ms artifact SHA-256 (fq-App-2-fixed); first vs cached dev readiness 5509 / 275 ms.
 - **Savings.**
@@ -437,6 +443,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 5. E3-6: Keep Corretto's spec binaries behind a fingerprint and skip the spec compile on unchanged reruns
 
+- **Status.** Implemented in v0.5.0 (`58135a2`) with ADR 0010 amended. Spec binaries now build in the development build's environment, so per-run settings such as `APP_SECRET` no longer defeat reuse. An unchanged `frappe corretto --concurrency=2` rerun took 1.09 s and kept both binaries.
 - **Mechanism.** Corretto deletes each worker binary and its `.dwarf` after the run (`src/frappe/corretto_runner.cr:165-168`), so a rerun with no change recompiles. Change: keep the binaries under `.caramel/corretto/` with a fingerprint (source signature, hash of `spec/**`, file list, toolchain, version) and skip the compile when it matches.
 - **Evidence.** `src/frappe/corretto_runner.cr:165-168`; fq-App-4-2 warm spec compile 3.64 s.
 - **Savings.**
@@ -500,6 +507,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 10. E1-4: `scripts/crystal` fast path: fewer processes per compiler call
 
+- **Status.** Implemented in v0.5.0 (`7b54d5a`).
 Same change as suite rank 7; mechanism, evidence, risk and verification are there.
 
 - **Savings in this family.**
@@ -527,6 +535,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 12. E3-4: Corretto starts the spec-binary compile at once, alongside the app compile, migrate and clone
 
+- **Status.** Implemented in v0.5.0 (`b4f4fae`). Spec binaries start building once the mock scan and the spec database checks pass, beside the migration and the clones; a failed migration still waits for the builds it started. Not measured separately: after E3-2, a hit removes the application build it would have hidden.
 - **Mechanism.** Corretto runs app compile → template migrate → clone → spec compile → run in sequence (`src/frappe/corretto_runner.cr:69-73`, `:160`). The spec compile needs no database. Change: start it at once. The app build and the spec build use different cache dirs.
 - **Evidence.** `src/frappe/corretto_runner.cr:69-73`, `:160`; m2b-1 3.27 s; fq-App-4 3.64–5.17 s.
 - **Savings.**

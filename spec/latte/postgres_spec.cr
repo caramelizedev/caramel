@@ -12,6 +12,23 @@ private def remove_postgres_unit_root(root : String)
   FileUtils.rm_rf(root)
 end
 
+# A copy of /bin/sleep under a name no other process of the user has.
+# Adoption matches the user's processes by executable name, so a managed
+# child named `sleep` would also match any other `sleep` the user runs.
+# macOS kills a copied platform binary, so the copy is re-signed ad hoc, and
+# its name fits in the 15 characters `ps` shows of a command.
+private def private_sleep(root : String) : String
+  path = File.join(root, "sl-#{Random::Secure.hex(4)}")
+  File.copy("/bin/sleep", path)
+  File.chmod(path, 0o700)
+  signed = Process.run("/usr/bin/codesign", ["--force", "--sign", "-", path],
+    output: Process::Redirect::Close, error: Process::Redirect::Close)
+  raise "could not sign #{path}" unless signed.success?
+  # The temporary directory is under /var, a symlink; adoption compares the
+  # resolved command line.
+  File.realpath(path)
+end
+
 # Writes an owner-only executable at *relative* under the root's installs.
 private def install_tool(root : String, relative : String, content : String) : Nil
   path = File.join(root, "data", "installs", relative)
@@ -142,7 +159,7 @@ describe Caramel::Latte::ManagedChild do
     root = postgres_unit_root
     record = File.join(root, "child.json")
     log = File.join(root, "child.log")
-    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    child = Caramel::Latte::ManagedChild.new("sleep", private_sleep(root), ["5"], record, log)
     started = Time.instant
     identity = child.start
     (Time.instant - started).should be < 2.seconds
@@ -161,7 +178,7 @@ describe Caramel::Latte::ManagedChild do
     File.write(target, "private\n")
     File.symlink(target, log)
     record = File.join(root, "child.json")
-    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    child = Caramel::Latte::ManagedChild.new("sleep", private_sleep(root), ["5"], record, log)
     expect_raises(Caramel::Latte::OwnershipError) { child.start }
   ensure
     FileUtils.rm_rf(root) if root
@@ -171,8 +188,9 @@ describe Caramel::Latte::ManagedChild do
     root = postgres_unit_root
     record = File.join(root, "child.json")
     log = File.join(root, "child.log")
-    stray = Process.new(["/bin/sleep", "5"])
-    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    sleeper = private_sleep(root)
+    stray = Process.new([sleeper, "5"])
+    child = Caramel::Latte::ManagedChild.new("sleep", sleeper, ["5"], record, log)
     identity = child.start
     identity.pid.should eq(stray.pid)
     child.stop.should be_true
@@ -194,9 +212,10 @@ describe Caramel::Latte::ManagedChild do
     first : Process? = nil
     # ameba:disable Lint/UselessAssign -- read by the ensure below
     second : Process? = nil
-    first = Process.new(["/bin/sleep", "5"])
-    second = Process.new(["/bin/sleep", "5"])
-    child = Caramel::Latte::ManagedChild.new("sleep", "/bin/sleep", ["5"], record, log)
+    sleeper = private_sleep(root)
+    first = Process.new([sleeper, "5"])
+    second = Process.new([sleeper, "5"])
+    child = Caramel::Latte::ManagedChild.new("sleep", sleeper, ["5"], record, log)
     expect_raises(Caramel::Latte::OwnershipError) { child.start }
     Process.exists?(first.pid).should be_true
     Process.exists?(second.pid).should be_true
@@ -205,6 +224,27 @@ describe Caramel::Latte::ManagedChild do
       process = stray.not_nil!
       process.terminate(graceful: false) unless process.terminated?
       process.wait
+    rescue
+    end
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "starts its own child beside same-named processes with other arguments" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    sleeper = private_sleep(root)
+    # Another Latte's service, or a check fixture's: same executable, other args.
+    others = [Process.new([sleeper, "6"]), Process.new([sleeper, "7"])]
+    child = Caramel::Latte::ManagedChild.new("sleep", sleeper, ["5"], record, log)
+    identity = child.start
+    others.map(&.pid).should_not contain(identity.pid)
+    others.each { |other| Process.exists?(other.pid).should be_true }
+    child.stop.should be_true
+  ensure
+    others.try &.each do |other|
+      other.terminate(graceful: false) unless other.terminated?
+      other.wait
     rescue
     end
     FileUtils.rm_rf(root) if root

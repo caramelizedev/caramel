@@ -1,4 +1,4 @@
-# ADR 0022: Blueprint-shaped expectations inspect rendered HTML
+# ADR 0023: Blueprint-shaped expectations inspect rendered HTML
 
 Date: 2026-09-30
 
