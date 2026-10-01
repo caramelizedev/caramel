@@ -20,9 +20,10 @@ CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/caramel
 CRYSTAL=$CACHE/crystal-$VERSION-1
 ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
 
-# Headers the compiler links against; most images already have them.
+# Headers and the C compiler/archive tools Lexbor's postinstall uses.
+# Most images already have them.
 missing=""
-for package in libpcre2-dev libssl-dev libyaml-dev zlib1g-dev; do
+for package in build-essential libpcre2-dev libssl-dev libyaml-dev zlib1g-dev; do
   dpkg -s "$package" >/dev/null 2>&1 || missing="$missing $package"
 done
 if [ -n "$missing" ]; then

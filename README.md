@@ -17,6 +17,7 @@ Latte now has a private project registry, managed PostgreSQL, DNS/HTTPS configur
 
 The application workflow branch adds SugarORM (immutable schemas, explicit changesets, typed queries and preloads, and migrations derived and linted by `frappe db diff`), Caramel Core (compile-time checked routes, typed request contracts that bind forms and JSON objects, per-action ingress for signed webhooks and token APIs ([ADR 0020](docs/decisions/0020-action-ingress-and-json-bodies.md)), actions with HTML or JSON egress, multi-target htmx partials and client islands), and the native Frappé CLI.
 
+- Corretto checks rendered HTML with nested Blueprint-shaped expectations; see [testing HTML](docs/testing.md).
 - The CLI creates and restores projects, generates typed resources, derives and applies migrations, and runs Corretto specs (`frappe corretto`) in rolled-back savepoints against per-worker Latte databases.
 - Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs.
 - The watched development loop reacts to kqueue events, type-checks before building, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes.

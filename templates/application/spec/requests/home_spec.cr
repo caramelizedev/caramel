@@ -6,11 +6,11 @@ describe "Home" do
       page = client.get("/")
       page.should have_status(200)
       page.should render_page("@@TITLE@@")
-      page.body.should contain("/assets/htmx-4.0.0.min.js")
+      page.should have_html { script(src: "/assets/htmx-4.0.0.min.js") }
       fragment = client.get("/", headers: {"HX-Request" => "true", "HX-Request-Type" => "partial"})
       fragment.should have_status(200)
       fragment.should_not render_page("@@TITLE@@")
-      fragment.body.should contain("<title>Welcome · @@TITLE@@</title>")
+      fragment.should have_html { title { "Welcome · @@TITLE@@" } }
     end
   end
 end

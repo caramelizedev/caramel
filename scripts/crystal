@@ -193,6 +193,12 @@ if [ -n "$PROGRAM" ]; then
     fi
 fi
 
+# `crystal file.cr` is shorthand for `crystal run file.cr`, including in
+# shard postinstall hooks. It needs the same runtime library paths.
+case ${1:-} in
+    *.cr) set -- run "$@" ;;
+esac
+
 case ${1:-} in
     build|run|spec)
         # A larger starting heap spares the compiler (and a spec or run

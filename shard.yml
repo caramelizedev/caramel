@@ -1,5 +1,5 @@
 name: caramel
-version: 0.5.1
+version: 0.6.0
 crystal: ">= 1.21.1"
 license: MIT
 dependencies:
@@ -13,6 +13,9 @@ dependencies:
     github: stephannv/blueprint
     version: 1.1.0
 development_dependencies:
+  lexbor:
+    github: kostya/lexbor
+    version: 3.6.4
   ameba:
     github: crystal-ameba/ameba
     version: 1.7.0

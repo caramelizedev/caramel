@@ -779,8 +779,9 @@ describe Teams::Create do
 
       # 2. Hypermedia Egress Verification
       response.should have_status(200)
-      response.should render_partial("#team-list", swap: "innerMorph")
-      response.body.should contain("Acme Corp")
+      response.should render_partial("#team-list", swap: "innerMorph") {
+        li { "Acme Corp · 10 seats" }
+      }
 
       # 3. Real State Verification
       team = Team::Query.where(name: "Acme Corp").first!(db)

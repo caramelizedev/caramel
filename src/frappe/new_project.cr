@@ -66,7 +66,7 @@ module Caramel::Frappe
         end
         result[path] = content
       end
-      result["shard.lock"] = shard_lock(source)
+      result["shard.lock"] = shard_lock(source, result["shard.yml"])
       htmx = File.read(File.join(@framework_root, "vendor/htmx/htmx-4.0.0.min.js"))
       result["public/assets/htmx-4.0.0.min.js"] = htmx
       result["app/assets/vendor/htmx-4.0.0.min.js"] = htmx
@@ -109,22 +109,28 @@ module Caramel::Frappe
       Latte::ProcessRunner.run(command, timeout: 10.seconds)
     end
 
-    # The framework at this release, then its runtime dependencies exactly as
-    # the framework locks them.
-    private def shard_lock(source : Dependency) : String
+    # The framework at this release, then its runtime dependencies and the
+    # application's explicit development dependencies as the framework locks them.
+    private def shard_lock(source : Dependency, manifest : String) : String
       framework = YAML.parse(File.read(File.join(@framework_root, "shard.yml")))
-      development_shards = framework["development_dependencies"]?
-      development = development_shards.try(&.as_h.keys.map(&.as_s)) || [] of String
+      development = dependency_names(framework, "development_dependencies")
+      application = YAML.parse(manifest)
+      required = dependency_names(application, "dependencies") +
+                 dependency_names(application, "development_dependencies")
       locked = YAML.parse(File.read(File.join(@framework_root, "shard.lock")))["shards"].as_h
       String.build do |io|
         io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock
         io << "\n    version: " << Caramel::VERSION << '\n'
         locked.each do |name, entry|
-          next if development.includes?(name.as_s)
+          next if development.includes?(name.as_s) && !required.includes?(name.as_s)
           io << "\n  " << name.as_s << ":\n"
           entry.as_h.each { |key, value| io << "    " << key.as_s << ": " << value.as_s << '\n' }
         end
       end
+    end
+
+    private def dependency_names(manifest : YAML::Any, key : String) : Array(String)
+      manifest[key]?.try(&.as_h.keys.map(&.as_s)) || [] of String
     end
 
     private def preflight_destination(path : String) : Nil

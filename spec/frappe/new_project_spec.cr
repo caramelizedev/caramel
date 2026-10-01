@@ -56,7 +56,7 @@ describe Caramel::Frappe::NewProject do
           caramel:
             #{source.shard}
         YAML
-      File.read(File.join(target, "shard.yml")).should end_with(required)
+      File.read(File.join(target, "shard.yml")).should contain(required)
       locked = <<-YAML + "\n"
           caramel:
             #{source.lock}
@@ -72,6 +72,21 @@ describe Caramel::Frappe::NewProject do
     ensure
       FileUtils.rm_rf(parent)
     end
+  end
+
+  it "pins the native HTML parser for application specs without making it a runtime dependency" do
+    framework = File.expand_path("../..", __DIR__)
+    files = Caramel::Frappe::NewProject.new(framework).plan("shop")
+    manifest = YAML.parse(files["shard.yml"])
+    manifest["dependencies"]["lexbor"]?.should be_nil
+    parser = manifest["development_dependencies"]["lexbor"]
+    parser["github"].as_s.should eq("kostya/lexbor")
+    parser["version"].as_s.should eq("3.6.4")
+
+    locked = YAML.parse(files["shard.lock"])["shards"]
+    locked["lexbor"]["git"].as_s.should eq("https://github.com/kostya/lexbor.git")
+    locked["lexbor"]["version"].as_s.should eq("3.6.4")
+    locked["ameba"]?.should be_nil
   end
 
   it "records the assets it publishes, so an edit before the first frappe dev publishes" do
@@ -142,7 +157,7 @@ describe Caramel::Frappe::NewProject do
             git: "/private/tmp/caramel-release.git"
             version: "~> #{Caramel::VERSION}"
         YAML
-      File.read(File.join(parent, "shelf/shard.yml")).should end_with(required)
+      File.read(File.join(parent, "shelf/shard.yml")).should contain(required)
       locked = <<-YAML + "\n"
         version: 2.0
         shards:
