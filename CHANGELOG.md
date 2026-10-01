@@ -4,6 +4,12 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.5.1 - 2026-09-30
+
+### Fixes
+
+- **latte:** let only exact matches make a service adoption ambiguous (71c3916)
+
 ## 0.5.0 - 2026-09-30
 
 ### Upgrade notes
