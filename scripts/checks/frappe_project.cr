@@ -1,10 +1,13 @@
 require "./support/latte_fixture"
 require "../../src/frappe/commands"
+require "../../src/caramel"
+require "../../src/caramel/corretto/matchers"
 require "uri"
 require "http/params"
 
 module Caramel::Checks
   class FrappeProject < LatteFixture
+    include Corretto::Matchers
     getter project : String
 
     MATCHED         = "The database matches the declared schema."
@@ -198,8 +201,17 @@ module Caramel::Checks
                 "--resolve", "bookshelf.caramel:#{port}:127.0.0.1",
                 "-H", "Host: bookshelf.caramel", "https://bookshelf.caramel:#{port}/"]
         page = command(curl, echo: false)
-        welcome = page.stdout.includes?("A little less setup.")
-        assert!(welcome && page.stdout.includes?("/assets/htmx-4.0.0.min.js"))
+        welcome = have_html {
+          html {
+            h1 {
+              plain "A little less setup."
+              br
+              plain "A lot more possibility."
+            }
+            script(src: "/assets/htmx-4.0.0.min.js")
+          }
+        }
+        assert!(welcome.match(page.stdout), welcome.failure_message(page.stdout))
         puts "PASS: real frappe new/setup/migrate/routes/corretto, clone secrets, " \
              "failed-dependency recovery, source preservation, " \
              "spec refusal for development URL, retained development data, " \

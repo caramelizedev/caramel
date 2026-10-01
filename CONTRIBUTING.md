@@ -4,7 +4,8 @@ Caramel's decisions are recorded in [docs/decisions](docs/decisions). Read the o
 
 ## Build and check
 
-On Apple Silicon with Apple's Command Line Tools:
+On Apple Silicon with Apple's Command Line Tools (including `cc` and `ar` for
+Corretto's Lexbor parser):
 
 ```sh
 scripts/install-toolchain

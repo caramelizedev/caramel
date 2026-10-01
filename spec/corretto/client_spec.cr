@@ -139,7 +139,9 @@ describe Corretto::Client do
     created.should render_partial("#note-list", swap: "beforeend")
     created.should_not render_partial("#note-list", swap: "innerMorph")
     created.should_not render_page("Milk")
-    created.body.should contain("&lt;b&gt;Milk&lt;/b&gt; ×2")
+    created.should have_html {
+      element("hx-partial", hx_target: "#note-list") { "<b>Milk</b> ×2" }
+    }
 
     forged = {"X-CSRF-Token" => "forged"}
     forged_note = {"title" => "Forged", "copies" => 1}
@@ -153,7 +155,7 @@ describe Corretto::Client do
   it "signs users in, follows 303 and HX-Location redirects and collects streamed bodies" do
     client = corretto_spec_client
     client.sign_in(CorrettoSpecUser.new(42))
-    client.get("/").body.should contain("Reader 42")
+    client.get("/").should have_html { p { "Reader 42" } }
 
     moved = client.patch("/notes/7")
     moved.should have_status(303)
@@ -172,7 +174,7 @@ describe Corretto::Client do
 
     client.get("/events").body.should eq("data: one\n\n")
     client.get("/", params: {"utm" => "spec"}).should render_page("Tom & Jerry")
-    client.get("/").body.should contain("Reader 42")
+    client.get("/").should have_html { p { "Reader 42" } }
   end
 
   it "sends JSON with the same cookies and CSRF as a form" do

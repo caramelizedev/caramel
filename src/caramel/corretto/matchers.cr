@@ -1,4 +1,4 @@
-require "html"
+require "./html"
 
 module Corretto
   # Expectations for `should`/`should_not`; `Corretto::Matchers` builds them.
@@ -30,35 +30,60 @@ module Corretto
       end
     end
 
-    struct RenderPartial
-      PARTIAL = /<hx-partial hx-target="([^"]*)" hx-swap="([^"]*)">/
+    class RenderPartial
+      @found = "none"
+      @detail = ""
+      @excerpt = ""
 
-      def initialize(@target : String, @swap : String?)
+      def initialize(@target : String, @swap : String?, @pattern : HTML::Pattern? = nil)
       end
 
       def match(response : Caramel::Response) : Bool
-        partials(response).any? do |(target, swap)|
-          target == @target && (@swap.nil? || swap == @swap)
+        HTML::Document.open(response.body) do |document|
+          partials = document.select("hx-partial")
+          @found = partials.join(", ") do |node|
+            "#{node["hx-target"]?} (#{node["hx-swap"]?})"
+          end
+          @found = "none" if @found.empty?
+          @detail = ""
+          @excerpt = ""
+          partials.any? do |node|
+            next false unless node["hx-target"]? == @target
+            next false unless @swap.nil? || node["hx-swap"]? == @swap
+            @excerpt = node.to_html[0, 800]
+            content_matches?(node)
+          end
         end
       end
 
       def failure_message(response : Caramel::Response) : String
-        found = partials(response).join(", ") { |(target, swap)| "#{target} (#{swap})" }
-        found = "none" if found.empty?
-        excerpt = Expectations.excerpt(response)
-        "Expected an <hx-partial> for #{description}; found #{found}\n#{excerpt}"
+        "Expected an <hx-partial> for #{description}; found #{@found[0, 800]}\n" \
+        "#{@detail[0, 800]}#{excerpt(response)}"
       end
 
       def negative_failure_message(response : Caramel::Response) : String
-        "Expected no <hx-partial> for #{description}\n#{Expectations.excerpt(response)}"
+        "Expected no <hx-partial> for #{description}\n#{excerpt(response)}"
+      end
+
+      private def excerpt(response) : String
+        return Expectations.excerpt(response) if @excerpt.empty?
+        "Response status #{response.status}\nHTML: #{@excerpt}"
       end
 
       private def description : String
         @swap ? "#{@target} swapped with #{@swap}" : @target
       end
 
-      private def partials(response : Caramel::Response) : Array({String, String})
-        response.body.scan(PARTIAL).map { |match| {::HTML.unescape(match[1]), match[2]} }
+      private def content_matches?(node) : Bool
+        pattern = @pattern
+        return true unless pattern
+        comparison = HTML::Comparison.new
+        found = node.scope.any? do |child|
+          next false if child.is_text? || child.is_comment? || child.tag_name != pattern.tag
+          comparison.matches?(pattern, child)
+        end
+        @detail = "#{comparison.mismatch || pattern.description}\n" unless found
+        found
       end
     end
 
@@ -106,27 +131,27 @@ module Corretto
       end
     end
 
-    struct RenderPage
+    class RenderPage
+      @found : String? = nil
+
       def initialize(@title : String)
       end
 
       def match(response : Caramel::Response) : Bool
-        return false unless response.body.matches?(/\A\s*<!DOCTYPE html>/i)
-        title(response).try(&.includes?(@title)) || false
+        HTML::Document.open(response.body) do |document|
+          @found = document.select("title").first?.try(&.inner_text)
+          document.full_page? && (@found.try(&.includes?(@title)) || false)
+        end
       end
 
       def failure_message(response : Caramel::Response) : String
-        got = title(response).try(&.inspect) || "no <title>"
+        got = @found.try(&.inspect) || "no <title>"
         excerpt = Expectations.excerpt(response)
         "Expected a full HTML page titled #{@title.inspect}; got #{got}\n#{excerpt}"
       end
 
       def negative_failure_message(response : Caramel::Response) : String
         "Expected no full HTML page titled #{@title.inspect}\n#{Expectations.excerpt(response)}"
-      end
-
-      private def title(response : Caramel::Response) : String?
-        response.body.match(/<title>(.*?)<\/title>/m).try { |match| ::HTML.unescape(match[1]) }
       end
     end
 
@@ -164,6 +189,17 @@ module Corretto
     # Matches an `<hx-partial>` block for `target`, and its `hx-swap` when given.
     def render_partial(target : String, swap : String? = nil) : Expectations::RenderPartial
       Expectations::RenderPartial.new(target, swap)
+    end
+
+    # Requirements recorded with Blueprint's element vocabulary.
+    def have_html(*, within : String? = nil, count : Int32? = nil, strict : Bool = false, &)
+      pattern = HTML::PatternBuilder.build { |builder| with builder yield }
+      Expectations::HaveHTML.new(pattern, within, count, strict)
+    end
+
+    def render_partial(target : String, swap : String? = nil, &)
+      pattern = HTML::PatternBuilder.build { |builder| with builder yield }
+      Expectations::RenderPartial.new(target, swap, pattern)
     end
 
     # A 3xx `Location` or an htmx `HX-Location` equal to `path`.

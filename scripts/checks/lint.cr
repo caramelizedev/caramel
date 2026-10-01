@@ -20,6 +20,7 @@ module Caramel::Checks::Lint
     service_nouns
     line_length
     no_exemptions
+    html_expectations
     framework = Checks.run([LINTER, "--format", "flycheck"], timeout: 300.seconds)
     unless framework.success?
       Checks.fail("The framework does not pass its rule set:\n" \
@@ -64,6 +65,30 @@ module Caramel::Checks::Lint
     lines = issues(result, "Layout/LineLength").map(&.[0])
     refuse("Layout/LineLength", lines, result) if result.success? || lines != [2]
     puts "PASS: Layout/LineLength reports a 101-character line, not a 100-character one"
+  end
+
+  private def html_expectations : Nil
+    result = probe(<<-CRYSTAL)
+      p "debug"
+      response.should have_html {
+        section {
+          p { "Paragraph" }
+          pp "debug"
+          p "debug inside expectation"
+        }
+      }
+      response.should render_partial("#notes") {
+        p { "Note" }
+      }
+      [1].each {
+        p "still debug"
+      }
+      CRYSTAL
+    debug = issues(result, "Lint/DebugCalls").map(&.[0])
+    curly = issues(result, "Style/MultilineCurlyBlock").map(&.[0])
+    refuse("Lint/DebugCalls", debug, result) unless debug == [1, 5, 6, 13]
+    refuse("Style/MultilineCurlyBlock", curly, result) unless curly == [12]
+    puts "PASS: HTML expectation syntax is scoped; ordinary debug calls and curly blocks are linted"
   end
 
   # ADR 0021: no file is exempt from the line limit, by the configuration or

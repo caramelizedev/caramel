@@ -1,5 +1,5 @@
 require "spec"
-require "../../src/caramel/view"
+require "../../src/caramel/corretto"
 
 private class LinkView < Caramel::View
   def initialize(@value : String)
@@ -62,7 +62,7 @@ describe Caramel::View do
   end
 
   it "renders nested views into the same document, each escaping its own input" do
-    OuterView.new("<inner>").to_s.should eq("<section><span>&lt;inner&gt;</span></section>")
+    OuterView.new("<inner>").to_s.should have_html { section { span { "<inner>" } } }
   end
 
   it "writes an island tag in place, without escaping it again" do

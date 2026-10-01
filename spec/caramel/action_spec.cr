@@ -1,5 +1,5 @@
 require "spec"
-require "../../src/caramel"
+require "../../src/caramel/corretto"
 require "../fixtures/app/views/greetings/show"
 require "../fixtures/app/actions/greetings"
 require "../fixtures/app/actions/greetings/show"
@@ -149,8 +149,13 @@ describe Caramel::Action do
 
     page = get("/rejected")
     page.status.should eq(422)
-    page.body.should contain("<li><code>title</code>: can&#39;t be blank</li>")
-    page.body.should contain("&lt;b&gt;Closed&lt;/b&gt;")
+    page.should have_html {
+      li {
+        code { "title" }
+        plain ": can't be blank"
+      }
+    }
+    page.should have_html { li { "_base: <b>Closed</b>" } }
 
     text = get("/rejected", HTTP::Headers{"Accept" => "*/*"})
     text.status.should eq(422)
@@ -165,13 +170,15 @@ describe Caramel::Action do
   it "negotiates a full page, an htmx fragment or JSON from one result" do
     full = get("/items/5")
     full.status.should eq(200)
-    full.body.should start_with("<!DOCTYPE html>")
-    full.body.should contain("<p>item 5</p>")
+    full.should render_page("Item")
+    full.should have_html { p { "item 5" } }
     full.headers["Vary"].should eq("Accept, HX-Request, HX-Request-Type")
     full.headers["Set-Cookie"].should start_with(Caramel::CSRF::COOKIE_NAME)
 
     partial = get("/items/5", HTTP::Headers{"HX-Request-Type" => "partial"})
-    partial.body.should eq("<title>Item</title><p>item 5</p>")
+    partial.should_not render_page("Item")
+    partial.should have_html { title { "Item" } }
+    partial.should have_html { p { "item 5" } }
 
     json = get("/items/5", HTTP::Headers{"Accept" => "application/json"})
     json.headers["Content-Type"].should eq("application/json")
@@ -181,11 +188,11 @@ describe Caramel::Action do
 
     htmx_json = HTTP::Headers{"Accept" => "application/json", "HX-Request" => "true"}
     htmx = get("/items/5", htmx_json)
-    htmx.body.should start_with("<!DOCTYPE html>")
+    htmx.should render_page("Item")
     prefers_json = HTTP::Headers{"Accept" => "text/html;q=0.9, application/json"}
     get("/items/5", prefers_json).headers["Content-Type"].should eq("application/json")
     prefers_html = HTTP::Headers{"Accept" => "text/html, application/json;q=0.5"}
-    get("/items/5", prefers_html).body.should start_with("<!DOCTYPE html>")
+    get("/items/5", prefers_html).should render_page("Item")
   end
 
   it "passes a Response from handle through unchanged" do
@@ -200,7 +207,12 @@ describe Caramel::Action do
   it "renders contract failures for browsers, JSON clients and other clients" do
     html = post("seats=0", HTTP::Headers{"Accept" => "text/html"})
     html.status.should eq(422)
-    html.body.should contain(%(<li><code>seats</code>: must be at least 1</li>))
+    html.should have_html {
+      li {
+        code { "seats" }
+        plain ": must be at least 1"
+      }
+    }
     html.headers["Content-Type"].should eq("text/html; charset=utf-8")
 
     json = post("seats=0", HTTP::Headers{"Accept" => "application/json"})
@@ -237,14 +249,14 @@ describe Caramel::Action do
   end
 
   it "renders several targets in one response" do
-    first = %(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial>)
-    second = %(<hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>)
-    get("/parts").body.should eq(first + second)
+    response = get("/parts")
+    response.should render_partial("#a", swap: "innerMorph") { p { "A" } }
+    response.should render_partial("#b", swap: "outerHTML") { p { "B" } }
+    response.should have_html(count: 2) { element("hx-partial") }
   end
 
   it "morphs one target" do
-    morphed = %(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>)
-    get("/morph").body.should eq(morphed)
+    get("/morph").should render_partial("#panel", swap: "innerMorph") { p { "x" } }
   end
 
   it "builds a small fragment inline with a view's escaping and the action's own methods" do
@@ -253,7 +265,8 @@ describe Caramel::Action do
 
   it "renders a view page with escaped input and a nested view" do
     response = get("/greetings/%3CAda%3E", HTTP::Headers{"HX-Request-Type" => "partial"})
-    response.body.should end_with("<p>Hello, &lt;Ada&gt;</p><footer>Caramel</footer>")
+    response.should have_html { p { "Hello, <Ada>" } }
+    response.should have_html { footer { "Caramel" } }
   end
 
   it "wraps pages of actions without a layout in a minimal escaped document" do

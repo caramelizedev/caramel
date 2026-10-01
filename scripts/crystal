@@ -104,6 +104,12 @@ if [ "${1:-}" = build ]; then
     fi
 fi
 
+# `crystal file.cr` is shorthand for `crystal run file.cr`, including in
+# shard postinstall hooks. It needs the same runtime library paths.
+case ${1:-} in
+    *.cr) set -- run "$@" ;;
+esac
+
 if [ "${1:-}" = eval ]; then
     DYLD_LIBRARY_PATH=$OPENSSL/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
     export DYLD_LIBRARY_PATH

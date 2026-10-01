@@ -25,7 +25,10 @@ fi
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
 CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
 BINARY=$CRYSTAL_ROOT/embedded/bin/shards
-PATH=$CRYSTAL_ROOT/bin:${PATH-}
+# Dependency hooks invoke `crystal` too; use the managed compiler wrapper
+# so native shard builds receive the same OpenSSL paths as application builds.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PATH=$SCRIPT_DIR:$BASE/bin:$CRYSTAL_ROOT/bin:${PATH-}
 SHARDS_CACHE_PATH=$BASE/shards-cache
 export PATH SHARDS_CACHE_PATH
 
