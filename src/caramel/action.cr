@@ -228,13 +228,9 @@ module Caramel
 
     def page(title : String, body : String, status : Int32 = @status) : Response
       page = Page.new(title, body)
-      html = if @context.partial?
-               # htmx extracts and removes this title before swapping a fragment.
-               "<title>#{HTML.escape(title_for(page))}</title>#{page.body}"
-             else
-               layout(page)
-             end
-      Response.new(status, html, html_headers)
+      # htmx extracts and removes the fragment's title before swapping it.
+      html = @context.partial? ? Egress.fragment(title_for(page), page.body) : layout(page)
+      Egress.html(@context, status, html)
     end
 
     # Renders `body`, a view, as the page.
@@ -256,7 +252,7 @@ module Caramel
     end
 
     def partials(fragments : Enumerable(Partial), status : Int32 = @status) : Response
-      Response.new(status, Hypermedia.render(fragments), html_headers)
+      Egress.html(@context, status, Hypermedia.render(fragments))
     end
 
     # Replaces one target's content with `html`, a view or trusted HTML.
@@ -268,12 +264,7 @@ module Caramel
     end
 
     def json(value, status : Int32 = @status) : Response
-      headers = HTTP::Headers{
-        "Content-Type"  => "application/json",
-        "Vary"          => VARY,
-        "Cache-Control" => "no-store",
-      }
-      Response.new(status, value.to_json, headers)
+      Egress.json(status, value.to_json)
     end
 
     def redirect_to(path : String) : Response
@@ -316,14 +307,12 @@ module Caramel
       elsif @context.browser?
         contract_failure_page(contract)
       else
-        text = contract.to_mrdp(@context.method, request.path)
-        headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
-        Response.new(422, text, headers)
+        Egress.text(422, contract.to_mrdp(@context.method, request.path))
       end
     end
 
     def contract_failure_page(contract : RequestContract) : Response
-      page("Check your request", errors_html(contract.errors), 422)
+      page("Check your request", Egress.errors_html(contract.errors), 422)
     end
 
     # Answers errors found after the contract, such as a changeset's, the way
@@ -332,41 +321,84 @@ module Caramel
     def render_errors(errors : Hash(String, Array(String)),
                       status : Int32 = 422) : Response
       return json({errors: errors}, status) if @context.wants_json?
-      return page("Check your request", errors_html(errors), status) if @context.browser?
-
-      text = String.build do |io|
-        io << "ERR INVALID:" << status
-        io << " at " << @context.method << ' ' << request.path << '\n'
-        errors.each do |field, messages|
-          messages.each { |message| io << "FIELD " << field << ": " << message << '\n' }
-        end
+      if @context.browser?
+        return page("Check your request", Egress.errors_html(errors), status)
       end
-      headers = HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"}
-      Response.new(status, text, headers)
+
+      Egress.text(status, Egress.errors_text(errors, status, @context.method, request.path))
     end
 
     private def errors_html(errors : Hash(String, Array(String))) : String
-      String.build do |io|
-        io << %(<section class="contract-errors" role="alert">)
-        io << %(<h1>Check your request</h1><ul>)
-        errors.each do |field, messages|
-          messages.each do |message|
-            io << "<li><code>" << HTML.escape(field) << "</code>: "
-            io << HTML.escape(message) << "</li>"
-          end
-        end
-        io << "</ul></section>"
-      end
+      Egress.errors_html(errors)
     end
 
     private def html_headers : HTTP::Headers
-      headers = HTTP::Headers{
-        "Content-Type"  => "text/html; charset=utf-8",
-        "Vary"          => VARY,
-        "Cache-Control" => "no-store",
-      }
-      headers.add("Set-Cookie", @context.csrf_cookie.to_set_cookie_header)
-      headers
+      Egress.html_headers(@context)
+    end
+
+    # :nodoc:
+    # The egress work that does not depend on the action, compiled once instead
+    # of once per action struct; the instance methods above forward to it.
+    module Egress
+      extend self
+
+      def html(context : RequestContext, status : Int32, body : String) : Response
+        Response.new(status, body, html_headers(context))
+      end
+
+      def html_headers(context : RequestContext) : HTTP::Headers
+        headers = HTTP::Headers{
+          "Content-Type"  => "text/html; charset=utf-8",
+          "Vary"          => VARY,
+          "Cache-Control" => "no-store",
+        }
+        headers.add("Set-Cookie", context.csrf_cookie.to_set_cookie_header)
+        headers
+      end
+
+      def fragment(title : String, body : String) : String
+        "<title>#{HTML.escape(title)}</title>#{body}"
+      end
+
+      def json(status : Int32, body : String) : Response
+        headers = HTTP::Headers{
+          "Content-Type"  => "application/json",
+          "Vary"          => VARY,
+          "Cache-Control" => "no-store",
+        }
+        Response.new(status, body, headers)
+      end
+
+      def text(status : Int32, body : String) : Response
+        Response.new(status, body, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
+      end
+
+      def errors_html(errors : Hash(String, Array(String))) : String
+        String.build do |io|
+          io << %(<section class="contract-errors" role="alert">)
+          io << %(<h1>Check your request</h1><ul>)
+          errors.each do |field, messages|
+            messages.each do |message|
+              io << "<li><code>" << HTML.escape(field) << "</code>: "
+              io << HTML.escape(message) << "</li>"
+            end
+          end
+          io << "</ul></section>"
+        end
+      end
+
+      def errors_text(errors : Hash(String, Array(String)),
+                      status : Int32,
+                      method : String,
+                      path : String) : String
+        String.build do |io|
+          io << "ERR INVALID:" << status
+          io << " at " << method << ' ' << path << '\n'
+          errors.each do |field, messages|
+            messages.each { |message| io << "FIELD " << field << ": " << message << '\n' }
+          end
+        end
+      end
     end
   end
 end
