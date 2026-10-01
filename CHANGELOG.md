@@ -4,6 +4,13 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.6.1 - 2026-10-01
+
+### Fixes
+
+- **sugar-orm:** compile each write's query once (5ff1208)
+- **core:** compile action egress once instead of once per action (be9b969)
+
 ## 0.6.0 - 2026-10-01
 
 ### Upgrade notes
