@@ -470,8 +470,10 @@ module Caramel::Latte
              "/usr/bin/ps"
            end
       # Keep the listing bounded by selecting only the executable name. Full
-      # argv is fetched for the small candidate set below and compared exactly
-      # before a process can be adopted.
+      # argv is fetched for that candidate set below, and only processes
+      # whose command line matches exactly can be adopted or make the choice
+      # ambiguous: another Latte's service or a check fixture's runs the same
+      # executable with other arguments.
       result = ProcessRunner.run(
         [ps, "-ww", "-U", LibC.getuid.to_s, "-o", "uid=,pid=,comm="],
         timeout: 2.seconds,
@@ -495,15 +497,14 @@ module Caramel::Latte
         exact = executable_name == @executable
         candidates << pid if exact || File.basename(executable_name) == expected_name
       end
-      if candidates.size > 1
+      matches = candidates.compact_map do |pid|
+        uid, start_time, command_line = process_snapshot(pid) || next
+        {pid, start_time} if uid == LibC.getuid.to_i64 && command_line == expected_command
+      end
+      if matches.size > 1
         raise OwnershipError.new("multiple unrecorded managed children match this identity")
       end
-      return unless candidates.size == 1
-      pid = candidates.first
-      snapshot = process_snapshot(pid)
-      return unless snapshot
-      uid, start_time, command_line = snapshot
-      return unless uid == LibC.getuid.to_i64 && command_line == expected_command
+      pid, start_time = matches.first? || return
       Identity.new(
         name: @name,
         pid: pid,

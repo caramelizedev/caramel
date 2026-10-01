@@ -228,6 +228,27 @@ describe Caramel::Latte::ManagedChild do
     end
     FileUtils.rm_rf(root) if root
   end
+
+  it "starts its own child beside same-named processes with other arguments" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    sleeper = private_sleep(root)
+    # Another Latte's service, or a check fixture's: same executable, other args.
+    others = [Process.new([sleeper, "6"]), Process.new([sleeper, "7"])]
+    child = Caramel::Latte::ManagedChild.new("sleep", sleeper, ["5"], record, log)
+    identity = child.start
+    others.map(&.pid).should_not contain(identity.pid)
+    others.each { |other| Process.exists?(other.pid).should be_true }
+    child.stop.should be_true
+  ensure
+    others.try &.each do |other|
+      other.terminate(graceful: false) unless other.terminated?
+      other.wait
+    rescue
+    end
+    FileUtils.rm_rf(root) if root
+  end
 end
 
 describe Caramel::Latte::Postgres do

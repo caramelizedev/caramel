@@ -19,6 +19,7 @@ The implementation has to survive terminal sessions, several projects and daemon
 
 1. **Supervision.**
    - The `latte daemon` is a per-user service supervisor. It starts, adopts after restart and recovers the shared PostgreSQL 18 cluster, CoreDNS and Caddy.
+   - It adopts an unrecorded process only when exactly one of the user's processes runs the service's executable with its exact command line, and refuses when several do. Since 2026-09-30, processes that share the executable's name but not the command line, such as another Latte's services or a check fixture's, no longer make the choice ambiguous.
    - Applications run under terminal-owned `frappe dev` sessions. These register a development gateway socket with Latte and stop when the terminal does.
    - The daemon owns processes and databases. It carries no agent protocol state: Frappé commands stay one-shot processes (RFC-0005).
 2. **Unix sockets.**
