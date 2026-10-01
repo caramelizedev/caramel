@@ -521,6 +521,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 11. E2-4: SugarORM write path: capture `Changeset#write`'s block and make `Repo.connection`/`using` single-yield
 
+- **Status.** Implemented (`5ff1208`) as described: `write` captures its block, and `Repo.connection` and `Repo.using` yield once, checking a connection out and returning it themselves. Interleaved warm dev builds of the 22-resource app: −0.110 s median (faster in 11 of 12 rounds, sign test p = 0.003) and, beside an identical control copy (−0.003 s, 8 of 16), −0.076 s (12 of 16, p = 0.038), all in `Codegen (crystal)`. A new integration spec checks that pooled work returns its connection and bound work does not.
 - **Mechanism.** `Changeset#write` yields in three places, one inside `Repo.transaction`, whose yields sit inside `Repo.connection` with two more (`src/sugar_orm/changeset.cr:260-266`, `src/sugar_orm/repo.cr:102-108`). Code generation inlines the block at every yield, about 10 query paths per insert and update per changeset. Change: capture `write`'s block and call it, and make `connection`/`using` single-yield.
 - **Evidence.** `src/sugar_orm/changeset.cr:260-266`; `src/sugar_orm/repo.cr:102-108`; patched copy vs baseline, warm build: `Semantic (main)` −0.008 s, `Codegen (crystal)` −0.062 s (fq-Fra-11-2 vs fq-Fra-0-2). Identical warm builds varied 0.967–1.298 s in `Codegen (crystal)` (profile rows, fq-Com-1, fq-Fra-0-1/-2), so this difference is within run-to-run noise.
 - **Savings.**
@@ -549,6 +550,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 13. E2-2: Leaner per-action egress: move type-independent bodies of `respond`/`json`/`page`/… into once-typed helpers
 
+- **Status.** Implemented (`be9b969`): the bodies of `page`, `partials`, `json` and the contract-failure and error responses moved to a nodoc `Caramel::Action::Egress`, compiled once; `layout`, `title_for` and `contract_failure_page` stay overridable instance methods. Interleaved warm dev builds of the 22-resource app beside an identical control copy (−0.003 s, 8 of 16 rounds): −0.074 s median (faster in 14 of 16 rounds, sign test p = 0.002), of which `Semantic (main)` −0.017 s and `Codegen (crystal)` −0.045 s.
 - **Mechanism.** Each of the 154 action structs re-types `Caramel::Action`'s egress methods (`respond`, `json`, `page`, `render_contract_failure`, `contract_failure_page`, `html_headers`; `src/caramel/action.cr:132-135` and neighbours), which every route method calls (`src/caramel/http/router.cr:381`). Change: keep one-line forwarders and move the type-independent bodies into class methods typed once.
 - **Evidence.** `src/caramel/action.cr:132-135`; `src/caramel/http/router.cr:381`; upper bound with all egress removed: `Semantic (main)` −0.038 s, `Codegen (crystal)` −0.139 s (fq-Fra-8, fq-Fra-9-2 vs fq-Fra-0-2); the baseline's `Codegen (crystal)` varied 0.967–1.298 s across identical builds.
 - **Savings.**
@@ -564,6 +566,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 14. E2-3: Flatten Blueprint block elements to one typed copy per call site
 
+- **Status.** Dropped: the saving did not beat run-to-run noise. A prototype redefined the block overload of all 97 elements registered in `Blueprint::HTML` and produced identical output for every element in 582 comparisons. In the same interleaved run as E2-4 and E2-2, warm dev builds were −0.037 s median (faster in 11 of 16 rounds, sign test p = 0.105); `Semantic (main)` fell 0.020 s (13 of 16, p = 0.011), but about 1 % of a build does not justify redefining 97 Blueprint methods against an exactly pinned version.
 - **Mechanism.** An element call with a block goes through three yielding methods (`lib/blueprint/src/blueprint/html/element_registrar.cr:4-19`, `lib/blueprint/src/blueprint/html/buffer_renderer.cr:19-25`), and Crystal never caches a block call's typed copy (compiler `semantic/call.cr:376-383`), so each call site types three copies. Change: redefine `register_element` in Caramel so the `(**attributes, &)` overload writes the tag directly.
 - **Evidence.** `element_registrar.cr:4-19`; `buffer_renderer.cr:19-25`; `semantic/call.cr:376-383`; every view body together costs `Semantic (main)` 0.068 s + `Codegen (crystal)` 0.074 s per warm build (fq-Fra-1-2 vs fq-Fra-0-2) and 12.35 s of the 84.85 s release build (fq-Fra-14/15); the warm-build ceiling uses the same fq-Fra-0-2 baseline, whose `Codegen (crystal)` varied 0.967–1.298 s across identical builds.
 - **Savings.**
