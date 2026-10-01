@@ -8,3 +8,7 @@ targets:
 dependencies:
   caramel:
     @@CARAMEL@@
+development_dependencies:
+  lexbor:
+    github: kostya/lexbor
+    version: 3.6.4

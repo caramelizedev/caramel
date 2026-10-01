@@ -84,11 +84,17 @@ module Corretto::HTML
     end
 
     private def candidate?(requirement : String, node) : Bool
-      node.is_text?
+      return false unless node.is_text?
+      previous = node.prev
+      while sibling = previous
+        return !sibling.is_text? unless sibling.is_comment?
+        previous = sibling.prev
+      end
+      true
     end
 
     private def candidate?(requirement : Pattern, node) : Bool
-      !node.is_text? && !node.is_comment? && node.tag_name == requirement.tag
+      !node.is_text? && !node.is_comment? && node.tag_name.downcase == requirement.tag
     end
 
     # Assign each requirement a node, moving an earlier assignment when
@@ -154,8 +160,19 @@ module Corretto::HTML
 
     private def child_matches?(requirement : String, child, path, parent) : Bool
       matches = child.is_text? &&
-                normalize(requirement, parent) == normalize(child.tag_text, parent)
+                normalize(requirement, parent) == normalize(direct_text(child), parent)
       matches || miss(path, "expected direct text #{requirement.inspect}")
+    end
+
+    private def direct_text(node) : String
+      String.build do |io|
+        current : Lexbor::Node? = node
+        while child = current
+          break unless child.is_text? || child.is_comment?
+          io << child.tag_text if child.is_text?
+          current = child.next
+        end
+      end
     end
 
     private def child_matches?(requirement : Pattern, child, path, parent) : Bool

@@ -35,7 +35,9 @@ macros, recording text and attributes without rendering them. Explicit
 compilation. Keep existing matcher signatures.
 
 Use [Lexbor 3.6.4](https://github.com/kostya/lexbor/tree/v3.6.4), pinned as a
-transitive dependency but required only through Corretto. Its existing HTML5
+development dependency in the framework and generated applications, and required
+only through Corretto. Application lockfiles retain the explicit development pin;
+production installs neither fetch nor build the parser. Its existing HTML5
 parser decodes attributes and text, and handles document and fragment parsing.
 An internal adapter owns native documents, chooses table/select fragment
 contexts, validates selectors and frees memory after each assertion. There is
@@ -52,10 +54,24 @@ comments and insignificant whitespace. Counts apply to complete matching roots;
 negation inverts the full result. Invalid expectations, selectors and missing
 scopes raise instead of making negative assertions pass.
 
+Production-case and authoring checks extend leaf text to numeric, Boolean and
+character results. Other leaf values require explicit `.to_s` and raise if
+unsupported; empty collection loops add no text. Conditional attribute arrays
+flatten and omit `nil`. Direct text coalesces across comments in both modes.
+Boolean attributes retain presence/absence syntax; ARIA/data literal false
+values use strings. See the [case inventory](../research/corretto-html-testing.md).
+
 Parse response matchers too: partial target, swap and content must come from the
 same element. Full pages need an actual source doctype and a parsed title;
 title matching retains substring semantics. Failure diagnostics retain paths,
 observed values/counts and bounded excerpts after releasing the document.
+
+Before DOM parsing, token metadata renames actual `hx-partial` envelopes to
+templates, matching htmx's treatment of table/select payloads. The adapter moves
+their parsed content into restored envelope nodes without adding wrappers.
+Ordinary template content remains inert. Lexbor's shard does not expose native
+template content, so a private binding follows the pinned C layout; review it
+when upgrading that dependency. Raw text and comments are never envelopes.
 
 Migrate behavioral specs and generated examples to decoded element assertions.
 Keep exact byte tests for serialization/escaping and browser checks for actual
@@ -67,7 +83,8 @@ line limit stays unchanged.
 
 - **2, state in database and hypermedia:** assertions inspect response HTML.
 - **3, expose the machine:** the native parser, install requirements and ownership
-  are explicit; ordinary application binaries do not gain a parser dependency.
+  are explicit; production installs and ordinary application binaries do not gain
+  a parser dependency.
 - **5, no tautological mocks:** expected nodes are independent data, never
   application view invocations or rerendered expected HTML. Escaping mutations
   must fail. Browser morph verification remains a separate boundary.

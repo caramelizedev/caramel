@@ -1,13 +1,15 @@
 require "lexbor"
+require "./partial_source"
 
 module Corretto::HTML
-  # Uses the tokenizer only to choose the HTML5 fragment context. Actual
-  # structure, attributes and text always come from Lexbor's DOM parser.
-  private class Context < Lexbor::Tokenizer::State
+  # Token metadata chooses the HTML5 fragment context and identifies htmx
+  # envelopes. Structure, attributes and text come from Lexbor's DOM parser.
+  private class Context < PartialSource
     getter first : Lexbor::Lib::TagIdT? = nil
     getter? document = false
 
     def on_token(token)
+      super
       tag = token.tag_id
       if tag == Lexbor::Lib::TagIdT::LXB_TAG__EM_DOCTYPE
         @document = true unless @first
@@ -46,10 +48,10 @@ module Corretto::HTML
     @parser : Lexbor::Parser
 
     def initialize(source : String)
-      context = Context.new
+      context = Context.new(source)
       context.parse(source)
-      @parser = Lexbor.new(context.document? ? source : "")
-      @root = parse_root(source, context)
+      @parser = Lexbor.new(context.document? ? context.html : "")
+      @root = parse_root(context)
       @full_page = context.document? && @root.children.any? do |node|
         node.tag_id == Lexbor::Lib::TagIdT::LXB_TAG__EM_DOCTYPE
       end
@@ -57,9 +59,10 @@ module Corretto::HTML
       context.try(&.free)
     end
 
-    private def parse_root(source, context) : Lexbor::Node
+    private def parse_root(context) : Lexbor::Node
       root = context.document? ? @parser.document! : @parser.create_node(context.parent)
-      root.inner_html = source unless context.document?
+      root.inner_html = context.html unless context.document?
+      context.restore(root, @parser)
       root
     rescue ex
       @parser.free

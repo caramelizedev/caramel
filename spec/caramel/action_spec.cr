@@ -176,6 +176,7 @@ describe Caramel::Action do
     full.headers["Set-Cookie"].should start_with(Caramel::CSRF::COOKIE_NAME)
 
     partial = get("/items/5", HTTP::Headers{"HX-Request-Type" => "partial"})
+    partial.body.should eq("<title>Item</title><p>item 5</p>")
     partial.should_not render_page("Item")
     partial.should have_html { title { "Item" } }
     partial.should have_html { p { "item 5" } }
@@ -249,14 +250,20 @@ describe Caramel::Action do
   end
 
   it "renders several targets in one response" do
+    first = %(<hx-partial hx-target="#a" hx-swap="innerMorph"><p>A</p></hx-partial>)
+    second = %(<hx-partial hx-target="#b" hx-swap="outerHTML"><p>B</p></hx-partial>)
     response = get("/parts")
+    response.body.should eq(first + second)
     response.should render_partial("#a", swap: "innerMorph") { p { "A" } }
     response.should render_partial("#b", swap: "outerHTML") { p { "B" } }
     response.should have_html(count: 2) { element("hx-partial") }
   end
 
   it "morphs one target" do
-    get("/morph").should render_partial("#panel", swap: "innerMorph") { p { "x" } }
+    morphed = %(<hx-partial hx-target="#panel" hx-swap="innerMorph"><p>x</p></hx-partial>)
+    response = get("/morph")
+    response.body.should eq(morphed)
+    response.should render_partial("#panel", swap: "innerMorph") { p { "x" } }
   end
 
   it "builds a small fragment inline with a view's escaping and the action's own methods" do
@@ -265,6 +272,7 @@ describe Caramel::Action do
 
   it "renders a view page with escaped input and a nested view" do
     response = get("/greetings/%3CAda%3E", HTTP::Headers{"HX-Request-Type" => "partial"})
+    response.body.should end_with("<p>Hello, &lt;Ada&gt;</p><footer>Caramel</footer>")
     response.should have_html { p { "Hello, <Ada>" } }
     response.should have_html { footer { "Caramel" } }
   end

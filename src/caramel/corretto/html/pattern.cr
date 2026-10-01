@@ -18,7 +18,7 @@ module Corretto::HTML
     end
 
     def attribute(name : String, value : Array) : Nil
-      attribute(name, value.join(' '))
+      attribute(name, value.flatten.compact.join(' '))
     end
 
     def attribute(name : String, value : Bool) : Nil
@@ -36,6 +36,15 @@ module Corretto::HTML
     def description : String
       suffix = attributes.join { |name, value| "[#{name}=#{value.inspect}]" }
       "#{tag}#{suffix}"
+    end
+
+    def summary : String
+      requirements = children.map do |child|
+        child.is_a?(Pattern) ? child.summary : "plain #{child.inspect}"
+      end
+      requirements << text.inspect if text
+      return description if requirements.empty?
+      "#{description} { #{requirements.join("; ")} }"
     end
   end
 
@@ -106,7 +115,15 @@ module Corretto::HTML
       node.text = value
     end
 
+    private def record_text(node : Pattern, value : Number | Bool | Char) : Nil
+      node.text = value.to_s if node.children.empty?
+    end
+
     private def record_text(node : Pattern, value) : Nil
+      return unless node.children.empty?
+      return if value.nil? || value.responds_to?(:each)
+      message = "Unsupported HTML text value #{value.class} in <#{node.tag}>; use .to_s"
+      raise ArgumentError.new(message)
     end
 
     private def add(tag, attributes) : Pattern

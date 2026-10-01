@@ -71,7 +71,9 @@ module Corretto
       end
 
       private def description : String
-        @swap ? "#{@target} swapped with #{@swap}" : @target
+        target = @swap ? "#{@target} swapped with #{@swap}" : @target
+        pattern = @pattern
+        pattern ? "#{target} containing HTML matching #{pattern.summary[0, 500]}" : target
       end
 
       private def content_matches?(node) : Bool
@@ -79,7 +81,8 @@ module Corretto
         return true unless pattern
         comparison = HTML::Comparison.new
         found = node.scope.any? do |child|
-          next false if child.is_text? || child.is_comment? || child.tag_name != pattern.tag
+          next false if child.is_text? || child.is_comment?
+          next false unless child.tag_name.downcase == pattern.tag
           comparison.matches?(pattern, child)
         end
         @detail = "#{comparison.mismatch || pattern.description}\n" unless found

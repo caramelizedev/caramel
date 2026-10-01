@@ -235,7 +235,7 @@ module Caramel::Checks
             git: #{url.to_json}
             version: "~> #{Caramel::VERSION}"\n
         YAML
-      assert!(File.read(File.join(tagged, "shard.yml")).ends_with?(dependency))
+      assert!(File.read(File.join(tagged, "shard.yml")).includes?(dependency))
       locked = <<-YAML
           caramel:
             git: #{url.to_json}
@@ -246,10 +246,28 @@ module Caramel::Checks
       checkout = File.info(library, follow_symlinks: false).directory? &&
                  File.file?(File.join(library, "src/caramel/command_line.cr"))
       assert!(checkout, "lib/caramel is not the tagged release")
+      production_dependencies(tagged)
       checked = command([@frappe, "check"], chdir: tagged, echo: false)
       assert!(checked.stdout.starts_with?("OK check "), checked.stdout)
       puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} " \
            "resolves the framework by git, migrates and type-checks"
+    end
+
+    private def production_dependencies(project) : Nil
+      FileUtils.rm_rf(File.join(project, "lib"))
+      shards = File.join(@repo, "scripts/shards")
+      result = command([shards, "install", "--frozen", "--production"], chdir: project)
+      assert!(!Dir.exists?(File.join(project, "lib/lexbor")), result.stdout + result.stderr)
+      output = (result.stdout + result.stderr).downcase
+      assert!(!output.includes?("lexbor"), result.stdout + result.stderr)
+      source = File.join(project, "src/tagged.cr")
+      command([File.join(@repo, "scripts/crystal"), "build", source, "--no-codegen"],
+        chdir: project, timeout: 120.seconds)
+      command([@frappe, "setup"], chdir: project)
+      assert!(Dir.exists?(File.join(project, "lib/lexbor")))
+      command([@frappe, "corretto"], chdir: project, timeout: 600.seconds)
+      puts "PASS: production installs omit Lexbor entirely; " \
+           "development setup restores the pinned parser and runs Corretto"
     end
 
     # RFC-0005 agent tooling on the generated project: the stateless manifest,
