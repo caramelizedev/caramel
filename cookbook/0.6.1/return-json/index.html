@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Read and write JSON. · Caramel 0.6.1</title><meta name="description" content="Use a generated Book resource for browser HTML, JSON responses, and typed JSON input through the same action contracts."><link rel="canonical" href="https://caramelize.dev/cookbook/0.6.1/return-json/"><meta property="og:title" content="Read and write JSON. · Caramel 0.6.1"><meta property="og:description" content="Use a generated Book resource for browser HTML, JSON responses, and typed JSON input through the same action contracts."><meta property="og:url" content="https://caramelize.dev/cookbook/0.6.1/return-json/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script><link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script></head><body data-page="json"><div id="caramel-site" class="c-awards c-zed c-scroll c-documentation" role="region" aria-label="Caramel documentation">
+  <header class="c-header">
+    <a class="c-brand cursor-interaction" data-page="home" aria-label="Caramel home" href="/"><span class="c-mark" aria-hidden="true"></span>caramel</a>
+    <nav class="c-nav" aria-label="Main navigation">
+      
+      <a class="cursor-interaction" data-page="map" href="/docs/0.6.1/project-map/">Docs</a>
+      <a class="cursor-interaction" data-page="cookbook" aria-current="true" href="/cookbook/0.6.1/">Cookbook</a>
+      <a class="cursor-interaction" data-page="agents" href="/docs/0.6.1/agents/">For agents</a>
+    </nav>
+    <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+  </header>
+  <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
+    <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.6.1 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
+    <div class="c-results" id="c-results" aria-live="polite"></div>
+  </section>
+  <a class="c-skip" href="#c-article">Skip to content</a><main id="c-main">
+    <div id="c-doc">
+      
+      <div class="c-docgrid">
+        <details class="c-docnav" open><summary>Browse documentation <span aria-hidden="true">+</span></summary><nav class="c-sidebar" aria-label="Documentation navigation">
+          <div class="c-sidebar-edition"><strong>Documentation</strong><span>0.6.1</span></div><h3>Start here</h3><a class="cursor-interaction" data-page="releases" href="/docs/0.6.1/releases/">Current release</a><a class="cursor-interaction" data-page="learn" href="/docs/0.6.1/getting-started/">Your first application</a><a class="cursor-interaction" data-page="map" href="/docs/0.6.1/project-map/">Project map</a>
+          <h3>Build something</h3><a data-page="cookbook" href="/cookbook/0.6.1/">All recipes</a><a class="cursor-interaction" data-page="crud" href="/cookbook/0.6.1/create-a-resource/">Create a resource</a><a class="cursor-interaction" data-page="json" aria-current="page" href="/cookbook/0.6.1/return-json/">Read and write JSON</a><a class="cursor-interaction" data-page="uploads" href="/cookbook/0.6.1/uploads/">Upload a file</a><a class="cursor-interaction" data-page="jobs" href="/cookbook/0.6.1/background-jobs/">Run a background job</a>
+          <h3>Go further</h3><a class="cursor-interaction" data-page="testing" href="/docs/0.6.1/testing-html/">Test rendered HTML</a><a class="cursor-interaction" data-page="webhooks" href="/cookbook/0.6.1/webhooks/">Receive a webhook</a><a class="cursor-interaction" data-page="agents" href="/docs/0.6.1/agents/">Work with an agent</a><a class="cursor-interaction" data-page="deploy" href="/docs/0.6.1/deployment/">Deployment status</a>
+        </nav></details>
+        <article class="c-doccontent" id="c-article" tabindex="-1"><div class="c-eyebrow">Cookbook / Requests and responses</div><h1>Read and write JSON.</h1><p class="c-lede">Use a generated Book resource for browser HTML, JSON responses, and typed JSON input through the same action contracts.</p><div class="c-tagrow"><span class="c-tag c-draft">Draft recipe</span><span class="c-tag">Target: 0.6.1</span><span class="c-tag">Not yet recipe-tested</span></div><h2 id="c-json-response">Ask for a JSON response</h2><p>A generated action returns records from <code>handle</code> and supplies HTML through <code>render</code>. A client sending <code>Accept: application/json</code> receives the action result as JSON.</p><div class="c-snippet"><header>spec/requests/books_spec.cr · inside an example</header><pre><code>Corretto.session do |client, db|
+  response = client.get(&quot;/books&quot;,
+    headers: {&quot;Accept&quot; =&gt; &quot;application/json&quot;})
+  response.should have_status(200)
+  JSON.parse(response.body)[&quot;records&quot;].as_a.should be_empty
+end</code></pre></div><p>This example assumes an empty spec database. Add a persisted-book case to verify the returned fields.</p><h2 id="c-json-input">Bind a JSON object to the contract</h2><p>The default request policy reads <code>Content-Type: application/json</code>. Use a top-level object and the field’s JSON type: strings for String and Time, numbers for Int32, Int64 and Float64, and booleans for Bool. Null is absent; nested arrays and objects do not bind to fields. Duplicate members are errors.</p><div class="c-snippet"><header>spec/requests/books_spec.cr · inside an example</header><pre><code>Corretto.session do |client, db|
+  book = {title: &quot;Dune&quot;, author: &quot;Frank Herbert&quot;}
+  accept = {&quot;Accept&quot; =&gt; &quot;application/json&quot;}
+  created = client.post(&quot;/books&quot;, json: book, headers: accept)
+  created.should have_status(201)
+  JSON.parse(created.body)[&quot;record&quot;][&quot;title&quot;].as_s.should eq(&quot;Dune&quot;)
+end</code></pre></div><h2 id="c-json-csrf">Keep browser writes protected</h2><p>Same-origin browser fetch requests send the page’s CSRF token as <code>X-CSRF-Token</code>. A JSON member named <code>_csrf</code> does not supply that token, and <code>_method</code> does not override the HTTP method. Corretto adds the origin, cookie, and CSRF header automatically; override a header to test rejection.</p><div class="c-snippet"><header>Corretto · inside a session</header><pre><code>forged = {&quot;Accept&quot; =&gt; &quot;application/json&quot;, &quot;X-CSRF-Token&quot; =&gt; &quot;forged&quot;}
+client.post(&quot;/books&quot;, json: book, headers: forged).should have_status(403)</code></pre></div><h2 id="c-json-errors">Check the failure cases</h2><p>Malformed JSON returns 400. A valid JSON value that is not an object returns 422. Wrong field types and contract or changeset errors return 422; JSON clients receive an errors object. Unsupported media types, including <code>application/*+json</code>, return 415 under the default policy. An action can use raw ingress when it needs a different JSON format.</p><div class="c-snippet"><header>Terminal</header><pre><code>frappe check
+frappe corretto spec/requests/books_spec.cr</code></pre></div><div class="c-note"><strong>External callers need their own credential</strong><p>An API that skips browser CSRF must declare an authenticator with ingress. Its session is empty and unsaved; authenticate with a bearer token or signature that a browser does not attach automatically. The webhook guide shows the request-policy boundary.</p></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.6.1/">← All recipes</a><a class="cursor-interaction" data-page="webhooks" href="/cookbook/0.6.1/webhooks/">Receive a signed body →</a></div></article>
+        <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-json-response">Ask for a JSON response</a><a href="#c-json-input">Bind a JSON object to the contract</a><a href="#c-json-csrf">Keep browser writes protected</a><a href="#c-json-errors">Check the failure cases</a></aside>
+      </div>
+    </div>
+  </main>
+  <footer class="c-footer"><span>0.6.1 · Documentation preview</span><span>Apple Silicon macOS · Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+</div>
+</body></html>

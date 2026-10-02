@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test the HTML your app returns. · Caramel 0.6.1</title><meta name="description" content="Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state."><link rel="canonical" href="https://caramelize.dev/docs/0.6.1/testing-html/"><meta property="og:title" content="Test the HTML your app returns. · Caramel 0.6.1"><meta property="og:description" content="Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state."><meta property="og:url" content="https://caramelize.dev/docs/0.6.1/testing-html/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script><link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script></head><body data-page="testing"><div id="caramel-site" class="c-awards c-zed c-scroll c-documentation" role="region" aria-label="Caramel documentation">
+  <header class="c-header">
+    <a class="c-brand cursor-interaction" data-page="home" aria-label="Caramel home" href="/"><span class="c-mark" aria-hidden="true"></span>caramel</a>
+    <nav class="c-nav" aria-label="Main navigation">
+      
+      <a class="cursor-interaction" data-page="map" aria-current="true" href="/docs/0.6.1/project-map/">Docs</a>
+      <a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.6.1/">Cookbook</a>
+      <a class="cursor-interaction" data-page="agents" href="/docs/0.6.1/agents/">For agents</a>
+    </nav>
+    <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+  </header>
+  <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
+    <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.6.1 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
+    <div class="c-results" id="c-results" aria-live="polite"></div>
+  </section>
+  <a class="c-skip" href="#c-article">Skip to content</a><main id="c-main">
+    <div id="c-doc">
+      
+      <div class="c-docgrid">
+        <details class="c-docnav" open><summary>Browse documentation <span aria-hidden="true">+</span></summary><nav class="c-sidebar" aria-label="Documentation navigation">
+          <div class="c-sidebar-edition"><strong>Documentation</strong><span>0.6.1</span></div><h3>Start here</h3><a class="cursor-interaction" data-page="releases" href="/docs/0.6.1/releases/">Current release</a><a class="cursor-interaction" data-page="learn" href="/docs/0.6.1/getting-started/">Your first application</a><a class="cursor-interaction" data-page="map" href="/docs/0.6.1/project-map/">Project map</a>
+          <h3>Build something</h3><a data-page="cookbook" href="/cookbook/0.6.1/">All recipes</a><a class="cursor-interaction" data-page="crud" href="/cookbook/0.6.1/create-a-resource/">Create a resource</a><a class="cursor-interaction" data-page="json" href="/cookbook/0.6.1/return-json/">Read and write JSON</a><a class="cursor-interaction" data-page="uploads" href="/cookbook/0.6.1/uploads/">Upload a file</a><a class="cursor-interaction" data-page="jobs" href="/cookbook/0.6.1/background-jobs/">Run a background job</a>
+          <h3>Go further</h3><a class="cursor-interaction" data-page="testing" aria-current="page" href="/docs/0.6.1/testing-html/">Test rendered HTML</a><a class="cursor-interaction" data-page="webhooks" href="/cookbook/0.6.1/webhooks/">Receive a webhook</a><a class="cursor-interaction" data-page="agents" href="/docs/0.6.1/agents/">Work with an agent</a><a class="cursor-interaction" data-page="deploy" href="/docs/0.6.1/deployment/">Deployment status</a>
+        </nav></details>
+        <article class="c-doccontent" id="c-article" tabindex="-1"><div class="c-eyebrow">Guides / Corretto</div><h1>Test the HTML your app returns.</h1><p class="c-lede">Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state.</p><h2 id="c-test-start">Start with a real response</h2><p>Generated spec helpers require <code>caramel/corretto</code> and call <code>Corretto.configure(App)</code>. Inside an example, use a session to request the page and assert its observable output.</p><div class="c-snippet"><header>spec/requests/books_spec.cr · after creating a Book titled &lt;Dune&gt;</header><pre><code>shown = client.get(path)
+shown.should have_status(200)
+shown.should render_page(&quot;Book&quot;)
+shown.should have_html {
+  section(class: &quot;form-page&quot;) {
+    h1 { &quot;Book&quot; }
+    dl { dd { &quot;&lt;Dune&gt;&quot; } }
+    a(href: &quot;#{path}/edit&quot;) { &quot;Edit book&quot; }
+  }
+}</code></pre></div><p>The block records requirements independently of the view renderer. Expected strings are decoded literal text: <code>"&lt;Dune&gt;"</code> checks escaped user text. Build expectations from values and elements, rather than rendering an application view as the expected result.</p><h2 id="c-test-requirements">Select the requirements that matter</h2><p>Each block has one root. By default, extra wrappers, markup and attributes are allowed. Nested requirements belong to the same matched ancestor; sibling requirements consume distinct nodes. Text matches exactly after HTML whitespace normalization, while pre and textarea preserve whitespace. Classes match a token subset, and Boolean attributes check presence or absence. Use strings for literal ARIA/data values such as <code>aria_expanded: "false"</code>.</p><div class="c-snippet"><header>Corretto · scopes and counts</header><pre><code>shown.should have_html(within: &quot;#books&quot;, count: 2) { li(class: &quot;book&quot;) }
+shown.should have_html(count: 0) { script(src: &quot;/unexpected.js&quot;) }
+shown.should_not have_html { p { &quot;Access denied&quot; } }</code></pre></div><p>Numeric, Boolean, and character leaf values check their literal text. Convert other values with <code>.to_s</code>. Use <code>plain</code> for direct text beside child elements. Loops and captured local values work; use <code>element("book-card")</code> for custom tags. A misspelled standard element fails compilation.</p><h2 id="c-test-strict">Check structure and partial responses</h2><p><code>strict: true</code> compares complete attributes and ordered direct children, ignoring comments and insignificant formatting whitespace. Use it when the complete subtree is the contract.</p><div class="c-snippet"><header>Corretto · a complete subtree</header><pre><code>shown.should have_html(strict: true) {
+  ul(class: &quot;books&quot;) {
+    li { &quot;Dune&quot; }
+    li { &quot;Solaris&quot; }
+  }
+}</code></pre></div><p>The block overload of <code>render_partial</code> checks target, swap, and content in the same hx-partial envelope. HTML5 table and select contexts are supported, including rows or cells inside partial envelopes.</p><div class="c-snippet"><header>Corretto · fragment response</header><pre><code>created.should render_partial(&quot;#note-list&quot;, swap: &quot;beforeend&quot;) {
+  li { &quot;&lt;b&gt;Milk&lt;/b&gt; ×2&quot; }
+}</code></pre></div><p><code>render_page("Books")</code> requires an actual source doctype and a parsed title containing Books. Both plain response matchers and block expectations are available. Invalid selectors, missing scopes, and invalid patterns raise even for negative assertions. Keep exact-byte tests for serialization and browser tests for JavaScript and htmx morphing.</p><h2 id="c-test-install">Install the test dependencies</h2><p>Generated applications declare Lexbor 3.6.4 as a development dependency. Keep this pin and the matching lockfile entry when configuring a project; <code>frappe setup</code> uses a frozen install. Development installs build the native parser with cc and ar, and need network access for its verified source download. Production installs omit the parser.</p><div class="c-snippet"><header>shard.yml · development dependencies</header><pre><code>development_dependencies:
+  lexbor:
+    github: kostya/lexbor
+    version: 3.6.4</code></pre></div><p>Use <code>frappe lint</code> for the scoped paragraph and nested-block rules in expectations. Upstream Ameba editor integrations alone do not load Caramel’s custom rules.</p><div class="c-snippet"><header>Terminal</header><pre><code>frappe check
+frappe corretto spec/requests/books_spec.cr
+frappe lint</code></pre></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.6.1/">← All recipes</a><a class="cursor-interaction" data-page="releases" href="/docs/0.6.1/releases/">Read the current release guide →</a></div></article>
+        <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-test-start">Start with a real response</a><a href="#c-test-requirements">Select the requirements that matter</a><a href="#c-test-strict">Check structure and partial responses</a><a href="#c-test-install">Install the test dependencies</a></aside>
+      </div>
+    </div>
+  </main>
+  <footer class="c-footer"><span>0.6.1 · Documentation preview</span><span>Apple Silicon macOS · Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+</div>
+</body></html>
