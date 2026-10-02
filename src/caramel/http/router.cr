@@ -1,6 +1,7 @@
 require "uri"
 require "../response"
 require "../action"
+require "../wording"
 require "./request_input"
 require "./request_context"
 
@@ -71,6 +72,13 @@ module Caramel
         headers["Content-Length"] = response.body.bytesize.to_s
       end
       Response.new(response.status, "", headers)
+    end
+
+    # No route matches the path, or a route parameter does not fit its
+    # field. The body is `Caramel::Wording.not_found`, which a locale catalog
+    # can translate.
+    def self.not_found : Response
+      Response.new(404, Wording.not_found)
     end
 
     # A route's authenticator refused the request; it learns nothing more.
@@ -460,9 +468,7 @@ macro __caramel_router_draw(locations, &block)
       path = match.path
       segments = match.segments
       return ::Caramel::Response.new(400, "Malformed path") unless segments
-      if segments.size > ::Caramel::Router::MAX_SEGMENTS
-        return ::Caramel::Response.new(404, "Not found")
-      end
+      return ::Caramel::Router.not_found if segments.size > ::Caramel::Router::MAX_SEGMENTS
       index, mask = match.index, match.mask
       if override = context.input.method_override
         index, mask = TREE.match(path, segments, override)
@@ -472,19 +478,19 @@ macro __caramel_router_draw(locations, &block)
         end
       end
       if index < 0
-        return ::Caramel::Response.new(404, "Not found") if mask == 0
+        return ::Caramel::Router.not_found if mask == 0
         headers = HTTP::Headers{"Allow" => ::Caramel::Router.allow_header(mask)}
         return ::Caramel::Response.new(405, "Method not allowed", headers)
       end
       {% if routes.empty? %}
-        response = ::Caramel::Response.new(404, "Not found")
+        response = ::Caramel::Router.not_found
       {% else %}
         response = case index
         {% for route, index in routes %}
           when {{ index }} then __caramel_route_{{ index }}(context, path, segments)
         {% end %}
         else
-          ::Caramel::Response.new(404, "Not found")
+          ::Caramel::Router.not_found
         end
       {% end %}
       context.request.method == "HEAD" ? ::Caramel::Router.head(response) : response
@@ -510,7 +516,7 @@ macro __caramel_router_draw(locations, &block)
         contract = ::{{ route[2] }}::Contract.parse(context.input)
         {% unless route[4].empty? %}
           if contract.route_error?({{ route[4].map { |param| param[0] } }})
-            return ::Caramel::Response.new(404, "Not found")
+            return ::Caramel::Router.not_found
           end
         {% end %}
         return action.render_contract_failure(contract) unless contract.valid?

@@ -31,7 +31,7 @@ module Caramel
     USAGE = [
       "serve",
       "work [--queues=NAMES] [--concurrency=N] [--no-scheduler]",
-      "seed", "routes", "schema", "drift",
+      "seed", "routes", "schema", "drift", "translations",
       "migrate [--dev-override]",
       "lint [--dev-override]",
     ].join('|')
@@ -88,11 +88,8 @@ module Caramel
       return refuse_usage unless flags.empty? || dev_override
 
       case command
-      when "routes"
-        routes(T::AppRouter.routes)
-      when "schema"
-        puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
-        0
+      when "routes", "schema", "translations"
+        describe(app, command, root)
       when "serve", "seed", "migrate", "lint", "drift"
         with_database(command == "migrate") do |db, url|
           database_command(app, command, db, url, dev_override, root)
@@ -101,6 +98,21 @@ module Caramel
         puts usage
         command == "help" ? 0 : 2
       end
+    end
+
+    # Answers from the compiled application alone, without a database: its
+    # routes, its declared schema or the keys its locales lack.
+    private def self.describe(app : T.class, command : String, root : String) : Int32 forall T
+      case command
+      when "routes" then routes(T::AppRouter.routes)
+      when "schema" then schema
+      else               translations(root)
+      end
+    end
+
+    private def self.schema : Int32
+      puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
+      0
     end
 
     # Runs Cold Brew's workers, maintenance and, unless disabled, schedules
@@ -117,6 +129,13 @@ module Caramel
         # In-flight jobs finish; no new ones start.
         service.stop
       end
+      0
+    end
+
+    # Lists the keys each locale takes from the default one, and returns 1
+    # while any is missing. `caramel/i18n` replaces it.
+    def self.translations(root : String) : Int32
+      puts "This application declares no locales."
       0
     end
 

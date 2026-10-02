@@ -1,4 +1,5 @@
 require "../http/request_input"
+require "../wording"
 
 module Caramel
   # The explicit, typed input of one action. Fields bind by name from route
@@ -143,7 +144,6 @@ module Caramel
       {% elsif has_max %}
         {% summary = summary + "(max=#{max})" %}
       {% end %}
-      {% unit = full == "String" ? " characters" : "" %}
 
       CARAMEL_FIELD_{{ name.upcase }} = {
         {{ name.stringify }}, {{ short }}, {{ nilable }}, {{ has_default }}, {{ summary }},
@@ -161,7 +161,7 @@ module Caramel
 
       def __caramel_assign_{{ name }}(input : ::Caramel::RequestInput) : Nil
         if input.source_count({{ name.stringify }}) > 1
-          add_error("_base", {{ "Duplicate field: #{name}" }})
+          add_error("_base", ::Caramel::Wording.duplicate_field({{ name.stringify }}))
           return
         end
         {% if full == "Caramel::UploadedFile" %}
@@ -171,17 +171,17 @@ module Caramel
           end
           raw = input.value?({{ name.stringify }})
           if raw && !raw.strip.empty?
-            add_error({{ name.stringify }}, "must be a file")
+            add_error({{ name.stringify }}, ::Caramel::Wording.must_be_file)
             return
           end
           {% unless nilable %}
-            add_error({{ name.stringify }}, "is required")
+            add_error({{ name.stringify }}, ::Caramel::Wording.required)
           {% end %}
         {% else %}
           {% json = ::Caramel::RequestContract::JSON_TYPES[full] %}
           json = ::Caramel::RequestInput::JsonKind::{{ json[0].id }}
           if input.json_mismatch?({{ name.stringify }}, json)
-            add_error({{ name.stringify }}, {{ "must be a JSON #{json[1].id}" }})
+            add_error({{ name.stringify }}, ::Caramel::Wording.json_type({{ json[1] }}))
             return
           end
           raw = input.value?({{ name.stringify }})
@@ -190,25 +190,27 @@ module Caramel
             {% if has_default %}
               @{{ name }} = {{ default }}
             {% elsif !nilable %}
-              add_error({{ name.stringify }}, "is required")
+              add_error({{ name.stringify }}, ::Caramel::Wording.required)
             {% end %}
             return
           end
           value = ::Caramel::RequestContract.convert(raw, {{ scalar }})
           if value.nil?
-            add_error({{ name.stringify }}, {{ "must be a valid #{short.id}" }})
+            add_error({{ name.stringify }}, ::Caramel::Wording.invalid_value({{ short }}))
             return
           end
           {% measure = full == "String" ? "value.size".id : "value".id %}
+          {% at_least = full == "String" ? "at_least_characters".id : "at_least".id %}
+          {% at_most = full == "String" ? "at_most_characters".id : "at_most".id %}
           {% if has_min %}
             if {{ measure }} < {{ min }}
-              add_error({{ name.stringify }}, {{ "must be at least #{min}#{unit.id}" }})
+              add_error({{ name.stringify }}, ::Caramel::Wording.{{ at_least }}({{ min }}))
               return
             end
           {% end %}
           {% if has_max %}
             if {{ measure }} > {{ max }}
-              add_error({{ name.stringify }}, {{ "must be at most #{max}#{unit.id}" }})
+              add_error({{ name.stringify }}, ::Caramel::Wording.{{ at_most }}({{ max }}))
               return
             end
           {% end %}
@@ -231,7 +233,8 @@ module Caramel
           {% end %}
         {% end %}
         input.strict_keys.each do |key|
-          contract.add_error("_base", "Unknown field: #{key}") unless __caramel_field?(key)
+          next if __caramel_field?(key)
+          contract.add_error("_base", ::Caramel::Wording.unknown_field(key))
         end
         contract
       end

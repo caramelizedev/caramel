@@ -5,7 +5,7 @@ module App::Views::Layouts
 
     private def blueprint
       doctype
-      html lang: "en" do
+      html lang: Caramel.language do
         head do
           meta charset: "utf-8"
           meta name: "viewport", content: "width=device-width, initial-scale=1"

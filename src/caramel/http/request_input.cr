@@ -4,6 +4,7 @@ require "json"
 require "uri/params"
 require "set"
 require "./ingress"
+require "../wording"
 
 module Caramel
   # A multipart file part streamed to a private tempfile. The file is deleted
@@ -194,7 +195,7 @@ module Caramel
         parser.read_object { |key| read_json_member(parser, key) }
       else
         parser.skip
-        add_error("_base", "Expected a JSON object")
+        add_error("_base", Wording.expected_json_object)
       end
       raise InvalidEncoding.new("Malformed JSON") unless parser.kind.eof?
     rescue JSON::ParseException
@@ -206,7 +207,7 @@ module Caramel
     private def read_json_member(parser : JSON::PullParser, key : String) : Nil
       check_text(key)
       if @json_kinds.has_key?(key)
-        add_error("_base", "Duplicate field: #{key}")
+        add_error("_base", Wording.duplicate_field(key))
         parser.skip
       else
         @json_kinds[key] = read_json_value(parser, key)
@@ -244,7 +245,7 @@ module Caramel
         check_text(key)
         check_text(value)
         unless seen.add?(key)
-          add_error("_base", "Duplicate field: #{key}")
+          add_error("_base", Wording.duplicate_field(key))
           next
         end
         next if control?(key, value, controls)
@@ -262,7 +263,7 @@ module Caramel
         name = part.name
         check_text(name)
         unless seen.add?(name)
-          add_error("_base", "Duplicate field: #{name}")
+          add_error("_base", Wording.duplicate_field(name))
           next
         end
         if part.filename

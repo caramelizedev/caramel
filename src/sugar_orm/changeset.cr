@@ -1,3 +1,5 @@
+require "./wording"
+
 module SugarORM
   # The type-independent part of every changeset; `SugarORM::Invalid` holds one.
   abstract class AnyChangeset
@@ -176,7 +178,7 @@ module SugarORM
     end
 
     # Each field must be present: not nil and, for strings, not blank.
-    def validate_required(*fields : T::Field, message : String = "is required") : Nil
+    def validate_required(*fields : T::Field, message : String = Wording.required) : Nil
       fields.each do |field|
         value = current(field)
         add_error(field, message) if value.nil? || (value.is_a?(String) && value.blank?)
@@ -184,7 +186,7 @@ module SugarORM
     end
 
     # A changed string must not be blank.
-    def validate_presence(field : T::Field, message : String = "can't be blank") : Nil
+    def validate_presence(field : T::Field, message : String = Wording.blank) : Nil
       column = T.__sugar_column(field)
       return unless @changes.has_key?(column)
       value = @changes[column]
@@ -193,35 +195,35 @@ module SugarORM
 
     def validate_greater_than(field : T::Field,
                               than : Number,
-                              message : String = "must be greater than #{than}") : Nil
+                              message : String = Wording.greater_than(than)) : Nil
       number(field) { |value| add_error(field, message) unless value > than }
     end
 
     def validate_less_than(field : T::Field,
                            than : Number,
-                           message : String = "must be less than #{than}") : Nil
+                           message : String = Wording.less_than(than)) : Nil
       number(field) { |value| add_error(field, message) unless value < than }
     end
 
     def validate_length(field : T::Field, min : Int32? = nil, max : Int32? = nil) : Nil
       string(field) do |value|
         if min && value.size < min
-          add_error(field, "should be at least #{min} character(s)")
+          add_error(field, Wording.too_short(min))
         elsif max && value.size > max
-          add_error(field, "should be at most #{max} character(s)")
+          add_error(field, Wording.too_long(max))
         end
       end
     end
 
     def validate_format(field : T::Field,
                         format : Regex,
-                        message : String = "has invalid format") : Nil
+                        message : String = Wording.invalid_format) : Nil
       string(field) { |value| add_error(field, message) unless format.matches?(value) }
     end
 
     def validate_inclusion(field : T::Field,
                            in values : Enumerable,
-                           message : String = "is invalid") : Nil
+                           message : String = Wording.invalid) : Nil
       column = T.__sugar_column(field)
       return unless @changes.has_key?(column)
       value = @changes[column]
@@ -231,7 +233,7 @@ module SugarORM
     # Maps a unique violation (SQLSTATE 23505) of the index that leads with
     # `field` to an error on it, instead of raising, when this changeset saves.
     def unique_constraint(field : T::Field,
-                          message : String = "has already been taken") : Nil
+                          message : String = Wording.taken) : Nil
       @unique_constraints << {T.__sugar_column(field), message}
     end
 
@@ -289,7 +291,7 @@ module SugarORM
         @record = original
         @saved = true
       else
-        add_error("_base", "Record no longer exists")
+        add_error("_base", Wording.record_gone)
       end
     end
 
@@ -308,7 +310,7 @@ module SugarORM
                   else
                     insert? && T.__sugar_required_columns.includes?(column)
                   end
-        add_error(column, "is required") if missing
+        add_error(column, Wording.required) if missing
       end
       validate(self)
     end
@@ -333,7 +335,7 @@ module SugarORM
         @record = stored
         @saved = true
       else
-        add_error("_base", "Record no longer exists")
+        add_error("_base", Wording.record_gone)
       end
     end
 

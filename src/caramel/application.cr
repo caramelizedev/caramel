@@ -6,6 +6,7 @@ require "./csrf"
 require "./http/request_input"
 require "./http/request_context"
 require "./http/router"
+require "./wording"
 {% if flag?(:caramel_development) %}
   require "./development_error"
 {% end %}
@@ -18,8 +19,6 @@ module Caramel
   class Application
     include HTTP::Handler
 
-    EXPIRED_FORM = "This form has expired or came from another site. " \
-                   "Reload the page and try again."
     CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; " \
                               "img-src 'self' data:; base-uri 'self'; form-action 'self'; " \
                               "frame-ancestors 'none'; object-src 'none'"
@@ -43,6 +42,30 @@ module Caramel
       if static = static_response(request)
         return secure(static)
       end
+      secure(localized(request) { |routed| route(routed) })
+    end
+
+    def call(context : HTTP::Server::Context) : Nil
+      response = handle(context.request)
+      context.response.status_code = response.status
+      response.headers.each { |name, values| context.response.headers[name] = values }
+      if streamer = response.streamer
+        streaming(response) do
+          streamer.call(context.response)
+        rescue IO::Error | HTTP::Server::ClientError
+          # The client disconnected; the server wraps socket errors in ClientError.
+        rescue error
+          # The status line has already been sent; only the log can report this.
+          Log.error { "request_id=#{UUID.random} error_type=#{error.class} streaming=true" }
+        end
+      else
+        context.response.print(response.body)
+      end
+    end
+
+    # Reads, checks and dispatches one request. Every failure becomes a
+    # response; `handle` secures them all.
+    private def route(request : HTTP::Request) : Response
       # The route decides how its body is read and whether CSRF guards it;
       # a request that matches none reads and is checked as a form.
       match = @router.match(request)
@@ -56,15 +79,15 @@ module Caramel
       if cookie = context.session_cookie
         response.headers.add("Set-Cookie", cookie.to_set_cookie_header)
       end
-      secure(response)
+      response
     rescue Forbidden
-      secure(Response.new(403, EXPIRED_FORM))
+      Response.new(403, Wording.expired_form)
     rescue RequestInput::TooLarge
-      secure(Response.new(413, "Request body is too large"))
+      Response.new(413, "Request body is too large")
     rescue RequestInput::UnsupportedMediaType
-      secure(Response.new(415, RequestInput::UNSUPPORTED))
+      Response.new(415, RequestInput::UNSUPPORTED)
     rescue RequestInput::InvalidEncoding
-      secure(Response.new(400, "Malformed request"))
+      Response.new(400, "Malformed request")
     rescue error
       request_id = UUID.random.to_s
       # Do not log arbitrary exception messages: dependency errors may include
@@ -72,7 +95,7 @@ module Caramel
       Log.error { "request_id=#{request_id} error_type=#{error.class}" }
       {% if flag?(:caramel_development) %}
         if ENV["CARAMEL_ENV"]? == "development"
-          return secure(DevelopmentError.response(error, request_id, request))
+          return DevelopmentError.response(error, request_id, request)
         end
       {% end %}
       headers = HTTP::Headers{
@@ -80,27 +103,21 @@ module Caramel
         "Cache-Control" => "no-store",
         "Content-Type"  => "text/plain; charset=utf-8",
       }
-      secure(Response.new(500, "Something went wrong. Reference: #{request_id}", headers))
+      Response.new(500, "Something went wrong. Reference: #{request_id}", headers)
     ensure
       input.try(&.cleanup)
     end
 
-    def call(context : HTTP::Server::Context) : Nil
-      response = handle(context.request)
-      context.response.status_code = response.status
-      response.headers.each { |name, values| context.response.headers[name] = values }
-      if streamer = response.streamer
-        begin
-          streamer.call(context.response)
-        rescue IO::Error | HTTP::Server::ClientError
-          # The client disconnected; the server wraps socket errors in ClientError.
-        rescue error
-          # The status line has already been sent; only the log can report this.
-          Log.error { "request_id=#{UUID.random} error_type=#{error.class} streaming=true" }
-        end
-      else
-        context.response.print(response.body)
-      end
+    # Routes *request*. `caramel/i18n` replaces this to resolve the request's
+    # locale around routing.
+    private def localized(request : HTTP::Request, & : HTTP::Request -> Response) : Response
+      yield request
+    end
+
+    # Writes a streamed body. `caramel/i18n` replaces this to keep the
+    # response's locale while it streams.
+    private def streaming(response : Response, &) : Nil
+      yield
     end
 
     private def secure(response : Response) : Response

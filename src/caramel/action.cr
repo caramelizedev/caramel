@@ -1,6 +1,7 @@
 require "json"
 require "./response"
 require "./html"
+require "./wording"
 require "./hypermedia"
 require "./islands"
 require "./contracts/request_contract"
@@ -198,7 +199,8 @@ module Caramel
     def layout(page : Page) : String
       title = HTML.escape(title_for(page))
       head = %(<head><meta charset="utf-8"><title>#{title}</title></head>)
-      %(<!DOCTYPE html><html lang="en">#{head}<body>#{page.body}</body></html>)
+      lang = HTML.escape(Caramel.language)
+      %(<!DOCTYPE html><html lang="#{lang}">#{head}<body>#{page.body}</body></html>)
     end
 
     def title_for(page : Page) : String
@@ -276,7 +278,7 @@ module Caramel
       Response.redirect_external(request, url, status)
     end
 
-    def not_found(message : String = "Not found") : Response
+    def not_found(message : String = Wording.not_found) : Response
       Response.new(404, message)
     end
 
@@ -312,7 +314,7 @@ module Caramel
     end
 
     def contract_failure_page(contract : RequestContract) : Response
-      page("Check your request", Egress.errors_html(contract.errors), 422)
+      page(Wording.check_request, Egress.errors_html(contract.errors), 422)
     end
 
     # Answers errors found after the contract, such as a changeset's, the way
@@ -322,7 +324,7 @@ module Caramel
                       status : Int32 = 422) : Response
       return json({errors: errors}, status) if @context.wants_json?
       if @context.browser?
-        return page("Check your request", Egress.errors_html(errors), status)
+        return page(Wording.check_request, Egress.errors_html(errors), status)
       end
 
       Egress.text(status, Egress.errors_text(errors, status, @context.method, request.path))
@@ -376,7 +378,7 @@ module Caramel
       def errors_html(errors : Hash(String, Array(String))) : String
         String.build do |io|
           io << %(<section class="contract-errors" role="alert">)
-          io << %(<h1>Check your request</h1><ul>)
+          io << %(<h1>) << HTML.escape(Wording.check_request) << %(</h1><ul>)
           errors.each do |field, messages|
             messages.each do |message|
               io << "<li><code>" << HTML.escape(field) << "</code>: "

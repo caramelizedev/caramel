@@ -26,6 +26,14 @@ module Caramel
     def island(component : String, props) : Nil
       raw Island.tag(component, props)
     end
+
+    # Builds a fragment with a view's escaping, such as a link to pass into
+    # a message: `markup { a(href: "/help") { "help" } }`. Inside the block,
+    # element methods such as `label` or `title` come first; the view's
+    # other methods and locals stay available.
+    def markup(&) : HTML::Safe
+      HTML::Safe.new(Blueprint::HTML::Builder.build { |builder| with builder yield })
+    end
   end
 end
 
