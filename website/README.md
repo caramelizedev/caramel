@@ -1,6 +1,6 @@
 # caramelize.dev
 
-Static marketing site and preview documentation for Caramel 0.7.0.
+Static marketing site and preview documentation for Caramel 0.7.1.
 The approved design lives in `source/site.html`. `build.mjs` exports that design
 to crawlable HTML pages with native links and ordinary window scrolling.
 The full-window documentation shell uses `source/docs.css` and `source/docs.js`,
@@ -12,7 +12,13 @@ The site documents the current framework state only. Its routes and metadata
 follow `shard.yml`; update the release labels and guides in `source/site.html`
 when the framework ships. `/docs/` and `/cookbook/` lead to the current edition.
 The internationalization guide covers opt-in catalogs, typed messages, locale
-selection, formatting, framework wording, and explicit locale scopes for jobs.
+selection, formatting, framework wording, explicit locale scopes for jobs, and the
+catalog's reserved keys. Best practices and the Reference pages (routes and
+contracts, actions, views, SugarORM, Cold Brew, Corretto, security defaults,
+commands, and the local environment) document the current APIs. `commands.mjs`
+reads the command lists from `src/frappe/commands.cr`,
+`src/caramel/command_line.cr`, and `src/latte.cr` at build time, and `check.mjs`
+fails when a command or a framework catalog key is missing from its page.
 `dist` is recreated on every build, so keep authored content under `source`.
 
 Requires Node.js 22 or newer; no npm install is needed. Code examples declare
@@ -35,9 +41,11 @@ To build, validate, and publish the current website with existing Git credential
 node website/publish.mjs
 ```
 
-The publisher uses a temporary Git index, preserves deployment history, and does
-not switch the working branch or alter the working index. It pushes without force.
-Generated output is ignored on `main`.
+The publisher refuses to run while `website/` has uncommitted changes, so every
+`gh-pages` commit names a `main` commit that holds its source. It uses a temporary
+Git index, preserves deployment history, and does not switch the working branch or
+alter the working index. It pushes without force. Generated output is ignored on
+`main`.
 
 `templates/github-pages.workflow.yml` is an optional GitHub Actions workflow for
 automatic builds on main. The current GitHub credential cannot upload workflows.

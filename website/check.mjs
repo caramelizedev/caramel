@@ -3,6 +3,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { highlightCode, decodeCode } from './highlight.mjs';
+import { frappeCommands, applicationCommands, latteCommands } from './commands.mjs';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -38,6 +39,18 @@ const currentJS = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
 assert(currentJS.includes(`/docs/${version}/testing-html/`), 'Current search omits HTML testing');
 assert(currentJS.includes(`/docs/${version}/releases/`), 'Current search omits the release guide');
 assert(currentJS.includes(`/docs/${version}/internationalization/`), 'Current search omits internationalization');
+assert(currentJS.includes(`/docs/${version}/best-practices/`), 'Current search omits best practices');
+// The references must keep up with the sources they document.
+const escapeHTML = text => text.replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const commandsPage = read(`docs/${version}/commands`);
+for (const {syntax} of [...frappeCommands(), ...applicationCommands(), ...latteCommands()]) {
+  assert(commandsPage.includes(`<code>${escapeHTML(syntax)}</code>`), `Command reference omits ${syntax}`);
+}
+const catalog = fs.readFileSync(new URL('../src/caramel/i18n/catalog.cr', import.meta.url), 'utf8');
+const i18nPage = read(`docs/${version}/internationalization`);
+for (const [, key] of catalog.matchAll(/\{"((?:errors|pages)\.[a-z_]+)", "::/g)) {
+  assert(i18nPage.includes(`<code>${key}</code>`), `Internationalization reference omits caramel.${key}`);
+}
 const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
 for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<\/loc>/g)) {
   assert(fs.existsSync(path.join(root, route, 'index.html')), `Sitemap: missing ${route}`);

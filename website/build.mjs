@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { highlightCode } from './highlight.mjs';
+import { commandRows } from './commands.mjs';
 
 // The approved prototype is the design/content source. Export real documents,
 // normal page scrolling, and shared assets without a client framework.
@@ -15,7 +16,11 @@ const sections = {
   learn: 'docs/getting-started', map: 'docs/project-map',
   agents: 'docs/agents', deploy: 'docs/deployment',
   testing: 'docs/testing-html', releases: 'docs/releases',
-  i18n: 'docs/internationalization',
+  i18n: 'docs/internationalization', practices: 'docs/best-practices',
+  routing: 'docs/routes-and-contracts', actions: 'docs/actions-and-responses',
+  views: 'docs/views', sugarorm: 'docs/sugarorm', coldbrew: 'docs/cold-brew',
+  corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',
+  local: 'docs/local-environment',
   crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
   uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
   webhooks: 'cookbook/webhooks',
@@ -29,6 +34,9 @@ const script = source.match(/<script>([\s\S]*?)<\/script>/)[1];
 const dataSource = script.slice(script.indexOf('  const escapeText'), script.indexOf('  function persist'));
 const { pages, tasks, recipes, searchIndex } = Function(dataSource + '\nreturn {pages,tasks,recipes,searchIndex};')();
 const current = {version, pages: Object.fromEntries(Object.entries(pages).map(([key, render]) => [key, render()])), tasks, recipes, searchIndex};
+// The command lists are read from the sources that define the commands.
+current.pages.commands = current.pages.commands.replace(/<div class="c-files" data-commands="(\w+)"><\/div>/g,
+  (_, kind) => `<div class="c-files" data-commands="${kind}">${commandRows(kind)}</div>`);
 const routes = routesFor(current);
 const links = (html, routes) => html.replace(/<button\b([^>]*\bdata-page="([^"]+)"[^>]*)>([\s\S]*?)<\/button>/g,
   (_, attrs, page, content) => `<a${attrs} href="${routes[page]}">${content}</a>`);
