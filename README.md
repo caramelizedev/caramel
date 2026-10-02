@@ -20,6 +20,7 @@ The application workflow branch adds SugarORM (immutable schemas, explicit chang
 - Corretto checks rendered HTML with nested Blueprint-shaped expectations; see [testing HTML](docs/testing.md).
 - The CLI creates and restores projects, generates typed resources, derives and applies migrations, and runs Corretto specs (`frappe corretto`) in rolled-back savepoints against per-worker Latte databases.
 - Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs.
+- Internationalization is opt-in through `frappe make locale CODE`. Catalogs are Crystal literals that compile to typed `t.` messages with CLDR plurals, each request resolves its locale, and an application that never opts in compiles none of it ([ADR 0024](docs/decisions/0024-internationalization.md)).
 - The watched development loop reacts to kqueue events, type-checks before building, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes.
 - `scripts/check browser` accepts the browser experience on a `.localhost` site.
 
