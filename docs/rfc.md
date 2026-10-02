@@ -697,8 +697,8 @@ frappe expand FILE:LINE:COL  # Print the plain Crystal that the macro call at FI
 
 #### 2.2. Two-Tier Compilation Pipeline
 
-1. **Tier 1 (Verification Loop):** Invoked via `frappe check`, and before every rebuild in `frappe dev`. Runs `crystal build --no-codegen` with the development flags. Performs syntax parsing, macro evaluation, and whole-program type inference; machine code generation is skipped. The ~180ms target is a deferred performance goal.
-2. **Tier 2 (Artifact Generation):** Full native LLVM machine code compilation and linking produces the binaries that must run. Crystal has no interpreter for whole applications, so these are:
+1. **Tier 1 (Verification Loop):** Invoked via `frappe check`, which runs `crystal build --no-codegen` with the development flags, and as the semantic phase of every build in `frappe dev`, reported before code generation starts ([ADR 0012](decisions/0012-latte-supervision-watching-branching.md) §4). Performs syntax parsing, macro evaluation, and whole-program type inference before any machine code is generated. The ~180ms target is a deferred performance goal.
+2. **Tier 2 (Artifact Generation):** Full native LLVM machine code compilation and linking produces the binaries that must run. The managed toolchain's Crystal has no interpreter, and the experimental interpreter in other builds cannot yet run an application reliably ([ADR 0013](decisions/0013-frappe-cli-check-mrdp.md) §5), so these are native builds:
    * the development server (`frappe dev`);
    * the spec workers (`frappe corretto`);
    * `frappe routes`, `migrate` and `seed`;
