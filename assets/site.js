@@ -15,30 +15,52 @@
   const story = root.querySelector('#l-story');
   const stage = root.querySelector('.l-sticky');
   const diagram = root.querySelector('.l-diagram');
+  const steam = root.querySelector('.l-steam');
   const chapters = Array.from(root.querySelectorAll('.l-chapter'));
   const pieces = ['caramel','foam','milk','espresso'].map(name=>root.querySelector('.l-'+name));
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let scrollFrame = 0, activeChapter = -1;
+  let scrollProgress = null, previousFrameTime = 0;
   const clamp = value => Math.max(0,Math.min(1,value));
   const smooth = value => value*value*(3-2*value);
-  function updateScroll(){
+  function updateScroll(time){
     scrollFrame=0;
     if(currentPage!=='home')return;
     const headerHeight=root.querySelector('.c-header').offsetHeight;
-    root.style.setProperty('--header-height',headerHeight+'px');
+    if(root.style.getPropertyValue('--header-height')!==headerHeight+'px'){
+      root.style.setProperty('--header-height',headerHeight+'px');
+    }
     const storyStart=story.offsetTop-headerHeight;
-    const p=clamp((window.scrollY-storyStart)/Math.max(1,story.offsetHeight-stage.offsetHeight));
-    // A little travel at the beginning and after each lift gives every
-    // ingredient time to settle. Scroll stays native in both directions.
-    const starts=[.07,.24,.41,.58], duration=.10;
-    const thresholds=[.075,.245,.415,.585,.80];
+    const target=clamp((window.scrollY-storyStart)/Math.max(1,story.offsetHeight-stage.offsetHeight));
+    // Ease trackpad bursts without detaching the illustration from the scroll.
+    const elapsed=previousFrameTime?Math.min(time-previousFrameTime,64):16;
+    previousFrameTime=time;
+    if(scrollProgress===null||reducedMotion.matches)scrollProgress=target;
+    else scrollProgress+=(target-scrollProgress)*(1-Math.exp(-elapsed/140));
+    if(Math.abs(target-scrollProgress)<.0002)scrollProgress=target;
+    const p=scrollProgress;
+    // Give the first lift more scroll travel, then settle between ingredients.
+    const steps=[
+      {start:.045,end:.29,lift:235,spread:16},
+      {start:.35,end:.52,lift:197,spread:-10},
+      {start:.58,end:.75,lift:154,spread:8},
+      {start:.80,end:.94,lift:116,spread:-8},
+    ];
+    const thresholds=[.06,.365,.595,.815,.97];
     const chapter=thresholds.filter(t=>p>=t).length;
-    const lifts=[235,197,154,116], spreads=[16,-10,8,-8];
-    pieces.forEach((piece,i)=>{const raw=clamp((p-starts[i])/duration);const amount=reducedMotion.matches?(raw>0?1:0):smooth(raw);piece.style.transform=`translate(${spreads[i]*amount}px,${-lifts[i]*amount}px)`;});
-    const framing=reducedMotion.matches?(chapter?1:0):smooth(clamp((p-starts[0])/duration));
+    pieces.forEach((piece,i)=>{
+      const step=steps[i], raw=clamp((p-step.start)/(step.end-step.start));
+      const amount=reducedMotion.matches?(raw>0?1:0):smooth(raw);
+      piece.style.transform=`translate(${step.spread*amount}px,${-step.lift*amount}px)`;
+    });
+    // The camera pulls back gradually, independently of the caramel lifting.
+    const framing=reducedMotion.matches?(chapter?1:0):smooth(clamp((p-.015)/.385));
     const mobile=root.clientWidth<=700, zoom=mobile?1.15:1.35, lift=mobile?80:130;
     diagram.style.transform=`translateY(${-lift*(1-framing)}px) scale(${zoom-(zoom-1)*framing})`;
+    steam.style.opacity=String(1-smooth(clamp((p-.04)/.25)));
     if(chapter!==activeChapter){activeChapter=chapter;chapters.forEach((el,i)=>{el.hidden=i!==chapter;});root.querySelector('#l-current').textContent=String(chapter).padStart(2,'0');story.dataset.chapter=String(chapter);}
+    if(scrollProgress!==target)scrollFrame=requestAnimationFrame(updateScroll);
+    else previousFrameTime=0;
   }
   function queueScrollUpdate(){if(!scrollFrame)scrollFrame=requestAnimationFrame(updateScroll);}
   window.addEventListener('scroll',queueScrollUpdate,{passive:true});

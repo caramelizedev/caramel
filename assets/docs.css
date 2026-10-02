@@ -9,7 +9,7 @@ html { scroll-padding-top:0 }
 }
 #caramel-site.c-documentation .c-header {
   display: grid;
-  grid-template-columns: calc(var(--docs-rail) - 32px) minmax(180px,1fr) auto;
+  grid-template-columns: calc(var(--docs-rail) - 32px) minmax(180px,1fr) auto auto;
   padding: 22px 32px;
   gap: 32px;
 }
@@ -20,6 +20,7 @@ html { scroll-padding-top:0 }
   margin:0; background:var(--wash);
 }
 #caramel-site.c-documentation .c-nav { grid-column:3; grid-row:1; gap:20px; margin:0 }
+#caramel-site.c-documentation .c-github { grid-column:4; grid-row:1 }
 #caramel-site.c-documentation .c-nav a[data-page] {
   position:relative; display:inline-flex; align-items:center; min-height:44px;
   border:0; padding:10px 2px; background:transparent;

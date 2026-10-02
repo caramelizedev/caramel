@@ -9,6 +9,7 @@
       <a class="cursor-interaction" data-page="agents" href="/docs/0.6.1/agents/">For agents</a>
     </nav>
     <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+    <a class="c-github" href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer" aria-label="Caramel on GitHub" title="Caramel on GitHub"><svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg></a>
   </header>
   <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
     <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.6.1 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
@@ -21,7 +22,7 @@
         <div class="a-feature l-feature">
         <div class="a-art l-art">
           <svg class="l-diagram" viewBox="0 0 360 470" role="img" aria-labelledby="l-title l-desc">
-            <title id="l-title">A caramel latte, layer by layer</title><desc id="l-desc">The assembled drink separates with scrolling: caramel, foam, milk, then espresso, revealing the glass cup.</desc>
+            <title id="l-title">A caramel latte, layer by layer</title><desc id="l-desc">Steam drifts above the drink. Scroll to gently separate the caramel, foam, milk, and espresso, revealing the glass cup.</desc>
             <defs>
               <linearGradient id="l-glass" x1="0" x2="1"><stop stop-color="var(--latte-glass)" stop-opacity=".25"/><stop offset=".25" stop-color="var(--latte-glass)" stop-opacity=".04"/><stop offset=".8" stop-color="var(--latte-glass)" stop-opacity=".08"/><stop offset="1" stop-color="var(--latte-glass)" stop-opacity=".25"/></linearGradient>
               <linearGradient id="l-coffee" x1="0" x2="1"><stop stop-color="#3c2013"/><stop offset=".3" stop-color="#91502a"/><stop offset=".72" stop-color="#623118"/><stop offset="1" stop-color="#321b11"/></linearGradient>
@@ -29,6 +30,13 @@
               <linearGradient id="l-foam" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#fff1d6"/><stop offset="1" stop-color="#ddc5a1"/></linearGradient>
               <linearGradient id="l-syrup" x1="0" x2="1"><stop stop-color="#975024"/><stop offset=".4" stop-color="#e7b564"/><stop offset=".65" stop-color="#c78638"/><stop offset="1" stop-color="#8a411e"/></linearGradient>
               <radialGradient id="l-shadow"><stop stop-color="var(--latte-shadow)" stop-opacity=".25"/><stop offset="1" stop-color="var(--latte-shadow)" stop-opacity="0"/></radialGradient>
+              <linearGradient id="l-steam-fade" gradientUnits="userSpaceOnUse" x1="0" y1="295" x2="0" y2="185">
+                <stop stop-color="var(--latte-steam)" stop-opacity="0"/>
+                <stop offset=".2" stop-color="var(--latte-steam)" stop-opacity=".65"/>
+                <stop offset=".65" stop-color="var(--latte-steam)" stop-opacity=".4"/>
+                <stop offset="1" stop-color="var(--latte-steam)" stop-opacity="0"/>
+              </linearGradient>
+              <filter id="l-steam-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
             </defs>
             <ellipse cx="183" cy="427" rx="119" ry="23" fill="url(#l-shadow)"/>
             <ellipse cx="169" cy="419" rx="113" ry="20" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
@@ -68,6 +76,11 @@
               <path d="M87 321 L98 380 Q99 389 103 393" stroke-width="5" stroke-linecap="round" stroke-opacity=".24"/>
               <path d="M250 326 L241 377" stroke-width="2" stroke-linecap="round" stroke-opacity=".25"/>
             </g>
+            <g class="l-steam" aria-hidden="true" fill="none" stroke="url(#l-steam-fade)" stroke-linecap="round" filter="url(#l-steam-blur)">
+              <g class="l-steam-wisp"><path d="M143 294 C127 272 161 262 146 240 C137 227 141 214 151 204" stroke-width="8"/></g>
+              <g class="l-steam-wisp"><path d="M174 293 C194 273 156 255 174 234 C188 218 179 204 166 193" stroke-width="9"/></g>
+              <g class="l-steam-wisp"><path d="M203 294 C190 275 216 263 205 246 C197 233 206 217 213 208" stroke-width="7"/></g>
+            </g>
           </svg>
         </div>
         <div class="l-copy">
@@ -89,6 +102,6 @@
       <section class="a-end"><div class="a-end-word" aria-hidden="true">caramel</div></section>
     </div>
   </main>
-  <footer class="c-footer"><span>0.6.1 · Documentation preview</span><span>Apple Silicon macOS · Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+  <footer class="c-footer"><span>0.6.1 · Documentation preview</span><span>Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
 </div>
 </body></html>
