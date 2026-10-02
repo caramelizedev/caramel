@@ -4,10 +4,23 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-02
+
+### Upgrade notes
+
 - Caramel can translate an application ([ADR 0024](docs/decisions/0024-internationalization.md)). Nothing changes until it runs `frappe make locale CODE`. That command adds `app/locales/en.cr`, `app/locales/CODE.cr` and the `caramel/i18n` lines in `config/application.cr`. Resources generated after it are translated, and `frappe translations` lists the keys each locale still lacks. Resources generated before it keep their English text until you replace it with `t.` calls.
 - In an existing application, change `html lang: "en"` in `app/views/layouts/application.cr` to `html lang: Caramel.language`, as new applications have it. For a right-to-left locale, also add `dir: locale.dir`.
 - `Caramel::Application::EXPIRED_FORM` is removed; use `Caramel::Wording.expired_form`, which a catalog can translate. Caramel's other messages now come from `Caramel::Wording` and `SugarORM::Wording`, with the same English text as before.
 - In a translated application, contract and changeset errors are in the request's locale, in pages and in JSON `errors` alike, and so is the router's 404 body (`caramel.pages.not_found`). A changeset built outside a request, such as in a Cold Brew job, uses the default locale unless the job wraps its work in `Caramel::I18n.with(locale) { … }`.
+
+### Breaking changes
+
+- **core:** move Caramel's messages into Wording hooks (46f8dc4)
+
+### Features
+
+- **core:** add opt-in internationalization with caramel/i18n (6f4b2fd)
+- **frappe:** add make locale, translations and translated resources (ad93ca8)
 
 ## 0.6.1 - 2026-10-01
 
