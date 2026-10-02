@@ -24,6 +24,7 @@ The first-run path, `frappe new demo && cd demo && frappe dev`, needed four manu
    - There is no fallback to a Crystal found on `PATH`. The variable stays as the override that checks use for test toolchains.
 2. **The installer records the toolchain.**
    - Without `--root`, `scripts/install-toolchain` reuses the toolchain `.caramel-toolchain` already names when its receipt is for this release, so a rerun verifies or resumes it. Otherwise it installs into `~/Library/Application Support/Caramel/toolchains/<release>`. `<release>` is 12 hex digits of the pinned selection's digest, so a changed release installs beside the old one.
+   - Since 2026-10-02 the selection leaves out the launchers, the toolchain's copies of `scripts/crystal` and `scripts/shards` (`launchers/`). A release that changes only them reuses the toolchain: after verifying it, the installer writes the release's launchers over the old ones and records the selection without them. Before, every launcher edit installed a new toolchain (a 39 s download, about 491 MB, cold compiler caches and a 20-minute crystalline rebuild). Frappé builds with each release's own `scripts/crystal`; the toolchain's copies serve only its `bin/crystal`.
    - After a fresh install or a verified reuse, it writes `.caramel-toolchain`. It is the only writer; `frappe lsp install` no longer writes the pointer.
 3. **Launchers on PATH.**
    - `frappe installations register` writes `~/.local/bin/frappe` and `~/.local/bin/latte`. Each is a marked script that `exec`s this checkout's binary.
@@ -62,8 +63,9 @@ Principles followed:
 
 - `spec/latte/toolchain_spec.cr` covers the lookup precedence and refuses a pointer others can write, a symlinked pointer and a relative root.
 - `scripts/check native`:
-  - `spec/native/toolchain_installer_spec.cr` covers the pointer written after installing and after an offline verification, and the default root. A bare rerun reuses the recorded toolchain of the same release, and a changed release installs under `CARAMEL_HOME/toolchains`.
+  - `spec/native/toolchain_installer_spec.cr` covers the pointer written after installing and after an offline verification, and the default root. A bare rerun reuses the recorded toolchain of the same release, and a changed release installs under `CARAMEL_HOME/toolchains`. A release whose launchers alone changed reuses the toolchain, offline or as the recorded default, and writes its launchers; both specs fail when the launchers count in the selection.
   - `spec/native/login_item_spec.cr` loads a login item into the user's GUI domain. It checks that the item runs at load, that its children outlive the job and its unloading, and that it uninstalls cleanly. Without `AbandonProcessGroup`, launchd kills those children.
+- `scripts/check installations` fails when an installed release pins the checkout's selection, launchers aside, but installs another toolchain instead of reusing it.
 - `spec/latte/login_item_spec.cr` parses the rendered agent with `plutil`.
 - `spec/frappe/launchers_spec.cr` covers quoting, replacing Caramel's own launchers, refusing foreign files and shared directories, and removal.
 - `spec/frappe/latte_client_spec.cr` covers the on-demand start and the log line reported when a start fails. `spec/latte/server_spec.cr` covers a stop request being answered before the server closes.

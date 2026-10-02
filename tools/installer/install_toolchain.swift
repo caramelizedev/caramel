@@ -47,6 +47,11 @@ exec "$ROOT/launchers/crystal" "$@"
 
 private func path(_ root: String, _ relative: String) -> String { root + "/" + relative }
 
+// The release's compiler and Shards launchers. Every toolchain holds a copy,
+// but they are not part of its identity: a release that changes only them
+// reuses the toolchain and writes its own launchers over the old ones.
+private func isLauncher(_ name: String) -> Bool { name.hasPrefix("launchers/") }
+
 private func info(_ file: String) -> stat? {
     var result = stat()
     return file.withCString { lstat($0, &result) } == 0 ? result : nil
@@ -187,7 +192,7 @@ private final class ToolchainInstallation {
         critical = fixture?.critical ?? releaseCritical
         aliases = fixture?.aliases ?? releaseAliases
         payloads = try ToolchainInstallation.releasePayloads(fixture: fixture)
-        selection = payloads.mapValues { sha256(data: $0) }
+        selection = ToolchainInstallation.identity(payloads)
     }
 
     // The authored files this toolchain release installs, read from the
@@ -211,6 +216,12 @@ private final class ToolchainInstallation {
         authored["config/empty.toml"] = Data()
         authored["system-config/empty.toml"] = Data()
         return authored
+    }
+
+    // What identifies a toolchain release: the hashes of its authored files
+    // except the launchers.
+    static func identity(_ payloads: [String: Data]) -> [String: String] {
+        payloads.filter { !isLauncher($0.key) }.mapValues { sha256(data: $0) }
     }
 
     func claim() throws {
@@ -241,7 +252,8 @@ private final class ToolchainInstallation {
             if let format = state["version"] as? Int, format > receiptFormat {
                 throw InstallerError(message: "\(receipt) was written by a newer Caramel (receipt format \(format)); this installer reads format \(receiptFormat). Run that release's scripts/install-toolchain")
             }
-            if state["version"] as? Int != receiptFormat || state["selection"] as? [String: String] != selection {
+            let recorded = (state["selection"] as? [String: String])?.filter { !isLauncher($0.key) }
+            if state["version"] as? Int != receiptFormat || recorded != selection {
                 throw InstallerError(message: "installation receipt differs from this toolchain release")
             }
             if !["installing", "complete"].contains(state["status"] as? String ?? "") {
@@ -265,12 +277,12 @@ private final class ToolchainInstallation {
             if parent != "." { try directory(root, parent) }
             if exists(file) {
                 try requireOwnedFile(file)
-                if try Data(contentsOf: URL(fileURLWithPath: file)) != data {
+                if try Data(contentsOf: URL(fileURLWithPath: file)) == data { continue }
+                if !isLauncher(name) {
                     throw InstallerError(message: "authored toolchain file differs; preserved: " + name)
                 }
-            } else {
-                try atomicWrite(data, to: file, mode: name.hasPrefix("bin/") || name.hasPrefix("launchers/") ? 0o700 : 0o600, prefix: ".install-")
             }
+            try atomicWrite(data, to: file, mode: name.hasPrefix("bin/") || isLauncher(name) ? 0o700 : 0o600, prefix: ".install-")
         }
     }
 
@@ -304,7 +316,7 @@ private final class ToolchainInstallation {
         guard let recorded = state["artifacts"] as? [String: String], Set(recorded.keys) == Set(critical) else {
             throw InstallerError(message: "toolchain artifact inventory verification failed")
         }
-        for (name, data) in payloads {
+        for (name, data) in payloads where !isLauncher(name) {
             let file = path(root, name)
             try requireOwnedFile(file)
             if try Data(contentsOf: URL(fileURLWithPath: file)) != data {
@@ -321,8 +333,30 @@ private final class ToolchainInstallation {
     func complete() throws {
         try verifyAliases()
         state["artifacts"] = try artifactHashes()
+        state["selection"] = selection
         state["status"] = "complete"
         try save()
+    }
+
+    // After a verified reuse: this release's launchers replace another
+    // release's, and the receipt records the identity without launchers.
+    func refreshLaunchers() throws {
+        var changed = false
+        for (name, data) in payloads.sorted(by: { $0.key < $1.key }) where isLauncher(name) {
+            let file = path(root, name)
+            let parent = (name as NSString).deletingLastPathComponent
+            if parent != "." { try directory(root, parent) }
+            if exists(file) {
+                try requireOwnedFile(file)
+                if try Data(contentsOf: URL(fileURLWithPath: file)) == data { continue }
+            }
+            try atomicWrite(data, to: file, mode: 0o700, prefix: ".install-")
+            changed = true
+        }
+        if changed || state["selection"] as? [String: String] != selection {
+            state["selection"] = selection
+            try save()
+        }
     }
 
     func fixtureProvider() throws -> Bool {
@@ -479,12 +513,12 @@ private func record(_ installation: ToolchainInstallation) throws {
 // a new directory named for this release in Caramel's toolchains directory.
 private func defaultRoot() throws -> String {
     let fixture = try InstallerFixture.load()
-    let selection = try ToolchainInstallation.releasePayloads(fixture: fixture).mapValues { sha256(data: $0) }
+    let selection = ToolchainInstallation.identity(try ToolchainInstallation.releasePayloads(fixture: fixture))
     if let pointer = try pointerPath(fixture),
        let recorded = try readToolchainPointer(pointer),
        let receipt = try? Data(contentsOf: URL(fileURLWithPath: path(recorded, receiptName))),
        let state = try? JSONSerialization.jsonObject(with: receipt) as? [String: Any],
-       state["selection"] as? [String: String] == selection {
+       (state["selection"] as? [String: String])?.filter({ !isLauncher($0.key) }) == selection {
         return recorded
     }
     return path(caramelHome(), "toolchains/" + String(sha256(data: try canonicalJSON(selection)).prefix(12)))
@@ -500,6 +534,7 @@ private func install(root supplied: String?, offline: Bool, miseBinary: String?)
     let installation = try ToolchainInstallation(root: root)
     try installation.claim()
     if try installation.verified() {
+        try installation.refreshLaunchers()
         print("Verified installed Caramel toolchain: " + installation.root)
         try record(installation)
         return

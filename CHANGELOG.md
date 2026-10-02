@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+### Upgrade notes
+
+- A Caramel release that changes only its compiler and Shards launchers (`scripts/crystal`, `scripts/shards`) no longer installs a new managed toolchain. Installing it reuses your toolchain when its pinned tools match, including the one 0.7.0 installed, and writes the release's launchers into it, so compiler caches and editor tools survive the upgrade ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md) §2).
+
 ## 0.7.0 - 2026-10-02
 
 ### Upgrade notes

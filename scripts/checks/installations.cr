@@ -48,9 +48,11 @@ module Caramel::Checks::Installations
         Checks.fail("the installed release lacks its linter: #{linter}")
       end
       recorded = File.read(File.join(release, ".caramel-toolchain")).strip
+      # The launchers are not part of a toolchain's identity (ADR 0015 §2).
       selection = ->(toolchain : String) do
         manifest = File.join(toolchain, ".caramel-toolchain.json")
-        JSON.parse(File.read(manifest))["selection"]
+        pins = JSON.parse(File.read(manifest))["selection"].as_h
+        pins.reject { |name, _| name.starts_with?("launchers/") }
       end
       current = Checks.toolchain_root
       if selection.call(recorded) == selection.call(current) && recorded != current

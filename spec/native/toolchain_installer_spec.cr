@@ -23,9 +23,13 @@ private class NativeToolchainFixture
     configure("create-critical")
   end
 
-  def configure(provider : String, lock : String = "version = 1\n") : Nil
+  def configure(provider : String,
+                lock : String = "version = 1\n",
+                launcher : String? = nil) : Nil
+    payloads = {"project/caramel-toolchain.toml" => "[tools]\n", "project/mise.lock" => lock}
+    payloads["launchers/crystal"] = launcher if launcher
     File.write(@config, {
-      "payloads" => {"project/caramel-toolchain.toml" => "[tools]\n", "project/mise.lock" => lock},
+      "payloads" => payloads,
       "critical" => @critical,
       "aliases"  => {} of String => String,
       "provider" => provider,
@@ -182,6 +186,32 @@ describe "Swift toolchain installer" do
     with_toolchain_fixture do |fixture|
       fixture.complete
       fixture.configure("fail")
+      home = File.join(fixture.base, "Caramel Home")
+      result = install_in_home(fixture, home)
+      result.success?.should be_true
+      result.stdout.should contain("Verified installed Caramel toolchain: #{fixture.root}")
+      File.exists?(home).should be_false
+    end
+  end
+
+  it "reuses a toolchain whose launchers changed and writes the new launchers" do
+    with_toolchain_fixture do |fixture|
+      fixture.configure("create-critical", launcher: "#!/bin/sh\necho old\n")
+      fixture.complete
+      fixture.configure("fail", launcher: "#!/bin/sh\necho new\n")
+      result = fixture.invoke(["--offline"])
+      result.success?.should be_true
+      result.stdout.should contain("Verified installed Caramel toolchain: #{fixture.root}")
+      File.read(File.join(fixture.root, "launchers/crystal")).should eq("#!/bin/sh\necho new\n")
+      fixture.receipt["selection"].as_h.keys.should_not contain("launchers/crystal")
+    end
+  end
+
+  it "reuses the recorded toolchain when only the launchers changed and no root is given" do
+    with_toolchain_fixture do |fixture|
+      fixture.configure("create-critical", launcher: "#!/bin/sh\necho old\n")
+      fixture.complete
+      fixture.configure("fail", launcher: "#!/bin/sh\necho new\n")
       home = File.join(fixture.base, "Caramel Home")
       result = install_in_home(fixture, home)
       result.success?.should be_true
