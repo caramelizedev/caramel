@@ -2,7 +2,7 @@
 
 Status: measured on 2026-09-28 at commit `5dcf865` (tag `v0.4.0`) on an Apple M3 Pro (12 CPUs, 36 GiB RAM, macOS 26.6.2) with the managed Crystal 1.21.0 toolchain (LLVM 15.0.7, Apple ld-1230.1, Swift 6.2.4). These numbers supersede the edit-latency, readiness, semantic-check, spec-command, release-build and compiler-profile figures in [development-performance.md](development-performance.md), because that baseline predates the Tier-1 type check, kqueue watching and Blueprint views. The owner skipped the instrumented full-suite run, so suite attribution rests on the 0.4.0 release log's per-run times and suite savings are estimates unless marked measured. Every number below comes from one observation unless a range is given.
 
-Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2, and Phase 3 (E3-7, E1-3, E3-5) in v0.4.3, all the same day. Phase 4 (E4-11, E3-2, E3-6, E3-4, E3-1, E1-5, E1-4, E1-1) shipped in v0.5.0 on 2026-09-30, and Phase 5 (E4-7, three parallel lanes) in v0.5.1 the same evening; E4-2 was not built. The release gates' runs took 548 s (v0.4.1), 473 s (v0.4.2), 472 s (v0.4.3) and 417 s (v0.5.0) one after another against 738 s at 0.4.0, and the whole releases 553.6, 481.3, 478.4, 422.2 and, with lanes, 193.1 s (v0.5.1) against 747 s (one observation each). Phases 4 and 5 were measured while the machine was in heavy daytime use, so their before/after numbers are interleaved comparisons from the same session. Each implemented opportunity's section starts with its status.
+Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10) shipped in v0.4.1 on 2026-09-29, Phase 2 (E4-6, E2-5, E4-9) with Crystal 1.21.1 in v0.4.2, and Phase 3 (E3-7, E1-3, E3-5) in v0.4.3, all the same day. Phase 4 (E4-11, E3-2, E3-6, E3-4, E3-1, E1-5, E1-4, E1-1) shipped in v0.5.0 on 2026-09-30, Phase 5 (E4-7, three parallel lanes) in v0.5.1 the same evening, and Phase 6 (E2-4, E2-2) in v0.6.1 on 2026-10-01, after the owner's v0.6.0; E4-2 and E2-3 were not built. The release gates' runs took 548 s (v0.4.1), 473 s (v0.4.2), 472 s (v0.4.3) and 417 s (v0.5.0) one after another against 738 s at 0.4.0, and the whole releases 553.6, 481.3, 478.4, 422.2 and, with lanes, 193.1 s (v0.5.1) and 238.1 s (v0.6.1, which includes v0.6.0's Lexbor builds) against 747 s (one observation each). Phases 4 to 6 were measured while the machine was in daytime use, so their before/after numbers are interleaved comparisons from the same session. Each opportunity's section starts with its status; [After the remediation](#after-the-remediation-v061) has the final measurement.
 
 ## Summary
 
@@ -14,6 +14,52 @@ Implementation: Phase 1 of the remediation (E4-1, E4-3, E4-4, E4-5, E4-8, E4-10)
 - **A 22-resource Crystal save takes 5.79 s (median)**: a duplicated 1.43 s type check, a 2.91 s warm build and 1.46 s outside the compiler. Folding the check into the build (E3-1) removes the 1.43 s (measured). Reusing the dev binary for one-shot commands (E3-2) removes about 3.2 s per repeated command.
 - **Cold compiles are dominated by two macro-run helpers.** The stdlib ECR processor costs 6.37 s (58–62% of a cold app build), but only in an empty cache; it stayed in the shared cache in every listing. Ameba's `read_type_doc` costs 26.28 s of a cold 34.83 s linter build. It and the linter are evicted by Crystal's 10-entry cache between suite runs, so the lint check runs cold (36.02 s cold vs 6.91 s warm, measured).
 - **Things that do not help:** `--no-debug` (warm builds get slower: bc+obj 0.81–0.94 s vs 0.16 s), `-no_deduplicate` and alternative `dsymutil` linkers (no change), more codegen threads (already 12), and a Crystal upgrade (no compile-time work in 1.21.1 or 1.22.0).
+
+## After the remediation (v0.6.1)
+
+Measured on 2026-10-01 at `2962be2` (tag `v0.6.1`), on the same machine and toolchain root as Phases 4 to 6 (Crystal 1.21.1). The v0.6.1 release gate was the instrumented `scripts/check all`: the 2026-09-28 sampler, extended to record memory and every lane's cache, ran beside it with the owner's Latte stopped. The development numbers come from `scripts/check frappe-project --benchmark` run at night, as the 0.4.0 baseline was (633.46 s; 0.4.0: 711.02 s). Each number is one observation.
+
+### Suite and release
+
+- The v0.6.1 release took **238.1 s**, against **747 s** at 0.4.0. Its gate passed all 23 runs in three lanes after a 9 s build step: lane 1 (spec, editor-tools, installations, integration, latte-postgres, native) 224 s, lane 2 (frappe-project-dev, runtime-diagnostics, latte-ipc) 199 s, lane 3 (browser, schema-diff and eleven shorter checks) 141 s. The runs sum to 573 s (0.4.0: 738 s in 24 runs one after another), and installations on lane 1 is the critical path.
+- Peaks: 34 compiler processes at once (codegen workers included), 6.64 GB of compiler memory, and 28.6 GB for all of the user's processes, the owner's applications included.
+- Caches: lane 1's shared `crystal-cache` created 8 entries and evicted 7, all temporary programs (the Phase 6 A/B copies, `crystal-run-generate_project.tmp`, `crystal-run-build_ext.tmp`); no checkout program was evicted. Lanes 2 and 3 evicted only their own generated projects and temporary programs.
+- v0.6.0's Lexbor development dependency costs about 40 s on the critical path. Against the v0.5.1 gate, installations went from 91 to 135 s and frappe-project-dev from 148 to 185 s, while no other run moved by more than 7 s. Every generated application and clone runs Lexbor's postinstall, which compiles `lib/lexbor/src/ext/build_ext.cr` (about 7 s, cold each time because each application has a new path) and then builds Lexbor's C sources with clang. Those Crystal compiles were running for 34.8 s of lane 2, 14.4 s of lane 1 and 14.5 s of lane 3; the compiled build program ran for another 37.0 s that the sampler could not tie to a lane.
+
+### Development loop, Corretto and one-shot commands
+
+| Metric | 2 resources, 0.4.0 → v0.6.1 | 22 resources, 0.4.0 → v0.6.1 |
+|---|---|---|
+| Crystal controller edit, median / p95 | 4868 / 5076 → 3090 / 3276 ms | 5792 / 5950 → 4470 / 4605 ms |
+| View edit, median / p95 | 4818 / 4970 → 3118 / 3249 ms | 5674 / 5945 → 4439 / 4561 ms |
+| CSS edit, median / p95 | 78 / 79 → 82 / 108 ms | 108 / 115 → 137 / 141 ms |
+| JavaScript edit, median / p95 | 77 / 79 → 82 / 89 ms | 112 / 115 → 138 / 151 ms |
+| First development readiness | 5223 → 4886 ms | 5509 → 4791 ms |
+| Cached development readiness | 290 → 155 ms | 275 → 187 ms |
+| Type check (`--no-codegen`, no `-D`) | 1007 → 1098 ms | 1446 → 1318 ms |
+| `frappe corretto` (N = 1) | 7954 → 5251 ms | 10632 → 7095 ms |
+| `frappe migrate` after 20 `make resource` | – | 4777 → 7151 ms |
+| `--release` build / binary | 39.03 s / 3.33 MiB → 51.22 s / 3.25 MiB | 82.46 s / 5.73 MiB → 89.17 s / 5.07 MiB |
+
+Compiled edits got 1.3–1.8 s faster, `frappe corretto` a third faster and cached readiness 32–47 % faster. Four changes were measured but not attributed:
+
+- **CSS and JavaScript edits** at 22 resources are about 30 ms slower: 108 → 137 ms (CSS median). One benchmark per session gave 125 and 123 ms on 2026-09-29 (around E3-7), 149 ms under daytime load on 2026-09-30, and 138 ms on the morning of 2026-10-01 under load. An asset edit hashes the source and asset trees twice (`src/frappe/dev_session.cr:125`, `:135`), which grows with the application.
+- **`frappe migrate`** after 20 `make resource` took 7151 ms (that morning 5810 ms; 4915 and 4919 ms on 2026-09-29). The benchmark runs it before `frappe dev` starts (`scripts/checks/frappe_project/benchmark.cr:264`, `:268`), so it builds the new sources itself; each figure is a single command.
+- **`--release` builds** are slower than at 0.4.0, but not because of the framework. The same 22-resource application, generated by 0.4.0, built in 98.16 s against v0.4.0's sources and in 85.78 s against v0.6.1's on today's toolchain, with a binary 11 % smaller (5,776,096 → 5,143,216 bytes). That build took 84.85 s on 2026-09-28 with Crystal 1.21.0 (fq-Fra-14), so the rest of the rise comes from the toolchain or the machine's state; it was not isolated. The 2-resource build took 51.0 s that morning too.
+- **The first benchmark run**, that morning at load 7, failed: its 22-resource `--release` build exceeded the fixture's 180 s deadline (`scripts/checks/support/latte_fixture.cr:54`). The same build took 89.28 s on its own that night.
+
+### Opportunities
+
+| Outcome | Opportunities |
+|---|---|
+| Implemented in v0.4.1 | E4-1, E4-3, E4-4, E4-5, E4-8, E4-10 |
+| Implemented in v0.4.2 | E4-6, E2-5, E4-9 |
+| Implemented in v0.4.3 | E3-7, E1-3, E3-5 |
+| Implemented in v0.5.0 | E4-11, E3-2, E3-6, E3-4, E3-1, E1-5, E1-4, E1-1 |
+| Implemented in v0.5.1 | E4-7 |
+| Implemented in v0.6.1 | E2-4, E2-2 |
+| Not built | E4-2 (about 5 s with lanes), E2-3 (did not beat run-to-run noise) |
+| Dropped by the owner | E1-2, E3-3, E3-8, E2-1 (conflicts with E3-2) |
 
 ## Where the time goes
 
@@ -336,6 +382,7 @@ Ranked by `check-all` seconds saved ÷ effort points (S = 1, M = 3, L = 8); ties
 
 ### 14. E1-2: Stop the stdlib ECR macro run by overriding `HTTP::StaticFileHandler#directory_listing`
 
+- **Status.** Dropped by the owner: the stdlib's ECR directory listing is not patched for a cost paid once per empty cache (6.37 s).
 - **Mechanism.** Programs that run an `HTTP::Server` handler chain (apps, Frappé, Latte) make `HTTP::StaticFileHandler#call` reachable, and with it the directory listing (`static_file_handler.cr:330-331` in the Crystal stdlib), which calls `DirectoryListing#to_s`, generated by `ECR.def_to_s` (`:318`). Requiring `http/server` alone is not enough: the route_compilation check binary and the fq-Com-3 probe run no ECR macro. Typing the listing runs the `ecr/process` macro-run helper, compiled at -O3: 6.37 s in an empty cache, 0.005 s once cached. Change: a small file required right after `http/server` by caramel, frappe and latte redefines `directory_listing` without ECR.
 - **Evidence.** stdlib `http/server/handlers/static_file_handler.cr:318`, `:330-331`; profile cold rows `Macro runs: process.cr 6.37 s` (58% and 62% of the cold builds). fq-Com-3 was inconclusive: its probe never started a server, so neither variant reached the listing.
 - **Savings.**
@@ -399,6 +446,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 2. E3-8: Tell developers to exempt their terminal from macOS first-launch scans of freshly linked binaries (doctor/dev hint + docs)
 
+- **Status.** Dropped by the owner: not worth asking developers to change macOS security settings. The ≈0.57 s first launch of each freshly linked binary stays a cost recorded here.
 - **Mechanism.** The first run of a freshly linked binary took 0.575 s; the next two took 0.0098 s and 0.0085 s (fq-App-3). Every dev save launches a new binary (`src/frappe/dev_session.cr:252`), every compiling command a new `.caramel/application` (`src/frappe/tools.cr:41-46`), and Corretto two. [INFERENCE] The delay is macOS's first-launch assessment (syspolicyd/XProtect). Adding the terminal under Privacy & Security → Developer Tools exempts its child processes, as the [nextest documentation](https://nexte.st/docs/installation/macos/) describes. Change: `frappe doctor` and `frappe dev` detect a slow first launch and print a one-time hint, plus a docs note. Frappé must not change the setting itself.
 - **Evidence.** fq-App-3; `src/frappe/dev_session.cr:252`; `src/frappe/tools.cr:41-46`; the save anatomy above (1456 ms outside the compiler).
 - **Savings.**
@@ -470,6 +518,7 @@ Ranked by weighted seconds ÷ effort points, where weighted seconds = 10 × `dev
 
 ### 7. E3-3: `frappe db diff` applies the derived migration to the scratch branch in-process, skipping its second compile
 
+- **Status.** Dropped by the owner: `frappe db diff` keeps its rebuild-based verification of the derived migration (ADR 0008 §2.4).
 - **Mechanism.** `frappe db diff` compiles the app (`src/frappe/schema_diff.cr:31`), writes the migration, then compiles the whole app again only to run it on the scratch branch (`src/frappe/schema_diff.cr:58`). Change: apply the derived statements to the branch from Frappé, which already holds them. The user's `frappe migrate` compiles the new file next anyway.
 - **Evidence.** `src/frappe/schema_diff.cr:31`, `:58`; m2b-2 2.97 s.
 - **Savings.**
@@ -521,7 +570,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 11. E2-4: SugarORM write path: capture `Changeset#write`'s block and make `Repo.connection`/`using` single-yield
 
-- **Status.** Implemented (`5ff1208`) as described: `write` captures its block, and `Repo.connection` and `Repo.using` yield once, checking a connection out and returning it themselves. Interleaved warm dev builds of the 22-resource app: −0.110 s median (faster in 11 of 12 rounds, sign test p = 0.003) and, beside an identical control copy (−0.003 s, 8 of 16), −0.076 s (12 of 16, p = 0.038), all in `Codegen (crystal)`. A new integration spec checks that pooled work returns its connection and bound work does not.
+- **Status.** Implemented in v0.6.1 (`5ff1208`) as described: `write` captures its block, and `Repo.connection` and `Repo.using` yield once, checking a connection out and returning it themselves. Interleaved warm dev builds of the 22-resource app: −0.110 s median (faster in 11 of 12 rounds, sign test p = 0.003) and, beside an identical control copy (−0.003 s, 8 of 16), −0.076 s (12 of 16, p = 0.038), all in `Codegen (crystal)`. A new integration spec checks that pooled work returns its connection and bound work does not.
 - **Mechanism.** `Changeset#write` yields in three places, one inside `Repo.transaction`, whose yields sit inside `Repo.connection` with two more (`src/sugar_orm/changeset.cr:260-266`, `src/sugar_orm/repo.cr:102-108`). Code generation inlines the block at every yield, about 10 query paths per insert and update per changeset. Change: capture `write`'s block and call it, and make `connection`/`using` single-yield.
 - **Evidence.** `src/sugar_orm/changeset.cr:260-266`; `src/sugar_orm/repo.cr:102-108`; patched copy vs baseline, warm build: `Semantic (main)` −0.008 s, `Codegen (crystal)` −0.062 s (fq-Fra-11-2 vs fq-Fra-0-2). Identical warm builds varied 0.967–1.298 s in `Codegen (crystal)` (profile rows, fq-Com-1, fq-Fra-0-1/-2), so this difference is within run-to-run noise.
 - **Savings.**
@@ -550,7 +599,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 13. E2-2: Leaner per-action egress: move type-independent bodies of `respond`/`json`/`page`/… into once-typed helpers
 
-- **Status.** Implemented (`be9b969`): the bodies of `page`, `partials`, `json` and the contract-failure and error responses moved to a nodoc `Caramel::Action::Egress`, compiled once; `layout`, `title_for` and `contract_failure_page` stay overridable instance methods. Interleaved warm dev builds of the 22-resource app beside an identical control copy (−0.003 s, 8 of 16 rounds): −0.074 s median (faster in 14 of 16 rounds, sign test p = 0.002), of which `Semantic (main)` −0.017 s and `Codegen (crystal)` −0.045 s.
+- **Status.** Implemented in v0.6.1 (`be9b969`): the bodies of `page`, `partials`, `json` and the contract-failure and error responses moved to a nodoc `Caramel::Action::Egress`, compiled once; `layout`, `title_for` and `contract_failure_page` stay overridable instance methods. Interleaved warm dev builds of the 22-resource app beside an identical control copy (−0.003 s, 8 of 16 rounds): −0.074 s median (faster in 14 of 16 rounds, sign test p = 0.002), of which `Semantic (main)` −0.017 s and `Codegen (crystal)` −0.045 s.
 - **Mechanism.** Each of the 154 action structs re-types `Caramel::Action`'s egress methods (`respond`, `json`, `page`, `render_contract_failure`, `contract_failure_page`, `html_headers`; `src/caramel/action.cr:132-135` and neighbours), which every route method calls (`src/caramel/http/router.cr:381`). Change: keep one-line forwarders and move the type-independent bodies into class methods typed once.
 - **Evidence.** `src/caramel/action.cr:132-135`; `src/caramel/http/router.cr:381`; upper bound with all egress removed: `Semantic (main)` −0.038 s, `Codegen (crystal)` −0.139 s (fq-Fra-8, fq-Fra-9-2 vs fq-Fra-0-2); the baseline's `Codegen (crystal)` varied 0.967–1.298 s across identical builds.
 - **Savings.**
@@ -581,6 +630,7 @@ Same change as suite rank 7; mechanism, evidence, risk and verification are ther
 
 ### 15. E2-1: Gate the routes/schema/migrate/lint/drift branches of `CommandLine` out of dev builds
 
+- **Status.** Dropped: it conflicts with E3-2, which runs one-shot commands such as `frappe routes` and `frappe migrate` on the dev build, so the dev binary must keep those branches.
 - **Mechanism.** `CommandLine.run` dispatches on a runtime string (`src/caramel/command_line.cr:37-48`), so the routes, schema, migrate, lint and drift branches are typed in every build, while dev binaries only run `serve` (`src/frappe/dev_session.cr:252`). Change: wrap those branches in `{% unless flag?(:caramel_development) %}`.
 - **Evidence.** `src/caramel/command_line.cr:37-48`; serve-only vs `Caramel.run` in the same copy: `Codegen (crystal)` 0.488 → 0.446 s (fq-Fra-6-2 vs fq-Fra-2-2); type check alone no faster (fq-Fra-5: `Semantic (main)` 0.377–0.397 vs m2e 0.370–0.371).
 - **Savings.**
