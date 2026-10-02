@@ -7,6 +7,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 ### Upgrade notes
 
 - A Caramel release that changes only its compiler and Shards launchers (`scripts/crystal`, `scripts/shards`) no longer installs a new managed toolchain. Installing it reuses your toolchain when its pinned tools match, including the one 0.7.0 installed, and writes the release's launchers into it, so compiler caches and editor tools survive the upgrade ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md) §2).
+- `scripts/crystal build` now runs the compiler without garbage collection (`GC_DONT_GC=1`). A warm 22-resource dev build is about 0.7 s faster, and each compile peaks about 125 MiB higher (about 1.35 GB at 22 resources). `run` and `spec` keep the collector, because the programs they start inherit the environment.
 
 ## 0.7.0 - 2026-10-02
 

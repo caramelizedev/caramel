@@ -209,6 +209,18 @@ case ${1:-} in
         ;;
 esac
 
+case ${1:-} in
+    build)
+        # A build's compiler, and the short macro programs it runs, need no
+        # garbage collection. A warm 22-resource dev build otherwise spends
+        # about 0.75 s in two full collections, forced by finalizers on its
+        # LLVM modules, and peaks about 125 MiB lower. Not for run or spec:
+        # the programs they run inherit the environment.
+        GC_DONT_GC=1
+        export GC_DONT_GC
+        ;;
+esac
+
 if [ "${1:-}" = eval ]; then
     DYLD_LIBRARY_PATH=$OPENSSL/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
     export DYLD_LIBRARY_PATH
