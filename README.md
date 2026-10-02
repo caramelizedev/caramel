@@ -52,10 +52,9 @@ Caramel Cold Brew (RFC-0003) keeps background work in PostgreSQL: typed jobs enq
 Caramel is released as source tags; there are no prebuilt binaries until it has an Apple Developer ID ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). On Apple Silicon with Apple's Command Line Tools, install a release from its tag ([ADR 0015](docs/decisions/0015-local-setup-and-latte-lifecycle.md)):
 
 ```sh
-git clone --branch v0.1.0 https://github.com/caramelizedev/caramel.git caramel && cd caramel
+git clone --branch v0.7.0 https://github.com/caramelizedev/caramel.git caramel && cd caramel
 scripts/install-toolchain                   # pinned Crystal, PostgreSQL, Caddy and CoreDNS; recorded in .caramel-toolchain
-scripts/shards install --frozen --without-development
-scripts/build-frappe && scripts/build-latte
+scripts/build-release
 bin/frappe installations register           # frappe and latte in ~/.local/bin
 frappe services start                       # starts Latte in the background
 scripts/install-local-integration prepare /private/tmp/caramel-integration-bundle
@@ -64,7 +63,7 @@ latte trust install                         # trusts Latte's local CA in your lo
 frappe new demo && cd demo && frappe dev
 ```
 
-Later releases install beside it: `frappe installations install 0.2.0` clones that tag into `~/Library/Application Support/Caramel/releases/`, reuses the toolchain when the release pins the same one, builds and registers it. Each application's `shard.lock` pins its release, and `frappe` runs that release's commands for it, offering to install a missing one. `~/.local/bin/frappe` and `latte`, on-demand Latte and the login item all run the newest installed release. `frappe doctor` names the command that updates a resolver or port relay from an older release.
+An existing installation can add the current release beside it: `frappe installations install 0.7.0` clones that tag into `~/Library/Application Support/Caramel/releases/`, reuses the toolchain when the release pins the same one, builds and registers it. Each application's `shard.lock` pins its release, and `frappe` runs that release's commands for it, offering to install a missing one. `~/.local/bin/frappe` and `latte`, on-demand Latte and the login item all run the newest installed release. `frappe doctor` names the command that updates a resolver or port relay from an older release.
 
 The integration and trust steps are needed once per machine. `sudo scripts/install-local-integration uninstall` and `latte trust remove` undo them. After that, the last line is the whole workflow:
 
@@ -72,6 +71,8 @@ The integration and trust steps are needed once per machine. `sudo scripts/insta
 - Any command that needs Latte starts it when it is not running. It keeps running after the terminal closes and logs to `~/Library/Application Support/Caramel/logs/latte.log`.
 - `latte stop` stops Latte, and `frappe services stop` stops its services.
 - `latte service install` starts Latte at every login instead; `latte service uninstall` removes that login item.
+
+Read the [current documentation](https://caramelize.dev/docs/0.7.0/getting-started/), [internationalization guide](https://caramelize.dev/docs/0.7.0/internationalization/), and [current release guide](https://caramelize.dev/docs/0.7.0/releases/) for typed translations, JSON ingress, Cold Brew workers, and Corretto HTML expectations.
 
 ## Contributor checks
 

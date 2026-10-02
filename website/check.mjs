@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
+import { highlightCode, decodeCode } from './highlight.mjs';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -12,12 +13,34 @@ for (const file of files) {
     assert(fs.existsSync(target), `${file}: missing local target ${url}`);
   }
   assert(!html.includes('href="undefined"'), `${file}: unknown page`);
+  for (const [, block] of html.matchAll(/<pre\b[^>]*>([\s\S]*?)<\/pre>/g)) {
+    assert(/^<code class="hljs language-[a-z]+">/.test(block), `${file}: unhighlighted code example`);
+  }
   for (const [, id] of html.matchAll(/href="#([^"]+)"/g)) {
     assert(html.includes(`id="${id}"`), `${file}: missing anchor ${id}`);
   }
 }
-for (const file of fs.readdirSync(path.join(root, 'assets')).filter(file => file.endsWith('.js'))) {
+const fixture = 'section(class: "form-page") { h1 { "<Dune> & \\"Book\\"" } }';
+const escaped = fixture.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+const highlighted = highlightCode(`<code class="language-crystal">${escaped}</code>`);
+assert(highlighted.includes('class="hljs-attr">class:</span>'), 'Blueprint class: mistaken for a declaration');
+assert(highlighted.includes('class="hljs-string"'), 'Crystal strings are not highlighted');
+assert.equal(decodeCode(highlighted.replace(/<[^>]*>/g, '')), fixture, 'Highlighting changed copyable code');
+for (const file of fs.readdirSync(path.join(root, 'assets'), {recursive: true}).filter(file => file.endsWith('.js'))) {
   new Script(fs.readFileSync(path.join(root, 'assets', file), 'utf8'), {filename:file});
+}
+const version = fs.readFileSync(new URL('../shard.yml', import.meta.url), 'utf8').match(/^version: (\S+)$/m)[1];
+const read = route => fs.readFileSync(path.join(root, route, 'index.html'), 'utf8');
+const guide = read(`docs/${version}/getting-started`);
+assert(guide.includes(`Caramel ${version}</title>`), 'Incorrect release metadata');
+assert(!read(`cookbook/${version}/return-json`).includes('JSON request bodies are not supported'), 'JSON guide is stale');
+const currentJS = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
+assert(currentJS.includes(`/docs/${version}/testing-html/`), 'Current search omits HTML testing');
+assert(currentJS.includes(`/docs/${version}/releases/`), 'Current search omits the release guide');
+assert(currentJS.includes(`/docs/${version}/internationalization/`), 'Current search omits internationalization');
+const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
+for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<\/loc>/g)) {
+  assert(fs.existsSync(path.join(root, route, 'index.html')), `Sitemap: missing ${route}`);
 }
 const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
 assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');
