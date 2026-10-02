@@ -11,7 +11,11 @@ module App::@@COLLECTION@@
 
     def handle(contract : Contract)
       record = App::@@MODEL@@.query.find(contract.id)
+      # frappe:only locales
+      return not_found(t.@@PLURAL@@.not_found) unless record
+      # frappe:else
       return not_found("@@MODEL@@ not found") unless record
+      # frappe:end
       changes = record.update(@@UPDATE_ATTRIBUTES@@)
       # frappe:only edit
       return render_form(contract.values, changes.errors, contract.id, 422) unless changes.saved?

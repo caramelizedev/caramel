@@ -8,7 +8,11 @@ module App::@@COLLECTION@@
     end
 
     def render(result)
+      # frappe:only locales
+      page t.@@PLURAL@@.collection, Views::@@COLLECTION@@::Index.new(result[:records])
+      # frappe:else
       page "@@COLLECTION_LABEL@@", Views::@@COLLECTION@@::Index.new(result[:records])
+      # frappe:end
     end
   end
 end

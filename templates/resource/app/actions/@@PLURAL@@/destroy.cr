@@ -6,7 +6,11 @@ module App::@@COLLECTION@@
 
     def handle(contract : Contract)
       record = App::@@MODEL@@.query.find(contract.id)
+      # frappe:only locales
+      return not_found(t.@@PLURAL@@.not_found) unless record && record.delete
+      # frappe:else
       return not_found("@@MODEL@@ not found") unless record && record.delete
+      # frappe:end
       {id: contract.id}
     end
 

@@ -9,6 +9,7 @@ require "./release"
 require "./launchers"
 require "./tools"
 require "./resource_generator"
+require "./locale_generator"
 require "./dev_session"
 require "./site_log"
 require "./schema_diff"
@@ -119,6 +120,10 @@ module Caramel::Frappe
         files.each { |path| @output.puts("Generated #{path}") }
         @output.puts("\nRun frappe migrate to apply the new schema. " \
                      "Use frappe routes to see the generated URLs.")
+      when "make locale"
+        make_locale(invocation["CODE"])
+      when "translations"
+        return translations
       when "migrate"
         return migrate(invocation)
       when "seed"
@@ -283,6 +288,26 @@ module Caramel::Frappe
       if filter && listing.empty?
         @error.puts("No route's method, path or action contains #{filter}.")
       end
+    end
+
+    private def make_locale(code : String) : Nil
+      files = LocaleGenerator.new.generate(Project.load, code)
+      files.each { |path| @output.puts("Generated #{path}") }
+      @output.puts("\nNext: write translations in app/locales/#{code}.cr, " \
+                   "set dir: locale.dir in app/views/layouts/application.cr " \
+                   "for right-to-left languages, " \
+                   "and run frappe translations to list what is missing.")
+    end
+
+    # Prints the application's report of keys each locale still lacks.
+    private def translations : Int32
+      project = Project.load
+      tools = Tools.new(@framework_root, @output, @error)
+      binary = tools.compile(project)
+      development = {"CARAMEL_ENV" => "development"}
+      status, report = tools.capture(binary, ["translations"], project.root, development)
+      @output.print(report)
+      status.success? ? 0 : 1
     end
 
     # `crystal tool expand` sees macro calls in method bodies and in the files

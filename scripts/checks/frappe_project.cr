@@ -69,6 +69,7 @@ module Caramel::Checks
           short_code:string:server:unique click_count:int64:server
         ]
         command(make + %w[Book title:string author:string], chdir: @project)
+        command([@frappe, "make", "locale", "fr"], chdir: @project)
         command(make + person, chdir: @project)
         command(make + link, chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
@@ -82,6 +83,7 @@ module Caramel::Checks
         [show, update, create].each do |route|
           assert!(routes.lines.any? { |line| line.split == route }, routes)
         end
+        translations
         agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
@@ -268,6 +270,16 @@ module Caramel::Checks
       command([@frappe, "corretto"], chdir: project, timeout: 600.seconds)
       puts "PASS: production installs omit Lexbor entirely; " \
            "development setup restores the pinned parser and runs Corretto"
+    end
+
+    # The application took fr before Person, so fr lacks Person's messages.
+    def translations : Nil
+      report = attempt([@frappe, "translations"], chdir: @project, timeout: 300.seconds)
+      assert!(!report.success?, report.stdout)
+      missing = "MISSING fr people.collection app/locales/fr.cr"
+      assert!(report.stdout.includes?(missing), report.stdout + report.stderr)
+      puts "PASS: frappe make locale wires i18n, localized resources compile " \
+           "beside plain ones, and frappe translations lists fr's missing keys"
     end
 
     # RFC-0005 agent tooling on the generated project: the stateless manifest,

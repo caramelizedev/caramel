@@ -149,6 +149,13 @@ module Caramel::Frappe
         "--only=create,show,index,new keeps the listed actions " \
         "of index, show, new, create, edit, update and destroy; " \
         "create and show are required, and edit needs new and update."),
+      Command.new("make locale CODE",
+        "Add the locale CODE, such as fr or pt-BR: create app/locales/CODE.cr; " \
+        "on first use also app/locales/en.cr and the i18n lines in " \
+        "config/application.cr, after which frappe make resource writes translated views."),
+      Command.new("translations",
+        "List the keys each locale still takes from the default locale; " \
+        "exits 1 while any is missing."),
       Command.new("migrate [--dev-override] #{MODE}",
         "Lint and apply pending migrations, then report schema drift read-only."),
       Command.new("seed", "Load db/seeds.cr into the development database."),

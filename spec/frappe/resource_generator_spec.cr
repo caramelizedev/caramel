@@ -2,6 +2,7 @@ require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/resource_generator"
+require "../../src/frappe/locale_generator"
 require "../../src/caramel/external_url"
 require "../../src/caramel/html"
 
@@ -14,6 +15,17 @@ private def resource_project(&)
   yield project, package
 ensure
   FileUtils.rm_rf(parent) if parent
+end
+
+private def localized_project(&)
+  resource_project do |project, package|
+    Caramel::Frappe::LocaleGenerator.new.generate(project, "fr")
+    yield project, Caramel::Frappe::ResourceGenerator.new(package)
+  end
+end
+
+private def read(project : Caramel::Frappe::Project, relative : String) : String
+  File.read(File.join(project.root, relative))
 end
 
 describe Caramel::Frappe::ResourceGenerator do
@@ -315,6 +327,60 @@ describe Caramel::Frappe::ResourceGenerator do
       expected = Caramel::Frappe::SchemaDiff.source(migration)
       generated = File.join(project.root, "db/migrations/20260919000003_create_people.cr")
       File.read(generated).should eq(expected)
+    end
+  end
+
+  it "writes translated views in a localized application" do
+    localized_project do |project, generator|
+      generator.generate(project, "Book", ["title:string"], version: 20260919000009_i64)
+      read(project, "app/views/books/index.cr").should contain("{ t.books.new_record }")
+      label = %(labelled "title", t.books.fields.title)
+      read(project, "app/views/books/form.cr").should contain(label)
+    end
+  end
+
+  it "adds the resource's messages before the default locale's marker" do
+    localized_project do |project, generator|
+      generator.generate(project, "Book", ["title:string"], version: 20260919000009_i64)
+      expected = <<-CRYSTAL
+            not_found:          "Book not found",
+            fields:             {
+              title: "Title",
+            },
+          },
+          # Frappé resource messages
+
+        CRYSTAL
+      english = read(project, "app/locales/en.cr")
+      english.should contain("  books: {\n    collection:         \"Books\",\n")
+      english.should contain(expected)
+    end
+  end
+
+  it "refuses a field a catalog cannot name, before writing" do
+    localized_project do |project, generator|
+      expect_raises(Caramel::Frappe::Error, "The field locale cannot be a catalog key") do
+        generator.generate(project, "Book", ["locale:string"])
+      end
+      Dir.children(File.join(project.root, "app/models")).should eq([".keep"])
+    end
+  end
+
+  it "refuses a plural that names a framework catalog group" do
+    localized_project do |project, generator|
+      expect_raises(Caramel::Frappe::Error, "The plural common is a catalog group") do
+        generator.generate(project, "Thing", ["title:string"], plural: "common")
+      end
+    end
+  end
+
+  it "refuses a localized application without a default locale" do
+    localized_project do |project, generator|
+      config = File.join(project.root, "config/application.cr")
+      File.write(config, File.read(config).sub(%(Caramel.locales default: "en"), ""))
+      expect_raises(Caramel::Frappe::Error, "no Caramel.locales default: line") do
+        generator.generate(project, "Book", ["title:string"])
+      end
     end
   end
 end

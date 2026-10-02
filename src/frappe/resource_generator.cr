@@ -1,4 +1,6 @@
 require "./project"
+require "./publication"
+require "../caramel/i18n/keys"
 require "./schema_diff"
 require "../sugar_orm/catalog"
 require "../sugar_orm/differ"
@@ -186,6 +188,15 @@ module Caramel::Frappe
     ]
     # Plurals that would take a path or directory the application already has.
     RESERVED_PLURALS = %w[assets health home new edit views]
+    # Catalog groups a localized application already has.
+    RESERVED_GROUPS = ["caramel", "common"]
+    # The default locale in a localized application's config/application.cr.
+    DEFAULT_LOCALE = /^Caramel\.locales default: "([^"]+)"/m
+    # Where the default locale's catalog takes a resource's messages.
+    MESSAGES_MARKER = "  # Frappé resource messages"
+
+    @localized = false
+    @plural = ""
 
     def initialize(@framework_root : String)
     end
@@ -211,6 +222,10 @@ module Caramel::Frappe
       if fields.empty? || fields.map(&.name).uniq!.size != fields.size
         raise Error.new("Declare at least one field and use each name only once")
       end
+      default_locale = default_locale(project.root)
+      @localized = !default_locale.nil?
+      @plural = collection
+      check_catalog_names(collection, fields) if @localized
       inputs = fields.reject(&.server?)
       if inputs.empty?
         raise Error.new("Leave at least one field without :server; the form needs one")
@@ -258,6 +273,7 @@ module Caramel::Frappe
         "@@ASSERT_CHANGESET@@"  => changeset_checks,
         "@@SPEC_TITLE@@"        => spec_title(actions),
         "@@ASSERT_ESCAPING@@"   => assert_escaping(inputs),
+        "@@FIELD_LABELS@@"      => field_labels(inputs),
       }
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")
@@ -265,7 +281,7 @@ module Caramel::Frappe
         next unless File.file?(path)
         relative = Path[path].relative_to(template_root).to_s
         next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
-        content = select_lines(File.read(path), actions)
+        content = select_lines(File.read(path), @localized ? actions + ["locales"] : actions)
         tokens.each do |key, value|
           relative = relative.gsub(key, value)
           content = content.gsub(key, value)
@@ -291,25 +307,117 @@ module Caramel::Frappe
       }.select { |action, _| actions.includes?(action) }.values
       path_helpers = ["  Caramel.resource_paths :#{collection}, :#{singular}"]
       insertions = {
-        "config/routes.cr" => {"    # Frappé resource routes", routes},
-        "config/paths.cr"  => {"  # Frappé resource paths", path_helpers},
+        "config/routes.cr" => {"    # Frappé resource routes", routes, routes},
+        "config/paths.cr"  => {"  # Frappé resource paths", path_helpers, path_helpers},
       }
+      if default_locale
+        messages = catalog_lines(name, collection, fields, actions)
+        insertions["app/locales/#{default_locale}.cr"] = {MESSAGES_MARKER, messages, messages[0, 1]}
+      end
       insertions.each do |relative, insertion|
-        validate_path(project.root, relative)
+        Publication.validate_path(project.root, relative)
         original = File.read(File.join(project.root, relative))
-        marker, lines = insertion
+        marker, lines, probes = insertion
         unless original.lines.count(marker) == 1
           raise Error.new("Expected exactly one generation marker in #{relative}; " \
                           "source was preserved")
         end
-        if lines.any? { |line| original.includes?(line) }
-          raise Error.new("Resource route or helper already exists")
+        if probes.any? { |line| original.includes?(line) }
+          raise Error.new("A resource route, helper or message group already exists")
         end
         originals[relative] = original
         files[relative] = original.sub(marker, "#{lines.join('\n')}\n#{marker}")
       end
-      publish(project, files, originals)
+      Publication.publish(project, files, originals)
       files.keys.sort!
+    end
+
+    # The default locale's code when config/application.cr requires
+    # caramel/i18n, which makes the generated views translated.
+    private def default_locale(root : String) : String?
+      config = File.read(File.join(root, "config/application.cr"))
+      return unless config.lines.includes?(%(require "caramel/i18n"))
+
+      match = config.match(DEFAULT_LOCALE)
+      raise Error.new("config/application.cr has no Caramel.locales default: line") unless match
+      match[1]
+    end
+
+    # A localized resource becomes a catalog group named for its plural, and
+    # each field a message in it, so both must be names a catalog accepts.
+    private def check_catalog_names(collection : String, fields : Array(ResourceField)) : Nil
+      if RESERVED_GROUPS.includes?(collection)
+        raise Error.new("The plural #{collection} is a catalog group Caramel uses; " \
+                        "choose another with --plural")
+      end
+      fields.each do |field|
+        next unless I18n::RESERVED_KEYS.includes?(field.name) || field.name.includes?("__")
+        raise Error.new("The field #{field.name} cannot be a catalog key; " \
+                        "choose another name")
+      end
+    end
+
+    # The default locale's messages for the resource, in catalog order and
+    # aligned as `crystal tool format` aligns them.
+    private def catalog_lines(model : String,
+                              collection : String,
+                              fields : Array(ResourceField),
+                              actions : Array(String)) : Array(String)
+      messages = resource_messages(model, collection, actions)
+      width = (messages.keys << "fields").max_of(&.size) + 2
+      lines = ["  #{collection}: {"]
+      messages.each { |key, text| lines << entry("    ", key, width, text.to_json) }
+      lines << entry("    ", "fields", width, "{")
+      field_width = fields.max_of(&.name.size) + 2
+      fields.each do |field|
+        lines << entry("      ", field.name, field_width, field.label.to_json)
+      end
+      lines.concat(["    },", "  },"])
+    end
+
+    # One `key: value` catalog line, its value starting at *width*.
+    private def entry(indent : String, key : String, width : Int32, value : String) : String
+      line = "#{indent}#{"#{key}:".ljust(width)}#{value}"
+      value == "{" ? line : "#{line},"
+    end
+
+    # Each message key with its English text, when an action uses it.
+    private def resource_messages(model : String,
+                                  collection : String,
+                                  actions : Array(String)) : Hash(String, String)
+      label = model.underscore.tr("_", " ")
+      collection_label = collection.tr("_", " ").capitalize
+      candidates = [
+        {"collection", collection_label, "index"},
+        {"model", model, nil},
+        {"new_record", "New #{label}", "new"},
+        {"first_record", "Add your first #{label} to get going.", "index"},
+        {"back_to_collection", "← #{collection_label}", "index"},
+        {"back_to_record", "← Back to #{label}", "edit"},
+        {"edit_record", "Edit #{label}", "edit"},
+        {"delete_record", "Delete #{label}", "destroy"},
+        {"save_record", "Save #{label}", "new"},
+        {"not_found", "#{model} not found", nil},
+      ]
+      messages = {} of String => String
+      candidates.each do |key, text, action|
+        messages[key] = text if action.nil? || actions.includes?(action)
+      end
+      messages
+    end
+
+    # The form's error summary names each field by its translated label,
+    # looked up without a branch per field.
+    private def field_labels(inputs : Array(ResourceField)) : String
+      width = inputs.max_of(&.name.size) + 2
+      inputs.join('\n') { |field| entry("        ", field.name, width, field_text(field)) }
+    end
+
+    # A field's label: its catalog message when localized, else English text.
+    private def field_text(field : ResourceField) : String
+      return "t.#{@plural}.fields.#{field.name}" if @localized
+
+      field.label.to_json
     end
 
     # Every action, or those `--only` names. Create and show are required:
@@ -376,7 +484,7 @@ module Caramel::Frappe
 
     private def table_headers(fields : Array(ResourceField)) : String
       headers = fields.map do |field|
-        "              th(scope: \"col\") { #{field.label.to_json} }"
+        "              th(scope: \"col\") { #{field_text(field)} }"
       end
       headers.join('\n')
     end
@@ -387,7 +495,7 @@ module Caramel::Frappe
 
     private def show_fields(fields : Array(ResourceField)) : String
       terms = fields.map do |field|
-        "          dt { #{field.label.to_json} }\n          dd { @record.#{field.name} }"
+        "          dt { #{field_text(field)} }\n          dd { @record.#{field.name} }"
       end
       terms.join('\n')
     end
@@ -582,7 +690,7 @@ module Caramel::Frappe
                 else
                   input_control(field, name, attributes)
                 end
-      "        labelled #{name}, #{field.label.to_json} do |id|\n#{control}\n        end"
+      "        labelled #{name}, #{field_text(field)} do |id|\n#{control}\n        end"
     end
 
     # A bool field's select, with an empty choice when it is nilable.
@@ -595,9 +703,16 @@ module Caramel::Frappe
     end
 
     private def option_tag(name : String, value : String) : String
-      label = (value.empty? ? "Unspecified" : value.capitalize).to_json
+      label = option_label(value)
       "            option(value: #{value.to_json}, " \
       "selected: @values[#{name}]? == #{value.to_json}) { #{label} }"
+    end
+
+    private def option_label(value : String) : String
+      english = (value.empty? ? "Unspecified" : value.capitalize).to_json
+      return english unless @localized
+
+      value.empty? ? "t.common.unspecified" : "t.common.option_#{value}"
     end
 
     private def input_control(field : ResourceField,
@@ -614,91 +729,6 @@ module Caramel::Frappe
       return "number" if %w[int32 int64 float64].includes?(field.kind)
 
       field.url? ? "url" : "text"
-    end
-
-    private def validate_path(root : String, relative : String) : Nil
-      current = root
-      relative.split('/').each do |part|
-        current = File.join(current, part)
-        if info = File.info?(current, follow_symlinks: false)
-          raise Error.new("Generator refuses symlinked paths: #{relative}") if info.symlink?
-        end
-      end
-    end
-
-    private def preflight(root : String,
-                          files : Hash(String, String),
-                          originals : Hash(String, String)) : Nil
-      # Repeat the version check while holding the publication lock: another
-      # generator may have planned a different resource in the same second.
-      files.each_key do |relative|
-        next unless relative.starts_with?("db/migrations/")
-        version = File.basename(relative).split('_', 2).first
-        unless Dir.glob(File.join(root, "db/migrations/#{version}_*.cr")).empty?
-          raise Error.new("Migration version already exists; retry generation")
-        end
-      end
-      files.each_key do |relative|
-        validate_path(root, relative)
-        path = File.join(root, relative)
-        if original = originals[relative]?
-          unless File.file?(path) && File.read(path) == original
-            raise Error.new("Source changed while planning generation: #{relative}")
-          end
-        elsif File.info?(path, follow_symlinks: false)
-          raise Error.new("File already exists: #{relative}; source was preserved")
-        end
-      end
-    end
-
-    private def publish(project : Project,
-                        files : Hash(String, String),
-                        originals : Hash(String, String)) : Nil
-      preflight(project.root, files, originals)
-      directory = Latte::StateSecurity.ensure_owned_directory(File.join(project.root, ".caramel"))
-      lock_path = File.join(directory, "generation.lock")
-      raise Error.new("Generator lock must be a regular file") if File.symlink?(lock_path)
-      File.open(lock_path, "a", perm: 0o600) do |lock|
-        lock.flock_exclusive do
-          preflight(project.root, files, originals)
-          stage = File.join(directory, "generate-#{Random::Secure.hex(8)}")
-          Dir.mkdir(stage, 0o700)
-          published = [] of String
-          begin
-            files.each do |relative, content|
-              path = File.join(stage, relative)
-              FileUtils.mkdir_p(File.dirname(path))
-              File.write(path, content)
-            end
-            files.each_key do |relative|
-              path = File.join(project.root, relative)
-              FileUtils.mkdir_p(File.dirname(path))
-              if originals.has_key?(relative)
-                unless File.read(path) == originals[relative]
-                  raise Error.new("Source changed while generating: #{relative}")
-                end
-                File.rename(File.join(stage, relative), path)
-              else
-                File.link(File.join(stage, relative), path)
-              end
-              published << relative
-            end
-          rescue ex
-            published.reverse_each do |relative|
-              path = File.join(project.root, relative)
-              next unless File.file?(path) && File.read(path) == files[relative]
-              if original = originals[relative]?
-                File.write(path, original)
-              else
-                File.delete(path)
-              end
-            end
-            raise ex
-          ensure
-            FileUtils.rm_rf(stage)
-          end
-        end
-      end
     end
   end
 end

@@ -6,12 +6,24 @@ module App::@@COLLECTION@@
       form = Views::@@COLLECTION@@::Form.new(action, id ? "PATCH" : "POST", csrf_token, values, errors)
       # frappe:only edit
       if id
+        # frappe:only locales
+        page t.@@PLURAL@@.edit_record, Views::@@COLLECTION@@::Edit.new(id, form), status
+        # frappe:else
         page "Edit @@LABEL@@", Views::@@COLLECTION@@::Edit.new(id, form), status
+        # frappe:end
       else
+        # frappe:only locales
+        page t.@@PLURAL@@.new_record, Views::@@COLLECTION@@::New.new(form), status
+        # frappe:else
         page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status
+        # frappe:end
       end
       # frappe:else
+      # frappe:only locales
+      page t.@@PLURAL@@.new_record, Views::@@COLLECTION@@::New.new(form), status
+      # frappe:else
       page "New @@LABEL@@", Views::@@COLLECTION@@::New.new(form), status
+      # frappe:end
       # frappe:end
     end
 
