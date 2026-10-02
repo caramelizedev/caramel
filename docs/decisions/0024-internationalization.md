@@ -62,6 +62,59 @@ Status: accepted.
    - After that, `frappe make resource` writes `t.` calls in place of English, and inserts the resource's messages into the default locale's catalog. In such an application it refuses a field or plural that would be an invalid catalog key.
    - `frappe translations` runs the application's `translations` command, which lists each `MISSING code key file` and exits 1 while any key is missing.
 
+## Catalog reference
+
+The reserved `caramel:` section takes only these keys. A locale that leaves one out uses the default locale's, then English.
+
+|Key|Value|English|
+|---|---|---|
+|`language`|The language's own name|`English`|
+|`number.separator`, `number.delimiter`|One character each|`.` and `,`|
+|`time.months`, `time.abbr_months`|12 names, January first|`January` …, `Jan` …|
+|`time.days`, `time.abbr_days`|7 names, Sunday first|`Sunday` …, `Sun` …|
+|`time.am`, `time.pm`|Text|`AM`, `PM`|
+|`time.formats.NAME`|A pattern|`date` `%B %-d, %Y`, `time` `%-I:%M %p`, `datetime` `%B %-d, %Y %-I:%M %p`, `short_date` `%b %-d`|
+
+- A pattern uses only `%Y %m %-m %d %-d %H %-H %I %-I %M %S %p %B %b %A %a %%`. `%I` is the 12-hour clock, and `%-` drops the leading zero.
+- The default locale may add format names; `l(time, :name)` takes each. Other locales may only translate the names it has.
+
+`errors` and `pages` translate Caramel's own messages. Each must use exactly the placeholders listed.
+
+|Key|English|Placeholders|
+|---|---|---|
+|`errors.required`|is required (contracts and changesets)|–|
+|`errors.must_be_file`|must be a file|–|
+|`errors.json_type`|must be a JSON %{type}|`type`|
+|`errors.invalid_value`|must be a valid %{type}|`type`|
+|`errors.at_least`|must be at least %{min}|`min`|
+|`errors.at_least_characters`|must be at least %{min} characters|`min`|
+|`errors.at_most`|must be at most %{max}|`max`|
+|`errors.at_most_characters`|must be at most %{max} characters|`max`|
+|`errors.duplicate_field`|Duplicate field: %{name}|`name`|
+|`errors.unknown_field`|Unknown field: %{name}|`name`|
+|`errors.expected_json_object`|Expected a JSON object|–|
+|`errors.url`|must be an absolute http or https URL|–|
+|`errors.blank`|can't be blank|–|
+|`errors.greater_than`|must be greater than %{than}|`than`|
+|`errors.less_than`|must be less than %{than}|`than`|
+|`errors.too_short`|should be at least %{min} character(s)|`min`|
+|`errors.too_long`|should be at most %{max} character(s)|`max`|
+|`errors.invalid_format`|has invalid format|–|
+|`errors.invalid`|is invalid|–|
+|`errors.taken`|has already been taken|–|
+|`errors.record_gone`|Record no longer exists|–|
+|`pages.check_request`|Check your request|–|
+|`pages.not_found`|Not found|–|
+|`pages.expired_form`|This form has expired or came from another site. Reload the page and try again.|–|
+
+Plural rules are built in for these languages:
+
+- `af am ar as ast az be bg bn bs ca cs cy da de el en es et eu fa fi fo fr fy ga gl gu he hi hr hu id is it ja ka kk km kn ko ky lb lo lt lv mk ml mn mr ms my nb ne nl nn no pl pt pt-PT ro ru sk sl so sq sr sv sw ta te th tr uk ur uz vi yue zh zu`.
+- A tag with a region or script uses its language's rules, so `pt-BR` uses `pt`'s; `pt-PT` has its own.
+- Any other language names one with the same rules: `Caramel.locale "eo", {…}, plural: "en"`.
+
+`Locale#dir` is `rtl` for `ar he fa ur ps sd ug yi dv ckb`, and `ltr` for every other language.
+
 ## Reasons
 
 - Rendering at creation time, rather than storing error codes, keeps the error hash and the JSON shape every client already reads. Switching to codes would break both, so it waits for a later, breaking release if the owner wants it.
