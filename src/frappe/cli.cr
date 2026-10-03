@@ -209,7 +209,7 @@ module Caramel::Frappe
                    "is not a terminal; --human selects the terminal layout.")
     end
 
-    # Stateless: reads only the command table (RFC-0005 §2.1).
+    # Stateless: reads only the command table.
     private def manifest : Nil
       @output.puts("CARAMEL CLI INTERFACE (STRICT TOKENS)")
       @output.puts("VERSION: #{Caramel::VERSION}")

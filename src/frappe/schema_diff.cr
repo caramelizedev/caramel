@@ -12,7 +12,7 @@ require "./tools"
 module Caramel::Frappe
   # `frappe db diff`: derives migrations by diffing the application's declared
   # schema against a disposable Latte branch of the development database, and
-  # proves them on that branch before keeping them (RFC-0002 §2.5).
+  # proves them on that branch before keeping them.
   class SchemaDiff
     NAME           = /\A[a-z][a-z0-9_]{0,62}\z/
     VERSION        = "%Y%m%d%H%M%S"
@@ -33,7 +33,7 @@ module Caramel::Frappe
     end
 
     # Returns the written migration files relative to the project root. With
-    # `agent`, halts and lint refusals raise as MRDP (RFC-0005 §2.3).
+    # `agent`, halts and lint refusals raise as MRDP.
     def run(name : String, dev_override : Bool, agent : Bool = false) : Array(String)
       @agent = agent
       unless name.matches?(NAME)

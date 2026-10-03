@@ -1,5 +1,5 @@
 module Caramel::Frappe
-  # Machine-Readable Diagnostic Protocol (RFC-0005 §2.3, Mode B): plain
+  # Machine-Readable Diagnostic Protocol (Mode B): plain
   # lines with no ANSI. Each diagnostic is an `ERR` line followed by one
   # `KEY: value` field per line.
   module MRDP

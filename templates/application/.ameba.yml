@@ -1,4 +1,4 @@
-# Caramel's rule set for RFC-0008 (poetic ergonomics), run by `frappe lint`
+# Caramel's rule set, run by `frappe lint`
 # and by ameba-ls in the editor. ADR 0017 gives the reason for each choice.
 # Every other Ameba 1.7.0 rule keeps its default.
 Version: "1.7.0"
@@ -22,7 +22,7 @@ Caramel/ServiceNoun:
 Metrics/CyclomaticComplexity:
   MaxComplexity: 10
 
-# Manifesto: no placeholders in shipped code.
+# No placeholders in shipped code.
 Documentation/Admonition:
   Enabled: true
 

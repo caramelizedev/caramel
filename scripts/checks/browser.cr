@@ -370,7 +370,7 @@ module Caramel::Checks
       end
     end
 
-    # The page streams the RFC-0003 §2.3 action; a POST commits a business row
+    # The page streams the Boards::Live action; a POST commits a business row
     # with its job; serve's worker runs the job, whose publish reaches Safari.
     private def check_pubsub : Nil
       group("Cold Brew job to PubSub through Caddy", "#pubsub") do
@@ -413,7 +413,7 @@ module Caramel::Checks
         click_ms = latency.total_milliseconds.round.to_i
         puts "PASS: a POST committed delivery #{delivery} with its Cold Brew job; " \
              "serve's worker finished the job (1 attempt) and its publish reached " \
-             "Safari's EventSource on the RFC-0003 §2.3 action through Caddy " \
+             "Safari's EventSource on the Boards::Live action through Caddy " \
              "#{click_ms} ms after the click"
       end
     end

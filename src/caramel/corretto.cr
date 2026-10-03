@@ -10,7 +10,7 @@ require "./corretto/wire"
 require "./corretto/client"
 require "./corretto/matchers"
 
-# Corretto (RFC-0006): zero-mock integration testing. Specs require
+# Corretto: zero-mock integration testing. Specs require
 # "caramel/corretto" and call `Corretto.configure` once in spec/spec_helper.cr;
 # `frappe corretto` runs them against per-worker Latte clones of the migrated
 # spec database.
@@ -190,7 +190,7 @@ module Corretto
     end
   end
 
-  # Mocking is forbidden (RFC-0006 §2.1): refuse to compile a suite that
+  # Mocking is forbidden: refuse to compile a suite that
   # loads a mocking library.
   macro finished
     {% instead = "assert on observable ingress, database rows and rendered hypermedia, " +

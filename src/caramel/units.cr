@@ -1,4 +1,4 @@
-# RFC-0008 §2.3: quantities read as what they measure. Crystal already turns
+# Quantities read as what they measure. Crystal already turns
 # integers into spans (`48.hours`) and spans into times (`3.days.from_now`);
 # Caramel adds sizes in bytes and midnight, so a limit reads
 # `storage_used > 50.gigabytes` and a schedule `3.days.from_now.at_midnight`.

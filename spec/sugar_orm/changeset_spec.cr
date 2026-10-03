@@ -6,7 +6,7 @@ private alias Update = SugarUnit::Team::UpdateChangeset
 private alias Profile = SugarUnit::Team::ProfileChangeset
 
 describe SugarORM::Changeset do
-  it "runs validate(cs) on construction exactly as the RFC writes it" do
+  it "runs validate(cs) on construction" do
     changeset = Update.new(SugarUnit.team, seats: 0, billing_email: "not-an-address")
     changeset.valid?.should be_false
     changeset.errors.should eq({

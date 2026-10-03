@@ -23,7 +23,7 @@ module Caramel::ColdBrew
       RETURNING id
       SQL
 
-    # RFC-0003 §2.2: the claim sets locked_at and locked_by and counts the
+    # The claim sets locked_at and locked_by and counts the
     # attempt in the same statement that SKIP LOCKED selected the row with.
     # A drain passes the ids that already failed during it as $2.
     def self.claim_sql(due_only : Bool, drain : Bool) : String

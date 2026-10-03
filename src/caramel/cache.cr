@@ -1,7 +1,7 @@
 require "../sugar_orm"
 
 module Caramel
-  # A string cache in the UNLOGGED `caramel_cache` table (RFC-0003 §2.4),
+  # A string cache in the UNLOGGED `caramel_cache` table,
   # read and written through SugarORM::Repo's current connection. Expired
   # entries read as nil; Cold Brew's maintenance fiber deletes them.
   module Cache

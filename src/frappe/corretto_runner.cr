@@ -8,7 +8,7 @@ require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
-  # `frappe corretto [SPEC_PATHS...] [--concurrency=N]` (RFC-0006): refuses
+  # `frappe corretto [SPEC_PATHS...] [--concurrency=N]`: refuses
   # mocking APIs under spec/, migrates the spec template database once, clones
   # one Latte test-worker database per worker from it, deals the spec files
   # round-robin to N parallel spec processes and drops the workers.

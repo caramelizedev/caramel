@@ -1,7 +1,7 @@
 require "./migration"
 
 module SugarORM
-  # Zero-lock rules (RFC-0002 §2.6) over migration SQL. The migrator runs them
+  # Zero-lock rules over migration SQL. The migrator runs them
   # over every pending migration before it executes any statement.
   module Linter
     IDENTIFIER = %q((?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*))
@@ -46,7 +46,7 @@ module SugarORM
         io << "  Remediation: " << remediation
       end
 
-      # RFC-0005 MRDP, with the migration file relative to `root`.
+      # MRDP, with the migration file relative to `root`.
       def to_mrdp(io : IO, root : String = Dir.current) : Nil
         at = file.starts_with?(root + "/") ? file[(root.size + 1)..] : file
         io << "ERR LINT_" << rule.upcase.tr("-", "_") << " at " << at << '\n'

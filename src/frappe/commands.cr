@@ -131,7 +131,7 @@ module Caramel::Frappe
         "Run the Tier-1 type check (crystal build --no-codegen) " \
         "and report diagnostics; MRDP unless stdout is a TTY."),
       Command.new("lint #{MODE}",
-        "Check the application against Caramel's RFC-0008 rule set in .ameba.yml; " \
+        "Check the application against Caramel's rule set in .ameba.yml; " \
         "MRDP unless stdout is a TTY."),
       Command.new("format",
         "Format the application's Crystal files with the pinned compiler's formatter."),

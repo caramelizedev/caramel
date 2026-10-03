@@ -17,7 +17,7 @@ lib LibC
 end
 
 module Caramel::Latte
-  # Recursive macOS kqueue watcher (RFC-0004 §2.1). Each watched directory and
+  # Recursive macOS kqueue watcher. Each watched directory and
   # file is held open with O_EVTONLY. A directory event rescans that directory,
   # so new entries gain watches and vanished ones release theirs. Missing
   # watched paths are picked up through their parent directories ("anchors").

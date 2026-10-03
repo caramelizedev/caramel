@@ -4,7 +4,7 @@ require "../../sugar_orm"
 require "./queue"
 
 module Caramel::ColdBrew
-  # A pool of fibers working one queue (RFC-0003 §2.2). Each fiber claims a
+  # A pool of fibers working one queue. Each fiber claims a
   # job with SKIP LOCKED and runs it on the connection that holds the claim;
   # an empty queue costs one 50 ms sleep.
   class Worker

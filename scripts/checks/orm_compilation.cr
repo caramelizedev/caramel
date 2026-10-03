@@ -4,10 +4,10 @@ require "./support/harness"
 # a remediation. Schema and changeset declaration errors name the exact line
 # with `-->` (Crystal reports class-body macro errors on the class line).
 cases = {
-  "compile_valid"          => nil,
-  "compile_rfc_examples"   => nil,
-  "compile_rfc_n_plus_one" => [
-    "compile_rfc_n_plus_one.cr:5:35",
+  "compile_valid"            => nil,
+  "compile_usage_examples"   => nil,
+  "compile_usage_n_plus_one" => [
+    "compile_usage_n_plus_one.cr:5:35",
     "undefined method 'each' for Team::UsersNotLoaded",
     "Association 'users' of Team was not preloaded",
     ".preload(:users)",
