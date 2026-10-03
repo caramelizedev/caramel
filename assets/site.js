@@ -18,6 +18,8 @@
   const steam = root.querySelector('.l-steam');
   const chapters = Array.from(root.querySelectorAll('.l-chapter'));
   const pieces = ['caramel','foam','milk','espresso'].map(name=>root.querySelector('.l-'+name));
+  const chapterNumber = root.querySelector('#l-current');
+  const indexLine = root.querySelector('.l-index-line');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let scrollFrame = 0, activeChapter = -1;
   let scrollProgress = null, previousFrameTime = 0;
@@ -41,24 +43,44 @@
     const p=scrollProgress;
     // Give the first lift more scroll travel, then settle between ingredients.
     const steps=[
-      {start:.045,end:.29,lift:235,spread:16},
-      {start:.35,end:.52,lift:197,spread:-10},
-      {start:.58,end:.75,lift:154,spread:8},
-      {start:.80,end:.94,lift:116,spread:-8},
+      {start:.045,end:.29,lift:235,spread:16,tilt:5},
+      {start:.35,end:.52,lift:197,spread:-10,tilt:-3.5},
+      {start:.58,end:.75,lift:154,spread:8,tilt:3},
+      {start:.80,end:.94,lift:116,spread:-8,tilt:-3},
     ];
     const thresholds=[.06,.365,.595,.815,.97];
     const chapter=thresholds.filter(t=>p>=t).length;
     pieces.forEach((piece,i)=>{
       const step=steps[i], raw=clamp((p-step.start)/(step.end-step.start));
       const amount=reducedMotion.matches?(raw>0?1:0):smooth(raw);
-      piece.style.transform=`translate(${step.spread*amount}px,${-step.lift*amount}px)`;
+      // A layer tips a little while it rises and lands level.
+      piece.style.transform=`translate(${step.spread*amount}px,${-step.lift*amount}px) rotate(${(step.tilt*Math.sin(Math.PI*amount)).toFixed(2)}deg)`;
     });
     // The camera pulls back gradually, independently of the caramel lifting.
     const framing=reducedMotion.matches?(chapter?1:0):smooth(clamp((p-.015)/.385));
     const mobile=root.clientWidth<=700, zoom=mobile?1.15:1.35, lift=mobile?80:130;
     diagram.style.transform=`translateY(${-lift*(1-framing)}px) scale(${zoom-(zoom-1)*framing})`;
-    steam.style.opacity=String(1-smooth(clamp((p-.04)/.25)));
-    if(chapter!==activeChapter){activeChapter=chapter;chapters.forEach((el,i)=>{el.hidden=i!==chapter;});root.querySelector('#l-current').textContent=String(chapter).padStart(2,'0');story.dataset.chapter=String(chapter);}
+    // Steam rises and thins as the caramel lifts, then stops drawing.
+    const vapor=smooth(clamp((p-.04)/.25));
+    steam.style.opacity=String(1-vapor);
+    steam.style.transform=`translateY(${-28*vapor}px)`;
+    steam.classList.toggle('is-idle',vapor>=1);
+    indexLine.style.setProperty('--fill',clamp((p-thresholds[0])/(thresholds[4]-thresholds[0])).toFixed(4));
+    if(chapter!==activeChapter){
+      const previous=activeChapter;
+      activeChapter=chapter;
+      // The first placement is instant; later chapters cross-fade in the scroll's direction.
+      if(previous<0){story.classList.add('l-instant');requestAnimationFrame(()=>requestAnimationFrame(()=>story.classList.remove('l-instant')));}
+      chapters.forEach((el,i)=>{
+        el.dataset.state=i===chapter?'current':i<chapter?'past':'next';
+        if(i===chapter)el.removeAttribute('aria-hidden');else el.setAttribute('aria-hidden','true');
+      });
+      chapterNumber.textContent=String(chapter).padStart(2,'0');
+      if(previous>0&&chapter>0&&!reducedMotion.matches){
+        chapterNumber.animate([{opacity:0,transform:`translateY(${chapter>previous?7:-7}px)`},{opacity:1,transform:'none'}],{duration:420,easing:'cubic-bezier(.22,.75,.2,1)'});
+      }
+      story.dataset.chapter=String(chapter);
+    }
     if(scrollProgress!==target)scrollFrame=requestAnimationFrame(updateScroll);
     else previousFrameTime=0;
   }

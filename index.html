@@ -30,22 +30,33 @@
               <linearGradient id="l-foam" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#fff1d6"/><stop offset="1" stop-color="#ddc5a1"/></linearGradient>
               <linearGradient id="l-syrup" x1="0" x2="1"><stop stop-color="#975024"/><stop offset=".4" stop-color="#e7b564"/><stop offset=".65" stop-color="#c78638"/><stop offset="1" stop-color="#8a411e"/></linearGradient>
               <radialGradient id="l-shadow"><stop stop-color="var(--latte-shadow)" stop-opacity=".25"/><stop offset="1" stop-color="var(--latte-shadow)" stop-opacity="0"/></radialGradient>
-              <linearGradient id="l-steam-fade" gradientUnits="userSpaceOnUse" x1="0" y1="295" x2="0" y2="185">
+              <linearGradient id="l-steam-fade" gradientUnits="userSpaceOnUse" x1="0" y1="302" x2="0" y2="186">
                 <stop stop-color="var(--latte-steam)" stop-opacity="0"/>
-                <stop offset=".2" stop-color="var(--latte-steam)" stop-opacity=".65"/>
-                <stop offset=".65" stop-color="var(--latte-steam)" stop-opacity=".4"/>
+                <stop offset=".14" stop-color="var(--latte-steam)" stop-opacity=".6"/>
+                <stop offset=".5" stop-color="var(--latte-steam)" stop-opacity=".4"/>
                 <stop offset="1" stop-color="var(--latte-steam)" stop-opacity="0"/>
               </linearGradient>
-              <filter id="l-steam-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
+              <filter id="l-steam-soft" x="-40%" y="-25%" width="180%" height="150%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".02 .05" numOctaves="2" seed="11" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="12" xChannelSelector="R" yChannelSelector="G" result="warp"/><feGaussianBlur in="warp" stdDeviation="2.6"/></filter>
+              <linearGradient id="l-wall" x1="0" x2="1"><stop stop-color="var(--latte-glass)" stop-opacity=".55"/><stop offset=".12" stop-color="var(--latte-glass)" stop-opacity=".18"/><stop offset=".5" stop-color="var(--latte-glass)" stop-opacity=".06"/><stop offset=".88" stop-color="var(--latte-glass)" stop-opacity=".18"/><stop offset="1" stop-color="var(--latte-glass)" stop-opacity=".55"/></linearGradient>
+              <linearGradient id="l-shine" x1="0" x2="0" y1="0" y2="1"><stop stop-color="var(--latte-shine)" stop-opacity=".9"/><stop offset=".6" stop-color="var(--latte-shine)" stop-opacity=".3"/><stop offset="1" stop-color="var(--latte-shine)" stop-opacity="0"/></linearGradient>
+              <linearGradient id="l-rim-shine" x1="0" x2="1"><stop stop-color="var(--latte-shine)" stop-opacity="0"/><stop offset=".3" stop-color="var(--latte-shine)" stop-opacity=".8"/><stop offset=".62" stop-color="var(--latte-shine)" stop-opacity=".3"/><stop offset="1" stop-color="var(--latte-shine)" stop-opacity="0"/></linearGradient>
+              <radialGradient id="l-caustic"><stop stop-color="var(--latte-caustic)" stop-opacity=".45"/><stop offset="1" stop-color="var(--latte-caustic)" stop-opacity="0"/></radialGradient>
+              <linearGradient id="l-gleam-fill" x1="0" x2="1"><stop stop-color="var(--latte-gleam)" stop-opacity="0"/><stop offset=".5" stop-color="var(--latte-gleam)" stop-opacity=".5"/><stop offset="1" stop-color="var(--latte-gleam)" stop-opacity="0"/></linearGradient>
+              <clipPath id="l-cup-clip"><path d="M76 307 C76 338 262 338 262 307 L248 386 Q242 421 169 421 Q96 421 90 386Z"/></clipPath>
             </defs>
-            <ellipse cx="183" cy="427" rx="119" ry="23" fill="url(#l-shadow)"/>
-            <ellipse cx="169" cy="419" rx="113" ry="20" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
-            <ellipse cx="169" cy="415" rx="98" ry="14" fill="none" stroke="var(--latte-glass)" stroke-opacity=".25"/>
+            <ellipse cx="179" cy="431" rx="122" ry="21" fill="url(#l-shadow)"/>
+            <ellipse cx="169" cy="423" rx="112" ry="19" fill="url(#l-wall)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
+            <ellipse cx="169" cy="418" rx="113" ry="19" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".34"/>
+            <ellipse cx="169" cy="416" rx="84" ry="12" fill="none" stroke="var(--latte-glass)" stroke-opacity=".18"/>
+            <ellipse cx="172" cy="418" rx="74" ry="8" fill="url(#l-shadow)"/>
+            <ellipse cx="200" cy="424" rx="38" ry="5.5" fill="url(#l-caustic)"/>
+            <path d="M56 418 A113 19 0 0 0 282 418" fill="none" stroke="url(#l-rim-shine)" stroke-width="1.2"/>
             <g class="l-cup-back">
-              <path d="M251 330 C319 305 320 393 260 391" fill="none" stroke="var(--latte-glass)" stroke-width="12" stroke-opacity=".22"/>
-              <path d="M253 330 C311 310 313 385 260 386" fill="none" stroke="var(--latte-glass)" stroke-width="2" stroke-opacity=".5"/>
-              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".3"/>
-              <ellipse cx="169" cy="307" rx="93" ry="24" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".38"/>
+              <path d="M252 323 C328 294 330 401 247 398 L247 386 C314 389 313 313 252 336Z" fill="url(#l-glass)" stroke="var(--latte-glass)" stroke-opacity=".42"/>
+              <path d="M270 322 C288 317 301 327 305 348" fill="none" stroke="url(#l-shine)" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" fill="url(#l-glass)"/>
+              <ellipse cx="169" cy="409" rx="66" ry="7" fill="var(--latte-glass)" fill-opacity=".08" stroke="var(--latte-glass)" stroke-opacity=".2"/>
+              <path d="M76 307 A93 24 0 0 1 262 307 L257.4 307 A88.4 21.4 0 0 0 80.6 307Z" fill="var(--latte-glass)" fill-opacity=".14" stroke="var(--latte-glass)" stroke-opacity=".42"/>
             </g>
             <g class="l-piece l-espresso">
               <path d="M93 380 L96 394 C98 417 240 417 242 394 L245 380Z" fill="url(#l-coffee)"/>
@@ -71,26 +82,34 @@
               <path d="M113 302 C136 292 205 294 219 299" stroke="#f8d595" stroke-width="1.5" opacity=".7"/>
             </g>
             <g class="l-cup-front" fill="none" stroke="var(--latte-glass)">
-              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" stroke-opacity=".55"/>
-              <path d="M76 307 C76 338 262 338 262 307" stroke-opacity=".45"/>
-              <path d="M87 321 L98 380 Q99 389 103 393" stroke-width="5" stroke-linecap="round" stroke-opacity=".24"/>
-              <path d="M250 326 L241 377" stroke-width="2" stroke-linecap="round" stroke-opacity=".25"/>
+              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307 L257.4 307 L243.6 384 Q238 411 169 411 Q100 411 94.4 384 L80.6 307Z" fill="url(#l-wall)" stroke="none"/>
+              <path d="M76 307 L90 386 Q96 421 169 421 Q242 421 248 386 L262 307" stroke-opacity=".6"/>
+              <path d="M80.6 307 L94.4 384 Q100 411 169 411 Q238 411 243.6 384 L257.4 307" stroke-opacity=".2"/>
+              <path d="M76 307 A93 24 0 0 0 262 307 L257.4 307 A88.4 21.4 0 0 1 80.6 307Z" fill="var(--latte-glass)" fill-opacity=".12" stroke-opacity=".5"/>
+              <path d="M98 322.5 A93 24 0 0 0 240 322.5" stroke="url(#l-rim-shine)" stroke-width="1.3"/>
+              <path d="M88 318 L99.5 386" stroke="url(#l-shine)" stroke-width="5" stroke-linecap="round" stroke-opacity=".5"/>
+              <path d="M94.5 321 L103.5 375" stroke="url(#l-shine)" stroke-width="1.3" stroke-linecap="round"/>
+              <path d="M252 322 L243 372" stroke="url(#l-shine)" stroke-width="2.2" stroke-linecap="round" stroke-opacity=".45"/>
+              <path d="M101 404 Q109 417 141 419" stroke="url(#l-rim-shine)" stroke-width="1.5" stroke-linecap="round"/>
             </g>
-            <g class="l-steam" aria-hidden="true" fill="none" stroke="url(#l-steam-fade)" stroke-linecap="round" filter="url(#l-steam-blur)">
-              <g class="l-steam-wisp"><path d="M143 294 C127 272 161 262 146 240 C137 227 141 214 151 204" stroke-width="8"/></g>
-              <g class="l-steam-wisp"><path d="M174 293 C194 273 156 255 174 234 C188 218 179 204 166 193" stroke-width="9"/></g>
-              <g class="l-steam-wisp"><path d="M203 294 C190 275 216 263 205 246 C197 233 206 217 213 208" stroke-width="7"/></g>
+            <g class="l-gleam" clip-path="url(#l-cup-clip)" aria-hidden="true"><g class="l-gleam-band"><rect x="108" y="288" width="34" height="156" transform="skewX(-14)" fill="url(#l-gleam-fill)"/></g></g>
+            <g class="l-steam" aria-hidden="true" fill="none" stroke="url(#l-steam-fade)" stroke-linecap="round" filter="url(#l-steam-soft)">
+              <g class="l-steam-wisp l-steam-haze"><path d="M172 300 C160 276 186 256 170 230 C160 214 180 200 174 188" stroke-width="18" stroke-opacity=".22"/></g>
+              <g class="l-steam-wisp"><path class="l-steam-body" d="M144 298 C136 284 152 274 146 260 C140 246 134 234 142 220 C147 211 142 204 138 198" stroke-width="8"/><path class="l-steam-core" d="M144 298 C136 284 152 274 146 260 C140 246 134 234 142 220 C147 211 142 204 138 198" stroke-width="2.6"/></g>
+              <g class="l-steam-wisp"><path class="l-steam-body" d="M164 297 C174 282 156 270 166 254 C176 238 180 226 170 212 C164 202 171 195 175 189" stroke-width="9"/><path class="l-steam-core" d="M164 297 C174 282 156 270 166 254 C176 238 180 226 170 212 C164 202 171 195 175 189" stroke-width="2.6"/></g>
+              <g class="l-steam-wisp"><path class="l-steam-body" d="M184 298 C178 285 193 273 186 258 C179 243 186 230 195 217 C200 209 195 201 190 195" stroke-width="7.5"/><path class="l-steam-core" d="M184 298 C178 285 193 273 186 258 C179 243 186 230 195 217 C200 209 195 201 190 195" stroke-width="2.4"/></g>
+              <g class="l-steam-wisp"><path class="l-steam-body" d="M204 298 C211 286 199 276 206 262 C213 248 211 236 202 224 C196 215 203 207 208 201" stroke-width="7"/><path class="l-steam-core" d="M204 298 C211 286 199 276 206 262 C213 248 211 236 202 224 C196 215 203 207 208 201" stroke-width="2.2"/></g>
             </g>
           </svg>
         </div>
         <div class="l-copy">
           <div class="l-chapters" aria-live="polite" aria-atomic="true">
-            <div class="l-chapter" data-chapter="0"><div class="a-meta">The Crystal web framework</div><h1><span>A little structure.</span><span class="a-word-two">A lot of possibility.</span></h1><p>PostgreSQL, typed HTML, and a clear place for every change.</p></div>
-            <div class="l-chapter" data-chapter="1" hidden><span class="l-kicker">01 / Caramel</span><h2>Blueprint</h2><p>Your ideas, rendered in typed HTML.</p></div>
-            <div class="l-chapter" data-chapter="2" hidden><span class="l-kicker">02 / Foam</span><h2>Corretto</h2><p>Confidence in every layer, through application tests.</p></div>
-            <div class="l-chapter" data-chapter="3" hidden><span class="l-kicker">03 / Milk</span><h2>SugarORM</h2><p>Give your data shape. Make your rules explicit.</p></div>
-            <div class="l-chapter" data-chapter="4" hidden><span class="l-kicker">04 / Espresso</span><h2>Frappé</h2><p>From the first file to the next feature.</p></div>
-            <div class="l-chapter" data-chapter="5" hidden><span class="l-kicker">05 / Cup</span><h2>Latte</h2><p>A local home, with services and named HTTPS.</p></div>
+            <div class="l-chapter" data-chapter="0" data-state="current"><div class="a-meta">The Crystal web framework</div><h1><span>A little structure.</span><span class="a-word-two">A lot of possibility.</span></h1><p>PostgreSQL, typed HTML, and a clear place for every change.</p></div>
+            <div class="l-chapter" data-chapter="1" data-state="next" aria-hidden="true"><span class="l-kicker">01 / Caramel</span><h2>Blueprint</h2><p>Your ideas, rendered in typed HTML.</p></div>
+            <div class="l-chapter" data-chapter="2" data-state="next" aria-hidden="true"><span class="l-kicker">02 / Foam</span><h2>Corretto</h2><p>Confidence in every layer, through application tests.</p></div>
+            <div class="l-chapter" data-chapter="3" data-state="next" aria-hidden="true"><span class="l-kicker">03 / Milk</span><h2>SugarORM</h2><p>Give your data shape. Make your rules explicit.</p></div>
+            <div class="l-chapter" data-chapter="4" data-state="next" aria-hidden="true"><span class="l-kicker">04 / Espresso</span><h2>Frappé</h2><p>From the first file to the next feature.</p></div>
+            <div class="l-chapter" data-chapter="5" data-state="next" aria-hidden="true"><span class="l-kicker">05 / Cup</span><h2>Latte</h2><p>A local home, with services and named HTTPS.</p></div>
           </div>
           <div class="a-cta l-action"><a class="a-start cursor-interaction" data-page="learn" href="/docs/0.7.1/getting-started/">Start building <span aria-hidden="true">↗</span></a></div>
           <div class="l-chapter-index" aria-hidden="true"><span id="l-current">00</span><span class="l-index-line"></span><span>05</span></div>
