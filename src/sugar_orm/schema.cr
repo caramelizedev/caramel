@@ -600,9 +600,9 @@ module SugarORM
             {% for key in foreign_keys %}
               ::SugarORM::Catalog::ForeignKey.new(
                 name: {{ key[:name] }},
-                column: {{ key[:column] }},
+                columns: [{{ key[:column] }}],
                 references_table: {{ key[:target] }}.__sugar_table_name,
-                references_column: {{ key[:target] }}.__sugar_primary_key,
+                references_columns: [{{ key[:target] }}.__sugar_primary_key],
               ),
             {% end %}
           ] of ::SugarORM::Catalog::ForeignKey,

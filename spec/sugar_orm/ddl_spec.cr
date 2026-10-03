@@ -9,7 +9,7 @@ describe SugarORM::DDL do
   it "renders a table with an identity key, defaults, nullability and inline foreign keys" do
     shelf = Catalog::ForeignKey.new(
       name: "fk_books_shelf_id",
-      column: "shelf_id",
+      columns: ["shelf_id"],
       references_table: "shelves",
       on_delete: "CASCADE",
     )
@@ -96,7 +96,7 @@ describe SugarORM::DDL do
   it "adds a foreign key without validating it, then validates it separately" do
     key = Catalog::ForeignKey.new(
       name: "fk_users_team_id",
-      column: "team_id",
+      columns: ["team_id"],
       references_table: "teams",
       on_delete: "SET NULL",
     )
@@ -113,10 +113,24 @@ describe SugarORM::DDL do
     DDL.render(drop).should eq(dropped)
   end
 
+  it "renders a composite foreign key with its columns in order" do
+    author = Catalog::ForeignKey.new(
+      name: "fk_books_author_id",
+      columns: ["author_id", "account_id"],
+      references_table: "authors",
+      references_columns: ["id", "account_id"],
+    )
+    add = Differ::AddForeignKey.new("books", author, not_valid: false)
+    added = %(ALTER TABLE "books" ADD CONSTRAINT "fk_books_author_id" ) \
+            %(FOREIGN KEY ("author_id", "account_id") ) \
+            %(REFERENCES "authors" ("id", "account_id"))
+    DDL.render(add).should eq(added)
+  end
+
   it "quotes identifiers and refuses an ON DELETE action outside PostgreSQL's set" do
     DDL.quote(%(odd"name)).should eq(%("odd""name"))
     injection = "CASCADE; DROP TABLE teams"
-    key = Catalog::ForeignKey.new("fk", "team_id", "teams", on_delete: injection)
+    key = Catalog::ForeignKey.new("fk", ["team_id"], "teams", on_delete: injection)
     add = Differ::AddForeignKey.new("users", key, not_valid: true)
     expect_raises(ArgumentError, "unsupported ON DELETE") { DDL.render(add) }
   end

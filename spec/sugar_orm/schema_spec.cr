@@ -26,14 +26,14 @@ describe SugarORM::Schema do
       Catalog::Index.new("index_unit_teams_on_name", ["name"], unique: true),
       Catalog::Index.new("index_unit_teams_on_seats_and_archived", ["seats", "archived"]),
     ])
-    owner = Catalog::ForeignKey.new("fk_unit_teams_owner_id", "owner_id", "unit_members")
+    owner = Catalog::ForeignKey.new("fk_unit_teams_owner_id", ["owner_id"], "unit_members")
     table.foreign_keys.should eq([owner])
     table.drops.should eq(["legacy_code"])
   end
 
   it "makes a NOT NULL belongs_to column, foreign key and index" do
     column = Catalog::Column.new("team_id", "bigint", false, nil)
-    foreign_key = Catalog::ForeignKey.new("fk_unit_members_team_id", "team_id", "unit_teams")
+    foreign_key = Catalog::ForeignKey.new("fk_unit_members_team_id", ["team_id"], "unit_teams")
     index = Catalog::Index.new("index_unit_members_on_team_id", ["team_id"])
     table = SugarUnit::Member.__sugar_table
     table.columns.last.should eq(column)

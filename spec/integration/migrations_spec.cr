@@ -59,12 +59,50 @@ end
 
 private alias Catalog = SugarORM::Catalog
 
+# Authors and books that belong to an account, each book to an author of its account.
+private def tenanted_catalog : Array(Catalog::Table)
+  id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+  account_id = Catalog::Column.new("account_id", "bigint", false, nil)
+  author_id = Catalog::Column.new("author_id", "bigint", false, nil)
+  [
+    Catalog::Table.new("accounts", [id]),
+    Catalog::Table.new(
+      name: "authors",
+      columns: [id, account_id],
+      indexes: [tenant_index("authors")],
+      foreign_keys: [account_key("authors")],
+    ),
+    Catalog::Table.new(
+      name: "books",
+      columns: [id, account_id, author_id],
+      indexes: [tenant_index("books")],
+      foreign_keys: [
+        account_key("books"),
+        Catalog::ForeignKey.new(
+          name: "fk_books_author_id",
+          columns: ["author_id", "account_id"],
+          references_table: "authors",
+          references_columns: ["id", "account_id"],
+        ),
+      ],
+    ),
+  ]
+end
+
+private def tenant_index(table : String) : Catalog::Index
+  Catalog::Index.new("index_#{table}_on_account_id_and_id", ["account_id", "id"], unique: true)
+end
+
+private def account_key(table : String) : Catalog::ForeignKey
+  Catalog::ForeignKey.new("fk_#{table}_account_id", ["account_id"], "accounts")
+end
+
 describe SugarORM::Migrator do
   it "reads back every declared catalog value after its DDL runs" do
     id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
     pen_name = Catalog::Column.new("name", "text", false, "'it''s anonymous'")
     author = Catalog::ForeignKey.new(
-      "fk_books_author_id", "author_id", "authors", on_delete: "CASCADE"
+      "fk_books_author_id", ["author_id"], "authors", on_delete: "CASCADE"
     )
     declared = [
       Catalog::Table.new("authors", [id, pen_name]),
@@ -95,6 +133,19 @@ describe SugarORM::Migrator do
       plan = SugarORM::Differ.diff(declared, snapshot)
       plan.clean?.should be_true
       plan.notes.should eq(["ignored table caramel_migrations (owned by Caramel)"])
+    end
+  end
+
+  it "reads back a composite foreign key and the unique index it references" do
+    with_scratch_database do |db|
+      declared = tenanted_catalog
+      creation = SugarORM::Differ.diff(declared, [] of Catalog::Table)
+      statements = SugarORM::DDL.statements(creation.transactional)
+      create = SugarORM::Migration.new(1_i64, "create", statements)
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      snapshot = SugarORM::Introspection.read(db)
+      snapshot.tables.reject(&.name.starts_with?("caramel_")).should eq(declared)
+      SugarORM::Differ.diff(declared, snapshot).clean?.should be_true
     end
   end
 
