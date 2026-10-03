@@ -21,6 +21,7 @@ The application workflow branch adds SugarORM (immutable schemas, explicit chang
 - The CLI creates and restores projects, generates typed resources, derives and applies migrations, and runs Corretto specs (`frappe corretto`) in rolled-back savepoints against per-worker Latte databases.
 - Resource generation produces editable SugarORM schemas and changesets, actions with request contracts, views, route helpers, derived migrations and request specs.
 - Internationalization is opt-in through `frappe make locale CODE`. Catalogs are Crystal literals that compile to typed `t.` messages with CLDR plurals, each request resolves its locale, and an application that never opts in compiles none of it ([ADR 0024](docs/decisions/0024-internationalization.md)).
+- Multi-tenancy is opt-in through `frappe make tenancy MODEL`. The first path segment names the tenant, SugarORM scopes tenanted tables and fails closed without a tenant, composite foreign keys keep references inside a tenant, and an application that never opts in compiles none of it ([ADR 0025](docs/decisions/0025-multi-tenancy.md)).
 - The watched development loop reacts to kqueue events, type-checks before building, serves same-origin build diagnostics, refreshes assets and cleans up terminal-owned app processes.
 - `scripts/check browser` accepts the browser experience on a `.localhost` site.
 
