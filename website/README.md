@@ -19,7 +19,9 @@ commands, and the local environment) document the current APIs. `commands.mjs`
 reads the command lists from `src/frappe/commands.cr`,
 `src/caramel/command_line.cr`, and `src/latte.cr` at build time, and `check.mjs`
 fails when a command or a framework catalog key is missing from its page.
-`dist` is recreated on every build, so keep authored content under `source`.
+`source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
+inlines it beside the wordmark in the header and sets it on a dark tile as the
+favicon. `dist` is recreated on every build, so keep authored content under `source`.
 
 Requires Node.js 22 or newer; no npm install is needed. Code examples declare
 their language in `source/site.html`. `highlight.mjs` uses a pinned, vendored

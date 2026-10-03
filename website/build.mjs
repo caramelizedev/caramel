@@ -40,7 +40,12 @@ current.pages.commands = current.pages.commands.replace(/<div class="c-files" da
 const routes = routesFor(current);
 const links = (html, routes) => html.replace(/<button\b([^>]*\bdata-page="([^"]+)"[^>]*)>([\s\S]*?)<\/button>/g,
   (_, attrs, page, content) => `<a${attrs} href="${routes[page]}">${content}</a>`);
+// The header and the favicon draw the same mark: the latte's cup and caramel spiral.
+const mark = fs.readFileSync(new URL('./source/mark.svg', import.meta.url), 'utf8').trim();
+const markSlot = '<span class="c-mark" aria-hidden="true"></span>';
+if (!source.includes(markSlot)) throw new Error('The header has no slot for the mark.');
 const template = source.slice(source.indexOf('<div id="caramel-site"'), source.indexOf('<script>'))
+  .replace(markSlot, `<span class="c-mark" aria-hidden="true">${mark}</span>`)
   .replace('<i data-lucide="search" aria-hidden="true"></i>', '')
   .replaceAll('Design preview', 'Documentation preview');
 const taskHTML = task => `<strong>${task.title}</strong>${task.files.map(f => `<code>${f}</code>`).join('')}<p>${task.detail}</p><small>${task.proof}</small>`;
@@ -166,10 +171,14 @@ for (const [route, target] of Object.entries({'/docs/': `/docs/${version}/gettin
   fs.mkdirSync(path.dirname(dest.pathname), {recursive: true});
   fs.writeFileSync(dest, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Caramel documentation</title><link rel="canonical" href="https://caramelize.dev${target}"><meta http-equiv="refresh" content="0;url=${target}"></head><body><a href="${target}">Read Caramel ${version} documentation</a></body></html>`);
 }
-fs.writeFileSync(new URL('favicon.svg', out), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#201d18"/><text x="16" y="47" font-family="Arial,sans-serif" font-size="52" font-weight="bold" fill="#e9a278">c</text></svg>');
+// The favicon sets the mark on the dark glass tile of the GitHub avatar.
+const tileGlow = '<radialGradient id="tile-glow" cx=".5" cy=".5" r=".64"><stop offset="0" stop-color="#4c3223"/><stop offset=".58" stop-color="#2b211a"/><stop offset="1" stop-color="#1d1a17"/></radialGradient>';
+const glass = '<circle cx="256" cy="256" r="218" fill="none" stroke="#efdbb9" stroke-opacity=".32" stroke-width="3"/><path d="M51.1 181.4A218 218 0 0 1 181.4 51.1" fill="none" stroke="#fff8ea" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>';
+const cup = mark.replace('<svg ', '<svg x="51" y="51" width="410" height="410" ');
+fs.writeFileSync(new URL('favicon.svg', out), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs>${tileGlow}</defs><rect width="512" height="512" rx="112" fill="url(#tile-glow)"/>${glass}${cup}</svg>\n`);
 fs.writeFileSync(new URL('robots.txt', out), 'User-agent: *\nAllow: /\nSitemap: https://caramelize.dev/sitemap.xml\n');
 fs.writeFileSync(new URL('.nojekyll', out), '');
 fs.writeFileSync(new URL('CNAME', out), 'caramelize.dev\n');
 fs.writeFileSync(new URL('sitemap.xml', out), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${generatedRoutes.map(r=>`<url><loc>https://caramelize.dev${r}</loc></url>`).join('')}</urlset>`);
-fs.writeFileSync(new URL('404.html', out), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found · Caramel</title><body style="background:#201d18;color:#eee8dd;font:18px/1.6 system-ui;padding:10vw"><h1>This page has moved on.</h1><p><a style="color:#e9a278" href="/">Back to Caramel</a></p></body></html>');
+fs.writeFileSync(new URL('404.html', out), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found · Caramel</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><body style="background:#201d18;color:#eee8dd;font:18px/1.6 system-ui;padding:10vw"><h1>This page has moved on.</h1><p><a style="color:#e9a278" href="/">Back to Caramel</a></p></body></html>');
 console.log(`Built ${generatedRoutes.length} pages for ${version} in dist.`);
