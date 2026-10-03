@@ -2,13 +2,17 @@ require "../spec_helper"
 
 describe "@@COLLECTION_LABEL@@" do
   it "@@SPEC_TITLE@@" do
+    # frappe:only tenant
+    tenant_session("acme") do |client, db|
+    # frappe:else
     Corretto.session do |client, db|
+    # frappe:end
       # frappe:only new
-      client.get("/@@PLURAL@@/new").should render_page("New @@LABEL@@")
+      client.get("@@ROOT@@/@@PLURAL@@/new").should render_page("New @@LABEL@@")
       # frappe:end
-      created = client.post("/@@PLURAL@@", params: {@@SAMPLE_FIELDS@@})
+      created = client.post("@@ROOT@@/@@PLURAL@@", params: {@@SAMPLE_FIELDS@@})
       record = App::@@MODEL@@.query.order_by(:id, :desc).first!(db)
-      path = "/@@PLURAL@@/#{record.id}"
+      path = "@@ROOT@@/@@PLURAL@@/#{record.id}"
       created.should have_status(303)
       created.should redirect_to(path)
       db.should have_row(App::@@MODEL@@, id: record.id, @@SAMPLE_CONDITIONS@@)
@@ -19,7 +23,7 @@ describe "@@COLLECTION_LABEL@@" do
       json.should have_status(200)
       JSON.parse(json.body)["record"]["id"].as_i64.should eq(record.id)
       # frappe:only index
-      client.get("/@@PLURAL@@").should render_page("@@COLLECTION_LABEL@@")
+      client.get("@@ROOT@@/@@PLURAL@@").should render_page("@@COLLECTION_LABEL@@")
       # frappe:end
       # frappe:only edit
       client.get("#{path}/edit").should render_page("Edit @@LABEL@@")
@@ -30,6 +34,10 @@ describe "@@COLLECTION_LABEL@@" do
       updated.should have_header("HX-Location", path)
       # frappe:end
       persisted = App::@@MODEL@@.query.find!(db, record.id)
+      # frappe:only tenant
+      @@TENANT@@(db, "globex")
+      client.get("/globex/@@PLURAL@@/#{record.id}").should have_status(404)
+      # frappe:end
       # frappe:only update
 @@ASSERT_FIELDS@@
       # frappe:end
@@ -41,8 +49,8 @@ describe "@@COLLECTION_LABEL@@" do
       sample = {@@SAMPLE_FIELDS@@}
       forged = {"X-CSRF-Token" => "forged"}
       foreign = {"Origin" => "https://attacker.example"}
-      client.post("/@@PLURAL@@", headers: forged, params: sample).should have_status(403)
-      client.post("/@@PLURAL@@", headers: foreign, params: sample).should have_status(403)
+      client.post("@@ROOT@@/@@PLURAL@@", headers: forged, params: sample).should have_status(403)
+      client.post("@@ROOT@@/@@PLURAL@@", headers: foreign, params: sample).should have_status(403)
       # frappe:end
       db.should have_row(App::@@MODEL@@, id: record.id)
       # frappe:only update
@@ -50,7 +58,7 @@ describe "@@COLLECTION_LABEL@@" do
       # frappe:else
       partial = {"HX-Request-Type" => "partial"}
       stray = {@@SAMPLE_FIELDS@@, "unexpected_field" => "refuse"}
-      rejected = client.post("/@@PLURAL@@", headers: partial, params: stray)
+      rejected = client.post("@@ROOT@@/@@PLURAL@@", headers: partial, params: stray)
       # frappe:end
       rejected.should have_status(422)
       # frappe:only update
@@ -85,9 +93,9 @@ describe "@@COLLECTION_LABEL@@" do
       }
       # frappe:only destroy
       # frappe:only index
-      client.delete(path).should redirect_to("/@@PLURAL@@")
+      client.delete(path).should redirect_to("@@ROOT@@/@@PLURAL@@")
       # frappe:else
-      client.delete(path).should redirect_to("/")
+      client.delete(path).should redirect_to("@@HOME@@")
       # frappe:end
       db.should_not have_row(App::@@MODEL@@, id: record.id)
       client.get(path).should have_status(404)

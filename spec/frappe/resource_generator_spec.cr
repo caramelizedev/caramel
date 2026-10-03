@@ -3,6 +3,7 @@ require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/resource_generator"
 require "../../src/frappe/locale_generator"
+require "../../src/frappe/tenancy_generator"
 require "../../src/caramel/external_url"
 require "../../src/caramel/html"
 
@@ -26,6 +27,41 @@ end
 
 private def read(project : Caramel::Frappe::Project, relative : String) : String
   File.read(File.join(project.root, relative))
+end
+
+private def tenant_project(&)
+  resource_project do |project, package|
+    tenancy = Caramel::Frappe::TenancyGenerator.new(package)
+    tenancy.generate(project, "Account", version: 20260919000010_i64)
+    yield project, Caramel::Frappe::ResourceGenerator.new(package)
+  end
+end
+
+# The files a resource writes besides config/, which a multi-tenant
+# application's config/ makes differ.
+private def resource_files(project : Caramel::Frappe::Project,
+                           written : Array(String)) : Hash(String, String)
+  written.reject(&.starts_with?("config/")).to_h { |relative| {relative, read(project, relative)} }
+end
+
+# The catalog SugarORM declares for `Note body:string code:string:unique`
+# belonging to Account.
+private def tenant_notes_table : SugarORM::Catalog::Table
+  zoned = "timestamp with time zone"
+  columns = [
+    SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+    SugarORM::Catalog::Column.new("account_id", "bigint", false, nil),
+    SugarORM::Catalog::Column.new("body", "text", false, nil),
+    SugarORM::Catalog::Column.new("code", "text", false, nil),
+    SugarORM::Catalog::Column.new("created_at", zoned, false, "CURRENT_TIMESTAMP"),
+    SugarORM::Catalog::Column.new("updated_at", zoned, false, "CURRENT_TIMESTAMP"),
+  ]
+  indexes = [
+    SugarORM::Catalog::Index.new("index_notes_on_account_id_and_id", ["account_id", "id"], true),
+    SugarORM::Catalog::Index.new("index_notes_on_code", ["code", "account_id"], true),
+  ]
+  keys = [SugarORM::Catalog::ForeignKey.new("fk_notes_account_id", ["account_id"], "accounts")]
+  SugarORM::Catalog::Table.new("notes", columns, indexes, keys)
 end
 
 describe Caramel::Frappe::ResourceGenerator do
@@ -381,6 +417,147 @@ describe Caramel::Frappe::ResourceGenerator do
       expect_raises(Caramel::Frappe::Error, "no Caramel.locales default: line") do
         generator.generate(project, "Book", ["title:string"])
       end
+    end
+  end
+end
+
+describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
+  it "declares the tenant in the model" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      expected = "      field id : Int64, primary: true\n" \
+                 "      tenant account : Account\n" \
+                 "      field body : String\n"
+      read(project, "app/models/note.cr").should contain(expected)
+    end
+  end
+
+  it "writes the migration frappe db diff derives for the tenanted table" do
+    tenant_project do |project, generator|
+      fields = ["body:string", "code:string:unique"]
+      generator.generate(project, "Note", fields, version: 20260919000011_i64)
+      tables = [tenant_notes_table]
+      diff = SugarORM::Differ.diff(tables, [] of SugarORM::Catalog::Table)
+      statements = SugarORM::DDL.statements(diff.transactional)
+      migration = SugarORM::Migration.new(20260919000011_i64, "create_notes", statements)
+      expected = Caramel::Frappe::SchemaDiff.source(migration)
+      read(project, "db/migrations/20260919000011_create_notes.cr").should eq(expected)
+    end
+  end
+
+  it "routes the resource inside the tenant block" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"],
+        only: "create,show", version: 20260919000011_i64)
+      read(project, "config/routes.cr").should contain(<<-CRYSTAL)
+            tenant App::Account, by: :slug do
+              get "/", App::Accounts::Home
+              post "/notes", App::Notes::Create
+              get "/notes/:id", App::Notes::Show
+              # Frappé tenant routes
+            end
+        CRYSTAL
+    end
+  end
+
+  it "keeps the path helpers line" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      helpers = "  Caramel.resource_paths :notes, :note\n  # Frappé resource paths\n"
+      read(project, "config/paths.cr").should contain(helpers)
+    end
+  end
+
+  it "signs the request spec into a tenant and proves another cannot see the record" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      spec = read(project, "spec/requests/notes_spec.cr")
+      spec.should contain(%(    tenant_session("acme") do |client, db|\n))
+      spec.should contain("client.post(\"/acme/notes\", params:")
+      spec.should contain(<<-'CRYSTAL')
+              account(db, "globex")
+              client.get("/globex/notes/#{record.id}").should have_status(404)
+        CRYSTAL
+      spec.should_not contain("Corretto.session")
+    end
+  end
+
+  it "sends a deleted record without an index to the tenant's home" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"],
+        only: "create,show,destroy", version: 20260919000011_i64)
+      destroy = read(project, "app/actions/notes/destroy.cr")
+      destroy.should contain(%(redirect_to(tenant_path("/"))))
+      read(project, "spec/requests/notes_spec.cr").should contain(%(redirect_to("/acme")))
+    end
+  end
+
+  it "writes a --central resource exactly as a single-tenant application would" do
+    fields = ["label:string", "code:string:unique"]
+    version = 20260919000012_i64
+    central = {} of String => String
+    tenant_project do |project, generator|
+      written = generator.generate(project, "Tag", fields, version: version, central: true)
+      central = resource_files(project, written)
+      read(project, "config/routes.cr").should contain(<<-CRYSTAL)
+            get "/tags/:id", App::Tags::Show
+            get "/tags/:id/edit", App::Tags::Edit
+            patch "/tags/:id", App::Tags::Update
+            delete "/tags/:id", App::Tags::Destroy
+            # Frappé resource routes
+        CRYSTAL
+    end
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      written = generator.generate(project, "Tag", fields, version: version)
+      resource_files(project, written).should eq(central)
+    end
+  end
+
+  it "refuses --central in a single-tenant application" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      expect_raises(Caramel::Frappe::Error, "--central is for multi-tenant applications") do
+        generator.generate(project, "Tag", ["label:string"], central: true)
+      end
+    end
+  end
+
+  it "refuses a field named for the tenant column" do
+    tenant_project do |project, generator|
+      message = "account_id is the tenant column of resources that belong to App::Account"
+      expect_raises(Caramel::Frappe::Error, message) do
+        generator.generate(project, "Note", ["account_id:int64"])
+      end
+    end
+  end
+
+  it "refuses routes without a tenant block" do
+    tenant_project do |project, generator|
+      routes = File.join(project.root, "config/routes.cr")
+      File.write(routes, File.read(routes).sub("by: :slug do", "by: \"slug\" do"))
+      expect_raises(Caramel::Frappe::Error, "config/routes.cr has no tenant App::Model") do
+        generator.generate(project, "Note", ["body:string"])
+      end
+    end
+  end
+
+  it "refuses a tenant model that declares no schema" do
+    tenant_project do |project, generator|
+      File.delete(File.join(project.root, "app/models/account.cr"))
+      message = "app/models/account.cr declares no schema for App::Account"
+      expect_raises(Caramel::Frappe::Error, message) do
+        generator.generate(project, "Note", ["body:string"])
+      end
+    end
+  end
+
+  it "writes nothing when it refuses" do
+    tenant_project do |project, generator|
+      expect_raises(Caramel::Frappe::Error) do
+        generator.generate(project, "Note", ["account_id:int64"])
+      end
+      File.exists?(File.join(project.root, "app/models/note.cr")).should be_false
     end
   end
 end

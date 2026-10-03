@@ -140,7 +140,8 @@ module Caramel::Frappe
         "path or action contains it (any case)."),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to."),
-      Command.new("make resource NAME FIELD:TYPE... [--plural=NAME] [--only=ACTIONS]",
+      Command.new("make resource NAME FIELD:TYPE... " \
+                  "[--plural=NAME] [--only=ACTIONS] [--central]",
         "Generate a SugarORM schema, migration, actions, views, routes and specs; " \
         "FIELD:TYPE:server marks a field the server sets, " \
         "kept out of forms and contracts, " \
@@ -148,11 +149,18 @@ module Caramel::Frappe
         "and :url validates an http or https URL entered in a URL input. " \
         "--only=create,show,index,new keeps the listed actions " \
         "of index, show, new, create, edit, update and destroy; " \
-        "create and show are required, and edit needs new and update."),
+        "create and show are required, and edit needs new and update. " \
+        "In a multi-tenant application a resource belongs to the tenant " \
+        "unless --central is given."),
       Command.new("make locale CODE",
         "Add the locale CODE, such as fr or pt-BR: create app/locales/CODE.cr; " \
         "on first use also app/locales/en.cr and the i18n lines in " \
         "config/application.cr, after which frappe make resource writes translated views."),
+      Command.new("make tenancy MODEL",
+        "Make the application multi-tenant with MODEL, such as Account, as the tenant: " \
+        "its schema, migration, sign-up page at /PLURAL/new and home at /SLUG, " \
+        "require \"caramel/tenancy\" and the tenant block in config/routes.cr; " \
+        "frappe make resource then writes resources that belong to a tenant."),
       Command.new("translations",
         "List the keys each locale still takes from the default locale; " \
         "exits 1 while any is missing."),

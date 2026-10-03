@@ -79,7 +79,7 @@ describe Caramel::Frappe::Commands do
       "frappe expand FILE:LINE:COL" => {
         %w[expand] => "missing FILE:LINE:COL",
       },
-      "frappe make resource NAME FIELD:TYPE... [--plural=NAME] [--only=ACTIONS]" => {
+      "frappe make resource NAME FIELD:TYPE... [--plural=NAME] [--only=ACTIONS] [--central]" => {
         %w[make resource Book] => "missing FIELD:TYPE",
       },
     }

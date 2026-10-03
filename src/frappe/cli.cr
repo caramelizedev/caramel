@@ -10,6 +10,7 @@ require "./launchers"
 require "./tools"
 require "./resource_generator"
 require "./locale_generator"
+require "./tenancy_generator"
 require "./dev_session"
 require "./site_log"
 require "./schema_diff"
@@ -116,12 +117,15 @@ module Caramel::Frappe
         files = ResourceGenerator.new(@framework_root).generate(
           project, invocation["NAME"], invocation.list("FIELD:TYPE"),
           plural: invocation["--plural"]?, only: invocation["--only"]?,
+          central: invocation.flag?("--central"),
         )
         files.each { |path| @output.puts("Generated #{path}") }
         @output.puts("\nRun frappe migrate to apply the new schema. " \
                      "Use frappe routes to see the generated URLs.")
       when "make locale"
         make_locale(invocation["CODE"])
+      when "make tenancy"
+        make_tenancy(invocation["MODEL"])
       when "translations"
         return translations
       when "migrate"
@@ -297,6 +301,15 @@ module Caramel::Frappe
                    "set dir: locale.dir in app/views/layouts/application.cr " \
                    "for right-to-left languages, " \
                    "and run frappe translations to list what is missing.")
+    end
+
+    private def make_tenancy(model : String) : Nil
+      files = TenancyGenerator.new(@framework_root).generate(Project.load, model)
+      files.each { |path| @output.puts("Generated #{path}") }
+      plural = ResourceGenerator.pluralize(model.underscore)
+      @output.puts("\nNext: run frappe migrate and open /#{plural}/new. " \
+                   "frappe make resource now writes tenant resources; " \
+                   "pass --central for one every tenant shares.")
     end
 
     # Prints the application's report of keys each locale still lacks.
