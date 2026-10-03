@@ -172,15 +172,21 @@ module Caramel
     end
 
     private def self.routes(entries : Array(Router::Entry)) : Int32
-      width = entries.max_of?(&.path.size) || 0
+      width = entries.max_of? { |entry| listed_path(entry).size } || 0
       entries.each do |entry|
-        line = "#{entry.method.ljust(7)} #{entry.path.ljust(width)}  #{entry.action}"
+        line = "#{entry.method.ljust(7)} #{listed_path(entry).ljust(width)}  #{entry.action}"
         line += "  #{entry.contract}" unless entry.contract.empty?
         ingress = entry.ingress.summary
         line += "  [#{ingress}]" unless ingress.empty?
         puts line
       end
       0
+    end
+
+    # A route's path as listed: a tenant route under `/:tenant`.
+    private def self.listed_path(entry : Router::Entry) : String
+      return entry.path unless entry.tenant
+      entry.path == "/" ? "/:tenant" : "/:tenant#{entry.path}"
     end
 
     # Opens the environment's database, refusing a connection other than the

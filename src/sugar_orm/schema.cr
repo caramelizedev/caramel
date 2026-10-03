@@ -29,7 +29,7 @@ module SugarORM
       end
     end
 
-    {% for name in %w(field timestamps belongs_to has_many has_one index drop_column) %}
+    {% for name in %w(field timestamps belongs_to has_many has_one index drop_column tenant) %}
       # :nodoc:
       macro {{ name.id }}(*arguments, **options)
         \{% raise "`{{ name.id }}` belongs inside the schema block.\n" +
@@ -81,7 +81,7 @@ module SugarORM
          ) %}
       {% holds_only = "Remediation: a schema block holds only " +
                       "field, timestamps, belongs_to, has_many, has_one, " +
-                      "index and drop_column declarations." %}
+                      "index, drop_column and tenant declarations." %}
       {% owner = @type.name(generic_args: false).stringify.split("::").last %}
       {% owner_key = owner.underscore + "_id" %}
       {% columns = [] of Nil %}
@@ -92,6 +92,7 @@ module SugarORM
       {% drops = [] of Nil %}
       {% primary = [] of Nil %}
       {% timestamps = [] of Nil %}
+      {% tenants = [] of Nil %}
 
       {% for statement in statements %}
         {% statement_at = "\n  --> #{statement.filename.id}:" +
@@ -261,13 +262,25 @@ module SugarORM
                } %}
           {% end %}
 
-        {% elsif kind == "belongs_to" || kind == "has_many" || kind == "has_one" %}
+        {% elsif %w(belongs_to has_many has_one tenant).includes?(kind) %}
+          {% if kind == "tenant" && !::SugarORM.has_constant?("Tenancy") %}
+            {% problem = "tenant needs require \"caramel/tenancy\".\n" +
+                         "Remediation: add it after require \"caramel\" " +
+                         "in config/application.cr." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
           {% declaration = statement.args[0] %}
           {% typed = statement.args.size == 1 && declaration.is_a?(TypeDeclaration) %}
           {% unless typed && declaration.value.is_a?(Nop) %}
             {% example = kind == "has_many" ? "users : User" : "team : Team" %}
+            {% example = kind == "tenant" ? "account : Account" : example %}
             {% problem = "#{kind.id} expects `#{kind.id} name : Type`, " +
                          "like `#{kind.id} #{example.id}`." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
+          {% if kind == "tenant" && !tenants.empty? %}
+            {% problem = "tenant is declared twice.\n" +
+                         "Remediation: keep one tenant name : Type." %}
             {% statement.raise problem + statement_at %}
           {% end %}
           {% declaration_at = "\n  --> #{declaration.filename.id}:" +
@@ -294,11 +307,11 @@ module SugarORM
           {% for argument in named %}
             {% option = argument.value %}
             {% symbol = option.is_a?(SymbolLiteral) || option.is_a?(StringLiteral) %}
-            {% keyed = argument.name.stringify == "foreign_key" && kind != "belongs_to" %}
+            {% keyed = argument.name.stringify == "foreign_key" && kind.starts_with?("has_") %}
             {% unless keyed && symbol && option.id.stringify =~ /\A[a-z][a-z0-9_]*\z/ %}
               {% remedy = "the only option is `foreign_key: :column`" %}
-              {% if kind == "belongs_to" %}
-                {% remedy = "belongs_to takes no options; " +
+              {% if kind == "belongs_to" || kind == "tenant" %}
+                {% remedy = "#{kind.id} takes no options; " +
                             "its column is `#{name.id}_id`" %}
               {% end %}
               {% problem = "Unknown #{kind.id} option '#{argument.name}'.\n" +
@@ -307,8 +320,9 @@ module SugarORM
             {% end %}
             {% key = argument.value.id.stringify %}
           {% end %}
-          {% if kind == "belongs_to" %}
+          {% if kind == "belongs_to" || kind == "tenant" %}
             {% key = name + "_id" %}
+            {% tenant_key = kind == "tenant" %}
             {% columns << {
                  node:         declaration,
                  name:         key,
@@ -320,26 +334,32 @@ module SugarORM
                  default:      nil,
                  literal:      nil,
                  primary:      false,
-                 system:       false,
+                 system:       tenant_key,
                  renamed_from: nil,
                } %}
             {% foreign_keys << {
                  name:   "fk_#{table.id}_#{key.id}",
                  column: key,
                  target: target,
+                 tenant: tenant_key,
                } %}
-            {% indexes << {
-                 name:    "index_#{table.id}_on_#{key.id}",
-                 columns: [key],
-                 unique:  false,
-               } %}
+            {% if tenant_key %}
+              {% tenants << {node: declaration, name: name, column: key, target: target} %}
+            {% else %}
+              {% indexes << {
+                   name:    "index_#{table.id}_on_#{key.id}",
+                   columns: [key],
+                   unique:  false,
+                   tenant:  false,
+                 } %}
+            {% end %}
           {% else %}
             {% key = key || owner_key %}
           {% end %}
           {% associations << {
                node:     declaration,
                name:     name,
-               kind:     kind,
+               kind:     kind == "tenant" ? "belongs_to" : kind,
                target:   target,
                key:      key,
                optional: optional,
@@ -393,6 +413,17 @@ module SugarORM
                      "to the schema block of #{@type}." %}
         {% table.raise problem + table_at %}
       {% end %}
+      {% tenant = tenants.empty? ? nil : tenants[0] %}
+      {% if tenant %}
+        {% tenant_column = tenant[:column] %}
+        {% tenant_index = {
+             name:    "index_#{table.id}_on_#{tenant_column.id}_and_#{primary[0].id}",
+             columns: [tenant_column, primary[0]],
+             unique:  true,
+             tenant:  true,
+           } %}
+        {% indexes = [tenant_index] + indexes %}
+      {% end %}
       {% names = [] of Nil %}
       {% for column in columns %}
         {% node = column[:node] %}
@@ -405,7 +436,8 @@ module SugarORM
         {% if names.includes?(column[:name]) %}
           {% problem = "#{@type} declares the column '#{column[:name].id}' twice.\n" +
                        "Remediation: remove the duplicate " +
-                       "(timestamps adds created_at/updated_at; belongs_to x adds x_id)." %}
+                       "(timestamps adds created_at/updated_at; " +
+                       "belongs_to x and tenant x add x_id)." %}
           {% node.raise problem + node_at %}
         {% end %}
         {% if reserved.includes?(column[:name]) %}
@@ -444,7 +476,11 @@ module SugarORM
         {% end %}
         {% index_name = "index_#{table.id}_on_#{index[:columns].join("_and_").id}" %}
         {% replaced = indexes.reject { |existing| existing[:name] == index_name } %}
-        {% entry = {name: index_name, columns: index[:columns], unique: index[:unique]} %}
+        {% indexed = index[:columns] %}
+        {% if tenant && index[:unique] && !indexed.includes?(tenant[:column]) %}
+          {% indexed = indexed + [tenant[:column]] %}
+        {% end %}
+        {% entry = {name: index_name, columns: indexed, unique: index[:unique], tenant: false} %}
         {% indexes = replaced + [entry] %}
       {% end %}
       {% for drop in drops %}
@@ -474,6 +510,26 @@ module SugarORM
           },
         {% end %}
       }
+
+      {% if tenant %}
+        # The column that names each row's tenant.
+        SUGAR_TENANT = {{ tenant[:column] }}
+
+        def self.__sugar_tenant_column : String
+          {{ tenant[:column] }}
+        end
+
+        # The tenant id statements are scoped to; nil inside
+        # Caramel::Tenancy.without.
+        def self.__sugar_tenant_scope : Int64?
+          ::SugarORM::Tenancy.scope({{ @type.stringify }})
+        end
+
+        # The tenant id a new row belongs to.
+        def self.__sugar_tenant_stamp : Int64
+          ::SugarORM::Tenancy.stamp({{ @type.stringify }})
+        end
+      {% end %}
 
       enum Field
         {% for column in columns %}
@@ -596,16 +652,7 @@ module SugarORM
               ),
             {% end %}
           ] of ::SugarORM::Catalog::Index,
-          foreign_keys: [
-            {% for key in foreign_keys %}
-              ::SugarORM::Catalog::ForeignKey.new(
-                name: {{ key[:name] }},
-                columns: [{{ key[:column] }}],
-                references_table: {{ key[:target] }}.__sugar_table_name,
-                references_columns: [{{ key[:target] }}.__sugar_primary_key],
-              ),
-            {% end %}
-          ] of ::SugarORM::Catalog::ForeignKey,
+          foreign_keys: __sugar_foreign_keys,
           drops: {{ drops.map(&.[:name]) }} of String,
         )
       end
@@ -725,7 +772,7 @@ module SugarORM
 
         def validate(cs)
           {% for index in indexes %}
-            {% if index[:unique] %}
+            {% if index[:unique] && !index[:tenant] %}
               cs.unique_constraint(:{{ index[:columns][0].id }})
             {% end %}
           {% end %}
@@ -760,6 +807,58 @@ module SugarORM
             \{% end %}
           {% end %}
         {% end %}
+        {% if tenant %}
+          {% node = tenant[:node] %}
+          {% written = "tenant #{tenant[:name].id} : #{tenant[:target]}" %}
+          {% at = " (at #{node.filename.id}:#{node.line_number})" %}
+          {% subject = "#{@type}: #{written.id}#{at.id}" %}
+          {% unschema = subject + " must name a SugarORM schema." %}
+          {% nested = subject + " names a tenanted schema; " +
+                      "the tenant cannot have a tenant itself." %}
+          \{% t = {{ tenant[:target] }}.resolve? %}
+          \{% unless t && t < ::SugarORM::Schema %}
+            \{% raise {{ unschema }} %}
+          \{% end %}
+          \{% if t.has_constant?(:SUGAR_TENANT) %}
+            \{% raise {{ nested }} %}
+          \{% end %}
+          \{% tenancy = ::SugarORM::Tenancy %}
+          \{% declared = tenancy.has_constant?(:SCHEMA) && tenancy.constant(:SCHEMA) %}
+          \{% if declared && t.name.stringify != declared %}
+            \{% raise {{ subject }} + " names #{t}, but the routes declare " +
+                      "#{declared.id} as the tenant.\nRemediation: name #{declared.id} here." %}
+          \{% end %}
+        {% end %}
+        {% tenant_column = tenant ? tenant[:column] : nil %}
+        # The table's foreign keys. A key from a tenanted schema to another
+        # tenanted one also matches the tenant column, so a row can only
+        # reference a row of its own tenant.
+        def self.__sugar_foreign_keys : Array(::SugarORM::Catalog::ForeignKey)
+          [
+            {% for key in foreign_keys %}
+              {% target = key[:target] %}
+              {% if tenant && !key[:tenant] %}
+                \{% composite = {{ target }}.resolve.has_constant?(:SUGAR_TENANT) %}
+              {% else %}
+                \{% composite = false %}
+              {% end %}
+              ::SugarORM::Catalog::ForeignKey.new(
+                name: {{ key[:name] }},
+                references_table: {{ target }}.__sugar_table_name,
+                \{% if composite %}
+                  columns: [{{ key[:column] }}, {{ tenant_column }}],
+                  references_columns: [
+                    {{ target }}.__sugar_primary_key,
+                    {{ target }}.__sugar_tenant_column,
+                  ],
+                \{% else %}
+                  columns: [{{ key[:column] }}],
+                  references_columns: [{{ target }}.__sugar_primary_key],
+                \{% end %}
+              ),
+            {% end %}
+          ] of ::SugarORM::Catalog::ForeignKey
+        end
         \{% create = @type.has_constant?(:CreateChangeset) %}
         \{% update = @type.has_constant?(:UpdateChangeset) %}
         __sugar_facade(

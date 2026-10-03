@@ -87,7 +87,7 @@ module SugarORM
       {% if field[:system] %}
         {% declaration.raise "param '#{name.id}' names #{schema}'s " +
                              "system-managed column '#{name.id}' " +
-                             "(primary key or timestamp), " +
+                             "(primary key, timestamp or tenant), " +
                              "which changesets never write.\n" +
                              "Remediation: remove `param #{name.id}`." + location %}
       {% end %}
@@ -246,6 +246,11 @@ module SugarORM
       end
       return if @saved || !valid?
       columns = @changes.keys
+      values = @changes.values
+      {% if T.has_constant?(:SUGAR_TENANT) %}
+        columns << T.__sugar_tenant_column
+        values << T.__sugar_tenant_stamp
+      {% end %}
       sql = String.build do |io|
         io << "INSERT INTO " << T.__sugar_quoted_table
         if columns.empty?
@@ -256,7 +261,7 @@ module SugarORM
         end
         io << " RETURNING " << T.__sugar_select_list
       end
-      write { Repo.query_one?(sql, @changes.values) { |rows| T.from_row(rows) } }
+      write { Repo.query_one?(sql, values) { |rows| T.from_row(rows) } }
     end
 
     # :nodoc:
@@ -274,11 +279,12 @@ module SugarORM
         %("#{column}" = $#{index + 1})
       end
       assignments << %("updated_at" = CURRENT_TIMESTAMP) if T.__sugar_timestamps?
-      sql = "UPDATE #{T.__sugar_quoted_table} SET #{assignments.join(", ")} " \
-            "WHERE \"#{T.__sugar_primary_key}\" = $#{@changes.size + 1} " \
-            "RETURNING #{T.__sugar_select_list}"
       args = @changes.values
       args << original.__sugar_primary_value
+      sql = "UPDATE #{T.__sugar_quoted_table} SET #{assignments.join(", ")} " \
+            "WHERE \"#{T.__sugar_primary_key}\" = $#{@changes.size + 1}" \
+            "#{SugarORM.tenant_filter(T, args)} " \
+            "RETURNING #{T.__sugar_select_list}"
       write { Repo.query_one?(sql, args) { |rows| T.from_row(rows) } }
     end
 

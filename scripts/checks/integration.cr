@@ -124,11 +124,18 @@ module Caramel::Checks::Integration
       # Superuser over the owned socket (trust), for specs that create scratch databases.
       env["CARAMEL_OWNED_ADMIN_URL"] = url("postgres", "caramel_admin", "", sock, port)
       crystal = File.join(Checks::REPO, "scripts/crystal")
-      specs = [crystal, "spec", "spec/integration", "--error-trace"] + ARGV
-      status = Process.new(specs,
-        env: env, chdir: Checks::REPO, input: Process::Redirect::Close,
-        output: Process::Redirect::Inherit, error: Process::Redirect::Inherit).wait
-      failed = !status.success?
+      # spec/tenancy redefines framework hooks for its whole program
+      # (ADR 0025), so it runs as a program of its own.
+      runs = [
+        [crystal, "spec", "spec/integration", "--error-trace"] + ARGV,
+        [crystal, "spec", "spec/tenancy", "--error-trace"],
+      ]
+      statuses = runs.map do |specs|
+        Process.new(specs,
+          env: env, chdir: Checks::REPO, input: Process::Redirect::Close,
+          output: Process::Redirect::Inherit, error: Process::Redirect::Inherit).wait
+      end
+      failed = !statuses.all?(&.success?)
     rescue ex : Exception
       STDERR.puts ex.message
       failed = true

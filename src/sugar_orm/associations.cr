@@ -57,9 +57,11 @@ module SugarORM
       ids = owners.compact_map { |owner| @key.call(owner) }.uniq!
       found = {} of Int64 => T
       unless ids.empty?
+        args = [ids] of Value
         sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
-              "WHERE \"#{T.__sugar_primary_key}\" = ANY($1)"
-        Repo.query_all(sql, [ids] of Value) { |rows| T.from_row(rows) }.each do |record|
+              "WHERE \"#{T.__sugar_primary_key}\" = ANY($1)" \
+              "#{SugarORM.tenant_filter(T, args)}"
+        Repo.query_all(sql, args) { |rows| T.from_row(rows) }.each do |record|
           found[record.__sugar_primary_value] = record
         end
       end
@@ -88,11 +90,12 @@ module SugarORM
                       & : Int64, T ->) : Nil forall O, T
       ids = owners.map(&.__sugar_primary_value).uniq!
       return if ids.empty?
+      args = [ids] of Value
       sql = "SELECT \"#{foreign_key}\", #{T.__sugar_select_list} " \
             "FROM #{T.__sugar_quoted_table} " \
-            "WHERE \"#{foreign_key}\" = ANY($1) " \
+            "WHERE \"#{foreign_key}\" = ANY($1)#{SugarORM.tenant_filter(T, args)} " \
             "ORDER BY \"#{T.__sugar_primary_key}\""
-      Repo.query(sql, [ids] of Value) do |rows|
+      Repo.query(sql, args) do |rows|
         rows.each do
           key = rows.read(Int64?)
           record = T.from_row(rows)

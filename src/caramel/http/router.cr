@@ -12,22 +12,26 @@ module Caramel
   module Router
     MAX_SEGMENTS = 32
 
+    # A route; `tenant` routes live under a tenant's `/SLUG` prefix.
     record Entry,
       method : String,
       path : String,
       action : String,
       contract : String,
-      ingress : Ingress = Ingress::DEFAULT
+      ingress : Ingress = Ingress::DEFAULT,
+      tenant : Bool = false
 
     # The route a request's real method and path select. It is found before
     # the body is read, so the route's ingress decides how to read it; an
     # unmatched request reads with DEFAULT, so it still meets the CSRF check.
+    # `tenant` says which routes it was matched against.
     record Match,
       path : String,
       segments : Segments?,
       index : Int32,
       mask : UInt8,
-      ingress : Ingress
+      ingress : Ingress,
+      tenant : Bool = false
 
     METHOD_BITS = {
       "GET"    => 1_u8,
@@ -185,6 +189,7 @@ module Caramel
     # A segment trie built once from the compile-time route table. Static
     # children win over the parameter child; matching backtracks, so
     # `/teams/new/members` can still reach `/teams/:team_id/members`.
+    # Tenant routes have a root of their own.
     class Tree
       class Node
         getter statics = [] of {String, Node}
@@ -196,8 +201,9 @@ module Caramel
 
       def initialize(@entries : Array(Entry))
         @root = Node.new
+        @tenant_root = Node.new
         @entries.each_with_index do |entry, index|
-          node = @root
+          node = entry.tenant ? @tenant_root : @root
           entry.path.lchop('/').split('/', remove_empty: true).each do |segment|
             node = if segment.starts_with?(':')
                      node.param ||= Node.new
@@ -213,25 +219,28 @@ module Caramel
 
       # Returns the route index (-1 for none) and every method allowed at the
       # matching paths, for 405 responses.
-      def match(path : String, segments : Segments, method : String) : {Int32, UInt8}
-        walk(@root, path, segments, 0, Router.method_bit(method))
+      def match(path : String,
+                segments : Segments,
+                method : String,
+                tenant : Bool = false) : {Int32, UInt8}
+        walk(tenant ? @tenant_root : @root, path, segments, 0, Router.method_bit(method))
       end
 
       # Matches the request's own method (HEAD as GET), before any override.
-      def route(path : String, method : String) : Match
+      def route(path : String, method : String, tenant : Bool = false) : Match
         segments = Segments.parse(path)
         unless segments && segments.size <= MAX_SEGMENTS
-          return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT)
+          return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT, tenant)
         end
 
-        index, mask = match(path, segments, method)
+        index, mask = match(path, segments, method, tenant)
         ingress = index >= 0 ? @entries[index].ingress : Ingress::DEFAULT
-        Match.new(path, segments, index, mask, ingress)
+        Match.new(path, segments, index, mask, ingress, tenant)
       end
 
       # Every method the routes at this path take, whatever the request's.
-      def allowed(path : String, segments : Segments) : UInt8
-        match(path, segments, "")[1]
+      def allowed(path : String, segments : Segments, tenant : Bool = false) : UInt8
+        match(path, segments, "", tenant)[1]
       end
 
       private def walk(node : Node,
@@ -268,6 +277,9 @@ module Caramel
     #
     # Checks that need only the route text run here, where each statement
     # still carries its source location, so errors highlight the route line.
+    #
+    # One `tenant App::Account, by: :slug do … end` block may hold the routes
+    # that live under a tenant's `/SLUG` prefix; it needs `caramel/tenancy`.
     macro draw(&block)
       {% if block.body.is_a?(Expressions) %}
         {% statements = block.body.expressions %}
@@ -276,10 +288,52 @@ module Caramel
       {% else %}
         {% statements = [block.body] %}
       {% end %}
+      {% flat = [] of Nil %}
+      {% tenants = [] of Nil %}
+      {% tenant = nil %}
+      {% for stmt in statements %}
+        {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.name.stringify == "tenant" %}
+          {% named = stmt.named_args.is_a?(Nop) ? [] of Nil : stmt.named_args %}
+          {% by = nil %}
+          {% if named.size == 1 && named[0].name.stringify == "by" %}
+            {% by = named[0].value %}
+          {% end %}
+          {% model = stmt.args.size == 1 ? stmt.args[0] : nil %}
+          {% unless model.is_a?(Path) && by.is_a?(SymbolLiteral) && stmt.block.is_a?(Block) %}
+            {% stmt.raise "tenant expects tenant App::Model, by: :field do ... end, " +
+                          "like tenant App::Account, by: :slug do" %}
+          {% end %}
+          {% if tenant %}
+            {% stmt.raise "Caramel::Router.draw takes one tenant block" %}
+          {% end %}
+          {% unless ::Caramel.has_constant?("Tenancy") %}
+            {% stmt.raise "tenant ... do needs require \"caramel/tenancy\".\n" +
+                          "Remediation: add it after require \"caramel\" " +
+                          "in config/application.cr." %}
+          {% end %}
+          {% tenant_at = "#{stmt.filename.id}:#{stmt.line_number}:#{stmt.column_number}" %}
+          {% tenant = {model: model, by: by, at: tenant_at} %}
+          {% body = stmt.block.body %}
+          {% inner = [body] %}
+          {% if body.is_a?(Expressions) %}
+            {% inner = body.expressions %}
+          {% elsif body.is_a?(Nop) %}
+            {% inner = [] of Nil %}
+          {% end %}
+          {% for route in inner %}
+            {% flat << route %}
+            {% tenants << true %}
+          {% end %}
+        {% else %}
+          {% flat << stmt %}
+          {% tenants << false %}
+        {% end %}
+      {% end %}
       {% routes = [] of Nil %}
       {% locations = [] of Nil %}
       {% verbs = ["get", "post", "put", "patch", "delete"] %}
-      {% for stmt in statements %}
+      {% for stmt, i in flat %}
+        {% in_tenant = tenants[i] %}
         {% ok = false %}
         {% if stmt.is_a?(Call) && stmt.receiver.is_a?(Nop) && stmt.block.is_a?(Nop) %}
           {% if verbs.includes?(stmt.name.stringify) && stmt.args.size == 2 %}
@@ -289,7 +343,7 @@ module Caramel
         {% unless ok %}
           {% stmt.raise "Caramel::Router.draw accepts only get, post, put, patch " +
                         "and delete declarations with a string path " +
-                        "and an Action constant: #{stmt}" %}
+                        "and an Action constant, and one tenant block: #{stmt}" %}
         {% end %}
         {% method = stmt.name.stringify.upcase %}
         {% path = stmt.args[0] %}
@@ -320,7 +374,8 @@ module Caramel
           {% path.raise "Route '#{path.id}' exceeds 32 path segments" %}
         {% end %}
         {% for earlier in routes %}
-          {% if earlier[0] == method && earlier[2].size == segments.size %}
+          {% same_size = earlier[2].size == segments.size %}
+          {% if earlier[0] == method && same_size && earlier[3] == in_tenant %}
             {% overlap = true %}
             {% identical = true %}
             {% mixed = nil %}
@@ -350,12 +405,49 @@ module Caramel
             {% end %}
           {% end %}
         {% end %}
-        {% routes << {method, path, segments} %}
+        {% routes << {method, path, segments, in_tenant} %}
         {% line_column = "#{stmt.line_number}:#{stmt.column_number}" %}
         {% locations << (stmt.filename ? "#{stmt.filename.id}:#{line_column.id}" : "") %}
       {% end %}
-      __caramel_router_draw({{ locations }}) do
-        {{ block.body }}
+      {% central = [] of Nil %}
+      {% if tenant %}
+        {% for route in routes %}
+          {% if !route[3] && !route[2].empty? %}
+            {% first = route[2][0] %}
+            {% if first.starts_with?(":") %}
+              {% route[1].raise "Route '#{route[1].id}' starts with a parameter, " +
+                                "which would take every tenant's address.\n" +
+                                "Remediation: give it a static first segment, " +
+                                "or move it into the tenant block." %}
+            {% end %}
+            {% unless central.includes?(first) %}
+              {% central << first %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% for route in routes %}
+          {% if route[3] && !route[2].empty? && central.includes?(route[2][0]) %}
+            {% route[1].raise "Route '#{route[1].id}' in the tenant block starts with " +
+                              "'#{route[2][0].id}', as a central route does; " +
+                              "a link could not tell them apart.\n" +
+                              "Remediation: rename one of them." %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% if tenant %}
+        {% declared = {
+             model:   tenant[:model],
+             by:      tenant[:by],
+             central: "[#{central.map(&.stringify).join(", ").id}] of String".id,
+             at:      tenant[:at],
+           } %}
+      {% else %}
+        {% declared = nil %}
+      {% end %}
+      __caramel_router_draw({{ locations }}, {{ tenants }}, {{ declared }}) do
+        {% for route in flat %}
+          {{ route }}
+        {% end %}
       end
     end
   end
@@ -364,8 +456,10 @@ end
 # Implementation of `Caramel::Router.draw`, which has already checked the
 # route text. A receiverless top-level macro expands in the caller's scope, so
 # relative action paths resolve there. `locations` holds each route's source
-# location for the checks that need resolved types.
-macro __caramel_router_draw(locations, &block)
+# location for the checks that need resolved types, and `tenants` whether it
+# lives in the tenant block. `tenant`, when the routes have a tenant block,
+# names its model, which resolves here too, for Caramel::Tenancy.declare.
+macro __caramel_router_draw(locations, tenants, tenant, &block)
   {% if block.body.is_a?(Expressions) %}
     {% statements = block.body.expressions %}
   {% elsif block.body.is_a?(Nop) %}
@@ -440,7 +534,19 @@ macro __caramel_router_draw(locations, &block)
         {% summaries << contract.constant(constant)[4].id %}
       {% end %}
     {% end %}
-    {% routes << {method, path, type, segments, params, summaries.join(" "), action.stringify} %}
+    {% summary = summaries.join(" ") %}
+    {% written = action.stringify %}
+    {% routes << {method, path, type, segments, params, summary, written, tenants[i]} %}
+  {% end %}
+
+  {% if tenant %}
+    {% resolved = tenant[:model].resolve? %}
+    ::Caramel::Tenancy.declare(
+      {{ resolved ? "::#{resolved}".id : tenant[:model] }},
+      by: {{ tenant[:by] }},
+      central: {{ tenant[:central] }},
+      at: {{ tenant[:at] }},
+    )
   {% end %}
 
   class AppRouter
@@ -450,7 +556,7 @@ macro __caramel_router_draw(locations, &block)
       {% for route in routes %}
         ::Caramel::Router::Entry.new(
           {{ route[0] }}, {{ route[1] }}, {{ route[6] }}, {{ route[5] }},
-          ::{{ route[2] }}::CARAMEL_INGRESS,
+          ::{{ route[2] }}::CARAMEL_INGRESS, {{ route[7] }},
         ),
       {% end %}
     ] of ::Caramel::Router::Entry)
@@ -460,7 +566,11 @@ macro __caramel_router_draw(locations, &block)
     end
 
     def match(request : HTTP::Request) : ::Caramel::Router::Match
-      TREE.route(request.path, request.method)
+      {% if tenants.includes?(true) %}
+        TREE.route(request.path, request.method, ::Caramel::Tenancy.bound?)
+      {% else %}
+        TREE.route(request.path, request.method)
+      {% end %}
     end
 
     def dispatch(context : ::Caramel::RequestContext,
@@ -471,10 +581,11 @@ macro __caramel_router_draw(locations, &block)
       return ::Caramel::Router.not_found if segments.size > ::Caramel::Router::MAX_SEGMENTS
       index, mask = match.index, match.mask
       if override = context.input.method_override
-        index, mask = TREE.match(path, segments, override)
+        index, mask = TREE.match(path, segments, override, match.tenant)
         # The body was read, and CSRF checked, as the POST's route reads it.
         if index >= 0 && !TREE.entries[index].ingress.reads_like?(match.ingress)
-          return ::Caramel::Router.override_refused(TREE.allowed(path, segments))
+          allowed = TREE.allowed(path, segments, match.tenant)
+          return ::Caramel::Router.override_refused(allowed)
         end
       end
       if index < 0

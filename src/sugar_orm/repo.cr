@@ -196,9 +196,10 @@ module SugarORM
 
     def self.delete(record : Schema) : Bool
       schema = record.class
+      args = [record.__sugar_primary_value] of Value
       sql = "DELETE FROM #{schema.__sugar_quoted_table} " \
-            "WHERE \"#{schema.__sugar_primary_key}\" = $1"
-      exec(sql, [record.__sugar_primary_value] of Value).rows_affected == 1
+            "WHERE \"#{schema.__sugar_primary_key}\" = $1#{SugarORM.tenant_filter(schema, args)}"
+      exec(sql, args).rows_affected == 1
     end
 
     {% for name in %w[insert update delete] %}
