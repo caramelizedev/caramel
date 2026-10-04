@@ -1,4 +1,5 @@
 require "./support/latte_fixture"
+require "../../src/caramel/cold_brew/migrations"
 require "uri"
 require "http/params"
 
@@ -187,8 +188,10 @@ module Caramel::Checks
         linted_output = linted.stdout + linted.stderr
         blocked = !linted.success? && linted.stderr.includes?("LINT not-null-default")
         assert!(blocked, linted_output)
+        # The framework's migrations and the three the project has applied so far.
         recorded = sql(runtime_url, "SELECT count(*) FROM caramel_migrations")
-        assert!(recorded == "6", linted_output)
+        expected = Caramel::ColdBrew::MIGRATIONS.size + 3
+        assert!(recorded == expected.to_s, "#{recorded} migrations recorded\n#{linted_output}")
         linted = command([app, "lint", "--dev-override"],
           chdir: @project, environment: app_env, echo: false)
         passed = linted.stdout.includes?("Pending migrations pass the zero-lock linter.")
