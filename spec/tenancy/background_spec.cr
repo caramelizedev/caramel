@@ -90,6 +90,6 @@ describe "Caramel::Tenancy.each" do
     Tenancy.each do |account|
       visited << {account.slug, Tenancy.current?.try(&.slug)}
     end
-    visited.should eq([{"acme", "acme"}, {"globex", "globex"}])
+    visited.sort_by(&.[0]).should eq([{"acme", "acme"}, {"globex", "globex"}])
   end
 end

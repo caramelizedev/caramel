@@ -1,6 +1,11 @@
 require "spec"
 require "random/secure"
 require "../../../src/caramel/tenancy"
+require "../../../src/caramel/i18n"
+
+Caramel.locale "en", {home: {title: "Home"}}
+Caramel.locale "fr", {home: {title: "Accueil"}}
+Caramel.locales default: "en", prefix: true
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
 private def owned_url(variable : String) : String
@@ -46,7 +51,18 @@ module TenancySpec
       field title : String
       field isbn : String
       belongs_to author : Author
+      belongs_to shelf : Shelf?
       index :isbn, unique: true
+    end
+  end
+
+  # Shared by every tenant; its books and its pick are tenanted.
+  struct Shelf < SugarORM::Schema
+    schema "shelves" do
+      field id : Int64, primary: true
+      field name : String
+      belongs_to pick : Book?
+      has_many books : Book
     end
   end
 
@@ -139,19 +155,47 @@ module TenancySpec
     end
   end
 
+  struct Renamed < Action
+    contract do
+      field id : Int64
+      field title : String
+    end
+
+    def handle(contract : Contract)
+      book = Book.query.find(contract.id) || return not_found
+      Caramel::Response.new(200, book.update!(title: contract.title).title)
+    end
+  end
+
+  # The language switcher's links to French and English.
+  struct Language < Action
+    contract do
+    end
+
+    def handle(contract : Contract)
+      french = switch_locale_path(Caramel::Locale::Fr)
+      Caramel::Response.new(200, "#{french} #{switch_locale_path(Caramel::Locale::En)}")
+    end
+  end
+
   Caramel::Router.draw do
     get "/", Home
     get "/health", Health
+    get "/switcher", Language
     tenant TenancySpec::Account, by: :slug do
       get "/", Dashboard
       get "/books", Books
       get "/books/:id", Shown
+      patch "/books/:id", Renamed
       get "/books-stream", Streamed
+      get "/language", Language
     end
   end
 
-  HOST = "tenancy.caramel"
-  APP  = Caramel::Application.new(AppRouter.new, Caramel::CSRF.new("s" * 64, "https://#{HOST}"))
+  HOST   = "tenancy.caramel"
+  ORIGIN = "https://#{HOST}"
+  CSRF   = Caramel::CSRF.new("s" * 64, ORIGIN)
+  APP    = Caramel::Application.new(AppRouter.new, CSRF)
 
   @@owner : DB::Database? = nil
   @@runtime : DB::Database? = nil
@@ -215,18 +259,31 @@ module TenancySpec
     Caramel::Tenancy.with(account) { Author.create!(name: name) }
   end
 
-  # A new book of *author*'s, in *account*.
+  # A new book of *author*'s, in *account*, on *shelf* when given.
   def self.book(account : Account,
                 author : Author,
                 title : String,
-                isbn : String = Random::Secure.hex(4)) : Book
+                isbn : String = Random::Secure.hex(4),
+                shelf : Shelf? = nil) : Book
     Caramel::Tenancy.with(account) do
-      Book.create!(title: title, isbn: isbn, author_id: author.id)
+      Book.create!(title: title, isbn: isbn, author_id: author.id, shelf_id: shelf.try(&.id))
     end
   end
 
   def self.get(path : String) : Caramel::Response
     APP.handle(HTTP::Request.new("GET", path, HTTP::Headers{"Host" => HOST}))
+  end
+
+  # A CSRF-protected form post of *body* to *path*.
+  def self.post(path : String, body : String) : Caramel::Response
+    token = CSRF.issue
+    headers = HTTP::Headers{
+      "Host"         => HOST,
+      "Origin"       => ORIGIN,
+      "Content-Type" => "application/x-www-form-urlencoded",
+      "Cookie"       => "#{Caramel::CSRF::COOKIE_NAME}=#{token}",
+    }
+    APP.handle(HTTP::Request.new("POST", path, headers, "_csrf=#{token}&#{body}"))
   end
 
   # What the server writes for a GET of *path*, streamed bodies included.

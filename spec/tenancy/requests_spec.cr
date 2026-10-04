@@ -38,6 +38,60 @@ describe "A tenant route" do
     acme_with_a_book
     TenancySpec.served("/acme/books-stream").should end_with("acme 1")
   end
+
+  it "takes a method override within its tenant" do
+    _, book = acme_with_a_book
+    renamed = TenancySpec.post("/acme/books/#{book.id}", "_method=PATCH&title=Renamed")
+    renamed.body.should eq("Renamed")
+  end
+
+  it "refuses a method override aimed at another tenant's record" do
+    _, book = acme_with_a_book
+    refused = TenancySpec.post("/globex/books/#{book.id}", "_method=PATCH&title=Taken")
+    refused.status.should eq(404)
+  end
+
+  it "lists the methods its tenant routes take when the method is wrong" do
+    acme_with_a_book
+    wrong = TenancySpec.post("/acme/books", "title=Wrong")
+    wrong.status.should eq(405)
+    wrong.headers["Allow"].should eq("GET, HEAD")
+  end
+end
+
+describe "A locale switch" do
+  it "redirects a tenant page to its locale under the tenant's prefix" do
+    acme_with_a_book
+    switched = TenancySpec.get("/acme/books?locale=fr")
+    switched.headers["Location"].should eq("/acme/fr/books")
+  end
+
+  it "redirects a tenant's home to its locale under the tenant's prefix" do
+    acme_with_a_book
+    TenancySpec.get("/acme?locale=fr").headers["Location"].should eq("/acme/fr")
+  end
+
+  it "serves a tenant page under a locale prefix" do
+    acme_with_a_book
+    TenancySpec.get("/acme/fr/books").body.should eq("Acme Atlas")
+  end
+
+  it "links a tenant page's language switcher within the tenant" do
+    acme_with_a_book
+    switcher = TenancySpec.get("/acme/fr/language").body
+    switcher.should eq("/acme/fr/language /acme/language?locale=en")
+  end
+
+  it "links a central page's language switcher without a tenant" do
+    acme_with_a_book
+    TenancySpec.get("/fr/switcher").body.should eq("/fr/switcher /switcher?locale=en")
+  end
+
+  it "prefixes a root query path with the tenant alone" do
+    acme, _ = acme_with_a_book
+    prefixed = Tenancy.with(acme) { Caramel.tenant_path("/?locale=en") }
+    prefixed.should eq("/acme?locale=en")
+  end
 end
 
 describe "A central route" do
@@ -74,6 +128,11 @@ end
 describe "SugarORM::Changeset#validate_tenant_slug" do
   it "refuses a central route's first segment" do
     changeset = TenancySpec::AccountChangeset.new(name: "Health", slug: "health")
+    changeset.errors.should eq({"slug" => [SugarORM::Wording.taken]})
+  end
+
+  it "refuses a locale prefix" do
+    changeset = TenancySpec::AccountChangeset.new(name: "French", slug: "fr")
     changeset.errors.should eq({"slug" => [SugarORM::Wording.taken]})
   end
 

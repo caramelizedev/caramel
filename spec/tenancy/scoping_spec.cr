@@ -62,6 +62,22 @@ describe "A tenanted schema" do
     book.account.slug.should eq("acme")
   end
 
+  it "preloads only the bound tenant's children of a shared row" do
+    acme, globex = two_tenants
+    shelf = TenancySpec::Shelf.create!(name: "Classics")
+    TenancySpec.book(acme, TenancySpec.author(acme), "Acme Shelved", shelf: shelf)
+    TenancySpec.book(globex, TenancySpec.author(globex), "Globex Shelved", shelf: shelf)
+    shelved = Tenancy.with(acme) { TenancySpec::Shelf.query.preload(:books).first! }
+    shelved.books.map(&.title).should eq(["Acme Shelved"])
+  end
+
+  it "preloads a shared row's reference to another tenant's row as nil" do
+    acme, globex = two_tenants
+    TenancySpec::Shelf.create!(name: "Picks", pick_id: foreign_book(globex).id)
+    shelf = Tenancy.with(acme) { TenancySpec::Shelf.query.preload(:pick).first! }
+    shelf.pick.should be_nil
+  end
+
   it "stamps a new row with the bound tenant" do
     acme, _ = two_tenants
     author = Tenancy.with(acme) { Author.query.first! }
