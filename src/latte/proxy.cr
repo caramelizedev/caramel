@@ -8,6 +8,8 @@ module Caramel::Latte
   # atomically loads this complete document through its private administration
   # socket, so registration retries cannot append duplicate routes.
   class Proxy
+    ACCESS_LOG = "access.log"
+
     getter https_port : Int32
     getter http_port : Int32
 
@@ -50,8 +52,9 @@ module Caramel::Latte
       redirects << unknown_host
       {
         admin:   {listen: "unix/#{admin_socket}|0600", config: {persist: false}},
+        logging: logging(sites),
         storage: {module: "file_system", root: storage_dir},
-        apps:    {pki: pki_app, tls: tls_app(domains), http: http_app(routes, redirects)},
+        apps:    {pki: pki_app, tls: tls_app(domains), http: http_app(routes, redirects, sites)},
       }.to_json
     end
 
@@ -80,13 +83,44 @@ module Caramel::Latte
       {certificates: {automate: domains}, automation: {policies: [policy]}}
     end
 
-    private def http_app(routes : Array(JSON::Any), redirects : Array(JSON::Any))
+    # One access log per site, in the site's log directory, so a site's log is its own.
+    # Caddy's roller keeps it to a megabyte and one previous file. The default logger
+    # keeps writing everything else to stderr, which is `proxy.log`.
+    private def logging(sites : Array(Site))
+      logs = {"default" => JSON.parse(%({"exclude":["http.log.access"]}))}
+      sites.each { |site| logs[logger_name(site)] = access_log(site) }
+      {logs: logs}
+    end
+
+    private def access_log(site : Site) : JSON::Any
+      filename = File.join(@registry.paths.site_log_dir(site.id), ACCESS_LOG)
+      writer = {
+        output: "file", filename: filename, roll: true,
+        roll_size_mb: 1, roll_keep: 1, mode: "0600",
+      }
+      log = {
+        writer:  writer,
+        encoder: {format: "json"},
+        include: ["http.log.access.#{logger_name(site)}"],
+      }
+      JSON.parse(log.to_json)
+    end
+
+    private def logger_name(site : Site) : String
+      "site_#{site.id}"
+    end
+
+    private def http_app(routes : Array(JSON::Any),
+                         redirects : Array(JSON::Any),
+                         sites : Array(Site))
+      mapped = sites.to_h { |site| {site.domain, [logger_name(site)]} }
       https = {
         listen:                  ["127.0.0.1:#{@https_port}"],
         strict_sni_host:         true,
         automatic_https:         {disable_redirects: true, disable_certificates: true},
         tls_connection_policies: [JSON.parse("{}")],
         routes:                  routes,
+        logs:                    {logger_names: mapped, skip_unmapped_hosts: true},
       }
       http = {
         listen:          ["127.0.0.1:#{@http_port}"],

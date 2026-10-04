@@ -182,7 +182,8 @@ module Caramel::Frappe
       Command.new("db diagnose",
         "Report database health: connections, locks, cache hits, unused indexes " \
         "and the slowest statements."),
-      Command.new("logs [app|compiler] [--follow]", "Show the development app or compiler log."),
+      Command.new("logs [app|compiler|access] [--follow]",
+        "Show the development app or compiler log, or Caddy's access log."),
       Command.new("traces [--errors] [--slow=MS] [--limit=N] #{MODE}",
         "List the development session's recent requests, jobs and schedule runs, " \
         "newest first."),

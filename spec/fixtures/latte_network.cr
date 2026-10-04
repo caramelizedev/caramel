@@ -31,5 +31,6 @@ puts({corefile: dns.config_file, caddy_config: proxy.config_file, admin: proxy.a
       ca: proxy.root_certificate, environment: proxy.environment, runtime: paths.run_dir,
       sites: registry.list.map do |entry|
         socket = File.join(paths.site_run_dir(entry.id), "app.sock")
-        {name: entry.name, domain: entry.domain, socket: socket}
+        access_log = File.join(paths.site_log_dir(entry.id), Caramel::Latte::Proxy::ACCESS_LOG)
+        {name: entry.name, domain: entry.domain, socket: socket, access_log: access_log}
       end}.to_json)

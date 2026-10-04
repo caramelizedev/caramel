@@ -160,7 +160,7 @@ module Caramel::Frappe
       when "db branch create", "db branch list", "db branch delete"
         branch(invocation)
       when "logs"
-        return logs(invocation["app|compiler"]? || "app", invocation.flag?("--follow"))
+        return logs(invocation["app|compiler|access"]? || "app", invocation.flag?("--follow"))
       when "traces"
         return traces(invocation)
       when "trace"

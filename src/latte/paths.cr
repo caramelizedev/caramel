@@ -219,6 +219,16 @@ module Caramel
         StateSecurity.ensure_owned_directory(File.join(root, "logs"))
       end
 
+      # A site's log directory: `app.log`, `compiler.log`, `events.jsonl` and Caddy's
+      # `access.log` sit together here. Frappé's `site_log_directory` is the same path.
+      def site_log_dir(id : String) : String
+        unless StateSecurity.valid_site_id?(id)
+          raise ArgumentError.new("invalid site id")
+        end
+        sites = StateSecurity.ensure_owned_directory(File.join(logs_dir, "sites"))
+        StateSecurity.ensure_owned_directory(File.join(sites, id))
+      end
+
       def dns_dir : String
         services = StateSecurity.ensure_owned_directory(File.join(root, "services"))
         StateSecurity.ensure_owned_directory(File.join(services, "dns"))

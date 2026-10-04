@@ -195,6 +195,14 @@ module Caramel::Checks
           request("bookshelf", "/__caramel/dev/traces.json", feed)[1].includes?("GET /")
         end
         assert!(listed_trace, "traces.json does not list GET /")
+        feed_body = request("bookshelf", "/__caramel/dev/traces.json", feed)[1]
+        page_trace = JSON.parse(feed_body)["traces"].as_a.find! { |item| item["name"] == "GET /" }
+        page_request = page_trace["request_id"].as_s
+        in_access_log = Checks.wait_until(15.seconds, 500.milliseconds) do
+          access = p.attempt([frappe, "logs", "access"], chdir: project, timeout: 30.seconds)
+          access.stdout.includes?(page_request)
+        end
+        assert!(in_access_log, "frappe logs access does not show the page's request id")
         runtime_url = p.local_values(project)["DATABASE_URL"]
         recorded = Checks.wait_until(30.seconds, 1.second) do
           p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").to_i > 0

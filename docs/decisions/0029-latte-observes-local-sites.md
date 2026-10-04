@@ -43,6 +43,13 @@ belong.
    run, adds to a count beside the status item and, when macOS allows, posts a
    notification that opens the inspector. The first snapshot after launch seeds what is
    known and alerts nothing; opening the menu clears the count.
+6. **Each site has its own Caddy access log.** Latte's proxy configuration holds one logger
+   per registered site, `site_<id>`, that writes JSON to `<logs>/sites/<id>/access.log`
+   with mode 0600, rolled at one megabyte with one previous file. The HTTPS server maps
+   each domain to its logger and skips unmapped hosts, and the default logger excludes
+   `http.log.access`, so `proxy.log` carries no access lines. The directory is the one
+   Frappé keeps `app.log`, `compiler.log` and `events.jsonl` in; `frappe logs access`
+   prints the file. Caddy redacts `Cookie` and `Authorization`.
 
 ## Reasons
 

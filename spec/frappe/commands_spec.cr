@@ -26,7 +26,8 @@ describe Caramel::Frappe::Commands do
 
     parse("db", "branch", "create", "feature_x")["NAME"].should eq("feature_x")
     parse("db", "diff", "--dev-override", "--name", "add_isbn")["--name"].should eq("add_isbn")
-    parse("logs", "compiler", "--follow")["app|compiler"].should eq("compiler")
+    parse("logs", "compiler", "--follow")["app|compiler|access"].should eq("compiler")
+    parse("logs", "access")["app|compiler|access"].should eq("access")
     parse("routes")["FILTER"]?.should be_nil
     parse("routes", "books")["FILTER"].should eq("books")
     corretto = parse("corretto", "spec/models", "spec/requests", "--concurrency=8")

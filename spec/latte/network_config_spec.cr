@@ -50,6 +50,25 @@ describe "Latte network configuration" do
       routes[0]["match"][0]["host"][0].as_s.should eq("bookshelf.caramel")
       routes[0]["handle"][0]["status_code"].as_i.should eq(503)
       routes.last["handle"][0]["status_code"].as_i.should eq(421)
+      bookshelf = registry.list.find! { |entry| entry.name == "bookshelf" }
+      notes = registry.list.find! { |entry| entry.name == "notes" }
+      logs = config["logging"]["logs"].as_h
+      logs.keys.sort!.should eq(["default", "site_#{bookshelf.id}", "site_#{notes.id}"].sort)
+      logs["default"]["exclude"].as_a.map(&.as_s).should eq(["http.log.access"])
+      access = logs["site_#{bookshelf.id}"]
+      writer = access["writer"]
+      expected = File.join(paths.logs_dir, "sites", bookshelf.id, "access.log")
+      writer["filename"].as_s.should eq(expected)
+      {writer["roll"].as_bool, writer["roll_size_mb"].as_i, writer["mode"].as_s}
+        .should eq({true, 1, "0600"})
+      access["include"].as_a.map(&.as_s).should eq(["http.log.access.site_#{bookshelf.id}"])
+      access["encoder"]["format"].as_s.should eq("json")
+      server["logs"]["skip_unmapped_hosts"].as_bool.should be_true
+      mapped = server["logs"]["logger_names"].as_h
+      mapped["bookshelf.caramel"].as_a.map(&.as_s).should eq(["site_#{bookshelf.id}"])
+      mapped["notes.caramel"].as_a.map(&.as_s).should eq(["site_#{notes.id}"])
+      File.info(File.dirname(writer["filename"].as_s)).permissions.value.should eq(0o700)
+      proxy.configuration.should eq(proxy.configuration)
       site = registry.list.find! { |entry| entry.name == "bookshelf" }
       socket_path = File.join(paths.site_run_dir(site.id), "app.sock")
       listener = UNIXServer.new(socket_path)
