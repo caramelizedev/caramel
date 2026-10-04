@@ -11,6 +11,7 @@ Data: app/models/ and app/changesets/
 HTML: app/views/
 Jobs: app/jobs/
 Translations: app/locales/ (enable with frappe make locale CODE)
+Tenants: the tenant block in config/routes.cr (enable with frappe make tenancy MODEL)
 Request specs: spec/requests/
 
 Discover: frappe agent-manifest; frappe routes
