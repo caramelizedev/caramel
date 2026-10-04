@@ -11,7 +11,7 @@ module Caramel::Frappe
       end
     end
 
-    def initialize(@path : String, @warnings : IO)
+    def initialize(@path : String, @warnings : IO, @max_bytes : Int32 = MAX_BYTES)
       self.class.validate_file(@path)
       @file = File.open(@path, "a", perm: 0o600)
       @disabled = false
@@ -26,7 +26,7 @@ module Caramel::Frappe
       begin
         @file.write(slice)
         @file.flush
-        if @file.size > MAX_BYTES
+        if @file.size > @max_bytes
           @file.close
           File.rename(@path, @path + ".previous")
           @file = File.open(@path, "a", perm: 0o600)

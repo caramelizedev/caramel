@@ -291,8 +291,23 @@ module Caramel
       trace.status = response.status
       trace.streamed = !response.streamer.nil?
       trace.bytes = response.body.bytesize.to_i64 unless trace.streamed?
+      server_timing(trace, response)
       finish(trace)
     end
+
+    {% if flag?(:caramel_development) %}
+      # The browser's developer tools show where a development request spent its time.
+      private def self.server_timing(trace : Trace, response : Response) : Nil
+        return if trace.streamed? || !development?
+
+        timing = "db;dur=#{Trace.ms(trace.db_time)};desc=\"#{trace.db_count} queries\", " \
+                 "view;dur=#{Trace.ms(trace.view_time)}, total;dur=#{Trace.ms(trace.duration)}"
+        response.headers["Server-Timing"] = timing
+      end
+    {% else %}
+      private def self.server_timing(trace : Trace, response : Response) : Nil
+      end
+    {% end %}
 
     # Fixes the duration, flags a slow trace and tells every sink.
     def self.finish(trace : Trace) : Nil

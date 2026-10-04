@@ -92,6 +92,54 @@ describe Caramel::Frappe::DevGateway do
     end
   end
 
+  it "names the upstream's request in the script it adds to a full page" do
+    directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
+    Dir.mkdir(directory, 0o700)
+    socket_path = File.join(directory, "app.sock")
+    upstream = HTTP::Server.new do |context|
+      context.response.headers["Content-Type"] = "text/html; charset=utf-8"
+      context.response.headers["X-Request-ID"] = "abcdef12"
+      context.response.print("<!DOCTYPE html><body>page</body>")
+    end
+    upstream.bind_unix(socket_path)
+    spawn { upstream.listen }
+    begin
+      gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+      gateway.ready(socket_path)
+      host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+      response = gateway.handle(HTTP::Request.new("GET", "/", host))
+      response.body.should contain("data-request=\"abcdef12\"")
+    ensure
+      upstream.close
+      File.delete?(socket_path)
+      Dir.delete(directory)
+    end
+  end
+
+  it "links each compiler diagnostic to the editor and keeps the raw output folded" do
+    editor = Caramel::Crema::Editor.from("zed")
+    origin = "https://bookshelf.caramel"
+    gateway = Caramel::Frappe::DevGateway.new(origin, [] of String, editor, "/proj")
+    diagnostic = Caramel::Frappe::Diagnostic.new("UNDEFINED_METHOD", "app/a.cr", 3, 7,
+      "undefined method 'foo'", remediation: "check the name", source: "  foo")
+    gateway.failed("raw compiler output", [diagnostic])
+    host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+    page = gateway.handle(HTTP::Request.new("GET", "/", host))
+    page.body.should contain("<a href=\"zed://file/proj/app/a.cr:3:7\">app/a.cr:3:7</a>")
+    folded = "<details><summary>Compiler output</summary><pre>raw compiler output</pre>"
+    page.body.should contain(folded)
+  end
+
+  it "reports the newest trace in its status" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    owner = HTTP::Headers{
+      "Host"                  => "bookshelf.caramel",
+      "X-Caramel-Owner-Token" => gateway.owner_token,
+    }
+    status = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/status", owner))
+    JSON.parse(status.body)["latest"].as_i.should eq(0)
+  end
+
   it "forwards bodiless responses without reading or decorating a body" do
     directory = "/private/tmp/caramel-gateway-#{Random::Secure.hex(6)}"
     Dir.mkdir(directory, 0o700)

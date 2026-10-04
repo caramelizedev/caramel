@@ -6,6 +6,10 @@ require "./build_slot"
 require "./tools"
 require "./latte_client"
 require "./site_log"
+require "./dev_events"
+require "./diagnostics"
+require "../caramel/crema/editor"
+require "../caramel/crema/redact"
 require "../latte/project_status"
 require "../latte/watcher"
 
@@ -47,6 +51,11 @@ module Caramel::Frappe
     @id : String
     @directory = ""
     @socket = ""
+    @events : DevEvents? = nil
+    @log_directory = ""
+    @application_ops : String? = nil
+    @secrets : Array(String)
+    @editor_setting : String
 
     # *runtime_url* replaces the application's DATABASE_URL, e.g. with a
     # Latte branch's runtime URL for `frappe dev --branch`.
@@ -58,9 +67,11 @@ module Caramel::Frappe
                    @error : IO = STDERR, *,
                    @runtime_url : String? = nil)
       @id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
-      secrets = @values.select { |key, _| key.matches?(/SECRET|PASSWORD|TOKEN|URL/) }.values
-      @runtime_url.try { |url| secrets << url }
-      @gateway = DevGateway.new(@project.origin, secrets)
+      @secrets = @values.select { |key, _| key.matches?(/SECRET|PASSWORD|TOKEN|URL/) }.values
+      @runtime_url.try { |url| @secrets << url }
+      @editor_setting = ENV["CARAMEL_EDITOR"]? || @values["CARAMEL_EDITOR"]? || "zed"
+      editor = Crema::Editor.from(@editor_setting)
+      @gateway = DevGateway.new(@project.origin, @secrets, editor, @project.root)
     end
 
     def run(*, open_browser : Bool = true) : Nil
@@ -83,6 +94,7 @@ module Caramel::Frappe
     # ameba:disable Metrics/CyclomaticComplexity -- the watch loop, one branch per event
     private def run_owned : Nil
       remove_stale_sockets
+      start_events
       @socket = File.join(@directory, "dev-#{Random::Secure.hex(4)}.sock")
       server = HTTP::Server.new([@gateway])
       @server = server
@@ -244,24 +256,34 @@ module Caramel::Frappe
         end
         return false if @stopping || @pending
         unless command.status.try(&.success?)
-          if checked
-            @gateway.failed(failure(command, "Compiler stopped before completing."))
-          else
-            @gateway.failed(failure(command, "Type check stopped before completing."))
-            elapsed = (Time.instant - started).total_milliseconds.round.to_i64
-            @output.puts("Type check failed in #{elapsed} ms")
-            @output.flush
-          end
+          compile_failed(command, checked, started)
           return false
         end
         # A compiler that reports no stages has still passed its type check.
         type_checked(started) unless checked
         slot.install(temporary, fingerprint)
+        record_build("built", started)
         true
       ensure
         File.delete?(temporary)
         File.delete?(temporary + ".dwarf")
       end
+    end
+
+    # Shows the compiler's diagnostics in the browser and records the failed build.
+    private def compile_failed(command : DevCommand,
+                               checked : Bool,
+                               started : Time::Instant) : Nil
+      what = checked ? "Compiler" : "Type check"
+      stopped = "#{what} stopped before completing."
+      diagnostics = Diagnostics.parse(command.output.contents, @project.root, @project.entrypoint)
+      @gateway.failed(failure(command, stopped), diagnostics)
+      record_build("failed", started, command, diagnostics)
+      return if checked
+
+      elapsed = (Time.instant - started).total_milliseconds.round.to_i64
+      @output.puts("Type check failed in #{elapsed} ms")
+      @output.flush
     end
 
     # Tier 1 passed: the compiler finished its semantic stages and is
@@ -272,6 +294,28 @@ module Caramel::Frappe
       @compiler_log.try(&.mark("build #{@project.name}"))
       @output.puts("Building #{@project.name}…")
       @output.flush
+      record_build("passed", started)
+    end
+
+    # Tells the inspector and the event log how a build or type check ended. Compiler
+    # text is kept, redacted, only when no diagnostic could be read from it.
+    private def record_build(state : String,
+                             started : Time::Instant,
+                             command : DevCommand? = nil,
+                             diagnostics : Array(Diagnostic) = [] of Diagnostic) : Nil
+      events = @events || return
+      elapsed = (Time.instant - started).total_milliseconds.round(3)
+      event = Crema::BuildEvent.new(Time.utc.to_rfc3339(fraction_digits: 3), state, elapsed)
+      event.diagnostics = diagnostics.map { |item| build_diagnostic(item) }
+      if command && diagnostics.empty?
+        event.message = Crema::Redact.text(command.output.contents, @secrets, 32_768)
+      end
+      events.build(event)
+    end
+
+    private def build_diagnostic(item : Diagnostic) : Crema::BuildDiagnostic
+      Crema::BuildDiagnostic.new(item.code, item.file, item.line, item.column,
+        Crema::Redact.text(item.message, @secrets, 4096), item.remediation)
     end
 
     # Takes the build lock, waiting while a command builds (ADR 0013 §5);
@@ -349,6 +393,7 @@ module Caramel::Frappe
     private def boot(binary : String, quiet : Bool = false) : Bool
       return false if @stopping
       socket = File.join(@directory, "app-#{Random::Secure.hex(4)}.sock")
+      ops = File.join(@directory, "ops-#{Random::Secure.hex(4)}.sock")
       # Request serving receives only the runtime role, never migration/spec credentials.
       values = @values.reject do |key, _|
         key.starts_with?("SPEC_") || key == "MIGRATION_DATABASE_URL"
@@ -358,9 +403,12 @@ module Caramel::Frappe
         "CARAMEL_ENV"                   => "development",
         "CARAMEL_PROJECT_ROOT"          => @project.root,
         "CARAMEL_SOCKET"                => socket,
+        "CARAMEL_OPS_SOCKET"            => ops,
+        "CARAMEL_EDITOR"                => @editor_setting,
         "DATABASE_URL"                  => database,
         "CARAMEL_EXPECTED_DATABASE_URL" => database,
       })
+      @events.try { |events| values["CARAMEL_DEV_EVENTS"] = events.socket }
       @app_log.try(&.mark("start #{@project.name}")) unless quiet
       candidate = DevCommand.new([binary, "serve"],
         @tools.environment(values),
@@ -378,16 +426,17 @@ module Caramel::Frappe
               candidate.output.log = @app_log
             end
             previous, previous_socket = @application, @application_socket
+            previous_ops = @application_ops
             @application, @application_socket = candidate, socket
+            @application_ops = ops
             @application_binary = binary
             @gateway.ready(socket)
             # ameba:disable Lint/UselessAssign -- read by the ensure below
             accepted = true
             if previous
               @retirement.retire(previous) do
-                if previous_path = previous_socket
-                  File.delete?(previous_path)
-                end
+                previous_socket.try { |path| File.delete?(path) }
+                previous_ops.try { |path| File.delete?(path) }
                 cleanup_binaries
               end
             end
@@ -416,6 +465,7 @@ module Caramel::Frappe
         unless accepted
           candidate.stop
           File.delete?(socket)
+          File.delete?(ops)
         end
       end
     end
@@ -454,7 +504,7 @@ module Caramel::Frappe
 
     private def remove_stale_sockets : Nil
       Dir.children(@directory).each do |name|
-        next unless name.matches?(/\A(?:dev|app)-[0-9a-f]{8}\.sock\z/)
+        next unless name.matches?(/\A(?:dev|app|ops|events)-[0-9a-f]{8}\.sock\z/)
         path = File.join(@directory, name)
         Latte::StateSecurity.validate_socket_entry(path, require_socket: true)
         deadline = Time.instant + 3.seconds
@@ -478,8 +528,17 @@ module Caramel::Frappe
     private def open_logs : Nil
       directory = @client.site_log_directory(@id, create: true)
       raise Error.new("Site logs are unavailable for #{@project.name}") unless directory
+      @log_directory = directory
       @app_log = SiteLog.new(File.join(directory, "app.log"), @error)
       @compiler_log = SiteLog.new(File.join(directory, "compiler.log"), @error)
+    end
+
+    # Listens for the application's trace and error events, which the inspector shows.
+    private def start_events : Nil
+      events = DevEvents.new(@directory, @log_directory, @error)
+      events.start
+      @events = events
+      @gateway.events = events
     end
 
     private def close_logs : Nil
@@ -508,6 +567,8 @@ module Caramel::Frappe
       Latte::ProjectStatus.remove_session(@directory, @socket) unless @socket.empty?
       File.delete?(@socket) unless @socket.empty?
       @application_socket.try { |socket| File.delete?(socket) }
+      @application_ops.try { |path| File.delete?(path) }
+      @events.try(&.close)
       Signal::INT.reset
       Signal::TERM.reset
       Signal::HUP.reset

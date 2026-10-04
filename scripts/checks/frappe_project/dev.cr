@@ -187,12 +187,19 @@ module Caramel::Checks
         assert!(steps.all? { |step| compiler_log.includes?(step) }, compiler_log)
         application_log = p.command([frappe, "logs"], chdir: project, echo: false).stdout
         assert!(application_log.includes?("start bookshelf"), application_log)
+        assert!(body.includes?("data-request="), "the served page does not name its request")
+        feed = ["X-Caramel-Dev: 1"]
+        listed_trace = Checks.wait_until(10.seconds, 100.milliseconds) do
+          request("bookshelf", "/__caramel/dev/traces.json", feed)[1].includes?("GET /")
+        end
+        assert!(listed_trace, "traces.json does not list GET /")
         # Under scripts/check all the build step has already built Latte.app.
         p.command([File.join(p.repo, "scripts/build-latte-menu")]) unless Checks.prebuilt?
         latte = File.join(p.repo, "bin/Latte.app/Contents/MacOS/Latte")
         menu = p.command([latte, "--check"], echo: false).stdout
         assert!(menu.includes?("[Build error] · Terminal session"), menu)
         assert!(menu.includes?("/logs/sites/#{site("bookshelf")["id"].as_s}"), menu)
+        assert!(menu.includes?("/__caramel/dev/inspector"), menu)
         puts "PASS: persistent per-site compiler and application logs " \
              "through frappe logs and the menu"
         assert!(request("bookshelf-clone")[0] == 200)
@@ -212,6 +219,7 @@ module Caramel::Checks
         tail = body[Math.max(0, body.size - 3000)..]
         operator = body.includes?("to &#39;Int32#+&#39;")
         assert!(operator && body.includes?("not String"), tail)
+        assert!(body.includes?("zed://file/"), "the type error page has no editor link")
         reported = Checks.wait_until(5.seconds, 50.milliseconds) do
           File.read(log_path).scan(/Type check failed in \d+ ms/).size == failures + 1
         end
@@ -244,6 +252,14 @@ module Caramel::Checks
         assert!(escaped && body.includes?("app/actions/home/show.cr:"), excerpt(body))
         assert_located!(body)
         assert!(body.includes?("Internal stack frames"))
+        errors = p.attempt([frappe, "errors", "--agent"], chdir: project, timeout: 30.seconds)
+        reported = Checks.wait_until(10.seconds, 200.milliseconds) do
+          errors = p.attempt([frappe, "errors", "--agent"], chdir: project, timeout: 30.seconds)
+          errors.stdout.includes?("ERR RUNTIME:500 at app/")
+        end
+        assert!(reported && !errors.success?, "frappe errors did not report the planted error")
+        last = p.command([frappe, "trace", "last-error", "--md"], chdir: project, echo: false)
+        assert!(last.stdout.includes?("## Backtrace"), last.stdout)
         assert!(site("bookshelf")["state"].as_s == "running")
         wait_ready("bookshelf")
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])

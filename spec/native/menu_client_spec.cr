@@ -150,6 +150,7 @@ describe "native Latte menu client" do
       result.stdout.should contain("Terminal session")
       logs = File.join(fixture.home, "logs/sites/0123456789abcdef")
       result.stdout.should contain("logs: #{logs}")
+      result.stdout.should contain("inspector: https://bookshelf.caramel/__caramel/dev/inspector")
     end
   end
 

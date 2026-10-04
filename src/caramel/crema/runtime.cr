@@ -76,3 +76,7 @@ module Caramel::Crema
     runtime
   end
 end
+
+{% if flag?(:caramel_development) %}
+  require "./dev_sink"
+{% end %}

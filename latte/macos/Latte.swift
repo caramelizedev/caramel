@@ -634,6 +634,7 @@ private enum LatteDiagnostics {
             for site in snapshot.sites.sorted(by: { $0.name < $1.name }) {
                 print("- \(site.name) \(site.origin) [\(site.stateLabel)]\(site.ownerLabel.map { " · " + $0 } ?? "")")
                 print("  logs: \(try client.runtime.logDirectory(for: site).path)")
+                print("  inspector: \(site.origin)/__caramel/dev/inspector")
             }
             return 0
         } catch {
@@ -804,6 +805,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
                     addDisabledItem(site.origin, to: siteMenu)
                     if let owner = site.ownerLabel { addDisabledItem(owner, to: siteMenu) }
                     siteMenu.addItem(actionItem("Open site", action: #selector(openSite(_:)), id: site.id))
+                    siteMenu.addItem(actionItem("Open inspector", action: #selector(openInspector(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open folder", action: #selector(openFolder(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open logs", action: #selector(openLogs(_:)), id: site.id))
                     siteItem.submenu = siteMenu
@@ -861,6 +863,16 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openInspector(_ sender: NSMenuItem) {
+        guard let site = site(for: sender), let url = try? site.validatedURL(),
+              let inspector = URL(string: "/__caramel/dev/inspector", relativeTo: url)?.absoluteURL else {
+            lastError = "The daemon returned an invalid site origin"
+            renderMenu()
+            return
+        }
+        NSWorkspace.shared.open(inspector)
     }
 
     @objc private func openFolder(_ sender: NSMenuItem) {

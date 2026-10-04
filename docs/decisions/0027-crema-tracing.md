@@ -80,6 +80,24 @@ secrets in logs and without a diagnostic that costs a production binary anything
     `caramel-cold-brew`, `caramel-listen`) so every backend is attributable.
 16. **JSON lines.** A data key equal to `ts`, `level`, `source` or `msg` (an error's
     `source`) is written with a `data_` prefix.
+17. **Development surfaces are compiled out of production.** They need
+    `-D caramel_development` and `CARAMEL_ENV=development`: the rich error page, the
+    event sink, `Server-Timing` and a query's binds and source line. The error page adds
+    an editor link per application frame, the source around the failing line, the
+    request, the queries before the error, the causes and Copy as Markdown; a client
+    that lists JSON first gets JSON.
+18. **Editor links.** `CARAMEL_EDITOR` names `zed` (the default), `vscode`, `cursor`,
+    `sublime`, `textmate`, `idea` or a template with `{path}`, `{line}` and `{column}`.
+19. **`frappe dev` keeps the events.** It listens on a private socket
+    (`CARAMEL_DEV_EVENTS`); the application's dev sink writes each finished trace and
+    unattached error there as a JSON line. The newest 500 traces stay in memory and every
+    line is appended to the site log's `events.jsonl`, which `frappe traces`,
+    `frappe trace REF [--md]` and `frappe errors` read without a session. `frappe errors`
+    prints MRDP `RUNTIME` and `REPEATED_QUERY`.
+20. **The inspector** is at `/__caramel/dev/inspector` on the development origin: requests,
+    traces with a waterfall, errors by fingerprint and builds. A toolbar on each page
+    links to its trace. Compile errors link to the editor, and Latte.app opens the
+    inspector.
 
 ## Reasons
 

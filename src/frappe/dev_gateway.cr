@@ -3,7 +3,11 @@ require "http/client"
 require "socket/unix_socket"
 require "crypto/subtle"
 require "./project"
+require "./diagnostics"
+require "./dev_events"
+require "./inspector"
 require "../caramel/html"
+require "../caramel/crema/editor"
 require "../caramel/crema/redact"
 require "../caramel/response"
 
@@ -12,8 +16,11 @@ module Caramel::Frappe
   # builds receive application traffic; diagnostics and refresh stay local.
   class DevGateway
     include HTTP::Handler
-    COOKIE = "__Host-caramel_dev"
-    CLIENT = {{ read_file("#{__DIR__}/dev_client.js") }}
+    COOKIE          = "__Host-caramel_dev"
+    CLIENT          = {{ read_file("#{__DIR__}/dev_client.js") }}
+    INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }}
+    TOOLBAR_STYLE   = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
+    PREFIX          = "/__caramel/dev/"
 
     # The diagnostic page's stylesheet.
     STYLE = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;" \
@@ -39,17 +46,39 @@ module Caramel::Frappe
     @upstream : String? = nil
     @token = Random::Secure.hex(32)
     @authority : String
+    @events : DevEvents? = nil
+    @inspector : Inspector? = nil
+    @diagnostics = [] of Diagnostic
+    @endpoints : Hash(String, Proc(HTTP::Request, Caramel::Response))
 
-    def initialize(@origin : String, @secrets : Array(String) = [] of String)
+    # *editor* and *root* turn compiler locations and queries into links that open
+    # the file; the inspector needs `events`, which the session sets once it exists.
+    def initialize(@origin : String,
+                   @secrets : Array(String) = [] of String,
+                   @editor : Crema::Editor = Crema::Editor.from(nil),
+                   @root : String? = nil)
       uri = URI.parse(@origin)
       https = uri.scheme == "https" && uri.host && uri.path.empty?
       raise Error.new("Development requires an HTTPS origin") unless https
       @authority = uri.authority || raise Error.new("Development requires an HTTPS origin")
+      @endpoints = endpoints
+    end
+
+    # The development event store behind the inspector and the toolbar.
+    def events=(events : DevEvents?) : DevEvents?
+      @events = events
+      @inspector = events.try { |store| Inspector.new(store, @editor, @root || "") }
+      events
+    end
+
+    def events : DevEvents?
+      @events
     end
 
     def building : Nil
       @state = "building"
       @message = "Compiling your application…"
+      @diagnostics = [] of Diagnostic
     end
 
     def ready(socket : String) : Nil
@@ -58,11 +87,13 @@ module Caramel::Frappe
       @generation += 1
     end
 
-    def failed(message : String) : Nil
+    # Shows *message*, and *diagnostics* parsed from it as links to the code.
+    def failed(message : String, diagnostics : Array(Diagnostic) = [] of Diagnostic) : Nil
       safe_message = redact(message)
       return if @state == "failed" && @message == safe_message
       @state = "failed"
       @message = safe_message
+      @diagnostics = diagnostics
       @generation += 1
     end
 
@@ -99,36 +130,65 @@ module Caramel::Frappe
       end
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity -- one branch per development endpoint
     private def endpoint(request : HTTP::Request) : Caramel::Response
       unless request.method == "GET"
         return secure(Caramel::Response.new(405, "Method not allowed"))
       end
-      case request.path
-      when "/__caramel/dev/client.js"
-        ok(CLIENT, "text/javascript; charset=utf-8")
-      when "/__caramel/dev/style.css"
-        ok(STYLE, "text/css; charset=utf-8")
-      when "/__caramel/dev/status"
-        if token = request.headers["X-Caramel-Owner-Token"]?
-          if token.bytesize == @owner_token.bytesize &&
-             Crypto::Subtle.constant_time_compare(token, @owner_token)
-            return status_response
-          end
+      path = request.path
+      inspector_path = "#{PREFIX}inspector"
+      prefixed = path.starts_with?(inspector_path) && !path.ends_with?(".css")
+      return inspector_page(request) if prefixed
+      handler = @endpoints[path]? || return secure(Caramel::Response.new(404, "Not found"))
+      handler.call(request)
+    end
+
+    # The development endpoints by path: assets, status and the traces feed.
+    private def endpoints : Hash(String, Proc(HTTP::Request, Caramel::Response))
+      {
+        "#{PREFIX}client.js"     => ->(_request : HTTP::Request) { script_asset(CLIENT) },
+        "#{PREFIX}style.css"     => ->(_request : HTTP::Request) { stylesheet(STYLE) },
+        "#{PREFIX}inspector.css" => ->(_request : HTTP::Request) { stylesheet(INSPECTOR_STYLE) },
+        "#{PREFIX}toolbar.css"   => ->(_request : HTTP::Request) { stylesheet(TOOLBAR_STYLE) },
+        "#{PREFIX}status"        => ->(request : HTTP::Request) { status(request) },
+        "#{PREFIX}traces.json"   => ->(request : HTTP::Request) { traces_feed(request) },
+      }
+    end
+
+    private def script_asset(body : String) : Caramel::Response
+      ok(body, "text/javascript; charset=utf-8")
+    end
+
+    private def stylesheet(body : String) : Caramel::Response
+      ok(body, "text/css; charset=utf-8")
+    end
+
+    # Latte's owner token or the browser's development session may read the status.
+    private def status(request : HTTP::Request) : Caramel::Response
+      if token = request.headers["X-Caramel-Owner-Token"]?
+        if token.bytesize == @owner_token.bytesize &&
+           Crypto::Subtle.constant_time_compare(token, @owner_token)
+          return status_response
         end
-        cookie = request.cookies[COOKIE]?.try(&.value)
-        origin = request.headers["Origin"]?
-        unless cookie && cookie.bytesize == @token.bytesize &&
-               Crypto::Subtle.constant_time_compare(cookie, @token) &&
-               request.headers["X-Caramel-Dev"]? == "1" &&
-               (origin.nil? || origin == @origin)
-          refused = "Refresh requires this project's development session"
-          return secure(Caramel::Response.new(403, refused))
-        end
-        status_response
-      else
-        secure(Caramel::Response.new(404, "Not found"))
       end
+      return refused unless session_request?(request)
+
+      status_response
+    end
+
+    # True for a request from the page this session served: its cookie, the
+    # `X-Caramel-Dev` header and, when sent, this project's origin.
+    private def session_request?(request : HTTP::Request) : Bool
+      cookie = request.cookies[COOKIE]?.try(&.value)
+      origin = request.headers["Origin"]?
+      return false unless cookie && cookie.bytesize == @token.bytesize
+
+      Crypto::Subtle.constant_time_compare(cookie, @token) &&
+        request.headers["X-Caramel-Dev"]? == "1" &&
+        (origin.nil? || origin == @origin)
+    end
+
+    private def refused : Caramel::Response
+      secure(Caramel::Response.new(403, "Refresh requires this project's development session"))
     end
 
     private def ok(body : String, content_type : String) : Caramel::Response
@@ -136,9 +196,31 @@ module Caramel::Frappe
       secure(Caramel::Response.new(200, body, headers))
     end
 
-    # The generation and state the refresh script polls for.
+    # The generation, state and newest trace the refresh script polls for.
     private def status_response : Caramel::Response
-      ok({generation: @generation, state: @state}.to_json, "application/json")
+      latest = @events.try(&.latest) || 0_i64
+      ok({generation: @generation, state: @state, latest: latest}.to_json, "application/json")
+    end
+
+    # The traces a page's toolbar and the inspector list ask for.
+    private def traces_feed(request : HTTP::Request) : Caramel::Response
+      return refused unless session_request?(request)
+
+      empty = {latest: 0, traces: [] of Int32}.to_json
+      inspector = @inspector || return ok(empty, "application/json")
+      ok(inspector.feed(request), "application/json")
+    end
+
+    private def inspector_page(request : HTTP::Request) : Caramel::Response
+      inspector = @inspector || return secure(Caramel::Response.new(404, "Not found"))
+      page = inspector.response(request)
+      secured = secure(page)
+      return secured unless page.headers["Content-Type"]?.try(&.starts_with?("text/html"))
+
+      body = with_script(page.body, @generation, nil)
+      response = Caramel::Response.new(page.status, body, page.headers)
+      add_cookie(response)
+      secure(response)
     end
 
     private def diagnostic(request : HTTP::Request,
@@ -153,14 +235,38 @@ module Caramel::Frappe
              "<title>#{title} · Frappé</title>" \
              "<link rel=\"stylesheet\" href=\"/__caramel/dev/style.css\"></head>" \
              "<body><main><p>FRAPPÉ DEVELOPMENT</p><h1>#{title}</h1>" \
-             "<pre>#{Caramel::HTML.escape(@message)}</pre>" \
+             "#{diagnostic_details}" \
              "<p>Save your changes to rebuild. " \
              "This page refreshes when the application is ready.</p></main>" \
-             "#{script(generation)}</body></html>"
+             "#{script(generation, nil)}</body></html>"
       headers = HTTP::Headers{"Content-Type" => "text/html; charset=utf-8"}
       response = secure(Caramel::Response.new(503, body, headers))
       add_cookie(response)
       response
+    end
+
+    # The message alone, or the diagnostics as links with the compiler's output after them.
+    private def diagnostic_details : String
+      raw = "<pre>#{Caramel::HTML.escape(@message)}</pre>"
+      return raw if @diagnostics.empty?
+
+      articles = @diagnostics.join { |entry| article(entry) }
+      "#{articles}<details><summary>Compiler output</summary>#{raw}</details>"
+    end
+
+    private def article(entry : Diagnostic) : String
+      text = Caramel::HTML.escape(redact(entry.message))
+      source = entry.source.try { |lines| "<pre>#{Caramel::HTML.escape(redact(lines))}</pre>" }
+      fix = entry.remediation.try { |remedy| "<p>#{Caramel::HTML.escape(remedy)}</p>" }
+      "<article class=\"diagnostic\">#{location_link(entry)}<p>#{text}</p>#{source}#{fix}</article>"
+    end
+
+    private def location_link(entry : Diagnostic) : String
+      label = Caramel::HTML.escape(entry.location)
+      path = File.join(@root || "", entry.file)
+      path = entry.file if entry.file.starts_with?("/")
+      href = @editor.link(path, entry.line, entry.column)
+      href.empty? ? "<p>#{label}</p>" : "<a href=\"#{Caramel::HTML.escape(href)}\">#{label}</a>"
     end
 
     # Forwards one request to the ready application over a fresh Unix socket.
@@ -237,7 +343,7 @@ module Caramel::Frappe
           else
             body = upstream.body_io?.try(&.gets_to_end) || ""
             if full_page?(request, returned)
-              body = with_script(body, generation)
+              body = with_script(body, generation, returned["X-Request-ID"]?)
               returned.delete("ETag")
               returned["Cache-Control"] = "no-store"
             end
@@ -279,14 +385,18 @@ module Caramel::Frappe
       request.headers["HX-Request-Type"]? != "partial"
     end
 
-    # *body* with the refresh script before its `</body>`, or at its end.
-    private def with_script(body : String, generation : Int64) : String
-      return body + script(generation) unless body.includes?("</body>")
-      body.sub("</body>", script(generation) + "</body>")
+    # *body* with the refresh script before its `</body>`, or at its end. A page
+    # that came from a traced request also names it, so the toolbar can show it.
+    private def with_script(body : String, generation : Int64, request_id : String?) : String
+      tag = script(generation, request_id)
+      return body + tag unless body.includes?("</body>")
+      body.sub("</body>", tag + "</body>")
     end
 
-    private def script(generation : Int64) : String
-      "<script src=\"/__caramel/dev/client.js\" data-generation=\"#{generation}\" defer></script>"
+    private def script(generation : Int64, request_id : String?) : String
+      request = request_id.try { |id| " data-request=\"#{Caramel::HTML.escape(id)}\"" }
+      "<script src=\"/__caramel/dev/client.js\" data-generation=\"#{generation}\"#{request} " \
+      "defer></script>"
     end
 
     private def add_cookie(response : Caramel::Response) : Nil

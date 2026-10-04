@@ -15,6 +15,7 @@ require "./dev_session"
 require "./site_log"
 require "./schema_diff"
 require "./editor_tools"
+require "./traces"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -155,6 +156,12 @@ module Caramel::Frappe
         branch(invocation)
       when "logs"
         return logs(invocation["app|compiler"]? || "app", invocation.flag?("--follow"))
+      when "traces"
+        return traces(invocation)
+      when "trace"
+        return trace(invocation)
+      when "errors"
+        return errors(invocation)
       when "services"
         return services(invocation["status|start|stop"]? || "status")
       when "sites"
@@ -634,6 +641,34 @@ module Caramel::Frappe
                 "lowercase letters, digits or underscores"
       raise Commands::Usage.new(message,
         "frappe #{invocation.command.name}", [invocation.command])
+    end
+
+    # The development events of this project, read from the log `frappe dev` keeps.
+    private def development_traces : Traces
+      project = Project.load
+      id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
+      store = EventStore.new
+      directory = LatteClient.new.site_log_directory(id, create: false)
+      directory.try { |found| store.replay(found) }
+      Traces.new(store, project.root, @output)
+    end
+
+    private def traces(invocation : Commands::Invocation) : Int32
+      agent = MRDP.agent?(invocation.flags, @output)
+      limit = invocation["--limit"]?.try(&.to_i?) || Traces::DEFAULT_LIMIT
+      slow = invocation["--slow"]?.try(&.to_f?)
+      development_traces.list(agent, invocation.flag?("--errors"), slow, limit)
+    end
+
+    private def trace(invocation : Commands::Invocation) : Int32
+      ref = invocation["REF"]
+      return 0 if development_traces.show(ref, invocation.flag?("--md"))
+
+      raise Error.new("No trace matches #{ref} in this project's development history.")
+    end
+
+    private def errors(invocation : Commands::Invocation) : Int32
+      development_traces.errors(MRDP.agent?(invocation.flags, @output))
     end
 
     private def logs(kind : String, follow : Bool) : Int32

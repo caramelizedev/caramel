@@ -17,6 +17,7 @@ Request specs: spec/requests/
 Discover: frappe agent-manifest; frappe routes
 Verify: frappe check; frappe corretto; frappe lint
 Diagnose: frappe check --agent (apply its PATCH lines); frappe expand FILE:LINE:COL
+Debug: frappe errors --agent; frappe traces --agent; frappe trace last-error --md; frappe db diagnose
 With i18n: frappe translations
 
 Surface unsupported requirements before editing framework internals, and link the

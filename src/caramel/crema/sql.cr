@@ -1,19 +1,11 @@
 require "db"
 require "../../sugar_orm"
 require "../crema"
+require "./summary"
 
 module Caramel::Crema
-  # The SQL a statement runs, reduced to its verb and first table, such as
-  # `SELECT books`. It never holds a bind value.
-  def self.summary(sql : String) : String
-    verb = sql.lstrip.partition(' ')[0].upcase
-    table = Sql::TABLE.match(sql).try(&.[1])
-    table ? "#{verb} #{table}" : verb
-  end
-
   # Times and tags the statements SugarORM runs for the current trace.
   module Sql
-    TABLE       = /\b(?:FROM|INTO|UPDATE|JOIN)\s+"?([A-Za-z_][A-Za-z0-9_]*)/i
     MAX_SOURCES = 200
     MAX_BINDS   =  20
     MAX_BIND    = 200

@@ -18,6 +18,10 @@ Excluded:
 Caramel/ServiceNoun:
   Enabled: true
 
+# ADR 0027: dump calls are development aids; remove them before committing.
+Caramel/Dump:
+  Enabled: true
+
 # §2.5: an action is a single thought, not a junk drawer.
 Metrics/CyclomaticComplexity:
   MaxComplexity: 10
