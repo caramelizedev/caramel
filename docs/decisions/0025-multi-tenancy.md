@@ -89,16 +89,15 @@ Alternatives the owner rejected:
 
 1. Adding `tenant` to a populated table halts at "NOT NULL column without a default".
 2. Write a migration by hand that adds the nullable column, backfills it and sets NOT NULL.
-3. In a second migration, build the index: `CREATE UNIQUE INDEX CONCURRENTLY "index_<t>_on_<col>_and_id" ON "<t>" ("<col>", "id")`. The differ's halt prints this exact SQL.
+3. In a second migration, build the index: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_<t>_on_<col>_and_id" ON "<t>" ("<col>", "id")`. When another tenanted table's key references the table, the differ halts until the index exists, and its halt prints this exact SQL.
 4. Run `frappe db diff` for the keys.
 
 ### Plugging out
 
-Each compile error names the next step:
-
-1. Remove the `tenant` lines and record `drop_column :account_id`.
-2. Move the routes out of the tenant block.
-3. Remove the require.
+1. Make every value of a per-tenant unique index unique across tenants. The differ rebuilds those indexes without the tenant column, and the build fails on a value two tenants share.
+2. Remove the `tenant` lines and record `drop_column :account_id`.
+3. Remove the require and the tenant block together, moving the block's routes out of it. Either one alone is a compile error: the require's guard asks for a tenant block, and a tenant block or `tenant` line asks for the require.
+4. Run `frappe db diff`.
 
 ### Fail-open edges
 
