@@ -19,6 +19,54 @@ module Caramel::Checks::LatteDaemon
     Checks::UnixHTTP.json!(socket, method, path, body, timeout: 20.seconds)
   end
 
+  TRACE_ID = "0123456789abcdef0123456789abcdef"
+
+  # Posts one OTLP JSON span to the collector, reads it back over the owner-only control
+  # socket, and shows that version 1 knows nothing of traces. A busy OTLP port is the one
+  # allowed excuse: the daemon must then say so.
+  private def verify_collector(socket : String) : Nil
+    collector = request(socket, "GET", "/v2/status")["collector"]
+    return if collector_unavailable?(collector)
+    running = collector["state"] == "running"
+    raise "The collector is not running: #{collector.to_json}" unless running
+
+    post_span("http://127.0.0.1:#{collector["port"]}/v1/traces")
+    spans = request(socket, "GET", "/v2/traces/#{TRACE_ID}")["spans"].as_a
+    stored = spans.map { |span| {span["service"].as_s, span["name"].as_s} }
+    unless stored == [{"billing", "POST /charges"}]
+      raise "The collector returned #{spans.to_json}"
+    end
+    listed = request(socket, "GET", "/v2/traces")["traces"].as_a
+    raise "The trace is not listed: #{listed.to_json}" unless listed.first["trace_id"] == TRACE_ID
+    status, _ = Checks::UnixHTTP.request(socket, "GET", "/v1/traces/#{TRACE_ID}")
+    raise "Control API 1 answered /traces with #{status}" unless status == 404
+  end
+
+  # Whether *collector* (the status document's) says its port is in use.
+  private def collector_unavailable?(collector : JSON::Any) : Bool
+    return false unless collector["state"].as_s == "unavailable"
+
+    unless collector["error"].as_s == "port #{collector["port"]} is in use"
+      raise "The collector is unavailable without saying why: #{collector.to_json}"
+    end
+    puts "SKIP: the trace collector's port #{collector["port"]} is in use"
+    true
+  end
+
+  private def post_span(url : String) : Nil
+    export = <<-JSON
+      {"resourceSpans":[{"resource":{"attributes":[
+        {"key":"service.name","value":{"stringValue":"billing"}}]},
+        "scopeSpans":[{"spans":[{"traceId":"#{TRACE_ID}","spanId":"bbbbbbbbbbbbbbbb",
+        "name":"POST /charges","kind":2,"startTimeUnixNano":"1790000000000000000",
+        "endTimeUnixNano":"1790000000042000000","status":{"code":1}}]}]}]}
+      JSON
+    curl = ["/usr/bin/curl", "--silent", "--show-error", "--max-time", "3", "--noproxy", "*",
+            "-H", "Content-Type: application/json", "--data-binary", export, url]
+    posted = Checks.run(curl)
+    raise "The collector refused a span: #{posted.stdout} #{posted.stderr}" unless posted.success?
+  end
+
   private def wait_state(socket : String, state : String) : Nil
     deadline = Time.instant + 60.seconds
     loop do
@@ -134,6 +182,7 @@ module Caramel::Checks::LatteDaemon
       unless release && status["api"].as_a.map(&.as_i) == window
         raise "Latte does not report its release and API window: #{status.to_json}"
       end
+      verify_collector(socket)
       reported = Checks.run([LATTE, "version"], env: environment)
       unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1, 2)\n"
         raise "latte version printed #{reported.stdout.inspect}"

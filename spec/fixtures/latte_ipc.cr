@@ -4,8 +4,8 @@ class FixtureServices < Caramel::Latte::ServiceControl
   def initialize(@registry : Caramel::Latte::Registry)
   end
 
-  def status_json : String
-    %({"version":1,"services":{"postgres":{"state":"stopped"},) \
+  def status_json(version : Int32) : String
+    %({"version":#{version},"services":{"postgres":{"state":"stopped"},) \
     %("dns":{"state":"stopped"},"proxy":{"state":"stopped"}}})
   end
 

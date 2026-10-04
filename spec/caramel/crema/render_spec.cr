@@ -16,6 +16,31 @@ describe Caramel::Crema::Render do
     text.should_not contain("## Dumps")
   end
 
+  it "adds an Across services section only when another service joined the trace" do
+    event = EventFixtures.trace("GET /books/:id")
+    own = Caramel::Crema::CollectedSpan.new("bookshelf", "b" * 16, nil, "GET /books/:id", 2,
+      1_790_000_000_000_000_000_i64, 1_790_000_000_012_000_000_i64, false, {} of String => String)
+    other = Caramel::Crema::CollectedSpan.new("billing", "c" * 16, "b" * 16, "POST /charges", 2,
+      1_790_000_000_004_000_000_i64, 1_790_000_000_020_000_000_i64, true, {} of String => String)
+    Caramel::Crema::Render.across([own], "bookshelf").should be_empty
+    across = Caramel::Crema::Render.across([other, own], "bookshelf")
+    across.map(&.service).should eq(%w[bookshelf billing])
+    text = Caramel::Crema::Render.markdown(event, nil, across)
+    expected = <<-MARKDOWN
+
+      ## Across services
+
+      - bookshelf: GET /books/:id, +0.0 ms, 12.0 ms
+      - billing: POST /charges, +4.0 ms, 16.0 ms, error
+      MARKDOWN
+    text.should contain(expected)
+    Caramel::Crema::Render.markdown(event).should_not contain("Across services")
+    html = Caramel::Crema::Render.trace_html(event, nil, nil, across)
+    html.should contain("<h3>Across services</h3>")
+    html.should contain("billing")
+    html.should contain("class=\"bar error\"")
+  end
+
   it "lists the application's frames before the dependencies'" do
     event = EventFixtures.trace("GET /books/:id", failing: true)
     text = Caramel::Crema::Render.markdown(event, "/proj")

@@ -454,11 +454,21 @@ module Caramel::Frappe
       document["services"].as_h.each do |name, value|
         @output.puts("#{name.ljust(12)} #{value["state"].as_s}")
       end
+      collector_line(document)
       if message = document["error"]?.try(&.as_s?)
         @error.puts(message)
         return 1
       end
       0
+    end
+
+    # The trace collector's line of `frappe services`: its state, and its port or why it
+    # is unavailable (ADR 0029).
+    private def collector_line(document : JSON::Any) : Nil
+      collector = document["collector"]? || return
+      state = collector["state"].as_s
+      detail = collector["error"]?.try(&.as_s?) || "127.0.0.1:#{collector["port"]}"
+      @output.puts("#{"collector".ljust(12)} #{state} (#{detail})")
     end
 
     private def doctor : Int32
@@ -648,14 +658,19 @@ module Caramel::Frappe
         "frappe #{invocation.command.name}", [invocation.command])
     end
 
-    # The development events of this project, read from the log `frappe dev` keeps.
+    # The development events of this project, read from the log `frappe dev` keeps, and
+    # the other services' spans for a trace from Latte's collector.
     private def development_traces : Traces
       project = Project.load
       id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
       store = EventStore.new
-      directory = LatteClient.new.site_log_directory(id, create: false)
-      directory.try { |found| store.replay(found) }
-      Traces.new(store, project.root, @output)
+      client = LatteClient.new
+      client.site_log_directory(id, create: false).try { |found| store.replay(found) }
+      name = project.name
+      across = ->(trace_id : String) do
+        Crema::Render.across(client.collected(trace_id), name)
+      end
+      Traces.new(store, project.root, @output, across)
     end
 
     private def traces(invocation : Commands::Invocation) : Int32

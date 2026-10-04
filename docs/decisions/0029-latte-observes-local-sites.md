@@ -50,6 +50,16 @@ belong.
    `http.log.access`, so `proxy.log` carries no access lines. The directory is the one
    Frappé keeps `app.log`, `compiler.log` and `events.jsonl` in; `frappe logs access`
    prints the file. Caddy redacts `Cookie` and `Authorization`.
+7. **Latte collects local traces.** The daemon listens on `127.0.0.1:4318`, the OTLP/HTTP
+   port, for `POST /v1/traces` with a JSON body of at most 4 MiB. It keeps the newest 2000
+   traces with at most 200 spans each, in memory, and refuses protobuf with 415. A busy
+   port leaves the collector `unavailable` and the daemon running. It serves no reads:
+   control API 2 lists traces (`GET /v2/traces?limit=N`), returns one (`GET
+   /v2/traces/<id>`) and reports the collector in `/v2/status`. Version 1 has none of it.
+   `frappe dev` forwards each trace of the application to the collector as
+   OTLP JSON under the project's name, and the inspector and `frappe trace --md` add an
+   "Across services" section when another service joined the trace. The services stay
+   out of the three-service readiness states.
 
 ## Reasons
 
@@ -57,4 +67,8 @@ belong.
   measured, and `auto_explain` writes the plan of a slow one to the PostgreSQL log with
   no bind values, as `ecto_psql_extras` and Django Debug Toolbar users reach for.
 - The statement tags Crema adds (ADR 0027) make those statistics attributable.
+- Local OTLP SDKs speak HTTP over TCP, so the collector is an exception to the Unix-socket
+  rule. Any local process may write, as with any OpenTelemetry collector; only the owner
+  can read, over the control socket. Traces hold span names and attributes the exporter
+  chose, never a Caramel secret (ADR 0028).
 - Research: [observability](https://github.com/caramelizedev/caramel-notes/blob/main/research/observability.md).

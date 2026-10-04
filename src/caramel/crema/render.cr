@@ -78,8 +78,11 @@ module Caramel::Crema
     end
 
     # The whole trace as Markdown, for a person, an agent or a bug report.
-    # Sections with nothing to show are left out.
-    def self.markdown(event : TraceEvent, root : String? = nil) : String
+    # Sections with nothing to show are left out. *across* is what `across` made of the
+    # spans Latte collected for this trace.
+    def self.markdown(event : TraceEvent,
+                      root : String? = nil,
+                      across : Array(CollectedSpan) = [] of CollectedSpan) : String
       String.build do |io|
         io << "# " << (event.error.try(&.error_class) || event.name) << "\n\n"
         summary_list(io, event)
@@ -88,7 +91,34 @@ module Caramel::Crema
         query_section(io, event)
         log_section(io, event)
         dump_section(io, event)
+        across_section(io, across)
       end
+    end
+
+    # The spans Latte's collector holds for a trace, sorted by start, when any of them
+    # came from a service other than *project*; empty when the trace stayed in one service.
+    def self.across(spans : Array(CollectedSpan), project : String) : Array(CollectedSpan)
+      return [] of CollectedSpan unless spans.any? { |span| span.service != project }
+
+      spans.sort_by(&.start_unix_nano)
+    end
+
+    private def self.across_section(io : IO, spans : Array(CollectedSpan)) : Nil
+      return if spans.empty?
+
+      first = spans.first.start_unix_nano
+      io << "\n## Across services\n\n"
+      spans.each do |span|
+        io << "- " << span.service << ": " << span.name << ", +"
+        io << ms((span.start_unix_nano - first) / 1_000_000.0) << " ms, "
+        io << ms(span_ms(span)) << " ms"
+        io << ", error" if span.error?
+        io << '\n'
+      end
+    end
+
+    private def self.span_ms(span : CollectedSpan) : Float64
+      (span.end_unix_nano - span.start_unix_nano) / 1_000_000.0
     end
 
     private def self.summary_list(io : IO, event : TraceEvent) : Nil
@@ -185,7 +215,10 @@ module Caramel::Crema
     # The trace as an HTML fragment: summary, waterfall, queries, repeated
     # queries, logs, dumps, the error and a Copy as Markdown block. Source
     # locations become editor links when *editor* and *root* are given.
-    def self.trace_html(event : TraceEvent, editor : Editor?, root : String?) : String
+    def self.trace_html(event : TraceEvent,
+                        editor : Editor?,
+                        root : String?,
+                        across : Array(CollectedSpan) = [] of CollectedSpan) : String
       String.build do |io|
         summary_html(io, event)
         waterfall_html(io, event)
@@ -194,8 +227,29 @@ module Caramel::Crema
         logs_html(io, event)
         dumps_html(io, event)
         error_html(io, event.error)
-        markdown_html(io, event, root)
+        across_html(io, across)
+        markdown_html(io, event, root, across)
       end
+    end
+
+    # The "Across services" table: every collected span, labelled by service, with the same
+    # SVG bars as the timeline.
+    private def self.across_html(io : IO, spans : Array(CollectedSpan)) : Nil
+      return if spans.empty?
+
+      first = spans.min_of(&.start_unix_nano)
+      total = {(spans.max_of(&.end_unix_nano) - first) / 1_000_000.0, 0.001}.max
+      io << "<h3>Across services</h3><table class=\"waterfall across\"><tbody>"
+      spans.each do |span|
+        x = ((span.start_unix_nano - first) / 1_000_000.0 / total * 1000).round(1)
+        width = {(span_ms(span) / total * 1000).round(1), 1.0}.max
+        io << "<tr><td>" << HTML.escape(span.service) << "</td><td>" << HTML.escape(span.name)
+        io << "</td><td>" << ms(span_ms(span)) << " ms</td><td>"
+        io << "<svg viewBox=\"0 0 1000 8\" class=\"bar" << (span.error? ? " error" : "")
+        io << "\"><rect x=\"" << x << "\" width=\"" << width << "\" height=\"8\"/></svg>"
+        io << "</td></tr>"
+      end
+      io << "</tbody></table>"
     end
 
     private def self.summary_html(io : IO, event : TraceEvent) : Nil
@@ -313,9 +367,13 @@ module Caramel::Crema
       error.message.try { |message| io << "<pre>" << HTML.escape(message) << "</pre>" }
     end
 
-    private def self.markdown_html(io : IO, event : TraceEvent, root : String?) : Nil
+    private def self.markdown_html(io : IO,
+                                   event : TraceEvent,
+                                   root : String?,
+                                   across : Array(CollectedSpan)) : Nil
       io << "<details class=\"markdown\"><summary>Copy as Markdown</summary>"
-      io << "<pre id=\"caramel-markdown\">" << HTML.escape(markdown(event, root)) << "</pre>"
+      io << "<pre id=\"caramel-markdown\">" << HTML.escape(markdown(event, root, across))
+      io << "</pre>"
       io << "<button type=\"button\" data-caramel-copy=\"caramel-markdown\">"
       io << "Copy as Markdown</button></details>"
     end

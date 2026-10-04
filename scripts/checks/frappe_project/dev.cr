@@ -203,6 +203,14 @@ module Caramel::Checks
           access.stdout.includes?(page_request)
         end
         assert!(in_access_log, "frappe logs access does not show the page's request id")
+        page_trace_id = page_trace["trace_id"].as_s
+        collected = Checks.wait_until(15.seconds, 500.milliseconds) do
+          spans = p.rpc("GET", "/v2/traces/#{page_trace_id}")["spans"].as_a
+          spans.any? { |span| span["service"].as_s == "bookshelf" }
+        rescue
+          false
+        end
+        assert!(collected, "Latte's collector holds no span of service bookshelf for the page")
         runtime_url = p.local_values(project)["DATABASE_URL"]
         recorded = Checks.wait_until(30.seconds, 1.second) do
           p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").to_i > 0

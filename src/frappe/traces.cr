@@ -12,7 +12,10 @@ module Caramel::Frappe
     PRELOAD_FIX   = "preload the association in the query that loads the records, " \
                     "e.g. .preload(:%s)"
 
-    def initialize(@store : EventStore, @root : String, @output : IO)
+    def initialize(@store : EventStore,
+                   @root : String,
+                   @output : IO,
+                   @collected : Crema::CollectedLookup = Crema::NO_COLLECTED)
     end
 
     # One line per trace, newest first. Agents get the canonical line; people
@@ -38,10 +41,16 @@ module Caramel::Frappe
       "#{stamp} #{text}"
     end
 
-    # One trace in full, as text or Markdown; false when *ref* matches none.
+    # One trace in full, as text or Markdown; false when *ref* matches none. The Markdown
+    # adds what other services did in the same trace, when Latte's collector holds it.
     def show(ref : String, markdown : Bool) : Bool
       event = @store.find(ref) || return false
-      @output.puts(markdown ? Crema::Render.markdown(event, @root) : Crema::Render.detail(event))
+      text = if markdown
+               Crema::Render.markdown(event, @root, @collected.call(event.trace_id))
+             else
+               Crema::Render.detail(event)
+             end
+      @output.puts(text)
       true
     end
 

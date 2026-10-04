@@ -1,7 +1,9 @@
 require "spec"
 require "file_utils"
 require "./support/events"
+require "http/server"
 require "../../src/frappe/dev_gateway"
+require "../../src/frappe/latte_client"
 
 private HOST = HTTP::Headers{"Host" => "bookshelf.caramel"}
 
@@ -68,5 +70,57 @@ describe Caramel::Frappe::Inspector do
     index.body.should contain("/__caramel/dev/client.js")
   ensure
     FileUtils.rm_rf(root) if root
+  end
+
+  it "shows what other services did in the same trace, from Latte's collector" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    paths = Caramel::Latte::Paths.new(root)
+    id = "1" * 32
+    billing = {
+      service: "billing", span_id: "c" * 16, parent_id: "b" * 16, name: "POST /charges",
+      kind: 2, start_unix_nano: 1_790_000_000_000_000_000_i64,
+      end_unix_nano: 1_790_000_000_042_000_000_i64, error: true, attributes: {} of String => String,
+    }
+    stub = HTTP::Server.new do |context|
+      context.response.headers["Content-Type"] = "application/json"
+      context.response.headers["Connection"] = "close"
+      case context.request.path
+      when "/v2/traces/#{id}"
+        context.response.print({version: 2, trace_id: id, spans: [billing]}.to_json)
+      when "/v2/status"
+        collector = {state: "running", port: 4318, error: nil}
+        context.response.print({version: 2, services: {} of String => String,
+                                collector: collector}.to_json)
+      else
+        context.response.status_code = 404
+        missing = {code: "not_found", message: "No such trace"}
+        context.response.print({version: 2, error: missing}.to_json)
+      end
+    end
+    begin
+      stub.bind_unix(paths.control_socket)
+      File.chmod(paths.control_socket, 0o600)
+      spawn { stub.listen }
+      client = Caramel::Frappe::LatteClient.new(root)
+      client.collector_port.should eq(4318)
+      client.collected(id).map(&.service).should eq(["billing"])
+      client.collected("f" * 32).should be_empty
+      client.collected("not a trace id").should be_empty
+      gateway.collected = ->(trace : String) do
+        Caramel::Crema::Render.across(client.collected(trace), "bookshelf")
+      end
+      gateway.events = gateway.events
+      address = "/__caramel/dev/inspector/traces/111111"
+      page = gateway.handle(HTTP::Request.new("GET", address, HOST))
+      page.status.should eq(200)
+      page.body.should contain("Across services")
+      page.body.should contain("billing")
+      page.body.should contain("POST /charges")
+    ensure
+      stub.try(&.close)
+      FileUtils.rm_rf(paths.run_dir) if paths
+      FileUtils.rm_rf(root)
+    end
   end
 end

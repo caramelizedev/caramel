@@ -130,7 +130,8 @@ module Caramel::Checks
         source = "spec/fixtures/frappe_environment.cr"
         command([File.join(@repo, "scripts/crystal"), "build", source, "-o", environment])
       end
-      @ports = [Checks.free_udp_port, Checks.free_tcp_port, Checks.free_tcp_port]
+      @ports = [Checks.free_udp_port, Checks.free_tcp_port, Checks.free_tcp_port,
+                Checks.free_tcp_port]
       home = File.join(@root, "home")
       Dir.mkdir(home, 0o700)
       # Trust-store discovery follows HOME (NSS) and JAVA_HOME. Keep both

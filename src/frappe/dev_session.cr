@@ -537,8 +537,16 @@ module Caramel::Frappe
     private def start_events : Nil
       events = DevEvents.new(@directory, @log_directory, @error)
       events.start
+      @client.collector_port.try { |port| events.forward(port, @project.name) }
       @events = events
+      @gateway.collected = across_lookup
       @gateway.events = events
+    end
+
+    # Asks Latte's collector for the spans of other services in a trace.
+    private def across_lookup : Crema::CollectedLookup
+      client, project = @client, @project.name
+      ->(trace_id : String) { Crema::Render.across(client.collected(trace_id), project) }
     end
 
     private def close_logs : Nil

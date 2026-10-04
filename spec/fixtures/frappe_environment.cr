@@ -6,6 +6,7 @@ supervisor = Caramel::Latte::Supervisor.new(
   dns_port: ARGV[1].to_i,
   http_port: ARGV[2].to_i,
   https_port: ARGV[3].to_i,
+  otlp_port: ARGV[4].to_i,
 )
 begin
   Caramel::Latte::Daemon.new(registry, supervisor).run

@@ -1,6 +1,7 @@
 require "http/client"
 require "socket/unix_socket"
 require "./project"
+require "../caramel/crema/event"
 require "../latte/postgres"
 require "../latte/installed_releases"
 
@@ -48,6 +49,29 @@ module Caramel::Frappe
 
     def stop_services : JSON::Any
       request("POST", "/v#{API_VERSION}/services/stop", "{}")
+    end
+
+    # The port of Latte's local trace collector, or nil when Latte is unreachable or the
+    # collector does not run (ADR 0029).
+    def collector_port : Int32?
+      collector = status["collector"]?
+      return unless collector && collector["state"]?.try(&.as_s?) == "running"
+
+      collector["port"].as_i
+    rescue Error | KeyError | TypeCastError
+      nil
+    end
+
+    # The spans the collector holds for *trace_id*, from every service that exported to
+    # it; empty when there are none, or when Latte does not answer within half a second.
+    def collected(trace_id : String) : Array(Crema::CollectedSpan)
+      return [] of Crema::CollectedSpan unless trace_id.matches?(/\A[0-9a-f]{32}\z/)
+
+      path = "/v#{API_VERSION}/traces/#{trace_id}"
+      found = request("GET", path, patience: 500.milliseconds)["spans"].as_a
+      found.map { |span| Crema::CollectedSpan.from_json(span.to_json) }
+    rescue Error | KeyError | TypeCastError | JSON::ParseException | JSON::SerializableError
+      [] of Crema::CollectedSpan
     end
 
     # Starts Latte when it is not running, then its services, and waits
@@ -256,7 +280,10 @@ module Caramel::Frappe
       raise Error.new("Latte returned an invalid service status")
     end
 
-    def request(method : String, path : String, body : String? = nil) : JSON::Any
+    def request(method : String,
+                path : String,
+                body : String? = nil,
+                patience : Time::Span = 13.seconds) : JSON::Any
       begin
         Latte::StateSecurity.validate_owned_directory(@root)
         Latte::StateSecurity.validate_owned_directory(@runtime)
@@ -270,12 +297,12 @@ module Caramel::Frappe
         raise Error.new("Latte is unavailable: #{ex.message}. #{hint}")
       end
       socket = Socket.unix
-      socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: 1.second)
-      socket.read_timeout = 13.seconds
+      socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: {patience, 1.second}.min)
+      socket.read_timeout = patience
       socket.write_timeout = 2.seconds
       finished = false
       spawn do
-        sleep 15.seconds
+        sleep patience + 2.seconds
         socket.close unless finished || socket.closed?
       rescue IO::Error
       end

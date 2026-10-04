@@ -157,4 +157,39 @@ module Caramel::Crema
     def initialize(@at : String, @state : String, @duration_ms : Float64)
     end
   end
+
+  # One span Latte's collector holds, from any service that exported OTLP/HTTP JSON to it
+  # (ADR 0029). Latte, Frappé and `Render` share it.
+  class CollectedSpan
+    include JSON::Serializable
+
+    property service : String
+    property span_id : String
+    property parent_id : String?
+    property name : String
+    property kind : Int32
+    property start_unix_nano : Int64
+    property end_unix_nano : Int64
+    @[JSON::Field(key: "error")]
+    property? error : Bool
+    property attributes : Hash(String, String)
+
+    def initialize(@service : String,
+                   @span_id : String,
+                   @parent_id : String?,
+                   @name : String,
+                   @kind : Int32,
+                   @start_unix_nano : Int64,
+                   @end_unix_nano : Int64,
+                   @error : Bool,
+                   @attributes : Hash(String, String))
+    end
+  end
+
+  # Finds the spans Latte's collector holds for a trace id; Frappé's inspector and
+  # `frappe trace` take one.
+  alias CollectedLookup = Proc(String, Array(CollectedSpan))
+
+  # The lookup that finds nothing.
+  NO_COLLECTED = CollectedLookup.new { |_| [] of CollectedSpan }
 end

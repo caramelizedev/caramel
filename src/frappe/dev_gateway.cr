@@ -64,10 +64,14 @@ module Caramel::Frappe
       @endpoints = endpoints
     end
 
+    # The spans of other services that Latte's collector holds for a trace id, for the
+    # inspector's "Across services"; none by default.
+    property collected : Crema::CollectedLookup = Crema::NO_COLLECTED
+
     # The development event store behind the inspector and the toolbar.
     def events=(events : DevEvents?) : DevEvents?
       @events = events
-      @inspector = events.try { |store| Inspector.new(store, @editor, @root || "") }
+      @inspector = events.try { |store| Inspector.new(store, @editor, @root || "", @collected) }
       events
     end
 

@@ -54,6 +54,21 @@ private class TestServices < Caramel::Latte::ServiceControl
     {version: 1, environment: environment}.to_json
   end
 
+  getter limits = [] of Int32
+
+  def traces_json(limit : Int32) : String
+    @limits << limit
+    {version: 2, traces: [] of Int32}.to_json
+  end
+
+  def trace_json(trace_id : String) : String
+    unless trace_id == "0123456789abcdef0123456789abcdef"
+      raise Caramel::Latte::PublicError.new("not_found", "No such trace", 404)
+    end
+
+    {version: 2, trace_id: trace_id, spans: [] of Int32}.to_json
+  end
+
   getter branches = [] of String
 
   def create_branch_json(id : String, name : String) : String
@@ -212,6 +227,33 @@ describe Caramel::Latte::Server do
       Dir.exists?(root).should be_true
       registry.list.should be_empty
       answer(server, "GET", "/unknown").status.should eq(404)
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "serves collected traces from version 2 only and bounds the listing limit" do
+    root = File.join("/private/tmp", "latte-api-traces-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      services = TestServices.new(registry)
+      server = Caramel::Latte::Server.new(registry, services)
+      id = "0123456789abcdef0123456789abcdef"
+      found = JSON.parse(answer(server, "GET", "/v2/traces/#{id}").body)
+      {found["version"].as_i, found["trace_id"].as_s}.should eq({2, id})
+      missing = answer(server, "GET", "/v2/traces/#{"f" * 32}")
+      {missing.status, JSON.parse(missing.body)["error"]["code"].as_s}.should eq({404, "not_found"})
+      answer(server, "GET", "/v2/traces/not-hex").status.should eq(404)
+      answer(server, "GET", "/v1/traces").status.should eq(404)
+      answer(server, "GET", "/v1/traces/#{id}").status.should eq(404)
+      answer(server, "POST", "/v2/traces", "{}").status.should eq(404)
+      answer(server, "GET", "/v2/traces")
+      answer(server, "GET", "/v2/traces?limit=9999")
+      answer(server, "GET", "/v2/traces?limit=0")
+      answer(server, "GET", "/v2/traces?limit=nope")
+      services.limits.should eq([50, 200, 1, 50])
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)

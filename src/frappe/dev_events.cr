@@ -1,4 +1,6 @@
+require "http/client"
 require "socket"
+require "../caramel/crema/otlp_json"
 require "./event_store"
 require "./site_log"
 
@@ -10,6 +12,9 @@ module Caramel::Frappe
   class DevEvents
     MAX_LINE  = 1_048_576
     LOG_BYTES = 8 * 1024 * 1024
+    # How many traces wait for the collector before newer ones are dropped.
+    FORWARD_QUEUE = 500
+    UNAVAILABLE   = "Latte's trace collector is unavailable; cross-site traces are off."
 
     getter socket : String
     # How many errors the application reported since this session started; history
@@ -18,13 +23,14 @@ module Caramel::Frappe
     # The newest of them.
     getter last_error : Crema::ErrorEvent? = nil
     @server : UNIXServer? = nil
+    @forward : Channel(Crema::TraceEvent)? = nil
 
-    def initialize(directory : String, log_directory : String, warnings : IO = STDERR)
+    def initialize(directory : String, log_directory : String, @warnings : IO = STDERR)
       @socket = File.join(directory, "events-#{Random::Secure.hex(4)}.sock")
       @store = EventStore.new
       @store_lock = Mutex.new
       @store.replay(log_directory)
-      @log = SiteLog.new(File.join(log_directory, EventStore::LOG_NAME), warnings, LOG_BYTES)
+      @log = SiteLog.new(File.join(log_directory, EventStore::LOG_NAME), @warnings, LOG_BYTES)
     end
 
     # Starts listening on a private socket.
@@ -64,8 +70,18 @@ module Caramel::Frappe
       @store.builds
     end
 
+    # Sends every trace the application reports to Latte's collector at *port*, as OTLP/HTTP
+    # JSON for *service* (ADR 0029), from a fiber with a queue of 500; a full queue drops
+    # the trace. A failed delivery is announced once.
+    def forward(port : Int32, service : String) : Nil
+      queue = Channel(Crema::TraceEvent).new(FORWARD_QUEUE)
+      @forward = queue
+      spawn(name: "frappe:otlp") { deliver(queue, port, service) }
+    end
+
     def close : Nil
       @server.try(&.close)
+      @forward.try(&.close)
       File.delete?(@socket)
       @log.close
     end
@@ -82,6 +98,7 @@ module Caramel::Frappe
       while line = next_line(client)
         event = @store.ingest(line) || next
         note_error(event)
+        queue_forward(event)
         append(line) if event.is_a?(Crema::TraceEvent | Crema::ErrorEvent)
       end
     rescue IO::Error
@@ -100,6 +117,46 @@ module Caramel::Frappe
 
       @errors_seen += 1
       @last_error = error
+    end
+
+    private def queue_forward(event : EventStore::Event) : Nil
+      queue = @forward
+      return unless queue && event.is_a?(Crema::TraceEvent)
+
+      select
+      when queue.send(event)
+      else
+        nil
+      end
+    rescue Channel::ClosedError
+      nil
+    end
+
+    private def deliver(queue : Channel(Crema::TraceEvent), port : Int32, service : String) : Nil
+      client = HTTP::Client.new("127.0.0.1", port)
+      client.connect_timeout = 1.second
+      client.read_timeout = 2.seconds
+      client.write_timeout = 2.seconds
+      announced = false
+      while event = queue.receive?
+        body = Crema::OtlpJson.encode([event], service: service, environment: "development")
+        next if post(client, body)
+
+        @warnings.puts(UNAVAILABLE) unless announced
+        announced = true
+      end
+    ensure
+      client.try(&.close)
+    end
+
+    # Whether Latte's collector accepted *body*.
+    private def post(client : HTTP::Client, body : String) : Bool
+      headers = HTTP::Headers{"Content-Type" => "application/json"}
+      client.post("/v1/traces", headers, body).success?
+    rescue IO::Error | Socket::Error
+      # The collector closes a connection after its answer; the next call reconnects.
+      client.close
+      false
     end
 
     # The next complete line, skipping any that exceeds MAX_LINE; nil at end of input.

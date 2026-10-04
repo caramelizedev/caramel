@@ -22,7 +22,10 @@ module Caramel::Frappe
       "Builds"   => "#{PREFIX}/builds",
     }
 
-    def initialize(@events : DevEvents, @editor : Crema::Editor, @root : String)
+    def initialize(@events : DevEvents,
+                   @editor : Crema::Editor,
+                   @root : String,
+                   @collected : Crema::CollectedLookup = Crema::NO_COLLECTED)
     end
 
     def response(request : HTTP::Request) : Caramel::Response
@@ -96,7 +99,8 @@ module Caramel::Frappe
       event = @events.find(id)
       return missing("No request or job matches #{id}.") unless event
 
-      page(event.name, Crema::Render.trace_html(event, @editor, @root))
+      across = @collected.call(event.trace_id)
+      page(event.name, Crema::Render.trace_html(event, @editor, @root, across))
     end
 
     # Error events grouped by fingerprint, newest group first.

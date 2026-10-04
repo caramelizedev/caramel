@@ -52,6 +52,14 @@ module Caramel::Latte
     def drop_test_worker(id : String, index : Int32) : Bool
       raise PublicError.new("unavailable", "Test worker databases are unavailable")
     end
+
+    def traces_json(limit : Int32) : String
+      raise PublicError.new("unavailable", "The trace collector is unavailable")
+    end
+
+    def trace_json(trace_id : String) : String
+      raise PublicError.new("unavailable", "The trace collector is unavailable")
+    end
   end
 
   class PublicError < Exception
@@ -210,9 +218,25 @@ module Caramel::Latte
         return handler.call(request, version)
       end
 
-      branch_route(request, version, route) ||
+      trace_route(request, version, route) ||
+        branch_route(request, version, route) ||
         worker_route(request, version, route) ||
         site_route(request, version, route)
+    end
+
+    # The local trace collector's reads, from version 2 on: `GET /traces?limit=N` and
+    # `GET /traces/<32 hex>`.
+    private def trace_route(request : HTTP::Request,
+                            version : Int32,
+                            route : String) : Caramel::Response?
+      return unless version >= 2 && request.method == "GET"
+
+      if route == "/traces"
+        limit = (request.query_params["limit"]?.try(&.to_i?) || 50).clamp(1, 200)
+        json(@services.traces_json(limit))
+      elsif match = route.match(/\A\/traces\/([0-9a-f]{32})\z/)
+        json(@services.trace_json(match[1]))
+      end
     end
 
     # The routes without an identifier in their path.
