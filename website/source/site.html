@@ -477,29 +477,7 @@
       '<h2 id="c-agent-map">Choose the application file</h2>'+files([['config/routes.cr','Endpoint declarations'],['app/actions/','Contracts and request behavior'],['app/models/ + app/changesets/','Data and write rules'],['app/views/','Typed HTML views'],['app/jobs/','Background work'],['spec/requests/','Request behavior tests']])+
       '<h2 id="c-agent-diagnose">Read the diagnostics</h2><p><code>frappe check</code>, <code>frappe lint</code>, <code>frappe migrate</code> and <code>frappe db diff</code> print MRDP when stdout is not a terminal, or with <code>--agent</code>: one finding per block, with its file, line and column. A route parameter missing from its contract comes back as <code>CONTRACT_MISMATCH</code>, and an association used without a preload as <code>N_PLUS_ONE</code>. Each carries a <code>PATCH</code> line; apply it, then run the check again.</p>'+snippet('frappe check --agent · two findings','ERR CONTRACT_MISMATCH:422 at app/actions/shelves/show.cr:3:5\nNODE: RequestContract\nMISSING: id:Int64\nPATCH: INSERT "field id : Int64" AT 4:7\nERR N_PLUS_ONE at app/actions/shelves/show.cr:9:52\nMSG: Association \'volumes\' of App::Shelf was not preloaded.\nPATCH: INSERT ".preload(:volumes)" AFTER 9:31','bash')+
       '<p>When a macro hides the code a diagnostic points into, <code>frappe expand FILE:LINE:COL</code> prints the plain Crystal that the macro call there expands to, such as <code>Caramel::Router.draw</code> or a <code>contract</code> block.</p><button class="c-secondary cursor-interaction" data-page="commands">Browse every command →</button>'+
-      '<h2 id="c-agent-proof">Make the result reviewable</h2>'+snippet('Terminal','frappe check\nfrappe corretto\nfrappe lint','bash')+`<p>Report the files changed, checks run, and any unsupported requirement. Link the task recipe and its exact release. Treat framework-source edits as a signal that the extension path needs review.</p><button class="c-secondary cursor-interaction" id="c-agent-plain" aria-expanded="false" aria-controls="c-agent-markdown">View compact guide as Markdown</button><pre class="c-plain" id="c-agent-markdown" hidden><code class="language-markdown"># Working in this Caramel application
-
-Read shard.lock for the pinned framework version.
-Use documentation for that exact release.
-
-Routes: config/routes.cr
-Actions and contracts: app/actions/
-Data: app/models/ and app/changesets/
-HTML: app/views/
-Jobs: app/jobs/
-Translations: app/locales/ (enable with frappe make locale CODE)
-Request specs: spec/requests/
-
-Discover: frappe agent-manifest; frappe routes
-Verify: frappe check; frappe corretto; frappe lint
-Diagnose: frappe check --agent (apply its PATCH lines); frappe expand FILE:LINE:COL
-With i18n: frappe translations
-
-Surface unsupported requirements before editing
-framework internals. Link the matching task recipe.
-
-Documentation: https://caramelize.dev/docs/0.7.1/agents/
-Cookbook: https://caramelize.dev/cookbook/0.7.1/</code></pre>`+next('map','Explore the project map'),
+      '<h2 id="c-agent-proof">Make the result reviewable</h2>'+snippet('Terminal','frappe check\nfrappe corretto\nfrappe lint','bash')+`<p>Report the files changed, checks run, and any unsupported requirement. Link the task recipe and its exact release. Treat framework-source edits as a signal that the extension path needs review.</p><button class="c-secondary cursor-interaction" id="c-agent-plain" aria-expanded="false" aria-controls="c-agent-markdown">View compact guide as Markdown</button><pre class="c-plain" id="c-agent-markdown" hidden><code class="language-markdown"></code></pre>`+next('map','Explore the project map'),
     i18n: () => heading('Guides / Internationalization','Speak your users’ language.','Add typed translations, choose a language for each request, and localize numbers, dates, and validation messages in Caramel 0.7.1.')+
       "<h2 id=\"c-i18n-enable\">Enable translations</h2><p>Internationalization is opt-in. Inside your application, add a locale before generating the resources you want translated. A plain application does not compile the i18n implementation.</p>"+
       snippet("Terminal · inside your application","frappe make locale fr\nfrappe check","bash")+

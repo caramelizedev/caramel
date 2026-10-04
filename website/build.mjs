@@ -37,6 +37,12 @@ const current = {version, pages: Object.fromEntries(Object.entries(pages).map(([
 // The command lists are read from the sources that define the commands.
 current.pages.commands = current.pages.commands.replace(/<div class="c-files" data-commands="(\w+)"><\/div>/g,
   (_, kind) => `<div class="c-files" data-commands="${kind}">${commandRows(kind)}</div>`);
+// The agent guide is the AGENTS.md that frappe new writes into applications.
+const agentGuide = fs.readFileSync(new URL('../templates/application/AGENTS.md', import.meta.url), 'utf8').trim();
+const guideSlot = '<pre class="c-plain" id="c-agent-markdown" hidden><code class="language-markdown"></code></pre>';
+if (!current.pages.agents.includes(guideSlot)) throw new Error('The agents page has no slot for the agent guide.');
+const escapedGuide = agentGuide.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+current.pages.agents = current.pages.agents.replace(guideSlot, () => guideSlot.replace('></code>', `>${escapedGuide}</code>`));
 const routes = routesFor(current);
 const links = (html, routes) => html.replace(/<button\b([^>]*\bdata-page="([^"]+)"[^>]*)>([\s\S]*?)<\/button>/g,
   (_, attrs, page, content) => `<a${attrs} href="${routes[page]}">${content}</a>`);
