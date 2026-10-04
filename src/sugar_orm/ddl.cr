@@ -10,6 +10,11 @@ module SugarORM
       %("#{identifier.gsub('"', "\"\"")}")
     end
 
+    # *identifiers*, each quoted, joined as a column list.
+    def self.quote_list(identifiers : Array(String)) : String
+      identifiers.join(", ") { |identifier| quote(identifier) }
+    end
+
     def self.statements(operations : Array(Differ::Operation)) : Array(String)
       operations.map { |operation| render(operation) }
     end
@@ -126,8 +131,9 @@ module SugarORM
       unless ON_DELETE.includes?(action)
         raise ArgumentError.new("unsupported ON DELETE action: #{action}")
       end
-      target = "#{quote(key.references_table)} (#{quote(key.references_column)})"
-      clause = "FOREIGN KEY (#{quote(key.column)}) REFERENCES #{target}"
+      targets = quote_list(key.references_columns)
+      target = "#{quote(key.references_table)} (#{targets})"
+      clause = "FOREIGN KEY (#{quote_list(key.columns)}) REFERENCES #{target}"
       action == "NO ACTION" ? clause : "#{clause} ON DELETE #{action}"
     end
   end

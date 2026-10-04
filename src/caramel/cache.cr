@@ -19,11 +19,11 @@ module Caramel
       if expires_in && expires_in <= Time::Span.zero
         raise ArgumentError.new("expires_in must be positive, got #{expires_in}")
       end
-      SugarORM.sql_exec(WRITE, key, value, expires_in.try(&.total_seconds))
+      SugarORM.sql_exec(WRITE, scoped(key), value, expires_in.try(&.total_seconds))
     end
 
     def self.read(key : String) : String?
-      SugarORM.sql(READ, key, as: {value: String}).first?.try(&.[:value])
+      SugarORM.sql(READ, scoped(key), as: {value: String}).first?.try(&.[:value])
     end
 
     # The cached value, or the block's value, written with `expires_in`.
@@ -38,7 +38,7 @@ module Caramel
 
     # True when an entry was removed.
     def self.delete(key : String) : Bool
-      SugarORM.sql_exec("DELETE FROM caramel_cache WHERE key = $1", key) > 0
+      SugarORM.sql_exec("DELETE FROM caramel_cache WHERE key = $1", scoped(key)) > 0
     end
 
     def self.clear : Nil
@@ -48,6 +48,12 @@ module Caramel
     # Deletes expired entries and returns how many.
     def self.vacuum : Int64
       SugarORM.sql_exec("DELETE FROM caramel_cache WHERE expires_at <= now()")
+    end
+
+    # The stored key *key* stands for. `caramel/tenancy` prefixes the bound
+    # tenant.
+    def self.scoped(key : String) : String
+      key
     end
   end
 end

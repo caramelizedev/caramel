@@ -36,19 +36,34 @@ private def sql(operations : Array(Differ::Operation)) : Array(String)
   SugarORM::DDL.statements(operations)
 end
 
+# The unique index a tenanted *table* gets on its tenant and primary key.
+private def tenant_index(table : String) : Catalog::Index
+  Catalog::Index.new("index_#{table}_on_account_id_and_id", ["account_id", "id"], unique: true)
+end
+
+# A key from *column* and the tenant column to a tenanted *table*.
+private def composite_key(name : String, column : String, table : String) : Catalog::ForeignKey
+  Catalog::ForeignKey.new(
+    name: name,
+    columns: [column, "account_id"],
+    references_table: table,
+    references_columns: ["id", "account_id"],
+  )
+end
+
 describe SugarORM::Differ do
   it "creates new tables after the new tables they reference, " \
      "with inline indexes and foreign keys" do
     authors = Catalog::Table.new("authors", [id_column])
-    author_key = Catalog::ForeignKey.new("fk_books_author_id", "author_id", "zines")
-    prequel_key = Catalog::ForeignKey.new("fk_books_prequel_id", "author_id", "books")
+    author_key = Catalog::ForeignKey.new("fk_books_author_id", ["author_id"], "zines")
+    prequel_key = Catalog::ForeignKey.new("fk_books_prequel_id", ["author_id"], "books")
     shelved = Catalog::Table.new(
       name: "books",
       columns: [id_column, nullable("author_id", "bigint")],
       indexes: [Catalog::Index.new("index_books_on_author_id", ["author_id"])],
       foreign_keys: [author_key, prequel_key],
     )
-    zines_key = Catalog::ForeignKey.new("fk_zines_author_id", "id", "authors")
+    zines_key = Catalog::ForeignKey.new("fk_zines_author_id", ["id"], "authors")
     zines = Catalog::Table.new("zines", [id_column], foreign_keys: [zines_key])
     plan = Differ.diff([authors, shelved, zines], [] of Catalog::Table)
     plan.online.should be_empty
@@ -68,8 +83,8 @@ describe SugarORM::Differ do
   end
 
   it "breaks a foreign key cycle between new tables with constraints added after both" do
-    to_right = Catalog::ForeignKey.new("fk_lefts_right_id", "right_id", "rights")
-    to_left = Catalog::ForeignKey.new("fk_rights_left_id", "left_id", "lefts")
+    to_right = Catalog::ForeignKey.new("fk_lefts_right_id", ["right_id"], "rights")
+    to_left = Catalog::ForeignKey.new("fk_rights_left_id", ["left_id"], "lefts")
     left_columns = [id_column, nullable("right_id", "bigint")]
     right_columns = [id_column, nullable("left_id", "bigint")]
     left = Catalog::Table.new("lefts", left_columns, foreign_keys: [to_right])
@@ -81,6 +96,75 @@ describe SugarORM::Differ do
     deferred = %(ALTER TABLE "lefts" ADD CONSTRAINT "fk_lefts_right_id" ) \
                %(FOREIGN KEY ("right_id") REFERENCES "rights" ("id"))
     statements[2].should eq(deferred)
+  end
+
+  it "adds a composite key on a new table's own rows after the table's indexes" do
+    sequel = composite_key("fk_books_sequel_id", "sequel_id", "books")
+    columns = [id_column, required("account_id", "bigint"), nullable("sequel_id", "bigint")]
+    table = Catalog::Table.new("books", columns, [tenant_index("books")], [sequel])
+    statements = sql(Differ.diff([table], [] of Catalog::Table).transactional)
+    statements[0].should_not contain("CONSTRAINT")
+    indexed = %(CREATE UNIQUE INDEX "index_books_on_account_id_and_id" ) \
+              %(ON "books" ("account_id", "id"))
+    deferred = %(ALTER TABLE "books" ADD CONSTRAINT "fk_books_sequel_id" ) \
+               %(FOREIGN KEY ("sequel_id", "account_id") ) \
+               %(REFERENCES "books" ("id", "account_id"))
+    statements[1..].should eq([indexed, deferred])
+  end
+
+  it "drops foreign keys before the columns of every table they depend on" do
+    author = composite_key("fk_books_author_id", "author_id", "authors")
+    plain = Catalog::ForeignKey.new("fk_books_author_id", ["author_id"], "authors")
+    account = required("account_id", "bigint")
+    author_id = required("author_id", "bigint")
+    authors = Catalog::Table.new("authors", [id_column, account], [tenant_index("authors")])
+    tenanted = books([author_id, account], [tenant_index("books")], [author])
+    actual = [authors, tenanted]
+    declared = [
+      Catalog::Table.new("authors", [id_column], drops: ["account_id"]),
+      books([author_id], keys: [plain], drops: ["account_id"]),
+    ]
+    sql(Differ.diff(declared, actual).transactional).should eq([
+      %(ALTER TABLE "books" DROP CONSTRAINT "fk_books_author_id"),
+      %(-- caramel:allow-drop authors.account_id\n) +
+      %(ALTER TABLE "authors" DROP COLUMN "account_id"),
+      %(-- caramel:allow-drop books.account_id\n) +
+      %(ALTER TABLE "books" DROP COLUMN "account_id"),
+      %(ALTER TABLE "books" ADD CONSTRAINT "fk_books_author_id" ) +
+      %(FOREIGN KEY ("author_id") REFERENCES "authors" ("id") NOT VALID),
+    ])
+  end
+
+  it "drops an undeclared key first, even when its own columns go too" do
+    author = composite_key("fk_books_author_id", "author_id", "authors")
+    account = required("account_id", "bigint")
+    author_id = required("author_id", "bigint")
+    authors = Catalog::Table.new("authors", [id_column, account], [tenant_index("authors")])
+    actual = [authors, books([author_id, account], keys: [author])]
+    declared = [
+      Catalog::Table.new("authors", [id_column], drops: ["account_id"]),
+      books(drops: ["author_id", "account_id"]),
+    ]
+    statements = sql(Differ.diff(declared, actual).transactional)
+    statements.first.should eq(%(ALTER TABLE "books" DROP CONSTRAINT "fk_books_author_id"))
+    statements[1].should end_with(%(ALTER TABLE "authors" DROP COLUMN "account_id"))
+  end
+
+  it "halts a key that would wait on a unique index built afterwards, CONCURRENTLY" do
+    account = required("account_id", "bigint")
+    author_id = required("author_id", "bigint")
+    author = composite_key("fk_books_author_id", "author_id", "authors")
+    authors = Catalog::Table.new("authors", [id_column, account])
+    declared = [
+      authors.copy_with(indexes: [tenant_index("authors")]),
+      books([author_id, account], keys: [author]),
+    ]
+    plan = Differ.diff(declared, [authors, books([author_id, account])])
+    plan.halts.map(&.subject).should eq(["books.fk_books_author_id"])
+    plan.halts.first.overridable.should be_false
+    build = %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS ) \
+            %("index_authors_on_account_id_and_id" ON "authors" ("account_id", "id"))
+    plan.halts.first.remediation.should contain(build)
   end
 
   it "reports no work when the database matches, and ignores undeclared and Caramel tables" do
@@ -249,14 +333,14 @@ describe SugarORM::Differ do
 
   it "adds a foreign key to an existing table NOT VALID " \
      "and validates it outside that transaction" do
-    shelf = Catalog::ForeignKey.new("fk_books_shelf_id", "shelf_id", "shelves")
+    shelf = Catalog::ForeignKey.new("fk_books_shelf_id", ["shelf_id"], "shelves")
     cascading = Catalog::ForeignKey.new(
       name: "fk_books_shelf_id",
-      column: "shelf_id",
+      columns: ["shelf_id"],
       references_table: "shelves",
       on_delete: "CASCADE",
     )
-    racks = Catalog::ForeignKey.new("fk_books_old", "shelf_id", "racks")
+    racks = Catalog::ForeignKey.new("fk_books_old", ["shelf_id"], "racks")
     declared = books([nullable("shelf_id", "bigint")], keys: [shelf])
     stale = books([nullable("shelf_id", "bigint")], keys: [cascading, racks])
     plan = Differ.diff([declared], [stale])
@@ -297,15 +381,22 @@ describe SugarORM::Catalog do
     index = Catalog::Index.new("index_books_on_email", ["email"], unique: true)
     key = Catalog::ForeignKey.new(
       name: "fk_books_email",
-      column: "email",
+      columns: ["email", "account_id"],
       references_table: "people",
-      references_column: "address",
+      references_columns: ["address", "account_id"],
       on_delete: "SET NULL",
     )
     tables = [books([email], [index], [key], ["legacy"])]
     Catalog.from_json(Catalog.to_json(tables)).should eq(tables)
-    unnamed = %({"version":1,"tables":[{"name":"x"}]})
+    unnamed = %({"version":2,"tables":[{"name":"x"}]})
     expect_raises(ArgumentError, "invalid schema document") { Catalog.from_json(unnamed) }
+  end
+
+  it "refuses a schema document of an earlier version" do
+    earlier = %({"version":1,"tables":[]})
+    expect_raises(ArgumentError, "unsupported schema document version") do
+      Catalog.from_json(earlier)
+    end
   end
 end
 

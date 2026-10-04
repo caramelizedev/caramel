@@ -42,7 +42,7 @@ module Caramel
       if static = static_response(request)
         return secure(static)
       end
-      secure(localized(request) { |routed| route(routed) })
+      secure(tenanted(request) { |found| localized(found) { |routed| route(routed) } })
     end
 
     def call(context : HTTP::Server::Context) : Nil
@@ -89,6 +89,13 @@ module Caramel
     rescue RequestInput::InvalidEncoding
       Response.new(400, "Malformed request")
     rescue error
+      failure(error, request)
+    ensure
+      input.try(&.cleanup)
+    end
+
+    # The 500 response to *error*, an exception routing *request* raised.
+    private def failure(error : Exception, request : HTTP::Request) : Response
       request_id = UUID.random.to_s
       # Do not log arbitrary exception messages: dependency errors may include
       # connection URLs, form values, or other secrets.
@@ -104,8 +111,12 @@ module Caramel
         "Content-Type"  => "text/plain; charset=utf-8",
       }
       Response.new(500, "Something went wrong. Reference: #{request_id}", headers)
-    ensure
-      input.try(&.cleanup)
+    end
+
+    # Routes *request* in its tenant. `caramel/tenancy` replaces this to find
+    # the tenant its first path segment names and strip that segment.
+    private def tenanted(request : HTTP::Request, & : HTTP::Request -> Response) : Response
+      yield request
     end
 
     # Routes *request*. `caramel/i18n` replaces this to resolve the request's

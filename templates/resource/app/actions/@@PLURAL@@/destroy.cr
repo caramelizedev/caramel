@@ -18,7 +18,11 @@ module App::@@COLLECTION@@
       # frappe:only index
       redirect_to(@@PLURAL@@_path)
       # frappe:else
+      # frappe:only tenant
+      redirect_to(tenant_path("/"))
+      # frappe:else
       redirect_to("/")
+      # frappe:end
       # frappe:end
     end
   end

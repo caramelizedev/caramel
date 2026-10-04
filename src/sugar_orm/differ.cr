@@ -26,6 +26,9 @@ module SugarORM
                       AddIndex | DropIndex |
                       AddForeignKey | ValidateForeignKey | DropForeignKey
 
+    # Unique indexes a plan builds CONCURRENTLY, by table and sorted columns.
+    alias OnlineIndexes = Hash({String, Array(String)}, Catalog::Index)
+
     # The Crystal type a halt suggests for a column's SQL type.
     CRYSTAL_TYPES = {
       "text"                     => "String",
@@ -104,15 +107,21 @@ module SugarORM
         end
       end
       create(declared.reject { |table| existing.has_key?(table.name) }, plan)
+      key_drops = [] of Operation
       declared.each do |table|
-        existing[table.name]?.try { |current| alter(table, current, plan, dev_override) }
+        existing[table.name]?.try do |current|
+          alter(table, current, plan, dev_override, key_drops)
+        end
       end
+      plan.transactional[0, 0] = key_drops
+      halt_keys_awaiting_online_indexes(plan)
       plan
     end
 
     # New tables are empty, so their indexes and foreign keys are built inline.
     # Tables are ordered so each one follows the new tables it references; a
-    # reference cycle falls back to constraints added after every table.
+    # reference cycle falls back to constraints added after every table. A
+    # composite key on its own table waits for the table's unique indexes.
     private def self.create(tables : Array(Catalog::Table), plan : Plan) : Nil
       pending = tables.dup
       deferred = [] of Operation
@@ -125,7 +134,9 @@ module SugarORM
           candidate.foreign_keys.none? { |key| waiting.call(candidate, key) }
         end
         table = ready || pending.first
-        later, inline = table.foreign_keys.partition { |key| waiting.call(table, key) }
+        later, inline = table.foreign_keys.partition do |key|
+          waiting.call(table, key) || composite_self_reference?(table, key)
+        end
         pending.delete(table)
         created = table.copy_with(
           foreign_keys: inline,
@@ -141,11 +152,16 @@ module SugarORM
       plan.transactional.concat(deferred)
     end
 
+    # Foreign key drops go to *key_drops*: the differ runs them before every
+    # other statement, since a composite key depends on the unique index of
+    # the table it references. An undeclared key is dropped even when its own
+    # column is, as another table's column drop may wait on it.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
     private def self.alter(declared : Catalog::Table,
                            current : Catalog::Table,
                            plan : Plan,
-                           dev_override : Bool) : Nil
+                           dev_override : Bool,
+                           key_drops : Array(Operation)) : Nil
       table = declared.name
       columns = current.columns.index_by(&.name)
       names = declared.columns.map(&.name).to_set
@@ -154,7 +170,6 @@ module SugarORM
       renames = [] of Operation
       changes = [] of Operation
       drops = [] of Operation
-      key_drops = [] of Operation
       key_adds = [] of Operation
 
       declared.columns.each do |column|
@@ -213,7 +228,7 @@ module SugarORM
       end
 
       renamed_keys = current.foreign_keys.map do |key|
-        key.copy_with(column: renamed[key.column]? || key.column)
+        key.copy_with(columns: key.columns.map { |column| renamed[column]? || column })
       end
       keys = renamed_keys.index_by(&.name)
       declared.foreign_keys.each do |key|
@@ -225,12 +240,68 @@ module SugarORM
       end
       current.foreign_keys.each do |key|
         next if declared.foreign_keys.any? { |wanted| wanted.name == key.name }
-        next if dropped.includes?(key.column)
         key_drops << DropForeignKey.new(table, key.name)
       end
 
-      steps = [key_drops, renames, changes, drops, key_adds]
+      steps = [renames, changes, drops, key_adds]
       steps.each { |operations| plan.transactional.concat(operations) }
+    end
+
+    private def self.composite_self_reference?(table : Catalog::Table,
+                                               key : Catalog::ForeignKey) : Bool
+      key.references_table == table.name && key.columns.size > 1
+    end
+
+    # A key this plan adds must not wait on a unique index the plan only
+    # builds afterwards, CONCURRENTLY: the key needs it to exist.
+    private def self.halt_keys_awaiting_online_indexes(plan : Plan) : Nil
+      online = online_unique_indexes(plan)
+      return if online.empty?
+      plan.transactional.each do |operation|
+        case operation
+        when CreateTable
+          operation.table.foreign_keys.each do |key|
+            awaiting_index(operation.table.name, key, online, plan)
+          end
+        when AddForeignKey
+          awaiting_index(operation.table, operation.foreign_key, online, plan)
+        end
+      end
+    end
+
+    # The unique indexes *plan* builds online.
+    private def self.online_unique_indexes(plan : Plan) : OnlineIndexes
+      indexes = OnlineIndexes.new
+      plan.online.each do |operation|
+        next unless operation.is_a?(AddIndex) && operation.index.unique
+        indexes[{operation.table, operation.index.columns.sort}] = operation.index
+      end
+      indexes
+    end
+
+    private def self.awaiting_index(table : String,
+                                    key : Catalog::ForeignKey,
+                                    online : OnlineIndexes,
+                                    plan : Plan) : Nil
+      index = online[{key.references_table, key.references_columns.sort}]? || return
+      plan.halts << online_index_awaited(table, key, index)
+    end
+
+    private def self.online_index_awaited(table : String,
+                                          key : Catalog::ForeignKey,
+                                          index : Catalog::Index) : Halt
+      target = key.references_table
+      columns = key.references_columns.join(", ")
+      build = "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS #{DDL.quote(index.name)} " \
+              "ON #{DDL.quote(target)} (#{DDL.quote_list(index.columns)})"
+      Halt.new(
+        subject: "#{table}.#{key.name}",
+        message: "#{key.name} references #{target} (#{columns}), whose unique " \
+                 "index #{index.name} this diff would only build afterwards, CONCURRENTLY.",
+        remediation: "build it first in a migration of its own: #{build}; " \
+                     "migrate, then run frappe db diff again.",
+        overridable: false,
+      )
     end
 
     private def self.compare(table : String,

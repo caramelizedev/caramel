@@ -13,9 +13,9 @@ module SugarORM::Catalog
 
   record ForeignKey,
     name : String,
-    column : String,
+    columns : Array(String),
     references_table : String,
-    references_column : String = "id",
+    references_columns : Array(String) = ["id"],
     on_delete : String = "NO ACTION"
 
   record Table,

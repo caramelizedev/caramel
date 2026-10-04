@@ -181,6 +181,8 @@ module Caramel::Frappe
     # `# frappe:unless a,b` and `# frappe:end` when none is; `# frappe:else`
     # turns a block over. Blocks nest, and the marker lines are dropped.
     MARKER = /\A\s*# frappe:(only|unless|else|end)(?: ([a-z,]+))?\z/
+    # A model class name.
+    MODEL_NAME = /\A[A-Z][A-Za-z0-9]*\z/
     # Class names the application and the framework already use.
     RESERVED_NAMES = %w[
       App ApplicationAction ApplicationView Home Health Caramel SugarORM
@@ -194,6 +196,20 @@ module Caramel::Frappe
     DEFAULT_LOCALE = /^Caramel\.locales default: "([^"]+)"/m
     # Where the default locale's catalog takes a resource's messages.
     MESSAGES_MARKER = "  # Frappé resource messages"
+    # A multi-tenant application requires this in config/application.cr.
+    TENANCY_REQUIRE = %(require "caramel/tenancy")
+    # The tenant block of a multi-tenant application's config/routes.cr.
+    TENANT_BLOCK = /^    tenant App::([A-Z][A-Za-z0-9]*), by: :[a-z][a-z0-9_]* do$/m
+    # The table the tenant model's schema declares.
+    TENANT_SCHEMA = /schema "([a-z][a-z0-9_]*)"/
+    # Where the tenant block takes a tenant resource's routes.
+    TENANT_ROUTES = "      # Frappé tenant routes"
+    # The address a generated request spec signs into.
+    SPEC_TENANT = "/acme"
+
+    # The model a tenant resource belongs to: its class, singular name,
+    # column on the resource and table.
+    record Tenant, model : String, name : String, column : String, table : String
 
     @localized = false
     @plural = ""
@@ -205,14 +221,11 @@ module Caramel::Frappe
     def generate(project : Project, name : String, declarations : Array(String), *,
                  plural : String? = nil,
                  version : Int64? = nil,
-                 only : String? = nil) : Array(String)
-      unless name.matches?(/\A[A-Z][A-Za-z0-9]*\z/) && name.size <= 40 &&
-             RESERVED_NAMES.none?(name)
-        raise Error.new("Use a singular class name such as Book; " \
-                        "application and framework names are reserved")
-      end
+                 only : String? = nil,
+                 central : Bool = false) : Array(String)
+      ResourceGenerator.validate_model(name)
       singular = name.underscore
-      collection = plural || pluralize(singular)
+      collection = plural || ResourceGenerator.pluralize(singular)
       unless collection.matches?(/\A[a-z][a-z0-9_]*\z/) && collection.size <= 50 &&
              collection != singular && RESERVED_PLURALS.none?(collection)
         raise Error.new("Resource plural must be a distinct lowercase identifier")
@@ -221,6 +234,11 @@ module Caramel::Frappe
       fields = declarations.map { |item| ResourceField.new(item) }
       if fields.empty? || fields.map(&.name).uniq!.size != fields.size
         raise Error.new("Declare at least one field and use each name only once")
+      end
+      tenant = tenant_of(project.root, central)
+      if tenant && fields.any? { |field| field.name == tenant.column }
+        raise Error.new("#{tenant.column} is the tenant column of resources " \
+                        "that belong to App::#{tenant.model}")
       end
       default_locale = default_locale(project.root)
       @localized = !default_locale.nil?
@@ -231,19 +249,17 @@ module Caramel::Frappe
         raise Error.new("Leave at least one field without :server; the form needs one")
       end
       uniques = fields.select(&.unique?)
-      if long = uniques.find { |field| index_name(collection, field).bytesize > 63 }
-        raise Error.new("The unique index #{index_name(collection, long)} " \
+      names = uniques.map { |field| ResourceGenerator.index_name(collection, field) }
+      if tenant
+        names << ResourceGenerator.tenant_index_name(collection, tenant)
+        names << ResourceGenerator.tenant_key_name(collection, tenant)
+      end
+      if long = names.find { |index| index.bytesize > 63 }
+        raise Error.new("The name #{long} " \
                         "would exceed PostgreSQL's 63-byte names; " \
                         "shorten the field or the plural")
       end
-      used_versions = migration_versions(project.root)
-      migration_version = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
-      if migration_version <= 0 || (version && used_versions.includes?(migration_version))
-        raise Error.new("Migration version must be positive and unused")
-      end
-      while used_versions.includes?(migration_version)
-        migration_version += 1
-      end
+      migration_version = ResourceGenerator.migration_version(project.root, version)
       required_text = fields.select { |field| field.kind == "string" && !field.nullable? }
       required_inputs = required_text.reject(&.server?)
       changeset_checks = assert_changeset(name, fields, required_inputs, actions)
@@ -274,14 +290,21 @@ module Caramel::Frappe
         "@@SPEC_TITLE@@"        => spec_title(actions),
         "@@ASSERT_ESCAPING@@"   => assert_escaping(inputs),
         "@@FIELD_LABELS@@"      => field_labels(inputs),
+        "@@TENANT@@"            => tenant.try(&.name) || "",
+        "@@TENANT_MODEL@@"      => tenant.try(&.model) || "",
+        "@@ROOT@@"              => tenant ? SPEC_TENANT : "",
+        "@@HOME@@"              => tenant ? SPEC_TENANT : "/",
       }
+      flags = actions.dup
+      flags << "locales" if @localized
+      flags << "tenant" if tenant
       files = {} of String => String
       template_root = File.join(@framework_root, "templates/resource")
       Dir.glob(File.join(template_root, "**/*")).sort.each do |path|
         next unless File.file?(path)
         relative = Path[path].relative_to(template_root).to_s
         next if (action = ACTION_FILES[relative]?) && !actions.includes?(action)
-        content = select_lines(File.read(path), @localized ? actions + ["locales"] : actions)
+        content = select_lines(File.read(path), flags)
         tokens.each do |key, value|
           relative = relative.gsub(key, value)
           content = content.gsub(key, value)
@@ -290,7 +313,7 @@ module Caramel::Frappe
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
-      ddl = create_table(collection, fields)
+      ddl = ResourceGenerator.create_table(collection, fields, tenant)
       migration = SugarORM::Migration.new(migration_version, "create_#{collection}", ddl)
       migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
       files[migration_path] = SchemaDiff.source(migration)
@@ -306,8 +329,12 @@ module Caramel::Frappe
         "destroy" => %(    delete "/#{collection}/:id", #{namespace}::Destroy),
       }.select { |action, _| actions.includes?(action) }.values
       path_helpers = ["  Caramel.resource_paths :#{collection}, :#{singular}"]
+      route_insertion = {"    # Frappé resource routes", routes, routes}
+      if tenant
+        route_insertion = {TENANT_ROUTES, routes.map { |line| "  #{line}" }, routes}
+      end
       insertions = {
-        "config/routes.cr" => {"    # Frappé resource routes", routes, routes},
+        "config/routes.cr" => route_insertion,
         "config/paths.cr"  => {"  # Frappé resource paths", path_helpers, path_helpers},
       }
       if default_locale
@@ -330,6 +357,35 @@ module Caramel::Frappe
       end
       Publication.publish(project, files, originals)
       files.keys.sort!
+    end
+
+    # The tenant a new resource belongs to: the tenant block's model in a
+    # multi-tenant application, unless *central* asks for a shared resource.
+    private def tenant_of(root : String, central : Bool) : Tenant?
+      config = File.read(File.join(root, "config/application.cr"))
+      unless config.lines.includes?(TENANCY_REQUIRE)
+        return unless central
+        raise Error.new("--central is for multi-tenant applications; " \
+                        "config/application.cr does not require caramel/tenancy")
+      end
+      return if central
+
+      routes = File.read(File.join(root, "config/routes.cr"))
+      model = routes.match(TENANT_BLOCK).try(&.[1])
+      raise Error.new("config/routes.cr has no tenant App::Model, by: :field do line") unless model
+      Tenant.new(model: model, name: model.underscore,
+        column: "#{model.underscore}_id", table: tenant_table(root, model))
+    end
+
+    # The table the tenant model's schema declares.
+    private def tenant_table(root : String, model : String) : String
+      relative = "app/models/#{model.underscore}.cr"
+      Publication.validate_path(root, relative)
+      path = File.join(root, relative)
+      table = File.read(path).match(TENANT_SCHEMA).try(&.[1]) if File.file?(path)
+      return table if table
+
+      raise Error.new("#{relative} declares no schema for App::#{model}")
     end
 
     # The default locale's code when config/application.cr requires
@@ -442,10 +498,27 @@ module Caramel::Frappe
       ACTIONS & chosen
     end
 
-    # The versions of the project's existing migrations.
-    private def migration_versions(root : String) : Array(Int64)
+    # Refuses a model name that is not a class name or that the application
+    # or the framework already uses.
+    def self.validate_model(name : String) : Nil
+      return if name.matches?(MODEL_NAME) && name.size <= 40 && RESERVED_NAMES.none?(name)
+
+      raise Error.new("Use a singular class name such as Book; " \
+                      "application and framework names are reserved")
+    end
+
+    # *version*, or a timestamp version no migration of the project uses.
+    def self.migration_version(root : String, version : Int64?) : Int64
       paths = Dir.glob(File.join(root, "db/migrations/*.cr"))
-      paths.compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
+      used = paths.compact_map { |path| File.basename(path).split('_', 2).first.to_i64? }
+      chosen = version || Time.utc.to_s("%Y%m%d%H%M%S").to_i64
+      if chosen <= 0 || (version && used.includes?(chosen))
+        raise Error.new("Migration version must be positive and unused")
+      end
+      while used.includes?(chosen)
+        chosen += 1
+      end
+      chosen
     end
 
     # One line per field, such as `      field title : String` for a *keyword* of
@@ -601,7 +674,7 @@ module Caramel::Frappe
       ([assert_presence(model, required)] + probes).reject(&.empty?).join('\n')
     end
 
-    private def pluralize(name : String) : String
+    def self.pluralize(name : String) : String
       return name[0...-1] + "ies" if name.matches?(/[^aeiou]y\z/)
       return name + "es" if name.matches?(/(?:s|x|z|ch|sh)\z/)
       name + "s"
@@ -609,34 +682,78 @@ module Caramel::Frappe
 
     # Diffs the generated schema's table against an empty database, exactly as
     # `frappe db diff --name create_<plural>` would: id identity key, the
-    # fields in order, the timestamps, then the unique indexes.
-    private def create_table(table : String, fields : Array(ResourceField)) : Array(String)
-      id = SugarORM::Catalog::Column.new(
+    # tenant column, the fields in order, the timestamps, then the tenant's
+    # index, the unique indexes and the tenant's foreign key.
+    def self.create_table(table : String,
+                          fields : Array(ResourceField),
+                          tenant : Tenant? = nil) : Array(String)
+      columns = [identity_column]
+      columns << tenant_column(tenant.column) if tenant
+      columns.concat(fields.map(&.column))
+      columns.concat(%w[created_at updated_at].map { |stamp| timestamp_column(stamp) })
+      indexes = [] of SugarORM::Catalog::Index
+      keys = [] of SugarORM::Catalog::ForeignKey
+      if tenant
+        indexes << tenant_index(table, tenant)
+        keys << tenant_key(table, tenant)
+      end
+      fields.select(&.unique?).each do |field|
+        scope = tenant ? [field.name, tenant.column] : [field.name]
+        indexes << SugarORM::Catalog::Index.new(index_name(table, field), scope, unique: true)
+      end
+      schema = [SugarORM::Catalog::Table.new(table, columns, indexes, keys)]
+      plan = SugarORM::Differ.diff(schema, [] of SugarORM::Catalog::Table)
+      SugarORM::DDL.statements(plan.transactional)
+    end
+
+    private def self.identity_column : SugarORM::Catalog::Column
+      SugarORM::Catalog::Column.new(
         name: "id",
         sql_type: "bigint",
         nullable: false,
         default: nil,
         primary: true,
         identity: true)
-      columns = [id]
-      columns.concat(fields.map(&.column))
-      %w[created_at updated_at].each do |stamp|
-        columns << SugarORM::Catalog::Column.new(
-          name: stamp,
-          sql_type: "timestamp with time zone",
-          nullable: false,
-          default: "CURRENT_TIMESTAMP")
-      end
-      indexes = fields.select(&.unique?).map do |field|
-        SugarORM::Catalog::Index.new(index_name(table, field), [field.name], unique: true)
-      end
-      schema = [SugarORM::Catalog::Table.new(table, columns, indexes)]
-      plan = SugarORM::Differ.diff(schema, [] of SugarORM::Catalog::Table)
-      SugarORM::DDL.statements(plan.transactional)
+    end
+
+    private def self.timestamp_column(name : String) : SugarORM::Catalog::Column
+      SugarORM::Catalog::Column.new(
+        name: name,
+        sql_type: "timestamp with time zone",
+        nullable: false,
+        default: "CURRENT_TIMESTAMP")
+    end
+
+    private def self.tenant_column(name : String) : SugarORM::Catalog::Column
+      SugarORM::Catalog::Column.new(name: name, sql_type: "bigint", nullable: false, default: nil)
+    end
+
+    # The unique (tenant, id) index SugarORM gives every tenanted table.
+    private def self.tenant_index(table : String, tenant : Tenant) : SugarORM::Catalog::Index
+      name = tenant_index_name(table, tenant)
+      SugarORM::Catalog::Index.new(name, [tenant.column, "id"], unique: true)
+    end
+
+    private def self.tenant_key(table : String, tenant : Tenant) : SugarORM::Catalog::ForeignKey
+      SugarORM::Catalog::ForeignKey.new(
+        name: tenant_key_name(table, tenant),
+        columns: [tenant.column],
+        references_table: tenant.table,
+        references_columns: ["id"])
+    end
+
+    # The name SugarORM gives a tenanted table's (tenant, id) index.
+    def self.tenant_index_name(table : String, tenant : Tenant) : String
+      "index_#{table}_on_#{tenant.column}_and_id"
+    end
+
+    # The name SugarORM gives a tenanted table's key to its tenant.
+    def self.tenant_key_name(table : String, tenant : Tenant) : String
+      "fk_#{table}_#{tenant.column}"
     end
 
     # The name SugarORM gives `index :field` in the schema.
-    private def index_name(table : String, field : ResourceField) : String
+    def self.index_name(table : String, field : ResourceField) : String
       "index_#{table}_on_#{field.name}"
     end
 

@@ -31,6 +31,18 @@ module SugarORM
     end
   end
 
+  # ` AND "<tenant column>" = $n`, with the tenant appended to *args*, when
+  # `T` is tenanted and scoped; "" otherwise.
+  def self.tenant_filter(schema : T.class, args : Array(Value)) : String forall T
+    {% if T.has_constant?(:SUGAR_TENANT) %}
+      tenant = T.__sugar_tenant_scope || return ""
+      args << tenant
+      %( AND "#{T.__sugar_tenant_column}" = $#{args.size})
+    {% else %}
+      ""
+    {% end %}
+  end
+
   record Clauses,
     conditions : Array(Condition) = [] of Condition,
     orders : Array(String) = [] of String,
@@ -94,7 +106,7 @@ module SugarORM
 
     # The bind values for `to_sql`, in `$n` order.
     def binds : Array(::SugarORM::Value)
-      @clauses.conditions.flat_map(&.values)
+      conditions.flat_map(&.values)
     end
 
     # All matching records: `Array(T)`, or `Array(Loaded(T, L))` once preloaded.
@@ -263,11 +275,24 @@ module SugarORM
       String.build { |io| write_filters(io, order) }
     end
 
+    # The query's conditions, led by its tenant's when `T` is tenanted. The
+    # scope applies when the query runs, so no chained call can remove it.
+    private def conditions : Array(::SugarORM::Condition)
+      {% if T.has_constant?(:SUGAR_TENANT) %}
+        if tenant = T.__sugar_tenant_scope
+          scope = ::SugarORM::Condition.column(T.__sugar_tenant_column, tenant)
+          return [scope] + @clauses.conditions
+        end
+      {% end %}
+      @clauses.conditions
+    end
+
     private def write_filters(io : IO, order : Bool) : Nil
-      unless @clauses.conditions.empty?
+      predicates = conditions
+      unless predicates.empty?
         index = 0
         io << " WHERE "
-        @clauses.conditions.join(io, " AND ") do |condition, inner|
+        predicates.join(io, " AND ") do |condition, inner|
           inner << condition.sql.gsub("?") { index += 1; "$#{index}" }
         end
       end

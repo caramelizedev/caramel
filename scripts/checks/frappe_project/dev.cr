@@ -117,7 +117,7 @@ module Caramel::Checks
 
         # Setup migrated the clone; a resource added since gives it a pending
         # migration, which this branch, taken before migrating, keeps.
-        p.command([frappe, "make", "resource", "Note", "body:string"],
+        p.command([frappe, "make", "resource", "Memo", "body:string"],
           chdir: @clone, echo: false)
         create_branch = [frappe, "db", "branch", "create", "unmigrated"]
         branch_url = p.command(create_branch, chdir: @clone, echo: false).stdout.strip

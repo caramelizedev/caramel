@@ -2,6 +2,7 @@ require "http"
 require "uri/params"
 require "../html"
 require "../wording"
+require "../http/paths"
 
 module Caramel::I18n
   # The cookie that remembers a browser's chosen locale.
@@ -124,9 +125,9 @@ module Caramel::I18n
   # The current page in *target*: under its prefix, or with `?locale=`.
   def self.switch_path(target) : String
     path = Fiber.current.caramel_path || "/"
-    return prefixed(target, path) if PREFIX && !target.default?
+    return ::Caramel.tenant_path(prefixed(target, path)) if PREFIX && !target.default?
     separator = path.includes?('?') ? '&' : '?'
-    "#{path}#{separator}locale=#{target.code}"
+    ::Caramel.tenant_path("#{path}#{separator}locale=#{target.code}")
   end
 
   # With prefixes, the locale a `/CODE` first segment names, which is then
@@ -149,7 +150,8 @@ module Caramel::I18n
     code = request.query_params["locale"]? || return
     locale = ::Caramel::Locale.parse?(code) || return
     query = without_locale(request.query)
-    target = prefixed(locale, query ? "#{request.path}?#{query}" : request.path)
+    page = query ? "#{request.path}?#{query}" : request.path
+    target = ::Caramel.tenant_path(prefixed(locale, page))
     response = begin
       Response.redirect(target, 303)
     rescue ArgumentError

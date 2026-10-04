@@ -83,6 +83,7 @@ module Caramel::Checks
         [show, update, create].each do |route|
           assert!(routes.lines.any? { |line| line.split == route }, routes)
         end
+        tenancy
         translations
         agent_tooling
         migrated = command([@frappe, "migrate"], chdir: @project)
@@ -272,6 +273,26 @@ module Caramel::Checks
            "development setup restores the pinned parser and runs Corretto"
     end
 
+    # Makes the application multi-tenant: Note belongs to an Account, Tag is
+    # shared by every tenant.
+    def tenancy : Nil
+      command([@frappe, "make", "tenancy", "Account"], chdir: @project)
+      make = [@frappe, "make", "resource"]
+      command(make + %w[Note body:string], chdir: @project)
+      command(make + %w[Tag label:string --central], chdir: @project)
+      routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
+      expected = [
+        %w[POST /accounts App::Accounts::Create name:String slug:String],
+        %w[GET /:tenant/notes App::Notes::Index],
+        %w[GET /tags App::Tags::Index],
+      ]
+      expected.each do |route|
+        assert!(routes.lines.any? { |line| line.split == route }, routes)
+      end
+      puts "PASS: frappe make tenancy wires caramel/tenancy; " \
+           "tenant resources route under /:tenant beside central ones"
+    end
+
     # The application took fr before Person, so fr lacks Person's messages.
     def translations : Nil
       report = attempt([@frappe, "translations"], chdir: @project, timeout: 300.seconds)
@@ -330,7 +351,10 @@ module Caramel::Checks
       end
       assert!(scoped, people.join("\n"))
       patches = command([@frappe, "routes", "patch"], chdir: @project, echo: false).stdout.lines
-      expected = [%w[PATCH /books/:id], %w[PATCH /people/:id], %w[PATCH /links/:id]]
+      expected = [
+        %w[PATCH /books/:id], %w[PATCH /people/:id], %w[PATCH /links/:id],
+        %w[PATCH /tags/:id], %w[PATCH /:tenant/notes/:id],
+      ]
       assert!(patches.map { |line| line.split[0, 2] } == expected, patches.join("\n"))
       unmatched = command([@frappe, "routes", "no-such-route"],
         chdir: @project, echo: false)
@@ -567,7 +591,7 @@ module Caramel::Checks
       result = command([@frappe, "corretto", "--concurrency=2"],
         chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
-      spread = result.stdout.includes?("Corretto: 6 spec files across 2 workers")
+      spread = result.stdout.includes?("Corretto: 9 spec files across 2 workers")
       passed = result.stdout.includes?("Corretto: 2 of 2 workers passed")
       assert!(spread && passed, output)
       %w[[w1] [w2]].each do |prefix|

@@ -48,18 +48,20 @@ module Caramel::ColdBrew
                 "got #{payload.bytesize}; publish an id and read the record instead"
       raise ArgumentError.new(message)
     end
-    SugarORM.sql_exec("SELECT pg_notify($1, $2)", channel, payload)
+    SugarORM.sql_exec("SELECT pg_notify($1, $2)", channel(channel), payload)
     nil
   end
 
   # Delivers every payload published to `channel` into `subscriber` until
   # `unsubscribe`, the channel closes, or the subscribing fiber ends.
   def self.subscribe(channel : String, subscriber : Channel(String)) : Nil
-    broker.subscribe(channel, subscriber)
+    validate_channel!(channel)
+    broker.subscribe(channel(channel), subscriber)
   end
 
   def self.unsubscribe(channel : String, subscriber : Channel(String)) : Nil
-    broker?.try(&.unsubscribe(channel, subscriber))
+    validate_channel!(channel)
+    broker?.try(&.unsubscribe(channel(channel), subscriber))
   end
 
   # Subscribes a new channel for the block and unsubscribes afterwards.
@@ -79,6 +81,24 @@ module Caramel::ColdBrew
                 "got #{name.inspect}"
       raise ArgumentError.new(message)
     end
+  end
+
+  # The PubSub channel *name* stands for. `caramel/tenancy` prefixes the
+  # bound tenant.
+  def self.channel(name : String) : String
+    name
+  end
+
+  # The payload a job is stored with. `caramel/tenancy` adds the tenant
+  # it was enqueued in.
+  def self.carry(payload : String) : String
+    payload
+  end
+
+  # Runs a claimed job's perform. `caramel/tenancy` binds the tenant its
+  # payload carries.
+  def self.carried(payload : String, &) : Nil
+    yield
   end
 
   # What `serve` runs beside the HTTP server, on a pool of its own so jobs

@@ -126,6 +126,11 @@ module Caramel::ColdBrew
                      "for example `param #{name}_value : #{declaration.type}`." %}
         {% declaration.raise message + at %}
       {% end %}
+      {% if name.stringify == "caramel_tenant" %}
+        {% message = "param 'caramel_tenant' is reserved for the tenant " \
+                     "caramel/tenancy carries.\nRemediation: rename the param." %}
+        {% declaration.raise message + at %}
+      {% end %}
       {% constant = "COLD_BREW_PARAM_#{name.stringify.upcase.id}".id %}
       {% if @type.has_constant?(constant) %}
         {% message = "param '#{name}' is declared twice in #{@type}.\n" \

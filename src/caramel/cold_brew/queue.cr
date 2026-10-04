@@ -85,7 +85,8 @@ module Caramel::ColdBrew
                   payload : String,
                   run_at : Time?,
                   priority : Int32) : Int64
-      SugarORM.sql(PUSH, queue, class_name, payload, priority, run_at, as: {id: Int64}).first[:id]
+      stored = ColdBrew.carry(payload)
+      SugarORM.sql(PUSH, queue, class_name, stored, priority, run_at, as: {id: Int64}).first[:id]
     end
 
     # The next due job of `queue`, locked for this connection's backend.
@@ -114,7 +115,7 @@ module Caramel::ColdBrew
     def self.run(job : Claim) : Exception?
       finished = false
       SugarORM::Repo.transaction do
-        Job.__cold_brew_perform(job.class_name, job.payload)
+        ColdBrew.carried(job.payload) { Job.__cold_brew_perform(job.class_name, job.payload) }
         finish(job)
         finished = true
       end

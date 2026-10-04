@@ -8,7 +8,7 @@ module SugarORM
     def self.to_json(tables : Array(Table)) : String
       JSON.build do |json|
         json.object do
-          json.field "version", 1
+          json.field "version", 2
           json.field "tables" do
             json.array do
               tables.each do |table|
@@ -45,9 +45,9 @@ module SugarORM
                       table.foreign_keys.each do |key|
                         json.object do
                           json.field "name", key.name
-                          json.field "column", key.column
+                          json.field "columns", key.columns
                           json.field "references_table", key.references_table
-                          json.field "references_column", key.references_column
+                          json.field "references_columns", key.references_columns
                           json.field "on_delete", key.on_delete
                         end
                       end
@@ -65,7 +65,7 @@ module SugarORM
     def self.from_json(text : String) : Array(Table)
       document = JSON.parse(text)
       version = document["version"].as_i
-      raise ArgumentError.new("unsupported schema document version") unless version == 1
+      raise ArgumentError.new("unsupported schema document version") unless version == 2
       document["tables"].as_a.map do |table|
         columns = table["columns"].as_a.map do |column|
           Column.new(
@@ -88,9 +88,9 @@ module SugarORM
         foreign_keys = table["foreign_keys"].as_a.map do |key|
           ForeignKey.new(
             name: key["name"].as_s,
-            column: key["column"].as_s,
+            columns: key["columns"].as_a.map(&.as_s),
             references_table: key["references_table"].as_s,
-            references_column: key["references_column"].as_s,
+            references_columns: key["references_columns"].as_a.map(&.as_s),
             on_delete: key["on_delete"].as_s,
           )
         end
@@ -169,27 +169,34 @@ module SugarORM
       SQL
 
     FOREIGN_KEYS = <<-SQL
-      SELECT t.relname::text, con.conname::text, cardinality(con.conkey), a.attname::text,
-             r.relname::text, ra.attname::text, con.confdeltype::text
+      SELECT t.relname::text, con.conname::text,
+             ARRAY(SELECT a.attname::text
+                   FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, position)
+                   JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+                   ORDER BY k.position),
+             r.relname::text,
+             ARRAY(SELECT a.attname::text
+                   FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, position)
+                   JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
+                   ORDER BY k.position),
+             con.confdeltype::text
       FROM pg_constraint con
       JOIN pg_class t ON t.oid = con.conrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
       JOIN pg_class r ON r.oid = con.confrelid
-      JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = con.conkey[1]
-      JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = con.confkey[1]
       WHERE con.contype = 'f' AND n.nspname = current_schema()
       ORDER BY 1, 2
       SQL
 
     COLUMN_ROW      = {String, String, String, Bool, String?, Bool, Bool}
     INDEX_ROW       = {String, String, Bool, Bool, Bool, Array(String)}
-    FOREIGN_KEY_ROW = {String, String, Int32, String, String, String, String}
+    FOREIGN_KEY_ROW = {String, String, Array(String), String, Array(String), String}
 
     def self.read(db : DB::Database | DB::Connection) : Snapshot
       invalid, skipped = [] of String, [] of String
       columns = read_columns(db)
       indexes = read_indexes(db, invalid, skipped)
-      keys = read_foreign_keys(db, skipped)
+      keys = read_foreign_keys(db)
       tables = db.query_all(TABLES, as: String).map do |table|
         Catalog::Table.new(
           name: table,
@@ -257,23 +264,18 @@ module SugarORM
       indexes
     end
 
-    # Single-column foreign keys by table; a multi-column one is reported.
-    private def self.read_foreign_keys(db : DB::Database | DB::Connection,
-                                       skipped : Array(String))
+    # Foreign keys by table, each with its columns in key order.
+    private def self.read_foreign_keys(db : DB::Database | DB::Connection)
       keys = by_table(Catalog::ForeignKey)
       rows = db.query_all(FOREIGN_KEYS, as: FOREIGN_KEY_ROW)
-      rows.each do |table, name, size, column, target, target_column, action|
-        if size == 1
-          keys[table] << Catalog::ForeignKey.new(
-            name: name,
-            column: column,
-            references_table: target,
-            references_column: target_column,
-            on_delete: ON_DELETE[action],
-          )
-        elsif !table.starts_with?("caramel_")
-          skipped << "skipped foreign key #{name} on #{table} (multi-column)"
-        end
+      rows.each do |table, name, columns, target, target_columns, action|
+        keys[table] << Catalog::ForeignKey.new(
+          name: name,
+          columns: columns,
+          references_table: target,
+          references_columns: target_columns,
+          on_delete: ON_DELETE[action],
+        )
       end
       keys
     end

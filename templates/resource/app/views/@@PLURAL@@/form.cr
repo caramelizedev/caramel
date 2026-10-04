@@ -22,7 +22,11 @@ module App::Views::@@COLLECTION@@
           a(class: "cancel", href: @action) { "Cancel" }
           # frappe:end
           # frappe:else
+          # frappe:only tenant
+          back = @method == "POST" ? tenant_path("/") : @action
+          # frappe:else
           back = @method == "POST" ? "/" : @action
+          # frappe:end
           # frappe:only locales
           a(class: "cancel", href: back) { t.common.cancel }
           # frappe:else
