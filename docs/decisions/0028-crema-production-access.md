@@ -53,6 +53,21 @@ nothing.
    `APP db diagnose` (`frappe db diagnose` runs it). `jobs` and `db diagnose` need no
    running application. `jobs show` is the one place a job's stored error is read, and it
    prints to the operator's terminal only. Registered commands extend `usage`.
+9. **The recorder is opt-in.** `require "caramel/crema/recorder"` keeps per-minute
+   aggregates in `caramel_metrics`; new applications require it in
+   `config/application.cr`. The table belongs to Cold Brew's framework migrations, so
+   every application has it and only one that requires the recorder writes it. A row is
+   `(bucket, kind, key)` with a count, an error count, total and maximum milliseconds and
+   a 12-bucket latency histogram (5 ms to 10 s and an overflow). The kind is `request`,
+   `job`, `schedule`, `sql` or `outbound`; the key is a route template, job class,
+   schedule name, parameterized SQL (at most 500 characters) or `METHOD host`. It
+   never holds a bind value, path, message, backtrace or trace.
+10. **Flushing.** The recorder writes its window every 15 seconds with an upsert and
+    deletes rows older than seven days hourly. It keeps at most 500 keys of a kind per
+    flush and folds the rest into `(other)`. A write that fails logs a warning, discards
+    that batch, counts it in `dropped["recorder"]` and changes nothing for the work it
+    measured. `APP insights [--since=DURATION] [--kind=KIND]` and the console's Insights
+    page read the rows and compute percentiles from the summed histograms.
 
 ## Reasons
 

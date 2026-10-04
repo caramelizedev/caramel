@@ -1,6 +1,7 @@
 require "spec"
 require "random/secure"
 require "../../src/caramel"
+require "../../src/caramel/crema/recorder"
 
 private def owned_url(variable : String, missing : String) : String
   ENV[variable]? || raise "Run scripts/check integration; no #{missing} provided"
@@ -84,10 +85,23 @@ module CremaSpec
     end
   end
 
+  struct Flaky < Page
+    contract do
+      field fail : Int32?
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      SugarORM.sql("SELECT $1::int AS n", 1, as: {n: Int32})
+      raise KeyError.new("secret detail of the failure") if contract.fail == 1
+      Caramel::Response.new(body: "fine")
+    end
+  end
+
   Caramel::Router.draw do
     get "/books/:id", CremaSpec::Show
     get "/repeats", CremaSpec::Repeats
     get "/tagged", CremaSpec::Tagged
+    get "/flaky", CremaSpec::Flaky
   end
 
   NAME = "caramel_crema_#{Random::Secure.hex(6)}"
@@ -131,7 +145,7 @@ module CremaSpec
   end
 
   def self.reset : DB::Database
-    owner.exec("TRUNCATE caramel_jobs")
+    owner.exec("TRUNCATE caramel_jobs, caramel_metrics")
     SugarORM::Repo.database = runtime
   end
 
@@ -293,5 +307,73 @@ describe "Crema db diagnose" do
       .each { |name| output.should contain(name) }
     output.should contain("outliers: pg_stat_statements is not installed in this database.")
     output.should contain("== table_sizes ==")
+  end
+end
+
+describe Caramel::Crema::Recorder do
+  it "keeps per-minute aggregates, never a message, and adds to a row it wrote" do
+    CremaSpec.reset
+    recorder = Caramel::Crema::Recorder.new(CremaSpec.runtime)
+    Caramel::Crema.subscribe(recorder)
+    begin
+      CremaSpec.get("/flaky")
+      CremaSpec.get("/flaky?fail=1")
+      recorder.flush
+      CremaSpec.get("/flaky")
+      recorder.flush
+    ensure
+      Caramel::Crema.unsubscribe(recorder)
+    end
+    owner = CremaSpec.owner
+    totals = "SELECT sum(count)::int, sum(errors)::int FROM caramel_metrics " \
+             "WHERE kind = 'request' AND key = 'GET /flaky'"
+    owner.query_one(totals, as: {Int32, Int32}).should eq({3, 1})
+    sizes = "SELECT array_length(histogram, 1) FROM caramel_metrics WHERE kind = 'request'"
+    owner.query_all(sizes, as: Int32).uniq.should eq([12])
+    statement = "SELECT count(*) FROM caramel_metrics WHERE kind = 'sql' " \
+                "AND key = 'SELECT $1::int AS n'"
+    owner.scalar(statement).as(Int64).should be >= 1
+    leaked = "SELECT count(*) FROM caramel_metrics " \
+             "WHERE caramel_metrics::text LIKE '%secret detail%'"
+    owner.scalar(leaked).as(Int64).should eq(0)
+  end
+
+  it "reports the busiest routes through insights" do
+    CremaSpec.reset
+    recorder = Caramel::Crema::Recorder.new(CremaSpec.runtime)
+    Caramel::Crema.subscribe(recorder)
+    begin
+      3.times { CremaSpec.get("/flaky") }
+      recorder.flush
+    ensure
+      Caramel::Crema.unsubscribe(recorder)
+    end
+    table = Caramel::Crema::Insights.table("request", 1.hour, CremaSpec.runtime)
+    table.headers.should eq(%w[KEY COUNT ERR P50MS P95MS MAXMS TOTAL_S])
+    table.rows.first[0, 3].should eq(["GET /flaky", "3", "0"])
+    Caramel::Crema::Insights.duration("90m").should eq(90.minutes)
+    Caramel::Crema::Insights.duration("soon").should be_nil
+  end
+
+  it "loses a batch it cannot write, logs a warning and raises nothing" do
+    CremaSpec.reset
+    recorder = Caramel::Crema::Recorder.new(CremaSpec.runtime)
+    Caramel::Crema.subscribe(recorder)
+    begin
+      CremaSpec.get("/flaky")
+    ensure
+      Caramel::Crema.unsubscribe(recorder)
+    end
+    before = Caramel::Crema.dropped["recorder"]? || 0_i64
+    CremaSpec.owner.exec("ALTER TABLE caramel_metrics RENAME TO caramel_metrics_away")
+    begin
+      Log.capture("crema") do |logs|
+        recorder.flush
+        logs.check(:warn, /\Arecorder flush failed error_type=/)
+      end
+    ensure
+      CremaSpec.owner.exec("ALTER TABLE caramel_metrics_away RENAME TO caramel_metrics")
+    end
+    (Caramel::Crema.dropped["recorder"]? || 0_i64).should be > before
   end
 end

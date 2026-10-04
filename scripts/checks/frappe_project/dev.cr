@@ -195,6 +195,11 @@ module Caramel::Checks
           request("bookshelf", "/__caramel/dev/traces.json", feed)[1].includes?("GET /")
         end
         assert!(listed_trace, "traces.json does not list GET /")
+        runtime_url = p.local_values(project)["DATABASE_URL"]
+        recorded = Checks.wait_until(30.seconds, 1.second) do
+          p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").to_i > 0
+        end
+        assert!(recorded, "the recorder wrote no caramel_metrics row")
         # Under scripts/check all the build step has already built Latte.app.
         p.command([File.join(p.repo, "scripts/build-latte-menu")]) unless Checks.prebuilt?
         latte = File.join(p.repo, "bin/Latte.app/Contents/MacOS/Latte")

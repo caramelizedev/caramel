@@ -1,4 +1,5 @@
 require "caramel"
+require "caramel/crema/recorder"
 
 module App
   TITLE      = "@@TITLE@@"
