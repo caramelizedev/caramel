@@ -154,7 +154,8 @@ module SugarORM
 
     # Foreign key drops go to *key_drops*: the differ runs them before every
     # other statement, since a composite key depends on the unique index of
-    # the table it references.
+    # the table it references. An undeclared key is dropped even when its own
+    # column is, as another table's column drop may wait on it.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
     private def self.alter(declared : Catalog::Table,
                            current : Catalog::Table,
@@ -239,7 +240,6 @@ module SugarORM
       end
       current.foreign_keys.each do |key|
         next if declared.foreign_keys.any? { |wanted| wanted.name == key.name }
-        next if key.columns.any? { |column| dropped.includes?(column) }
         key_drops << DropForeignKey.new(table, key.name)
       end
 

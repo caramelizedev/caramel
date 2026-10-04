@@ -135,6 +135,21 @@ describe SugarORM::Differ do
     ])
   end
 
+  it "drops an undeclared key first, even when its own columns go too" do
+    author = composite_key("fk_books_author_id", "author_id", "authors")
+    account = required("account_id", "bigint")
+    author_id = required("author_id", "bigint")
+    authors = Catalog::Table.new("authors", [id_column, account], [tenant_index("authors")])
+    actual = [authors, books([author_id, account], keys: [author])]
+    declared = [
+      Catalog::Table.new("authors", [id_column], drops: ["account_id"]),
+      books(drops: ["author_id", "account_id"]),
+    ]
+    statements = sql(Differ.diff(declared, actual).transactional)
+    statements.first.should eq(%(ALTER TABLE "books" DROP CONSTRAINT "fk_books_author_id"))
+    statements[1].should end_with(%(ALTER TABLE "authors" DROP COLUMN "account_id"))
+  end
+
   it "halts a key that would wait on a unique index built afterwards, CONCURRENTLY" do
     account = required("account_id", "bigint")
     author_id = required("author_id", "bigint")
