@@ -2,23 +2,11 @@
 
 Date: 2026-09-28
 
-Status: accepted. Amends [RFC-0008](../rfc.md) §2.4, RFC-0001's presentation text (the partials example in §2.3, the island example in §2.4 and the layout in §2.5), and [ADR 0005](0005-island-props-helper.md) and [ADR 0011](0011-default-action-layout.md) where they name ECR.
+Status: accepted. Amends [ADR 0005](0005-island-props-helper.md) and [ADR 0011](0011-default-action-layout.md) where they name ECR.
 
 ## Context
 
-RFC-0008 §2.4 adopts Slang, a whitespace-sensitive template language. Caramel shipped compiled ECR views instead: `.html.ecr` files under `app/views/`, looked up with the `view "books/show"` macro (`Caramel::Templates`), rendered by `Caramel::View.render`/`embed`, and compiled by an adaptation of Crystal's ECR processor (`src/caramel/view/compiler.cr`, Apache-2.0, `vendor/licenses/crystal-LICENSE`) that escaped every `<%= %>` expression. `scripts/check views` tested that its errors pointed back at the template. After comparing a generated form written in ECR and in Blueprint, the owner rejected ECR for how it reads.
-
-Slang 1.7.3 was evaluated on Crystal 1.21.0:
-
-- Its last release was in May 2021. The library code has not changed since, and open pull requests are unmerged.
-- Its lexer ends an attribute value at the first space, so RFC-0008 §2.4's own example does not compile: `class=(team.active? ? … : …)` and `hx-vals='{"seats": 1}'` both fail.
-- Dynamic attribute values escape only `"` (`src/slang/nodes/element.cr:36`).
-- Compile errors point at its generated code: a typo on line 3 of `typo.slang` was reported at line 15 of the generated Crystal. Issue #27, location pragmas, has been open since 2017.
-
-Blueprint 1.1.0 (github.com/stephannv/blueprint), a Phlex-style shard that writes HTML in plain Crystal, was evaluated as well. It had two defects Caramel cannot ship:
-
-- Attribute values escaped only `"` (`src/blueprint/html/attributes_renderer.cr:64`), so `&` reached the browser raw and a stored `&amp;` came back as `&`.
-- Attributes rendered through a process-wide cache (lines 4-23): a `Hash(UInt64, String)` keyed by the attributes' 64-bit hash, never evicted, and locked only under `-Dpreview_mt`.
+Views need to read like the Crystal around them, with typed inputs, escaped output and compiler errors at the view's own line. Compiled ECR templates (`.html.ecr`) read poorly and look inputs up by name. Slang is unmaintained and its attribute handling is broken, and Blueprint 1.1.0, a Phlex-style shard that writes HTML in plain Crystal, escapes attribute values incompletely and caches attributes in an unbounded, unlocked process-wide hash.
 
 ## Decision
 
@@ -35,40 +23,14 @@ Blueprint 1.1.0 (github.com/stephannv/blueprint), a Phlex-style shard that write
    - `config/application.cr` requires `../app/views/application_view`, then `../app/views/**`, before the actions.
    - `.ameba.yml` globs `app/**/*.cr` and excludes `app/views/**/*.cr` from `Lint/DebugCalls`: in a view, `p` is the paragraph element, not the debug print.
 8. **`frappe make resource`** (`templates/resource`, `src/frappe/resource_generator.cr`) writes `app/views/<plural>/{index,show,new,edit,form}.cr` as `App::Views::<Plural>::{Index,Show,New,Edit,Form}`. The Form takes `(action, method, csrf_token, values, errors)`; New and Edit render the Form they are given. Each field the form takes, which is every field not declared `name:type:server`, is `labelled "name", "Label" do |id| ... end` around an explicit `input` or `select_tag`. Actions call, for example, `page "Books", Views::Books::Index.new(result[:records])`. `ApplicationView` is a reserved resource name and `views` a reserved plural.
-9. **Removed, without a deprecation release:** ECR views, `Caramel::View.render` and `embed`, the `view "..."` lookup macro (`Caramel::Templates`), `src/caramel/view/compiler.cr` with `vendor/licenses/crystal-LICENSE`, and `scripts/check views`. View errors are now ordinary Crystal errors at the view's own file and line, so the ECR location mapping that check tested no longer exists.
-
-This is an explicit exception to the deprecation rule in `CONTRIBUTING.md`. The owner chose a clean cutover because the only ECR applications are demos.
+9. **ECR is gone, without a deprecation release:** there are no ECR views, `Caramel::View.render` or `embed`, `view "..."` lookup macro (`Caramel::Templates`), or ECR compiler. View errors are ordinary Crystal errors at the view's own file and line. This is an explicit exception to the deprecation rule in `CONTRIBUTING.md`, because the only ECR applications were demos.
 
 ## Reasons
 
-- Views are plain Crystal: the compiler proves every expression, and errors point at the view's own line. A typo in a probe view was reported at `typo.cr:12:27`.
+- Views are plain Crystal: the compiler proves every expression, and errors point at the view's own line.
 - Inputs are typed constructor arguments, not locals looked up by name.
-- Text is escaped, and raw output requires a safe-branded value. This is the shape of Phlex 2 (phlex.fun), which renders selectively through an explicit `fragment` and whose `raw` only outputs strings branded with `safe`.
-- Slang would have needed the RFC's example rewritten to compile, a patch to its attribute escaping and location mapping it has lacked since 2017, in a library that is no longer maintained.
+- Text is escaped, and raw output requires a safe-branded value, the shape of Phlex 2.
 - Patching Blueprint is two small overrides in one file, pinned and specified.
-
-Principles followed:
-
-- Manifesto 8 and RFC-0008 §1: markup that reads like the code around it.
-- Manifesto 7: the compiler checks every view, and reports errors at the view's own line to people and agents alike.
-
-## Alternatives considered
-
-- **Keep ECR.** Rejected by the owner for how it reads.
-- **Slang 1.7.3.** Rejected for the reasons in Context.
-- **Blueprint unpatched.** Rejected: attribute values would round-trip `&amp;` as `&`, and the attribute cache grows without bound and is unlocked without `-Dpreview_mt`.
-
-## Verification
-
-- `spec/caramel/view_spec.cr`: attribute escaping round trip, `Safe` as-is in text and attributes, nested views, the island helper, and no retained attribute cache.
-- `spec/caramel/action_spec.cr`: a page from a view with escaped input and a nested view, and a `markup` fragment that escapes its text and attributes and calls the action's own method.
-- `spec/frappe/resource_generator_spec.cr` and `spec/frappe/new_project_spec.cr`: generated views and configuration.
-- `scripts/check frappe-project`: a generated application with Book and Person resources covering every field kind compiles, lints and passes its request specs.
-- `scripts/check browser`: the probe application's views (`spec/fixtures/browser/app/views/probe/*.cr`) in Safari.
-- `scripts/check all`.
-
-## Implementation
-
-- Framework: `src/caramel/view.cr`, `src/caramel/html.cr`, `src/caramel/action.cr`, `src/caramel/hypermedia.cr`, `shard.yml`, `vendor/licenses/blueprint-LICENSE`, `THIRD_PARTY_NOTICES.md`.
-- Generator: `templates/application`, `templates/resource`, `src/frappe/resource_generator.cr`.
-- Checks: the browser probe views and the benchmarks are ported. The edit-latency benchmark's `template` kind is now `view`, and inserts a `comment` marker into `app/views/home/index.cr`; `compiler-profile`'s stage is `view_edit`.
+- Rejected: keeping ECR, because it reads poorly and looks inputs up by name.
+- Rejected: Slang 1.7.3, because it is unmaintained since 2021, its lexer ends an attribute value at the first space, it escapes only `"` in dynamic attributes, and its compile errors point at generated code.
+- Rejected: Blueprint unpatched, because attribute values would round-trip `&amp;` as `&`, and the attribute cache grows without bound and is unlocked without `-Dpreview_mt`.

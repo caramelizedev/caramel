@@ -6,65 +6,46 @@ Status: accepted.
 
 ## Context
 
-- The owner wants internationalization built into Caramel. An application that never opts in must pay nothing: no per-request work, no allocation, no added binary code and no extra compile step.
-- The owner fixed these choices:
-  - **Catalogs are Crystal literals.** `app/locales/CODE.cr` calls `Caramel.locale "fr", { … }` with a named tuple literal. The compiler parses it, so an error lands on the catalog's own line. There is no `{{ run }}` helper and no build step.
-  - **Each message compiles to a typed method.** The compiler checks `t.books.count(3)` and `t.home.greeting(name: n)`. A message nobody calls is never typed, so it never reaches the binary.
-  - **Locale resolution:** a `?locale=` switch, then an opt-in `/fr/…` prefix, then the remembered cookie, then the best `Accept-Language` match, then the default. Existing URLs keep working.
-  - **Catalogs supply the formatting data.** Number separators, month and day names and time patterns live in a reserved `caramel:` section. English is built in.
-  - **Generated applications stay plain English** until `frappe make locale CODE`. After that, `frappe make resource` writes `t.` calls and catalog entries.
-  - **Caramel's own messages are translated through the same catalogs:** contract and changeset errors, the "Check your request" page and the expired-form page. They render in the request's locale when they are created.
-- Research into other frameworks gave these lessons:
-
-  |Lesson|Evidence|
-  |---|---|
-  |Keys are compile-time methods|Rails i18n-tasks names "missing keys only blow up at runtime" as the core flaw. Paraglide, Rosetta (0 B/op) and fluent-typed generate one typed function per message.|
-  |CLDR plural categories, checked per locale|Rails ships English rules only. Laravel and vue-i18n use positional plurals. Rosetta and FormatJS validate the required categories.|
-  |Text is escaped by default; only `Caramel::HTML::Safe` arguments are raw|Rails' `_html` semantics. Laravel's `{!! __() !!}` and vue-i18n CVE-2025-53892 show the risk.|
-  |The locale is bound per request and restored, never process-global|ruby-i18n #723, Laravel Octane's `FlushLocaleState`, i18n.cr's global races.|
-  |Ordered resolution, a bounded Accept-Language parse, `Content-Language` and `Vary`|Django's `LocaleMiddleware`, CVE-2023-23969, next-intl's and Paraglide's strategies.|
-  |Forms post to localized URLs|The mcamara POST→GET redirect bug.|
-  |A missing translation falls back to the default locale, and a command reports it|Rosetta's strict-complete rule blocks shipping. go-i18n returns the text plus an error; Lingui and Angular gate this in CI.|
-  |Zero cost comes from opt-in requires and hooks|Django's `USE_I18N` overhead; Caramel's own `caramel/corretto` and `flag?(:caramel_development)` precedents.|
+Internationalization is built in. An application that never opts in pays nothing: no
+per-request work, no allocation, no added binary code and no extra compile step.
 
 ## Decision
 
 1. **Hooks with English and identity defaults** (`src/caramel/wording.cr`, `src/sugar_orm/wording.cr`).
-   - Every framework message comes from a method of `Caramel::Wording` or `SugarORM::Wording` that returns today's English. That includes the router's 404 body for a path no route matches (`Caramel::Router.not_found`), and `Action#not_found`'s default.
-   - `Caramel.language` returns `"en"`, and `Caramel.localize_path` returns its path unchanged. Resource path helpers pass through `Caramel.localize_path`.
+   - Every framework message comes from a method of `Caramel::Wording` or `SugarORM::Wording` that returns the English text. That includes the router's 404 body (`Caramel::Router.not_found`) and `Action#not_found`'s default.
+   - `Caramel.language` returns `"en"`, and `Caramel.localize_path` returns its path unchanged. Resource path helpers pass through `Caramel.localize_path`, so with `prefix: true` generated links and forms carry the prefix.
    - `Application#handle` routes through `localized`, which only yields, and `#call` streams through `streaming`, which only yields.
-   - `CommandLine.translations` prints that the application declares no locales.
-   - `Caramel::Application::EXPIRED_FORM` is removed in favour of `Caramel::Wording.expired_form`, without a deprecation release. This is an explicit exception to the deprecation rule in `CONTRIBUTING.md`: the owner chose the clean cutover, and nothing Caramel generates refers to the constant.
-2. **`require "caramel/i18n"` is the only way in.** `src/caramel.cr` does not require it. It redefines the hooks above, so an application that never requires it compiles none of its code. A `macro finished` guard refuses a program that requires it without calling `Caramel.locales`.
-3. **Catalogs** (`src/caramel/i18n/catalog.cr`):
+   - `CommandLine.translations` prints that no locales are declared.
+   - `Caramel::Wording.expired_form` replaces `Caramel::Application::EXPIRED_FORM`, with no deprecation release, an explicit exception to `CONTRIBUTING.md`.
+2. **`require "caramel/i18n"` is the only way in.** `src/caramel.cr` does not require it. It redefines the hooks above. A `macro finished` guard refuses a program that requires it without calling `Caramel.locales`.
+3. **Catalogs** (`src/caramel/i18n/catalog.cr`) are Crystal literals in `app/locales/CODE.cr`, with no `{{ run }}` helper and no build step.
    - `Caramel.locale(code, messages, plural = nil)` records a catalog. Its code is a language tag, such as `fr`, `pt-BR` or `zh-Hant`.
    - `Caramel.locales(default:, prefix: false)` checks every catalog and writes the code. A value is text, a plural (a named tuple whose keys are all CLDR categories or `=N`) or a group. So a group's keys cannot all be category names.
    - Keys are lowercase identifiers. They exclude Crystal's keywords, the methods every value has, and `locale`. `%{name}` is a placeholder; a literal `%{` cannot be written.
-   - Every error is a compile error at the offending catalog value, with a fixed problem text and a remediation: an invalid code, a locale declared twice, an invalid or reserved key, interpolated text, a key the default locale lacks, different placeholders, a different kind of value, a missing or unused plural form, a language without plural rules, an unknown framework key, an unsupported time directive, a malformed separator or name list, and a missing or unknown default.
-   - Each locale must have the default locale's keys, with the same placeholders. A missing key uses the default locale's text, and the application's `translations` command lists it.
+   - Every mistake is a compile error at the offending catalog value, with a fixed problem text and a remediation: an invalid code, a duplicate locale, an invalid or reserved key, interpolated text, a key the default locale lacks, different placeholders or kind of value, a missing or unused plural form, a language without plural rules, an unknown framework key, an unsupported time directive, a malformed separator or name list, and a missing or unknown default.
+   - A locale may omit keys the default locale has: a missing key uses the default locale's text, and `translations` lists it. A key it defines must exist in the default locale, with the same kind of value and placeholders.
+   - The reserved `caramel:` section supplies formatting data (see Catalog reference).
 4. **What `Caramel.locales` writes:**
-   - **`Caramel::Locale`**, an enum of the declared locales. It answers each locale's code, name, writing direction, plural category, number separators, month and day names, AM and PM, and time patterns. Each piece of formatting data falls back from the locale to the default locale, and then to English.
-   - **`Caramel::Messages`**, a struct per catalog group, which `t` returns. Each message is a method whose `case` over the locale has a branch per locale. A message with placeholders takes them as named arguments, and a plural takes its count first.
-   - **`Caramel::I18n::TimeFormat`**, `PREFIX` and `MISSING`.
+   - **`Caramel::Locale`**, an enum of the declared locales. It answers each locale's code, name, direction, plural category and formatting data; formatting data falls back from the locale to the default locale, then English.
+   - **`Caramel::Messages`**, a struct per catalog group, which `t` returns. Each message is a typed method (`t.books.count(3)`, `t.home.greeting(name: n)`) whose `case` over the locale has a branch per locale. Placeholders are named arguments; a plural takes its count first.
    - **The redefinitions of every framework message some catalog translates.** Each has the hook's signature and answers the request locale's text, else the default locale's, else the English one through `previous_def`.
-5. **Plural rules** (`src/caramel/i18n/plural.cr`) are CLDR 47's cardinal rules for whole numbers, one method per family of languages. A plural message must define its family's integer categories, and may define its other categories and exact `=N` counts. The table was checked against CLDR 47's `supplemental/plurals.json` for every listed language, at every count from 0 to 2,999 and around multiples of a million, and matched it everywhere.
-6. **Composition and escaping.** A message with placeholders is built by `Caramel::I18n.compose`. When an argument is a `Caramel::HTML::Safe`, the message is safe HTML: the catalog's text and every other argument are escaped, and the safe argument is written as it is. Otherwise the message is plain text, which views escape. Translators never write HTML.
+5. **Plural rules** (`src/caramel/i18n/plural.cr`) are CLDR 47's cardinal rules for whole numbers, one method per family of languages. A plural message must define its family's integer categories, and may define its other categories and exact `=N` counts.
+6. **Composition and escaping.** A message with placeholders is built by `Caramel::I18n.compose`. When an argument is a `Caramel::HTML::Safe`, the message is safe HTML: the catalog's text and other arguments are escaped and the safe argument is written as is. Otherwise the message is plain text, which views escape.
 7. **Resolution** (`Application#localized`, `src/caramel/i18n/localized.cr`):
    - With `prefix: true`, a first path segment that is a non-default locale's lowercase code selects that locale and is removed before routing. The default locale has no prefix.
    - A GET or HEAD with a `locale` parameter that names a declared locale is answered without routing: a 303 to the same page in that locale, or 200 with `HX-Redirect` for htmx. Both set the `__Host-caramel_locale` cookie for a year. An unknown value is ignored.
-   - Otherwise the locale is the prefix's, else the cookie's, else the best `Accept-Language` match, else the default. An `Accept-Language` longer than 1,024 bytes is ignored, and only its first 16 ranges are read. A range matches its exact tag, then the first locale in its language.
-   - Routing runs inside `Caramel::I18n.with`, which binds the locale to the fiber and restores it afterwards. Every response says `Content-Language`. A negotiated response adds `Vary: Accept-Language, Cookie`. A prefix locale that differs from the cookie updates it.
-   - Streamed bodies run in the response's locale.
+   - Otherwise the locale is the prefix's, else the cookie's, else the best `Accept-Language` match, else the default. An `Accept-Language` over 1,024 bytes is ignored; only its first 16 ranges are read. A range matches its exact tag, then the first locale in its language.
+   - Routing and streamed bodies run inside `Caramel::I18n.with`, which binds the locale to the fiber and restores it afterwards. Every response says `Content-Language`; a negotiated one adds `Vary: Accept-Language, Cookie`. A prefix locale that differs from the cookie updates it.
    - `handle` secures every response the hook returns, the switch's redirect included.
-8. **Framework messages render when they are created.** Errors keep their `Hash(String, Array(String))` shape, and JSON clients receive localized text. A message created outside a request, such as in a job or a console, is in the default locale unless it is wrapped in `Caramel::I18n.with`. `spawn`ed fibers and Cold Brew jobs start in the default locale: a job carries `param locale : String` and wraps its work in `Caramel::I18n.with`.
+8. **Framework messages render when they are created.** Errors keep their `Hash(String, Array(String))` shape, and JSON clients receive localized text. A message created outside a request, `spawn`ed fibers and Cold Brew jobs use the default locale unless wrapped in `Caramel::I18n.with`: a job carries `param locale : String` and wraps its work in `Caramel::I18n.with`.
 9. **Frappé:**
-   - `frappe make locale CODE` writes `app/locales/CODE.cr`. The first time, it also writes `app/locales/en.cr` and the i18n lines in `config/application.cr`.
-   - After that, `frappe make resource` writes `t.` calls in place of English, and inserts the resource's messages into the default locale's catalog. In such an application it refuses a field or plural that would be an invalid catalog key.
+   - Generated applications stay plain English until `frappe make locale CODE`, which writes `app/locales/CODE.cr`. The first time it also writes `app/locales/en.cr` and the i18n lines in `config/application.cr`.
+   - After that, `frappe make resource` writes `t.` calls in place of English, and inserts the resource's messages into the default locale's catalog. It refuses a field or plural that would be an invalid catalog key.
    - `frappe translations` runs the application's `translations` command, which lists each `MISSING code key file` and exits 1 while any key is missing.
 
-## Catalog reference
+### Catalog reference
 
-The reserved `caramel:` section takes only these keys. A locale that leaves one out uses the default locale's, then English.
+The reserved `caramel:` section takes only these keys; an omitted key uses the default locale's, then English.
 
 |Key|Value|English|
 |---|---|---|
@@ -76,74 +57,53 @@ The reserved `caramel:` section takes only these keys. A locale that leaves one 
 |`time.formats.NAME`|A pattern|`date` `%B %-d, %Y`, `time` `%-I:%M %p`, `datetime` `%B %-d, %Y %-I:%M %p`, `short_date` `%b %-d`|
 
 - A pattern uses only `%Y %m %-m %d %-d %H %-H %I %-I %M %S %p %B %b %A %a %%`. `%I` is the 12-hour clock, and `%-` drops the leading zero.
-- The default locale may add format names; `l(time, :name)` takes each. Other locales may only translate the names it has.
+- The default locale may add format names, which `l(time, :name)` takes; other locales only translate existing names.
 
-`errors` and `pages` translate Caramel's own messages. Each must use exactly the placeholders listed.
+`errors` and `pages` translate Caramel's own messages. Each uses exactly the placeholders its English text shows.
 
-|Key|English|Placeholders|
-|---|---|---|
-|`errors.required`|is required (contracts and changesets)|–|
-|`errors.must_be_file`|must be a file|–|
-|`errors.json_type`|must be a JSON %{type}|`type`|
-|`errors.invalid_value`|must be a valid %{type}|`type`|
-|`errors.at_least`|must be at least %{min}|`min`|
-|`errors.at_least_characters`|must be at least %{min} characters|`min`|
-|`errors.at_most`|must be at most %{max}|`max`|
-|`errors.at_most_characters`|must be at most %{max} characters|`max`|
-|`errors.duplicate_field`|Duplicate field: %{name}|`name`|
-|`errors.unknown_field`|Unknown field: %{name}|`name`|
-|`errors.expected_json_object`|Expected a JSON object|–|
-|`errors.url`|must be an absolute http or https URL|–|
-|`errors.blank`|can't be blank|–|
-|`errors.greater_than`|must be greater than %{than}|`than`|
-|`errors.less_than`|must be less than %{than}|`than`|
-|`errors.too_short`|should be at least %{min} character(s)|`min`|
-|`errors.too_long`|should be at most %{max} character(s)|`max`|
-|`errors.invalid_format`|has invalid format|–|
-|`errors.invalid`|is invalid|–|
-|`errors.taken`|has already been taken|–|
-|`errors.record_gone`|Record no longer exists|–|
-|`pages.check_request`|Check your request|–|
-|`pages.not_found`|Not found|–|
-|`pages.expired_form`|This form has expired or came from another site. Reload the page and try again.|–|
+|Key|English|
+|---|---|
+|`errors.required`|is required|
+|`errors.must_be_file`|must be a file|
+|`errors.json_type`|must be a JSON %{type}|
+|`errors.invalid_value`|must be a valid %{type}|
+|`errors.at_least`|must be at least %{min}|
+|`errors.at_least_characters`|must be at least %{min} characters|
+|`errors.at_most`|must be at most %{max}|
+|`errors.at_most_characters`|must be at most %{max} characters|
+|`errors.duplicate_field`|Duplicate field: %{name}|
+|`errors.unknown_field`|Unknown field: %{name}|
+|`errors.expected_json_object`|Expected a JSON object|
+|`errors.url`|must be an absolute http or https URL|
+|`errors.blank`|can't be blank|
+|`errors.greater_than`|must be greater than %{than}|
+|`errors.less_than`|must be less than %{than}|
+|`errors.too_short`|should be at least %{min} character(s)|
+|`errors.too_long`|should be at most %{max} character(s)|
+|`errors.invalid_format`|has invalid format|
+|`errors.invalid`|is invalid|
+|`errors.taken`|has already been taken|
+|`errors.record_gone`|Record no longer exists|
+|`pages.check_request`|Check your request|
+|`pages.not_found`|Not found|
+|`pages.expired_form`|This form has expired or came from another site. Reload the page and try again.|
 
 Plural rules are built in for these languages:
 
 - `af am ar as ast az be bg bn bs ca cs cy da de el en es et eu fa fi fo fr fy ga gl gu he hi hr hu id is it ja ka kk km kn ko ky lb lo lt lv mk ml mn mr ms my nb ne nl nn no pl pt pt-PT ro ru sk sl so sq sr sv sw ta te th tr uk ur uz vi yue zh zu`.
-- A tag with a region or script uses its language's rules, so `pt-BR` uses `pt`'s; `pt-PT` has its own.
+- A tag with a region or script uses its language's rules, so `pt-BR` uses `pt`'s.
 - Any other language names one with the same rules: `Caramel.locale "eo", {…}, plural: "en"`.
 
 `Locale#dir` is `rtl` for `ar he fa ur ps sd ug yi dv ckb`, and `ltr` for every other language.
 
 ## Reasons
 
-- Rendering at creation time, rather than storing error codes, keeps the error hash and the JSON shape every client already reads. Switching to codes would break both, so it waits for a later, breaking release if the owner wants it.
-- Hooks that already exist with English and identity bodies let one opt-in require replace them. A plain application keeps exactly its old behaviour, and the check proves its binary holds no i18n code.
-- Typed message methods turn a missing or misspelled key, a missing placeholder and a missing plural form into compile errors. An unused message is never typed, so it adds nothing to the binary.
-
-Alternatives the owner rejected:
-
-- YAML catalogs read through a `{{ run }}` macro, which adds a compile step and moves errors away from the catalog's line.
-- Code generated by Frappé, which can drift from the catalogs it was generated from.
-- Bundled CLDR formatting data, which would add size to every localized binary. Catalogs supply what each application uses, and English is built in.
-- Applications that are internationalization-ready from their first day, which would make every application pay for i18n.
-
-Not part of this decision, each a separate feature: select and gender messages, currency and relative time, translated URL segments, translations stored in the database, carrying the locale into Cold Brew jobs automatically, and a report of unused keys.
-
-## Verification
-
-- `scripts/check i18n`:
-  - type-checks a valid fixture and one fixture per compile error in `spec/fixtures/i18n`, and asserts each problem text and the fixture's file in the compiler's output;
-  - builds the same application without and with `caramel/i18n`, and fails with "i18n code must be absent from an application that does not require caramel/i18n" unless only the second binary holds `__Host-caramel_locale`; the first must answer `200 -` and `404 -`, the second `200 fr` and `404 fr`;
-  - runs `spec/i18n`, which covers messages, fallbacks, escaping, plurals in English, Russian and Arabic, negotiation, prefixes, the switch, streaming, translated contract and changeset errors, and number and time formats.
-  
-  Those specs replace framework methods for their whole program, so they are not part of the main spec run.
-- `spec/frappe/locale_generator_spec.cr` and `spec/frappe/resource_generator_spec.cr` cover `frappe make locale` and localized resources. Plain resources are byte-identical to before.
-- `scripts/check frappe-project` runs `frappe make locale fr` in a generated application. It then generates localized resources beside a plain one, compiles, lints and specs them, and asserts that `frappe translations` lists fr's missing keys.
-
-## Implementation
-
-- Hooks: `src/caramel/wording.cr`, `src/sugar_orm/wording.cr`, `src/caramel/application.cr` (`route`, `localized`, `streaming`), `src/caramel/http/paths.cr`, `src/caramel/view.cr` (`markup`), `src/caramel/command_line.cr` (`translations`), and the layout template's `html lang: Caramel.language`.
-- `caramel/i18n`: `src/caramel/i18n.cr`, `src/caramel/i18n/keys.cr`, `plural.cr`, `catalog.cr`, `runtime.cr` and `localized.cr`.
-- Frappé: `src/frappe/publication.cr`, `src/frappe/locale_generator.cr`, `src/frappe/resource_generator.cr`, `src/frappe/commands.cr`, `src/frappe/cli.cr` and `templates/resource`.
-- Checks: `scripts/checks/i18n.cr`, `spec/i18n`, `spec/fixtures/i18n` and `scripts/checks/frappe_project.cr`.
+- Catalogs as Crystal literals and typed message methods make every catalog mistake a compile error on the catalog's line; unused messages add nothing to the binary.
+- Hooks that one opt-in require replaces keep a plain application unchanged and free of i18n code.
+- Rendering at creation keeps the error hash and JSON shape clients read.
+- Escaping by default, a per-request locale and localized form URLs avoid injection, races and POST-to-GET redirects.
+- Falling back to the default locale and reporting gaps never blocks shipping.
+- Rejected: YAML catalogs through a `{{ run }}` macro, because they add a compile step and move errors off the catalog's line.
+- Rejected: Frappé-generated code, because it drifts.
+- Rejected: bundled CLDR formatting data, because it enlarges every localized binary.
+- Rejected: i18n-ready applications from day one, because all would pay.
