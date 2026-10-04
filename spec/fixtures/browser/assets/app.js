@@ -76,7 +76,7 @@
     });
   }
 
-  // Streams the board's Cold Brew channel through the RFC-0003 §2.3 action.
+  // Streams the board's Cold Brew channel through the Boards::Live action.
   function openBoard() {
     const board = document.getElementById('pubsub').dataset.board;
     const log = document.getElementById('pubsub-log');

@@ -395,7 +395,7 @@ module Caramel::Latte
     end
 
     # Clones the site's development database into a disposable branch behind
-    # the RFC-0004 connection guard. The branch belongs to the development
+    # the connection guard. The branch belongs to the development
     # migration role and admits exactly the development roles.
     def create_branch(site : Site, name : String) : Branch
       database = self.class.branch_database(site.id, name)
@@ -448,7 +448,7 @@ module Caramel::Latte
       output.lines.map(&.strip).reject(&.empty?).map(&.lchop(prefix))
     end
 
-    # RFC-0004 connection guard: while the block runs, `database` refuses new
+    # Connection guard: while the block runs, `database` refuses new
     # connections and has no other backends. Connections are re-allowed in
     # every outcome, including an expired operation deadline.
     def guard_connections(database : String, &) : Nil
@@ -459,7 +459,7 @@ module Caramel::Latte
     end
 
     # A crash between guard and release would lock developers out of their
-    # database (RFC-0004 §3); Latte re-allows connections whenever it starts.
+    # database; Latte re-allows connections whenever it starts.
     def release_guards : Nil
       @lock.synchronize { run_admin_psql(RELEASE_GUARDS_SQL) }
     end

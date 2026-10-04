@@ -1,8 +1,8 @@
 require "./mrdp"
 
 module Caramel::Frappe
-  # One compiler diagnostic (RFC-0005 §2.3), rendered as MRDP for agents or
-  # in the RFC-0008 §2.6 typography for people.
+  # One compiler diagnostic, rendered as MRDP for agents or
+  # in terminal typography for people.
   class Diagnostic
     SUMMARIES = {
       "CONTRACT_MISMATCH"  => "A route parameter must bind to a field of its action's contract.",
@@ -61,7 +61,7 @@ module Caramel::Frappe
       MRDP.write(io, @status ? "#{@code}:#{@status}" : @code, location, fields)
     end
 
-    # Mode A (RFC-0008 §2.6): the source line boxed with its file and line, a
+    # Mode A: the source line boxed with its file and line, a
     # caret under the column, then the remediation. ANSI only when `color`.
     def render(io : IO, color : Bool) : Nil
       paint = ->(text : String, style : String) { color ? "\e[#{style}m#{text}\e[0m" : text }

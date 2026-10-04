@@ -14,11 +14,22 @@ scripts/build-frappe && scripts/build-latte
 scripts/check all
 ```
 
-`scripts/check all` builds everything, then runs the spec suite and every check in three lanes side by side ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. Three lanes' compilers peaked at about 6 GB; on a machine with less memory, `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one; the README lists what each needs. The browser check needs an unlocked screen and Safari's Allow Remote Automation. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first: run `frappe services stop`, wait until `frappe services` shows every service stopped, then run `latte stop`.
+`scripts/check all` builds everything, then runs the spec suite and every check in three lanes side by side ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. Three lanes' compilers peaked at about 6 GB; on a machine with less memory, `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one, and `scripts/check` alone lists them. The browser check needs an unlocked screen and Safari's Allow Remote Automation. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first: run `frappe services stop`, wait until `frappe services` shows every service stopped, then run `latte stop`.
+
+What the checks need:
+
+- Every command uses the pinned managed tools; none falls back to a Crystal or Shards on `PATH`. `scripts/install-toolchain` installs into `~/Library/Application Support/Caramel/toolchains/` and records the location in this checkout's `.caramel-toolchain`, which every command and check reads. `--root <dir>` installs elsewhere, and `CARAMEL_TOOLCHAIN_ROOT` overrides the recorded location. The selection and lockfile live in `tools/toolchain/`.
+- `integration` creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS or certificate trust. No check runs the system integration installer or `latte trust install`; those are separate, explicit operations.
+- The Latte checks (`latte-ipc`, `latte-postgres`, `latte-network`, `latte-daemon`, `native`) also need the pinned CoreDNS artifact (`scripts/install-latte-tools --help`) and the macOS Swift compiler. Run `scripts/build-latte` and `scripts/build-frappe` before the checks that use them.
+- `latte-daemon` runs the real `bin/latte daemon` on Latte's fixed ports: DNS 15353 and HTTP/HTTPS 18080/18443.
+- `browser` drives Safari through `safaridriver` against a generated app on an isolated Latte stack; enable Safari's "Allow Remote Automation" once with `safaridriver --enable`.
+- `scripts/check all --except NAME` skips a check, for example `--except latte-daemon` while your own Latte holds its ports. It runs `frappe-project` once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow.
+
+Editor tools: build Frappé first (`scripts/build-frappe`), then run `bin/frappe lsp install`; the repo's `.zed/settings.json` runs `bin/frappe lsp …`, so trust the worktree when Zed asks. `scripts/check editor-tools` verifies them.
 
 ## Formatting and linting
 
-Code follows Caramel's RFC-0008 rule set ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)): `crystal tool format` for layout, and Ameba 1.7.0 plus `Caramel/ServiceNoun` for the rest. `scripts/check lint` builds `bin/frappe-lint` and lints the framework. `bin/frappe-lint --fix` applies Ameba's corrections, but review every one: some change behaviour, and ADR 0017 lists those that are not adopted. An inline `# ameba:disable Rule -- reason` goes on its own line above the code it covers and always names its reason.
+Code follows Caramel's rule set ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)): `crystal tool format` for layout, and Ameba 1.7.0 plus `Caramel/ServiceNoun` for the rest. `scripts/check lint` builds `bin/frappe-lint` and lints the framework. `bin/frappe-lint --fix` applies Ameba's corrections, but review every one: some change behaviour, and ADR 0017 lists those that are not adopted. An inline `# ameba:disable Rule -- reason` goes on its own line above the code it covers and always names its reason.
 
 ## Style
 
@@ -55,11 +66,42 @@ The formatter owns layout, and the linter owns what it can check ([ADR 0017](doc
 
 - **Name the steps.** A method that does three things calls three private methods named for what they do. Tables, limits and messages are named constants.
 - **Write multi-line text as it reads.** JSON bodies, SQL, `.env` files and expected output are heredocs, not strings joined with `\n`.
+- **No service nouns.** `…Service`, `…Manager`, `…Factory` and the like hold a verb that belongs on its subject: a method on the model, a changeset or a job.
 - **Specs:**
   - name their inputs and expectations;
   - test one concern per example;
   - share setup through small helpers named for what they return, such as `signed(body)`.
 - **Templates read as the code they generate.** Resource templates mark optional code with whole lines: `# frappe:only a,b`, `# frappe:unless a,b`, `# frappe:else` and `# frappe:end`. They never tag the end of a code line.
+
+## Writing
+
+Every piece of writing has one home, chosen by what it is ([ADR 0026](docs/decisions/0026-writing-homes.md)):
+
+- What application authors need: the website (`website/source/site.html`). API detail
+  goes in doc comments at the code.
+- What contributors must do: this file.
+- A decision: an ADR in `docs/decisions` with Context (optional, the problem), Decision
+  (the rules in force, present tense) and Reasons (why, and what was rejected). When a
+  change alters a decision, edit its ADR in the same commit.
+- Status, measurements, investigations, incident timelines and history: not this
+  repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
+  pull request description or the CHANGELOG.
+
+State a fact once and link to it. `scripts/check prose` checks where markdown lives,
+the ADR sections, relative links and each file's size.
+
+## Principles
+
+Decisions follow these principles:
+
+1. One machine is enough: a compiled binary and PostgreSQL, without premature distribution.
+2. State lives in PostgreSQL and in server-rendered HTML that htmx morphs.
+3. Nothing hides the machine: native processes and Unix sockets, no containers in development.
+4. Data integrity comes first: schema changes are branched and verified before they touch data.
+5. No mocks: specs exercise real PostgreSQL and real rendered HTML.
+6. Agents get stateless command-line tools with compact diagnostics, not daemons.
+7. Compile-time macros, not runtime reflection, with fast repair loops.
+8. Code reads like short sentences, without ceremonial plumbing.
 
 ## Commits
 

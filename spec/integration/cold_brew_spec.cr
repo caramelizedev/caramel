@@ -116,7 +116,7 @@ module ColdBrewSpec
       end
     end
 
-    # RFC-0003 §2.3, verbatim apart from the base struct.
+    # Boards::Live, verbatim apart from the base struct.
     struct Live < Page
       contract do
         field board_id : Int64
@@ -1027,7 +1027,7 @@ describe "Caramel::ColdBrew PubSub" do
     end
   end
 
-  it "streams the RFC-0003 §2.3 action as server-sent events" do
+  it "streams the Boards::Live action as server-sent events" do
     ColdBrewSpec.reset
     ColdBrewSpec.with_broker do
       router = ColdBrewSpec::AppRouter.new

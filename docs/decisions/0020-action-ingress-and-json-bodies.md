@@ -2,16 +2,14 @@
 
 Date: 2026-09-29
 
-Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decisions 3 and 4, and [RFC-0001](../rfc.md) §3.
+Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decisions 3 and 4.
 
 ## Context
 
-ADR 0003 read every request the same way before routing. `Caramel::RequestInput` accepted URL-encoded and multipart forms, answered any other media type with 415, and the application checked CSRF on every POST, PUT, PATCH and DELETE. First users of 0.4.0 hit that boundary twice:
+Reading every request the same way before routing, and checking CSRF on every POST, PUT, PATCH and DELETE, does not fit two kinds of client:
 
-- **JSON clients** ([#2](https://github.com/caramelizedev/caramel/issues/2)). A notes API had to reopen `RequestInput` to parse JSON into contract fields. Its first version changed form parsing for the whole application.
-- **Signed webhooks** ([#3](https://github.com/caramelizedev/caramel/issues/3)). A webhook relay needs the exact bytes it received to verify an HMAC, a limit of its own, and an authentication policy in place of the browser CSRF check. It had to reopen `Application#handle` for one path.
-
-A token-authenticated JSON API has the same needs as the webhook, except that it wants its body parsed rather than raw.
+- **JSON clients** ([#2](https://github.com/caramelizedev/caramel/issues/2)) need their body parsed into contract fields without changing form parsing for the whole application.
+- **Signed webhooks** ([#3](https://github.com/caramelizedev/caramel/issues/3)) and token-authenticated APIs need the exact bytes (for an HMAC), a limit of their own, and an authentication policy in place of the browser CSRF check.
 
 ## Decision
 
@@ -30,7 +28,7 @@ A token-authenticated JSON API has the same needs as the webhook, except that it
    - The same match drives dispatch, so the trie is walked once unless the request overrides its method. Matching still allocates nothing.
 3. **Reading.** `RequestInput.read(request, ingress)` reads under the policy.
    - **Raw.** The bytes are read up to the limit, with no transport controls, and the contract binds only the route and the query.
-   - **Form.** URL-encoded text and multipart text are bounded by the limit; uploads keep their 64 MiB budget. `application/json` bodies are also read (rule 4).
+   - **Form.** URL-encoded text and multipart text are bounded by the limit; uploads stream to request-scoped tempfiles within a 64 MiB total budget. `application/json` bodies are also read (rule 4).
    - Other media types still answer 415.
 4. **JSON.** A JSON body must be an object. Its scalar members bind like form fields:
    - numbers keep their source text, so contracts convert them with the existing grammar;
@@ -52,31 +50,3 @@ A token-authenticated JSON API has the same needs as the webhook, except that it
 - The body must be read differently per route (raw bytes, a limit), so the route has to be known before the body is read. Matching on the real method, and falling back to the default policy, keeps every unmatched request as guarded as before.
 - JSON members bind through the same contract grammar as form text, so a JSON client and a form share one contract and one set of error messages. Checking each member's JSON type keeps `"5"` from passing as a number.
 - An empty session on CSRF-off routes turns the one authenticator that would reopen CSRF, a session cookie, into one that fails closed.
-
-Principles followed:
-
-- Manifesto 7: compile-time AST macros replace runtime reflection.
-- Manifesto 3: no hidden allocation on the matching path.
-- RFC-0008 §2.5: an action reads as contract, handle and egress, with no plumbing.
-
-## Verification
-
-- `spec/caramel/request_input_spec.cr` covers:
-  - JSON scalars and their types;
-  - `null`, duplicates, nesting, a non-object body, malformed JSON, NUL and invalid UTF-8;
-  - the ingress limit;
-  - raw bytes of any type, with no transport controls;
-  - 415 for other media types.
-- `spec/caramel/request_contract_spec.cr` covers JSON binding and type errors.
-- `spec/caramel/ingress_spec.cr` covers:
-  - an HMAC-signed webhook without CSRF;
-  - 401 before the action or the contract;
-  - 413 over the limit;
-  - a token API whose session is empty and unsaved;
-  - authenticated reads;
-  - same-origin JSON requiring the CSRF header;
-  - no CSRF bypass through unmatched routes or other methods;
-  - 405 for an override into a route that reads differently;
-  - the route listing.
-- `spec/caramel/router_spec.cr` covers matching by the real method before the body, with zero allocation.
-- `scripts/check route-compilation` covers every compile error above, plus an inherited and a redeclared ingress.

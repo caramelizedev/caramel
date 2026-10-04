@@ -2,16 +2,16 @@
 
 Date: 2026-09-28
 
-Status: accepted. Amends [RFC-0004](../rfc.md) §2.1 and [RFC-0005](../rfc.md) §2.1. [ADR 0016](0016-versioning-and-releases.md) amends on-demand start and the launchers: both run the newest installed release.
+Status: accepted. Amended by [ADR 0016](0016-versioning-and-releases.md) on on-demand start and the launchers.
 
 ## Context
 
-The first-run path, `frappe new demo && cd demo && frappe dev`, needed four manual steps that the RFCs never asked for:
+The first-run path, `frappe new demo && cd demo && frappe dev`, must work without manual steps:
 
-- Every command needed `CARAMEL_TOOLCHAIN_ROOT` exported. `scripts/crystal` and `scripts/shards` silently used whatever Crystal was on `PATH` without it.
-- `frappe` and `latte` had to be called by their full paths in the checkout.
-- `latte daemon` had to be started by hand in a terminal, and it stopped when that terminal closed.
-- A new project refused to serve until `frappe migrate` ran. `frappe dev` then printed the same refusal every second.
+- Every command would need `CARAMEL_TOOLCHAIN_ROOT` exported, and `scripts/crystal` and `scripts/shards` could silently use whatever Crystal is on `PATH`.
+- `frappe` and `latte` would need full paths in the checkout.
+- `latte daemon` would need starting by hand, and would stop when that terminal closes.
+- A new project would refuse to serve until `frappe migrate` ran.
 
 ## Decision
 
@@ -24,10 +24,10 @@ The first-run path, `frappe new demo && cd demo && frappe dev`, needed four manu
    - There is no fallback to a Crystal found on `PATH`. The variable stays as the override that checks use for test toolchains.
 2. **The installer records the toolchain.**
    - Without `--root`, `scripts/install-toolchain` reuses the toolchain `.caramel-toolchain` already names when its receipt is for this release, so a rerun verifies or resumes it. Otherwise it installs into `~/Library/Application Support/Caramel/toolchains/<release>`. `<release>` is 12 hex digits of the pinned selection's digest, so a changed release installs beside the old one.
-   - Since 2026-10-02 the selection leaves out the launchers, the toolchain's copies of `scripts/crystal` and `scripts/shards` (`launchers/`). A release that changes only them reuses the toolchain: after verifying it, the installer writes the release's launchers over the old ones and records the selection without them. Before, every launcher edit installed a new toolchain (a 39 s download, about 491 MB, cold compiler caches and a 20-minute crystalline rebuild). Frappé builds with each release's own `scripts/crystal`; the toolchain's copies serve only its `bin/crystal`.
-   - After a fresh install or a verified reuse, it writes `.caramel-toolchain`. It is the only writer; `frappe lsp install` no longer writes the pointer.
+   - The selection leaves out the launchers, the toolchain's copies of `scripts/crystal` and `scripts/shards` (`launchers/`). A release that changes only them reuses the toolchain: after verifying it, the installer writes the release's launchers over the old ones and records the selection without them. Frappé builds with each release's own `scripts/crystal`; the toolchain's copies serve only its `bin/crystal`.
+   - After a fresh install or a verified reuse, it writes `.caramel-toolchain`. It is the only writer; `frappe lsp install` does not write the pointer.
 3. **Launchers on PATH.**
-   - `frappe installations register` writes `~/.local/bin/frappe` and `~/.local/bin/latte`. Each is a marked script that `exec`s this checkout's binary.
+   - `frappe installations register` writes `~/.local/bin/frappe` and `~/.local/bin/latte`. Each is a marked script that `exec`s the binary of the newest installed release, which may be this checkout's ([ADR 0016](0016-versioning-and-releases.md) decision 5).
    - It refuses, before writing either file, when a name is taken by a file Caramel did not create, or when the directory is writable by others.
    - `frappe installations remove` deletes the launchers that run the removed checkout.
 4. **Latte's lifecycle.**
@@ -46,28 +46,9 @@ The first-run path, `frappe new demo && cd demo && frappe dev`, needed four manu
 ## Reasons
 
 - The installer is the only component that knows where it installed. Recording that per checkout replaces an environment variable every shell had to carry. The ownership checks keep another local user from redirecting the compiler this user runs.
+- Launcher reuse avoids a new toolchain for every launcher edit (a 39 s download, about 491 MB, cold compiler caches and a 20-minute crystalline rebuild).
 - `~/.local/bin` is the per-user executable directory that is usually already on `PATH`, so no shell profile is edited. Marked scripts make "Caramel created this file" provable. Unlike symlinks, they let each binary find its checkout through its own executable path.
-- Starting the service supervisor on demand removes a manual step without adding an agent daemon. Frappé commands stay one-shot and stateless (RFC-0005), and the daemon still carries no agent protocol state. The login item is opt-in because it changes what runs at login.
-- launchd kills a job's whole process group when the job exits. Without `AbandonProcessGroup`, a crash or `latte stop` would take PostgreSQL, CoreDNS and Caddy with it. With `KeepAlive`, a daemon that exits because another one is already running would restart in a loop; on-demand start already recovers from a crash.
-- A project that serves right after `frappe new` is the first run the RFCs describe.
-
-Principles followed:
-
-- Manifesto 3: native processes and Unix sockets, with no containers and no shell activation.
-- Manifesto 4: never overwrite a file Caramel did not create; services survive daemon exits.
-- Manifesto 6: Frappé stays a set of stateless one-shot tools. The daemon it starts supervises processes, not an agent protocol.
-- Manifesto 7: `frappe new demo && cd demo && frappe dev` works on the first try.
-- RFC-0008 §2.6: every refusal names its remedy, such as "Run scripts/install-toolchain."
-
-## Verification
-
-- `spec/latte/toolchain_spec.cr` covers the lookup precedence and refuses a pointer others can write, a symlinked pointer and a relative root.
-- `scripts/check native`:
-  - `spec/native/toolchain_installer_spec.cr` covers the pointer written after installing and after an offline verification, and the default root. A bare rerun reuses the recorded toolchain of the same release, and a changed release installs under `CARAMEL_HOME/toolchains`. A release whose launchers alone changed reuses the toolchain, offline or as the recorded default, and writes its launchers; both specs fail when the launchers count in the selection.
-  - `spec/native/login_item_spec.cr` loads a login item into the user's GUI domain. It checks that the item runs at load, that its children outlive the job and its unloading, and that it uninstalls cleanly. Without `AbandonProcessGroup`, launchd kills those children.
-- `scripts/check installations` fails when an installed release pins the checkout's selection, launchers aside, but installs another toolchain instead of reusing it.
-- `spec/latte/login_item_spec.cr` parses the rendered agent with `plutil`.
-- `spec/frappe/launchers_spec.cr` covers quoting, replacing Caramel's own launchers, refusing foreign files and shared directories, and removal.
-- `spec/frappe/latte_client_spec.cr` covers the on-demand start and the log line reported when a start fails. `spec/latte/server_spec.cr` covers a stop request being answered before the server closes.
-- `scripts/check latte-daemon` runs `frappe services start` with no daemon. It checks that the detached daemon outlives Frappé in its own session with a private log, and that `latte stop` ends it.
-- `scripts/check frappe-project` and `scripts/check schema-diff` start from projects that `frappe new` has migrated. `scripts/check frappe-project --dev` shows a pending migration and serves once it is applied.
+- Starting the service supervisor on demand removes a manual step without adding an agent daemon. Frappé commands stay one-shot and stateless, and the daemon still carries no agent protocol state. The login item is opt-in because it changes what runs at login.
+- launchd kills a job's whole process group when the job exits. Without `AbandonProcessGroup`, a crash or `latte stop` would take PostgreSQL, CoreDNS and Caddy with it.
+- Rejected: `KeepAlive` on the login item, because a daemon that exits since another one is already running would restart in a loop, and on-demand start already recovers from a crash.
+- A project that serves right after `frappe new` is the expected first run.

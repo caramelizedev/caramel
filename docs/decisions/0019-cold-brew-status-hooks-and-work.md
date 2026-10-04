@@ -2,17 +2,15 @@
 
 Date: 2026-09-29
 
-Status: accepted. Amends [ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decisions 3 and 8, and [RFC-0003](../rfc.md) §2.2.
+Status: accepted. Amends [ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decisions 3 and 8.
 
 ## Context
 
 A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/caramelizedev/caramel/issues/6)) used Cold Brew for delivery with retries. Three gaps made the application reach past the framework:
 
 - **Status.** To show a delivery's attempts, next run, lock and failure, its dashboard joined its own table to `caramel_jobs`, whose partitioning and columns belong to the framework ([#4](https://github.com/caramelizedev/caramel/issues/4)).
-- **Transitions.** A job can publish its success from `perform`, because the publish commits with the job. A failure rolls that transaction back, and Cold Brew then writes the retry or failure with no callback, so the dashboard polled for it ([#4](https://github.com/caramelizedev/caramel/issues/4)).
+- **Transitions.** A failure rolls back the job's transaction, and Cold Brew then writes the retry or failure with no callback, so the dashboard polled for it ([#4](https://github.com/caramelizedev/caramel/issues/4)).
 - **Processes.** A second process that only worked queues needed a custom compiled entry point to start `Worker` and `Scheduler` ([#5](https://github.com/caramelizedev/caramel/issues/5)).
-
-The relay also showed that a job's call to another service repeats when the process dies or the commit fails after the call, which no document stated.
 
 ## Decision
 
@@ -39,7 +37,7 @@ The relay also showed that a job's call to another service repeats when the proc
    - `ColdBrew.start(url, env, scheduler: false)` leaves `every` schedules to other processes. Maintenance always runs, because it is idempotent.
    - `work` refuses pending migrations, prints a ready line once its workers are claiming jobs, and on SIGTERM or SIGINT lets in-flight jobs finish before it exits 0.
    - It refuses to run under `CARAMEL_ENV=test`, where specs drain queues.
-   - `serve` now starts Cold Brew inside the block that removes its socket, so invalid worker settings no longer leave the socket behind.
+   - `serve` starts Cold Brew inside the block that removes its socket, so invalid worker settings never leave the socket behind.
 4. **Delivery.** Jobs run at least once: a job's own writes commit once with its completion, but a call to another service repeats when the process dies or the commit fails after the call. Receivers deduplicate on a stable identifier. PubSub notifications are at most once.
 
 ## Reasons
@@ -48,22 +46,3 @@ The relay also showed that a job's call to another service repeats when the proc
 - A hook inside the failed `perform` transaction would be rolled back with it and could not describe the durable queue state. Calling hooks after the transition row is written is the first point where the state they describe is real.
 - Running each hook in its own transaction makes its effects commit together and keeps a broken hook from affecting the worker or a spec's transaction.
 - The worker-only process reuses `serve`'s startup and shutdown instead of a second entry point, so a deployment runs one binary in two roles.
-
-Principles followed:
-
-- Manifesto 2: state lives in the database.
-- Manifesto 4: data integrity. Hooks see only committed transitions.
-- RFC-0008 §2.5: no plumbing in application code.
-
-## Verification
-
-- `spec/cold_brew/status_spec.cr` covers the state rules and an empty batch.
-- `spec/cold_brew/configuration_spec.cr` covers `work`'s flags and their environment.
-- `spec/integration/cold_brew_spec.cr` covers:
-  - every state from real rows, and that `error_class` carries no message;
-  - hooks, after a worker's retry and failure, seeing the committed row from another connection;
-  - a hook's publish reaching a subscriber;
-  - a raising hook leaving the worker running, and a failing hook leaving a spec's transaction usable (it fails without the hook's savepoint);
-  - `start(scheduler: false)` writing no schedule lease;
-  - `CommandLine.work` becoming ready and letting its in-flight job finish after it is stopped.
-- A compiled application's `work` was sent SIGTERM during a two-second job. It waited for the job, exited 0, and the job was finished.

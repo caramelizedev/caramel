@@ -303,7 +303,7 @@ module Caramel::Checks
            "beside plain ones, and frappe translations lists fr's missing keys"
     end
 
-    # RFC-0005 agent tooling on the generated project: the stateless manifest,
+    # Agent tooling on the generated project: the stateless manifest,
     # strict usage errors, the routes filter, Tier-1 `frappe check` with MRDP
     # whose PATCH lines are applied mechanically until the check passes, the
     # human typography, `frappe expand` and database branches.
@@ -375,8 +375,8 @@ module Caramel::Checks
         MSG: Use built-in formatter to format this source (Lint/Formatting)
         FIX: frappe format
         ERR LINT_CARAMEL_SERVICE_NOUN at app/models/invitation_service.cr:2:10
-        MSG: `InvitationService` is a service noun; put the verb on its subject instead \
-        (RFC-0008 §2.1), e.g. a method on the model, a changeset or a job \
+        MSG: `InvitationService` is a service noun; put the verb on its subject instead, \
+        e.g. a method on the model, a changeset or a job \
         (Caramel/ServiceNoun)\n
         MRDP
       command([@frappe, "format"], chdir: @project, echo: false)
@@ -578,7 +578,7 @@ module Caramel::Checks
       puts "PASS: frappe corretto refuses a planted allow( with its file and line " \
            "before migrating or compiling"
 
-      rfc_example
+      teams_example
 
       File.write(File.join(@project, "spec/requests/corretto_probe_spec.cr"), CORRETTO_PROBE)
       File.write(File.join(@project, "app/jobs/probe_job.cr"), PROBE_JOB)
@@ -611,25 +611,14 @@ module Caramel::Checks
            "then drops the workers"
     end
 
-    # RFC-0006 §2.1's example spec, copied byte for byte from docs/rfc.md, runs
-    # green against the minimal application it describes: top-level User, Team
-    # and Notification schemas, a Teams::Create action and a Cold Brew job.
-    def rfc_example : Nil
-      rfc = File.read_lines(File.join(@repo, "docs/rfc.md"), chomp: false)
-      heading = "# spec/actions/teams/create_spec.cr\n"
-      start = rfc.index(heading) || raise "docs/rfc.md lacks the RFC-0006 example spec"
-      assert!(rfc[start - 1] == "```crystal\n",
-        "the RFC-0006 example must start a crystal code block")
-      closing = (start...rfc.size).find { |index| rfc[index].starts_with?("```") }
-      finish = closing || raise "the RFC-0006 example code block is not closed"
-      example = rfc[start...finish].join
-      described = example.includes?("describe Teams::Create do")
-      notified = "Notification::Query.where(user_id: user.id).count(db).should eq(1)"
-      assert!(described && example.includes?(notified), example)
+    # The Teams example spec runs green against the minimal application it describes:
+    # top-level User, Team and Notification schemas, a Teams::Create action and a
+    # Cold Brew job.
+    def teams_example : Nil
       spec = File.join(@project, "spec/actions/teams/create_spec.cr")
       Dir.mkdir_p(File.dirname(spec))
-      File.write(spec, example)
-      RFC_APP.each do |relative, source|
+      File.write(spec, TEAMS_SPEC)
+      TEAMS_APP.each do |relative, source|
         Dir.mkdir_p(File.join(@project, File.dirname(relative)))
         File.write(File.join(@project, relative), source)
       end
@@ -647,20 +636,54 @@ module Caramel::Checks
 
       result = command([@frappe, "corretto", "spec/actions/teams/create_spec.cr"],
         chdir: @project, timeout: 600.seconds)
-      assert!(File.read(spec) == example, "the RFC-0006 example spec changed on disk")
+      assert!(File.read(spec) == TEAMS_SPEC, "the Teams example spec changed on disk")
       ran = result.stdout.includes?("[w1] 1 examples, 0 failures, 0 errors, 0 pending")
       passed = result.stdout.includes?("Corretto: 1 of 1 workers passed")
       assert!(ran && passed, result.stdout + result.stderr)
-      puts "PASS: RFC-0006 §2.1's example spec, verbatim from docs/rfc.md, " \
-           "passes under frappe corretto with a derived create_teams migration " \
-           "and a drained Cold Brew notification job"
+      puts "PASS: the Teams example spec passes under frappe corretto with a derived " \
+           "create_teams migration and a drained Cold Brew notification job"
     end
 
-    # The list item the RFC's Teams::Create action renders. It is a raw
+    TEAMS_SPEC = <<-CRYSTAL
+      # spec/actions/teams/create_spec.cr
+      require "../../spec_helper"
+
+      describe Teams::Create do
+        it "creates team, sets owner, and synchronously processes notification" do
+          Corretto.session do |client, db|
+            user = User.create!(db, email: "founder@caramel.dev")
+            client.sign_in(user)
+
+            # 1. Ingress: Authentic htmx request
+            response = client.post("/teams",
+              headers: { "HX-Request" => "true" },
+              params: { "name" => "Acme Corp", "seats" => "10" }
+            )
+
+            # 2. Hypermedia Egress Verification
+            response.should have_status(200)
+            response.should render_partial("#team-list", swap: "innerMorph") {
+              li { "Acme Corp · 10 seats" }
+            }
+
+            # 3. Real State Verification
+            team = Team::Query.where(name: "Acme Corp").first!(db)
+            team.seats.should eq(10)
+            team.owner_id.should eq(user.id)
+
+            # 4. Synchronous Queue Drain
+            Caramel::ColdBrew.drain_queue!(db, "default")
+            Notification::Query.where(user_id: user.id).count(db).should eq(1)
+          end
+        end
+      end
+      CRYSTAL
+
+    # The list item the Teams::Create action renders. It is a raw
     # literal, so its interpolations reach the generated source as written.
     TEAM_ITEM = %q(<li>#{Caramel::HTML.escape(created.name)} · #{created.seats} seats</li>)
 
-    RFC_APP = {
+    TEAMS_APP = {
       "app/models/user.cr" => <<-CRYSTAL,
         struct User < SugarORM::Schema
           schema "users" do

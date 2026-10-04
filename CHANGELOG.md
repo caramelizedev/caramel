@@ -4,6 +4,11 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+### Upgrade notes
+
+- `frappe new` writes an `AGENTS.md` that maps the application for coding agents, a `CLAUDE.md` that imports it, and a shorter `README.md`. Existing applications keep their files; copy `AGENTS.md` and `CLAUDE.md` from `templates/application` in the release source to adopt them.
+- The `Caramel/ServiceNoun` lint message and description no longer cite the design RFC. The rule is unchanged.
+- The release source no longer ships the design RFC, the research notes or the separate testing, views and editor-tools guides. The notes are in [caramel-notes](https://github.com/caramelizedev/caramel-notes), and the guides are on the website.
 - An application can be multi-tenant ([ADR 0025](docs/decisions/0025-multi-tenancy.md)). Nothing changes until it runs `frappe make tenancy MODEL`, such as `frappe make tenancy Account`. That command adds the tenant's schema, migration, sign-up page and home page, `require "caramel/tenancy"` in `config/application.cr`, and a `tenant App::Account, by: :slug do … end` block in `config/routes.cr`. Resources generated after it belong to the tenant and live under `/SLUG`; `frappe make resource … --central` makes one every tenant shares. To make an existing populated table tenanted, follow the ADR's "Plugging in on existing data".
 - `SugarORM::Catalog::ForeignKey` now holds `columns` and `references_columns` arrays instead of `column` and `references_column`, so a key may span several columns. The schema document an application prints for `frappe db diff` is now version 2: upgrade the application's Caramel and Frappé together.
 

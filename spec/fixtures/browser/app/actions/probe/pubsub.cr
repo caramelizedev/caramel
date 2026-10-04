@@ -10,7 +10,7 @@ module App::Probe
     end
   end
 
-  # RFC-0003 §2.3, verbatim.
+  # The Boards::Live streaming action.
   struct Live < App::ApplicationAction
     contract do
       field board_id : Int64

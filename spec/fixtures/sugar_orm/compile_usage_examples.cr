@@ -1,6 +1,6 @@
-# Every Crystal block of docs/rfc.md RFC-0002 §2.1–§2.4 and §3, copied
-# verbatim. Only the scaffolding the snippets assume is added: the User schema,
-# a render_form stub, and defs that supply team_id/team and allow `return`.
+# Usage examples for schemas, preloads, the facade and changesets. Only the
+# scaffolding they assume is added: the User schema, a render_form stub, and
+# defs that supply team_id/team and allow `return`.
 require "../../../src/sugar_orm"
 
 # app/models/team.cr
@@ -45,7 +45,7 @@ def render_form(errors : Hash(String, Array(String))) : String
 end
 
 # §2.2
-def rfc_preload(team_id : Int64)
+def usage_preload(team_id : Int64)
   team = Team.query.preload(:users).find!(team_id)
   team.users.each do |user|   # Array(User)
     puts user.email
@@ -53,7 +53,7 @@ def rfc_preload(team_id : Int64)
 end
 
 # §2.3
-def rfc_facade(team : Team)
+def usage_facade(team : Team)
   # 1. Developer-Facing Fluent Ergonomics (Rails/Laravel Happiness)
   change = team.update(seats: 10, billing_email: "billing@acme.com")
   return render_form(change.errors) unless change.saved?
@@ -64,7 +64,7 @@ def rfc_facade(team : Team)
 end
 
 # §3
-def rfc_sql
+def usage_sql
   ranked = SugarORM.sql(<<-SQL, 30.days.ago, as: {team_id: Int64, total: Int64, rank: Int32})
     WITH totals AS (SELECT team_id, count(*) AS total FROM users WHERE created_at > $1 GROUP BY team_id)
     SELECT team_id, total, rank() OVER (ORDER BY total DESC)::int4 AS rank FROM totals
@@ -73,8 +73,8 @@ end
 
 # Type-check every snippet; never run (no database is configured).
 if ARGV.includes?("--never")
-  rfc_preload(1_i64)
-  rfc_facade(Team.query.find!(1_i64))
-  rfc_sql
+  usage_preload(1_i64)
+  usage_facade(Team.query.find!(1_i64))
+  usage_sql
   Team.query.larger_than(3).to_a
 end

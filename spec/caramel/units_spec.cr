@@ -1,7 +1,7 @@
 require "spec"
 require "../../src/caramel/units"
 
-describe "semantic units (RFC-0008 §2.3)" do
+describe "semantic units" do
   it "counts sizes as Int64 bytes in binary multiples, past Int32" do
     1.kilobyte.should eq(1024)
     2.megabytes.should eq(2_097_152)

@@ -2,15 +2,15 @@
 
 Date: 2026-09-27
 
-Status: accepted. Supersedes the hand-written SQL migration workflow of [decision 0002](0002-typed-persistence.md). Amends [RFC-0002](../rfc.md) §2.5, §2.6 and §3.
+Status: accepted.
 
 ## Context
 
-RFC-0002 §2.5 derives migrations by diffing the declared schema against a catalog snapshot taken from a Latte branch. §2.6 lints for zero-lock safety, and §3 allows a `--dev-override`. The RFC leaves several things open:
+Migrations are derived by diffing the declared schema against a catalog snapshot taken from a Latte branch, and linted for zero-lock safety. Several things need a rule:
 
-- how the "headless binary" reaches the declared schema;
+- how the headless binary reaches the declared schema;
 - how a derived migration is verified;
-- how `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` can run, since neither may run inside the old one-transaction-per-batch migrator;
+- how `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` can run, since neither may run inside a one-transaction-per-batch migrator;
 - which statements count as unsafe on a brand-new table;
 - how a deliberate column removal is expressed.
 
@@ -18,7 +18,7 @@ RFC-0002 §2.5 derives migrations by diffing the declared schema against a catal
 
 1. **Declared schema.** Every compiled application gains a `schema` subcommand that prints `SugarORM::Catalog.declared` as JSON: the headless schema dump. Frappé builds the application and runs it.
 2. **`frappe db diff --name NAME [--dev-override]`**:
-   1. Latte clones the site's development database into a scratch branch behind the RFC-0004 connection guard: disallow connections, terminate other backends, `CREATE DATABASE … TEMPLATE … STRATEGY FILE_COPY`, and always re-allow connections.
+   1. Latte clones the site's development database into a scratch branch behind the connection guard: disallow connections, terminate other backends, `CREATE DATABASE … TEMPLATE … STRATEGY FILE_COPY`, and always re-allow connections.
    2. Frappé applies any pending migrations to the branch, introspects its `pg_catalog`, diffs, and lints.
    3. It writes `db/migrations/<UTC timestamp>_<name>.cr`. Online changes go in a separate `…_concurrently.cr` file.
    4. It verifies the new files by rebuilding the application, migrating the branch and re-diffing to empty.
@@ -46,28 +46,5 @@ RFC-0002 §2.5 derives migrations by diffing the declared schema against a catal
 - Branch isolation keeps the verification away from development data.
 - Separate online migrations are the only way PostgreSQL permits `CONCURRENTLY`. Refusing to journal an invalid index keeps the journal truthful.
 - Explicit rename and drop intent turns the most common source of data loss into a compile-visible, reviewable declaration.
-
-Principles followed:
-
-- Manifesto 4: data integrity over everything; treat database state like Git.
-- Manifesto 3: native PostgreSQL features, not abstractions.
-- RFC-0008 §2.6: halts carry remediation.
-
-## Verification
-
-- `spec/sugar_orm/{differ,ddl,linter}_spec.cr` covers every rule, halt, rename, drop and online split.
-- `spec/integration/migrations_spec.cr` (`scripts/check integration`) covers:
-  - the introspection round trip;
-  - transactional and online migrator paths with a real `CREATE INDEX CONCURRENTLY`;
-  - lint refusal in production and override in development;
-  - checksum drift.
-- `scripts/check latte-postgres` covers branch creation and dropping, and shows that the source database accepts connections again afterwards.
-- `scripts/check schema-diff` runs end to end in a generated project and covers:
-  - `CREATE TABLE`;
-  - a default-bearing addition;
-  - a rename that keeps its data;
-  - a separate concurrent index;
-  - halts and `--dev-override`;
-  - `drop_column`;
-  - drift reporting;
-  - dropped scratch branches.
+- Native PostgreSQL features are used directly, not abstracted.
+- Halts carry remediation.

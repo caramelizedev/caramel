@@ -2,7 +2,7 @@ module Ameba::Rule::Caramel
   # Reports types named for a service noun, such as `InvitationService`,
   # `TeamMemberInvitationServiceHandler` or `AbstractDataTransformerFactory`.
   #
-  # RFC-0008 §2.1: subjects act on objects directly, so the verb belongs on
+  # Subjects act on objects directly, so the verb belongs on
   # its subject (`team.invite(...)`, a changeset or a job), not on an
   # intermediary noun that exists only to hold it.
   #
@@ -12,13 +12,13 @@ module Ameba::Rule::Caramel
   # ```
   class ServiceNoun < Base
     properties do
-      description "Disallows service-noun type names (RFC-0008 §2.1)"
+      description "Disallows service-noun type names"
       suffixes %w[Service Handler Manager Factory Controller Helper Util Utils Utility]
       prefixes %w[Abstract]
     end
 
-    MSG = "`%s` is a service noun; put the verb on its subject instead " \
-          "(RFC-0008 §2.1), e.g. a method on the model, a changeset or a job"
+    MSG = "`%s` is a service noun; put the verb on its subject instead, " \
+          "e.g. a method on the model, a changeset or a job"
 
     def test(source, node : Crystal::ClassDef | Crystal::ModuleDef)
       name = node.name.names.last

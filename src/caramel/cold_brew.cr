@@ -12,7 +12,7 @@ require "./cold_brew/broker"
 require "./cold_brew/maintenance"
 require "./cold_brew/scheduler"
 
-# Caramel Cold Brew (RFC-0003): background jobs, recurring tasks, PubSub
+# Caramel Cold Brew: background jobs, recurring tasks, PubSub
 # and the cache, all in PostgreSQL.
 module Caramel::ColdBrew
   CHANNEL_NAME  = /\A[a-z0-9_.:-]{1,63}\z/

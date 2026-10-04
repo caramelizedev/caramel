@@ -1,7 +1,7 @@
 require "yaml"
 require "./support/harness"
 
-# Lints the framework with Caramel's RFC-0008 rule set (.ameba.yml, ADR
+# Lints the framework with Caramel's rule set (.ameba.yml, ADR
 # 0017), after proving that bin/frappe-lint carries Caramel's own rule and
 # that the framework's line limit is on (ADR 0021). Under scripts/check all
 # the build step has just built the linter.
@@ -26,12 +26,12 @@ module Caramel::Checks::Lint
       Checks.fail("The framework does not pass its rule set:\n" \
                   "#{framework.stdout}#{framework.stderr}")
     end
-    puts "PASS: the framework passes Caramel's RFC-0008 rule set " \
+    puts "PASS: the framework passes Caramel's rule set " \
          "(Ameba 1.7.0 and Caramel/ServiceNoun)"
     0
   end
 
-  # RFC-0008 §2.1: service nouns are reported; subjects, verbs and actions
+  # Service nouns are reported; subjects, verbs and actions
   # are not.
   private def service_nouns : Nil
     result = probe(<<-CRYSTAL)
