@@ -170,6 +170,13 @@ describe Caramel::Frappe::TenancyGenerator do
     end
   end
 
+  it "refuses a missing anchored file, writing nothing" do
+    tenancy_project do |project, generator|
+      File.delete(File.join(project.root, "spec/spec_helper.cr"))
+      refuses(project, generator, "spec/spec_helper.cr needs exactly one Corretto.configure(App);")
+    end
+  end
+
   it "refuses a model name that is not a free class name, writing nothing" do
     tenancy_project do |project, generator|
       ["account", "Home", "../Account"].each do |model|

@@ -250,8 +250,12 @@ module Caramel::Frappe
       end
       uniques = fields.select(&.unique?)
       names = uniques.map { |field| ResourceGenerator.index_name(collection, field) }
+      if tenant
+        names << ResourceGenerator.tenant_index_name(collection, tenant)
+        names << ResourceGenerator.tenant_key_name(collection, tenant)
+      end
       if long = names.find { |index| index.bytesize > 63 }
-        raise Error.new("The unique index #{long} " \
+        raise Error.new("The name #{long} " \
                         "would exceed PostgreSQL's 63-byte names; " \
                         "shorten the field or the plural")
       end
@@ -726,16 +730,26 @@ module Caramel::Frappe
 
     # The unique (tenant, id) index SugarORM gives every tenanted table.
     private def self.tenant_index(table : String, tenant : Tenant) : SugarORM::Catalog::Index
-      name = "index_#{table}_on_#{tenant.column}_and_id"
+      name = tenant_index_name(table, tenant)
       SugarORM::Catalog::Index.new(name, [tenant.column, "id"], unique: true)
     end
 
     private def self.tenant_key(table : String, tenant : Tenant) : SugarORM::Catalog::ForeignKey
       SugarORM::Catalog::ForeignKey.new(
-        name: "fk_#{table}_#{tenant.column}",
+        name: tenant_key_name(table, tenant),
         columns: [tenant.column],
         references_table: tenant.table,
         references_columns: ["id"])
+    end
+
+    # The name SugarORM gives a tenanted table's (tenant, id) index.
+    def self.tenant_index_name(table : String, tenant : Tenant) : String
+      "index_#{table}_on_#{tenant.column}_and_id"
+    end
+
+    # The name SugarORM gives a tenanted table's key to its tenant.
+    def self.tenant_key_name(table : String, tenant : Tenant) : String
+      "fk_#{table}_#{tenant.column}"
     end
 
     # The name SugarORM gives `index :field` in the schema.

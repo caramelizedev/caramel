@@ -532,6 +532,16 @@ describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
     end
   end
 
+  it "refuses a plural whose tenant index name would exceed 63 bytes" do
+    tenant_project do |project, generator|
+      plural = "notes_#{"x" * 32}"
+      message = "The name index_#{plural}_on_account_id_and_id would exceed"
+      expect_raises(Caramel::Frappe::Error, message) do
+        generator.generate(project, "Note", ["body:string"], plural: plural)
+      end
+    end
+  end
+
   it "refuses routes without a tenant block" do
     tenant_project do |project, generator|
       routes = File.join(project.root, "config/routes.cr")

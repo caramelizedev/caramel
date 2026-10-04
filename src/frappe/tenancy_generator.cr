@@ -58,16 +58,19 @@ module Caramel::Frappe
       originals = {} of String => String
       ANCHORS.each do |relative, anchor|
         Publication.validate_path(root, relative)
-        original = File.read(File.join(root, relative))
+        path = File.join(root, relative)
+        raise unanchored(relative, anchor) unless File.file?(path)
+        original = File.read(path)
         lines = original.lines
         raise Error.new(ALREADY_TENANTED) if relative == CONFIG && lines.includes?(TENANCY_REQUIRE)
-        unless lines.count(anchor) == 1
-          raise Error.new("#{relative} needs exactly one #{anchor}; " \
-                          "wire caramel/tenancy by hand (ADR 0025)")
-        end
+        raise unanchored(relative, anchor) unless lines.count(anchor) == 1
         originals[relative] = original
       end
       originals
+    end
+
+    private def unanchored(relative : String, anchor : String) : Error
+      Error.new("#{relative} needs exactly one #{anchor}; wire caramel/tenancy by hand (ADR 0025)")
     end
 
     private def tenanted_config(config : String) : String
