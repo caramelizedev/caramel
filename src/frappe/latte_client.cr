@@ -10,7 +10,7 @@ module Caramel::Frappe
   class LatteClient
     MAX_RESPONSE = 1024 * 1024
     # The control API version this Frappé speaks (ADR 0016).
-    API_VERSION = 1
+    API_VERSION = 2
     getter socket_path : String
     getter root : String
 
@@ -35,19 +35,19 @@ module Caramel::Frappe
     end
 
     def status : JSON::Any
-      request("GET", "/v1/status")
+      request("GET", "/v#{API_VERSION}/status")
     end
 
     def sites : Array(JSON::Any)
-      request("GET", "/v1/sites")["sites"].as_a
+      request("GET", "/v#{API_VERSION}/sites")["sites"].as_a
     end
 
     def start_services : JSON::Any
-      request("POST", "/v1/services/start", "{}")
+      request("POST", "/v#{API_VERSION}/services/start", "{}")
     end
 
     def stop_services : JSON::Any
-      request("POST", "/v1/services/stop", "{}")
+      request("POST", "/v#{API_VERSION}/services/stop", "{}")
     end
 
     # Starts Latte when it is not running, then its services, and waits
@@ -138,48 +138,49 @@ module Caramel::Frappe
         directory: project.root,
         suffix:    project.metadata.domain_suffix,
       }
-      request("POST", "/v1/sites", site.to_json)["site"]
+      request("POST", "/v#{API_VERSION}/sites", site.to_json)["site"]
     end
 
     def unregister(id : String) : Nil
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}")
       nil
     end
 
     def environment(id : String, directory : String) : Hash(String, String)
       validate_id(id)
       body = {directory: directory}.to_json
-      values = request("POST", "/v1/sites/#{id}/environment", body)["environment"]
+      values = request("POST", "/v#{API_VERSION}/sites/#{id}/environment", body)["environment"]
       values.as_h.transform_values(&.as_s)
     end
 
     def set_upstream(id : String, socket : String) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
     end
 
     def clear_upstream(id : String, socket : String) : Bool
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["cleared"].as_bool
+      body = {socket: socket}.to_json
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/upstream", body)["cleared"].as_bool
     end
 
     # A disposable copy of the site's development database. The returned
     # document holds `name`, `database`, `migration_url` and `runtime_url`.
     def create_branch(id : String, name : String) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/branches", {name: name}.to_json)["branch"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/branches", {name: name}.to_json)["branch"]
     end
 
     def branches(id : String) : Array(JSON::Any)
       validate_id(id)
-      request("GET", "/v1/sites/#{id}/branches")["branches"].as_a
+      request("GET", "/v#{API_VERSION}/sites/#{id}/branches")["branches"].as_a
     end
 
     def drop_branch(id : String, name : String) : Nil
       validate_id(id)
       raise Error.new("Invalid branch name") unless name.matches?(Latte::Postgres::BRANCH_NAME)
-      request("DELETE", "/v1/sites/#{id}/branches/#{name}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/branches/#{name}")
       nil
     end
 
@@ -197,12 +198,12 @@ module Caramel::Frappe
     # and `runtime_url`.
     def test_worker(id : String, index : Int32) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/test-workers/#{index}", "{}")["worker"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/test-workers/#{index}", "{}")["worker"]
     end
 
     def drop_test_worker(id : String, index : Int32) : Nil
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}/test-workers/#{index}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/test-workers/#{index}")
       nil
     end
 

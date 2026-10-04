@@ -267,6 +267,13 @@ module Caramel::Checks
         assert!(reported && !errors.success?, "frappe errors did not report the planted error")
         last = p.command([frappe, "trace", "last-error", "--md"], chdir: project, echo: false)
         assert!(last.stdout.includes?("## Backtrace"), last.stdout)
+        counted = Checks.wait_until(10.seconds, 500.milliseconds) do
+          p.command([latte, "--check"], echo: false).stdout.matches?(/errors: [1-9]\d*\b/)
+        end
+        assert!(counted, "Latte.app --check did not report the planted runtime error")
+        menu = p.command([latte, "--check"], echo: false).stdout
+        assert!(menu.includes?("last error: "), menu)
+        assert!(site("bookshelf")["errors"].as_i > 0, "the control API lists no errors")
         assert!(site("bookshelf")["state"].as_s == "running")
         wait_ready("bookshelf")
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])

@@ -109,7 +109,7 @@ module Caramel::Checks
     end
 
     def site(name : String) : JSON::Any
-      sites = rpc("GET", "/v1/sites")["sites"].as_a
+      sites = rpc("GET", "/v2/sites")["sites"].as_a
       sites.find { |item| item["name"].as_s == name } || raise "Missing site: #{name}"
     end
 

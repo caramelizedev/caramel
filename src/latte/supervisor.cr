@@ -58,9 +58,9 @@ module Caramel::Latte
       )
     end
 
-    def status_json : String
+    def status_json(version : Int32 = 1) : String
       {
-        version:  1,
+        version:  version,
         latte:    Caramel::VERSION,
         api:      ControlAPI::VERSIONS,
         services: @states.transform_values { |state| {state: state} },

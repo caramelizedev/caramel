@@ -28,6 +28,21 @@ belong.
 3. **Dumps leave it out.** `frappe db dump` excludes the schema and the extension, because
    `restore` runs as the migration role, which cannot create an extension.
    `frappe db diagnose` reads the statistics when the extension is present.
+4. **Control API version 2 carries each site's errors.** Latte serves `/v1/…` and `/v2/…`
+   through the same routes, and every body names the version asked for. A version 2 site
+   adds `errors`, the number of errors its development application reported since
+   `frappe dev` started, and `last_error`: `{fingerprint, error_class, location, at}`
+   or null, with a location of at most 200 characters and never a message. The
+   development gateway reports both on its status endpoint; a gateway that predates
+   them reads as zero errors. A version 1 site is unchanged. Frappé, Corretto and
+   Latte.app ask for version 2; a Latte that serves only version 1 is refused with
+   `latte stop` as the remedy.
+5. **Latte.app raises alerts.** A site's menu title shows its error count, its submenu the
+   newest error, and an Open inspector item opens `/__caramel/dev/inspector`. A build
+   that turns to `build-error`, or an error fingerprint not yet seen for that site in this
+   run, adds to a count beside the status item and, when macOS allows, posts a
+   notification that opens the inspector. The first snapshot after launch seeds what is
+   known and alerts nothing; opening the menu clears the count.
 
 ## Reasons
 

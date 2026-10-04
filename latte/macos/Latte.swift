@@ -2,8 +2,9 @@ import AppKit
 import CryptoKit
 import Darwin
 import Foundation
+import UserNotifications
 
-private let latteProtocolVersion = 1
+private let latteProtocolVersion = 2
 private let latteMaximumResponseBytes = 1_048_576
 private let latteRequestTimeoutNanoseconds: UInt64 = 2_000_000_000
 private let latteSocketWaitNanoseconds: UInt64 = 250_000_000
@@ -57,6 +58,26 @@ private struct StatusResponse: Decodable {
     }
 }
 
+private struct LastError: Decodable {
+    let fingerprint: String
+    let errorClass: String
+    let location: String?
+    let at: String
+
+    enum CodingKeys: String, CodingKey {
+        case fingerprint
+        case errorClass = "error_class"
+        case location
+        case at
+    }
+
+    /// "KeyError at app/actions/books/show.cr:12:7", or just the class without a location.
+    var summary: String {
+        guard let location, !location.isEmpty else { return errorClass }
+        return "\(errorClass) at \(location)"
+    }
+}
+
 private struct Site: Decodable {
     let id: String
     let name: String
@@ -67,6 +88,25 @@ private struct Site: Decodable {
     let upstream: String?
     let state: String?
     let owner: String?
+    let errors: Int?
+    let lastError: LastError?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, directory, suffix, domain, origin, upstream, state, owner, errors
+        case lastError = "last_error"
+    }
+
+    /// How many errors the development application reported since `frappe dev` started.
+    var errorCount: Int { errors ?? 0 }
+
+    /// The menu title of this site: its name, state and, when there are any, its errors.
+    var menuTitle: String {
+        var title = name + "  ·  " + stateLabel
+        if errorCount > 0 {
+            title += "  ·  \(errorCount) " + (errorCount == 1 ? "error" : "errors")
+        }
+        return title
+    }
 
     var stateLabel: String {
         switch state {
@@ -304,7 +344,7 @@ private final class LatteHTTPClient {
     }
 
     fileprivate func snapshot(deadline: UInt64) throws -> LatteSnapshot {
-        let status: StatusResponse = try requestJSON(method: "GET", path: "/v1/status", body: nil, deadline: deadline)
+        let status: StatusResponse = try requestJSON(method: "GET", path: "/v2/status", body: nil, deadline: deadline)
         guard status.version == latteProtocolVersion else {
             throw LatteError.invalidResponse("unsupported status protocol version \(status.version)")
         }
@@ -314,7 +354,7 @@ private final class LatteHTTPClient {
             }
         }
 
-        let sitesResponse: SitesResponse = try requestJSON(method: "GET", path: "/v1/sites", body: nil, deadline: deadline)
+        let sitesResponse: SitesResponse = try requestJSON(method: "GET", path: "/v2/sites", body: nil, deadline: deadline)
         if sitesResponse.version != latteProtocolVersion {
             throw LatteError.invalidResponse("unsupported sites protocol version \(sitesResponse.version)")
         }
@@ -342,7 +382,7 @@ private final class LatteHTTPClient {
             throw LatteError.invalidConfiguration("unsupported service action")
         }
         let payload = Data("{}".utf8)
-        let status: StatusResponse = try requestJSON(method: "POST", path: "/v1/services/\(action)", body: payload, deadline: deadline)
+        let status: StatusResponse = try requestJSON(method: "POST", path: "/v2/services/\(action)", body: payload, deadline: deadline)
         guard status.version == latteProtocolVersion else {
             throw LatteError.invalidResponse("unsupported status protocol version \(status.version)")
         }
@@ -370,7 +410,7 @@ private final class LatteHTTPClient {
     private func request(method: String, path: String, body: Data?, deadline: UInt64) throws -> Data {
         try ensureBeforeDeadline(deadline, operation: "starting the daemon request")
         try runtime.verifyOwnedSocket()
-        guard path.hasPrefix("/v1/"), !path.contains(".."), !path.contains("\0") else {
+        guard path.hasPrefix("/v2/"), !path.contains(".."), !path.contains("\0") else {
             throw LatteError.invalidConfiguration("invalid control path")
         }
 
@@ -635,6 +675,10 @@ private enum LatteDiagnostics {
                 print("- \(site.name) \(site.origin) [\(site.stateLabel)]\(site.ownerLabel.map { " · " + $0 } ?? "")")
                 print("  logs: \(try client.runtime.logDirectory(for: site).path)")
                 print("  inspector: \(site.origin)/__caramel/dev/inspector")
+                print("  errors: \(site.errorCount)")
+                if let lastError = site.lastError {
+                    print("  last error: \(lastError.summary)")
+                }
             }
             return 0
         } catch {
@@ -644,7 +688,7 @@ private enum LatteDiagnostics {
     }
 }
 
-private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private let client: LatteHTTPClient?
     private var clientError: String?
     private var statusItem: NSStatusItem?
@@ -654,6 +698,13 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     private var requestInFlight = false
     private var refreshTimer: Timer?
     private var sitesByID: [String: Site] = [:]
+    /// Errors and build failures announced since the menu last opened.
+    private var alertsPending = 0
+    private var notificationsAllowed = false
+    /// The first snapshot after launch only seeds what is already known.
+    private var seeded = false
+    private var seenFingerprints: [String: Set<String>] = [:]
+    private var previousStates: [String: String] = [:]
 
     override init() {
         do {
@@ -666,7 +717,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             if let image = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: "Caramel Latte") {
                 image.isTemplate = true
@@ -685,6 +736,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
         renderMenu()
         refresh()
         refreshTimer = Timer.scheduledTimer(timeInterval: 10, target: self, selector: #selector(refreshTimerFired), userInfo: nil, repeats: true)
+        requestNotificationAuthorization()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -693,6 +745,8 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        alertsPending = 0
+        updateBadge()
         refresh()
     }
 
@@ -728,8 +782,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
                 self.requestInFlight = false
                 switch result {
                 case let .success(value):
-                    self.snapshot = value
-                    self.sitesByID = Dictionary(uniqueKeysWithValues: value.sites.map { ($0.id, $0) })
+                    self.apply(value)
                     self.lastError = nil
                 case let .failure(error):
                     self.lastError = error.localizedDescription
@@ -758,8 +811,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
                 self.requestInFlight = false
                 switch result {
                 case let .success(value):
-                    self.snapshot = value
-                    self.sitesByID = Dictionary(uniqueKeysWithValues: value.sites.map { ($0.id, $0) })
+                    self.apply(value)
                     self.lastError = nil
                 case let .failure(error):
                     self.lastError = error.localizedDescription
@@ -799,11 +851,12 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
                 addDisabledItem("No registered sites", to: menu)
             } else {
                 for site in snapshot.sites.sorted(by: { $0.name < $1.name }) {
-                    let siteItem = NSMenuItem(title: site.name + "  ·  " + site.stateLabel, action: nil, keyEquivalent: "")
+                    let siteItem = NSMenuItem(title: site.menuTitle, action: nil, keyEquivalent: "")
                     let siteMenu = NSMenu()
                     siteMenu.autoenablesItems = false
                     addDisabledItem(site.origin, to: siteMenu)
                     if let owner = site.ownerLabel { addDisabledItem(owner, to: siteMenu) }
+                    if let lastError = site.lastError { addDisabledItem("Last error: \(lastError.summary)", to: siteMenu) }
                     siteMenu.addItem(actionItem("Open site", action: #selector(openSite(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open inspector", action: #selector(openInspector(_:)), id: site.id))
                     siteMenu.addItem(actionItem("Open folder", action: #selector(openFolder(_:)), id: site.id))
@@ -914,6 +967,83 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
 
     @objc private func quit(_ sender: Any?) {
         NSApp.terminate(nil)
+    }
+
+    /// Takes a snapshot in, and announces what is new in it.
+    private func apply(_ value: LatteSnapshot) {
+        snapshot = value
+        sitesByID = Dictionary(uniqueKeysWithValues: value.sites.map { ($0.id, $0) })
+        detectAlerts(in: value)
+    }
+
+    /// A build that has just failed, or an error whose fingerprint this run has not seen
+    /// for the site. The first snapshot after launch only seeds those sets.
+    private func detectAlerts(in value: LatteSnapshot) {
+        defer {
+            previousStates = Dictionary(uniqueKeysWithValues: value.sites.map { ($0.id, $0.state ?? "") })
+            seeded = true
+        }
+        for site in value.sites {
+            if let fingerprint = site.lastError?.fingerprint {
+                let isNew = seenFingerprints[site.id, default: []].insert(fingerprint).inserted
+                if isNew && seeded, let lastError = site.lastError {
+                    announce(site, title: "\(site.name): \(lastError.errorClass)",
+                             body: lastError.location ?? "A new error", path: "/__caramel/dev/inspector/errors")
+                }
+            }
+            if seeded && site.state == "build-error" && previousStates[site.id] != "build-error" {
+                announce(site, title: "\(site.name): build failed",
+                         body: "Open the site to read the compiler's message.", path: "/__caramel/dev/inspector")
+            }
+        }
+    }
+
+    /// Counts the alert on the status item and, when macOS allows, posts a notification
+    /// that opens *path* of the site's origin.
+    private func announce(_ site: Site, title: String, body: String, path: String) {
+        alertsPending += 1
+        updateBadge()
+        guard notificationsAllowed, let origin = try? site.validatedURL(),
+              let target = URL(string: path, relativeTo: origin)?.absoluteURL else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["url": target.absoluteString]
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    private func updateBadge() {
+        guard let button = statusItem?.button else { return }
+        button.imagePosition = .imageLeading
+        button.title = alertsPending > 0 ? " \(alertsPending)" : ""
+    }
+
+    /// Asks once at launch. A bundle that macOS refuses, or a denied request, leaves only the badge.
+    private func requestNotificationAuthorization() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            DispatchQueue.main.async { self?.notificationsAllowed = granted }
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let text = response.notification.request.content.userInfo["url"] as? String,
+           let url = URL(string: text), url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+        }
+        completionHandler()
     }
 
     private func site(for item: NSMenuItem) -> Site? {

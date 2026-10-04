@@ -12,6 +12,11 @@ module Caramel::Frappe
     LOG_BYTES = 8 * 1024 * 1024
 
     getter socket : String
+    # How many errors the application reported since this session started; history
+    # replayed from earlier sessions is not counted.
+    getter errors_seen : Int32 = 0
+    # The newest of them.
+    getter last_error : Crema::ErrorEvent? = nil
     @server : UNIXServer? = nil
 
     def initialize(directory : String, log_directory : String, warnings : IO = STDERR)
@@ -76,12 +81,25 @@ module Caramel::Frappe
     private def read(client : UNIXSocket) : Nil
       while line = next_line(client)
         event = @store.ingest(line) || next
+        note_error(event)
         append(line) if event.is_a?(Crema::TraceEvent | Crema::ErrorEvent)
       end
     rescue IO::Error
       nil
     ensure
       client.close
+    end
+
+    private def note_error(event : EventStore::Event) : Nil
+      error = case event
+              in Crema::TraceEvent then event.error
+              in Crema::ErrorEvent then event
+              in Crema::BuildEvent then nil
+              end
+      return unless error
+
+      @errors_seen += 1
+      @last_error = error
     end
 
     # The next complete line, skipping any that exceeds MAX_LINE; nil at end of input.

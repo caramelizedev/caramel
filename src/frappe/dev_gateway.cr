@@ -196,10 +196,28 @@ module Caramel::Frappe
       secure(Caramel::Response.new(200, body, headers))
     end
 
-    # The generation, state and newest trace the refresh script polls for.
+    # The generation, state, newest trace and error tally that the refresh script and
+    # Latte poll for.
     private def status_response : Caramel::Response
       latest = @events.try(&.latest) || 0_i64
-      ok({generation: @generation, state: @state, latest: latest}.to_json, "application/json")
+      status = {
+        generation: @generation,
+        state:      @state,
+        latest:     latest,
+        errors:     @events.try(&.errors_seen) || 0,
+        last_error: @events.try(&.last_error).try { |error| newest(error) },
+      }
+      ok(status.to_json, "application/json")
+    end
+
+    # What Latte shows of an error: no message, a bounded location.
+    private def newest(error : Crema::ErrorEvent)
+      {
+        fingerprint: error.fingerprint,
+        error_class: error.error_class,
+        location:    error.location.try(&.[0, 200]),
+        at:          error.at,
+      }
     end
 
     # The traces a page's toolbar and the inspector list ask for.

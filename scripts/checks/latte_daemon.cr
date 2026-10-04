@@ -135,7 +135,7 @@ module Caramel::Checks::LatteDaemon
         raise "Latte does not report its release and API window: #{status.to_json}"
       end
       reported = Checks.run([LATTE, "version"], env: environment)
-      unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1)\n"
+      unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1, 2)\n"
         raise "latte version printed #{reported.stdout.inspect}"
       end
       duplicate = Checks.run([LATTE, "daemon"], env: environment, timeout: 5.seconds)

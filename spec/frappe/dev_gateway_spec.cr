@@ -137,7 +137,10 @@ describe Caramel::Frappe::DevGateway do
       "X-Caramel-Owner-Token" => gateway.owner_token,
     }
     status = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/status", owner))
-    JSON.parse(status.body)["latest"].as_i.should eq(0)
+    document = JSON.parse(status.body)
+    document.as_h.keys.sort!.should eq(%w[errors generation last_error latest state])
+    {document["latest"].as_i, document["errors"].as_i}.should eq({0, 0})
+    document["last_error"].raw.should be_nil
   end
 
   it "forwards bodiless responses without reading or decorating a body" do

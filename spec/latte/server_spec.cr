@@ -10,9 +10,9 @@ private class TestServices < Caramel::Latte::ServiceControl
   def initialize(@registry : Caramel::Latte::Registry)
   end
 
-  def status_json : String
+  def status_json(version : Int32) : String
     stopped = {state: "stopped"}
-    {version: 1, services: {postgres: stopped, dns: stopped, proxy: stopped}}.to_json
+    {version: version, services: {postgres: stopped, dns: stopped, proxy: stopped}}.to_json
   end
 
   def start_services : Nil
@@ -192,7 +192,7 @@ describe Caramel::Latte::Server do
       services.starts.should eq(1)
       answer(server, "POST", "/v1/services/stop", "{}").status.should eq(200)
       services.stops.should eq(1)
-      other = answer(server, "GET", "/v2/status")
+      other = answer(server, "GET", "/v3/status")
       other.status.should eq(404)
       refusal = JSON.parse(other.body)
       reported = {
@@ -200,7 +200,7 @@ describe Caramel::Latte::Server do
         refusal["latte"].as_s,
         refusal["api"].as_a.map(&.as_i),
       }
-      reported.should eq({"unsupported_api", Caramel::VERSION, [1]})
+      reported.should eq({"unsupported_api", Caramel::VERSION, [1, 2]})
       oversized = "{" + " " * 16384
       answer(server, "POST", "/v1/services/start", oversized).status.should eq(413)
       services.starts.should eq(1)
@@ -212,6 +212,32 @@ describe Caramel::Latte::Server do
       Dir.exists?(root).should be_true
       registry.list.should be_empty
       answer(server, "GET", "/unknown").status.should eq(404)
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "adds error fields to a site in version 2 only, and stamps bodies with the version asked" do
+    root = File.join("/private/tmp", "latte-api-v2-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      server = Caramel::Latte::Server.new(registry, TestServices.new(registry))
+      registration = {name: "bookshelf", directory: root}.to_json
+      answer(server, "POST", "/v2/sites", registration).status.should eq(201)
+      v2 = JSON.parse(answer(server, "GET", "/v2/sites").body)
+      v2["version"].as_i.should eq(2)
+      listed = v2["sites"][0]
+      listed["errors"].as_i.should eq(0)
+      listed["last_error"].raw.should be_nil
+      v1 = JSON.parse(answer(server, "GET", "/v1/sites").body)
+      v1["version"].as_i.should eq(1)
+      v1["sites"][0].as_h.has_key?("errors").should be_false
+      v1["sites"][0].as_h.has_key?("last_error").should be_false
+      missing = JSON.parse(answer(server, "DELETE", "/v2/sites/0123456789abcdef").body)
+      {missing["version"].as_i, missing["error"]["code"].as_s}.should eq({2, "not_found"})
+      answer(server, "GET", "/status").status.should eq(404)
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)

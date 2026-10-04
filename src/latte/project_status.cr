@@ -10,6 +10,15 @@ module Caramel::Latte
   module ProjectStatus
     FILE_NAME = "dev-session.json"
 
+    # The newest error the development application reported since `frappe dev` started.
+    record LastError,
+      fingerprint : String,
+      error_class : String,
+      location : String?,
+      at : String do
+      include JSON::Serializable
+    end
+
     def self.write_session(directory : String, socket : String, token : String) : Nil
       StateSecurity.validate_owned_directory(directory)
       unless File.dirname(socket) == directory
@@ -77,10 +86,11 @@ module Caramel::Latte
         size = response.body_io.read_greedy(bytes)
         return result("unknown") unless response.status_code == 200 && size <= 4096
         document = JSON.parse(String.new(bytes[0, size]))
+        errors, last_error = errors_of(document)
         case document["state"].as_s
-        when "ready"    then result("running", "terminal")
-        when "building" then result("building", "terminal")
-        when "failed"   then result("build-error", "terminal")
+        when "ready"    then result("running", "terminal", errors, last_error)
+        when "building" then result("building", "terminal", errors, last_error)
+        when "failed"   then result("build-error", "terminal", errors, last_error)
         else                 result("unknown")
         end
       end
@@ -97,8 +107,22 @@ module Caramel::Latte
       socket.try(&.close)
     end
 
-    private def self.result(state : String, owner : String? = nil)
-      {state: state, owner: owner}
+    private def self.result(state : String,
+                            owner : String? = nil,
+                            errors : Int32 = 0,
+                            last_error : LastError? = nil)
+      {state: state, owner: owner, errors: errors, last_error: last_error}
+    end
+
+    # The error count and newest error a gateway reports. A gateway that predates them
+    # reports none.
+    private def self.errors_of(document : JSON::Any) : {Int32, LastError?}
+      count = document["errors"]?.try(&.as_i?) || 0
+      newest = document["last_error"]?
+      last = newest.try { |error| error.as_h? ? LastError.from_json(error.to_json) : nil }
+      {count, last}
+    rescue JSON::SerializableError
+      {0, nil}
     end
 
     private def self.validate_file(path : String) : Nil
