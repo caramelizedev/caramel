@@ -11,6 +11,10 @@ under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
   alters a decision edits that ADR in the same commit.
 - Status, measurements, investigations and history never go in this repository
   (CONTRIBUTING.md, Writing).
+- History, research and measurements live in
+  [caramel-notes](https://github.com/caramelizedev/caramel-notes). Before investigating a
+  problem, read its `index.md`, at `../caramel-notes` when it is checked out beside this
+  repository; put new findings in its `inbox/`, as its AGENTS.md describes.
 
 ## Checks
 
