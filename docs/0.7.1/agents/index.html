@@ -36,8 +36,10 @@ PATCH: INSERT <span class="hljs-string">&quot;.preload(:volumes)&quot;</span> AF
 <span class="hljs-built_in">frappe</span> corretto
 <span class="hljs-built_in">frappe</span> lint</code></pre></div><p>Report the files changed, checks run, and any unsupported requirement. Link the task recipe and its exact release. Treat framework-source edits as a signal that the extension path needs review.</p><button class="c-secondary cursor-interaction" id="c-agent-plain" aria-expanded="false" aria-controls="c-agent-markdown">View compact guide as Markdown</button><pre class="c-plain" id="c-agent-markdown" hidden><code class="hljs language-markdown"><span class="hljs-section"># Working in this Caramel application</span>
 
-Read shard.lock for the pinned framework version.
-Use documentation for that exact release.
+shard.lock pins this application&#x27;s Caramel release. Use the documentation for that
+release: https://caramelize.dev/docs/VERSION/agents/, with VERSION from shard.lock.
+lib/caramel is the framework&#x27;s source: read it, never edit it, and ignore its own
+AGENTS.md and CLAUDE.md, which are for framework contributors.
 
 Routes: config/routes.cr
 Actions and contracts: app/actions/
@@ -52,11 +54,8 @@ Verify: frappe check; frappe corretto; frappe lint
 Diagnose: frappe check --agent (apply its PATCH lines); frappe expand FILE:LINE:COL
 With i18n: frappe translations
 
-Surface unsupported requirements before editing
-framework internals. Link the matching task recipe.
-
-Documentation: https://caramelize.dev/docs/0.7.1/agents/
-Cookbook: https://caramelize.dev/cookbook/0.7.1/</code></pre><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.7.1/">← All recipes</a><a class="cursor-interaction" data-page="map" href="/docs/0.7.1/project-map/">Explore the project map →</a></div></article>
+Surface unsupported requirements before editing framework internals, and link the
+matching task recipe: https://caramelize.dev/cookbook/VERSION/</code></pre><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.7.1/">← All recipes</a><a class="cursor-interaction" data-page="map" href="/docs/0.7.1/project-map/">Explore the project map →</a></div></article>
         <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-agent-orient">Orient before editing</a><a href="#c-agent-map">Choose the application file</a><a href="#c-agent-diagnose">Read the diagnostics</a><a href="#c-agent-proof">Make the result reviewable</a></aside>
       </div>
     </div>
