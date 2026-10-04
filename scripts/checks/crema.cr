@@ -39,7 +39,12 @@ Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
 
 socket = File.join(root, "app.sock")
 log = File.join(root, "stdout.log")
-env = {"CARAMEL_ENV" => "production", "CARAMEL_PROJECT_ROOT" => root}
+ops_socket = File.join(root, "ops.sock")
+env = {
+  "CARAMEL_ENV"          => "production",
+  "CARAMEL_PROJECT_ROOT" => root,
+  "CARAMEL_OPS_SOCKET"   => ops_socket,
+}
 process = File.open(log, "w") do |output|
   Process.new(binary, [socket], env: env, output: output, error: Process::Redirect::Inherit)
 end
@@ -79,6 +84,45 @@ begin
   everything = File.read(log)
   Caramel::Checks.fail("exception message reached stdout") if everything.includes?("do-not-log")
   puts "PASS: an error line holds the fingerprint and not the message"
+
+  ops = ->(arguments : Array(String)) do
+    result = Caramel::Checks.run([binary, "ops"] + arguments, env: env, timeout: 30.seconds)
+    Caramel::Checks.fail(result.stdout + result.stderr) unless result.success?
+    result.stdout
+  end
+  status = ops.call(["status"])
+  Caramel::Checks.fail("ops status has no App line") unless status.starts_with?("App ")
+  mode = File.info(ops_socket).permissions.value
+  Caramel::Checks.fail("ops socket is mode #{mode.to_s(8)}") unless mode == 0o600
+  puts "PASS: ops status answers on an owner-only socket"
+
+  fingerprint = failure["fingerprint"].as_s
+  listing = ops.call(["errors"])
+  Caramel::Checks.fail("ops errors lacks #{fingerprint}") unless listing.includes?(fingerprint)
+  detail = ops.call(["error", fingerprint])
+  message_shown = detail.includes?("do-not-log")
+  Caramel::Checks.fail("ops error lacks the message: #{detail}") unless message_shown
+  Caramel::Checks.fail("the message reached stdout") if File.read(log).includes?("do-not-log")
+  puts "PASS: the message is on the ops socket and never on stdout"
+
+  expected = %(caramel_requests_total{method="GET",route="/books/:id",status="200"})
+  metrics = ops.call(["metrics"])
+  Caramel::Checks.fail("ops metrics lacks #{expected}") unless metrics.includes?(expected)
+  puts "PASS: ops metrics counts requests by route and status"
+
+  rebinding = Caramel::Checks.run([CURL, "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                                   "--unix-socket", ops_socket, "-H", "Host: evil.example",
+                                   "http://ops/v1/status"], timeout: 30.seconds)
+  Caramel::Checks.fail("evil Host got #{rebinding.stdout}") unless rebinding.stdout == "421"
+  puts "PASS: an unknown Host is refused with 421"
+
+  token = ops.call(["debug-token", "--minutes=5"]).lines.first.split.last
+  traced = request(socket, "/books/4", {"X-Caramel-Debug" => token})
+  header = traced.downcase.includes?("x-caramel-trace: ")
+  Caramel::Checks.fail("no X-Caramel-Trace in #{traced}") unless header
+  kept = ops.call(["traces", "--debug"]).includes?("debug")
+  Caramel::Checks.fail("ops traces --debug is empty") unless kept
+  puts "PASS: a debug token traces its request and the trace is kept"
 ensure
   Caramel::Checks.stop(process)
 end

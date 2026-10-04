@@ -143,6 +143,11 @@ module Caramel::Frappe
         runner.run(paths.empty? ? ["spec"] : paths, concurrency)
       when "db dump", "db restore"
         backup(invocation["FILE"]?)
+      when "db diagnose"
+        project = Project.load
+        values = development_environment(project).merge({"CARAMEL_ENV" => "development"})
+        values["CARAMEL_EXPECTED_DATABASE_URL"] = values["DATABASE_URL"]
+        Tools.new(@framework_root, @output, @error).app_command(project, ["db", "diagnose"], values)
       when "db diff"
         project = Project.load
         tools = Tools.new(@framework_root, @output, @error)

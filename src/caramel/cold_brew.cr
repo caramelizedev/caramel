@@ -116,8 +116,12 @@ module Caramel::ColdBrew
                    @workers : Array(Worker),
                    @maintenance : Maintenance,
                    @scheduler : Scheduler,
-                   @broker : Broker)
+                   @broker : Broker,
+                   @scheduler_on : Bool = true)
     end
+
+    # False when `--no-scheduler` left `every` schedules to other processes.
+    getter? scheduler_on : Bool
 
     # Fetches no new jobs, lets in-flight jobs and schedule blocks finish,
     # then closes the LISTEN connection and the pool.
@@ -148,7 +152,7 @@ module Caramel::ColdBrew
     workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }
     maintenance = Maintenance.new(db).start
     ticks = Scheduler.new(scheduler ? schedules : [] of Schedule, db).start
-    Service.new(db, workers, maintenance, ticks, broker)
+    Service.new(db, workers, maintenance, ticks, broker, scheduler)
   end
 
   # The distinct queue names CARAMEL_WORKER_QUEUES lists, default `default`.

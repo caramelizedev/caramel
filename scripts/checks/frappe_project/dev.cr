@@ -134,6 +134,8 @@ module Caramel::Checks
         session_builds = Dir.glob(File.join(@clone, ".caramel/dev/application-*"))
         assert!(session_builds.any? { |build| File.same?(build, command_build) },
           "frappe migrate rebuilt the sources frappe dev had built")
+        diagnosis = p.command([frappe, "db", "diagnose"], chdir: @clone, echo: false).stdout
+        assert!(diagnosis.includes?("== table_sizes =="), diagnosis)
         wait_ready("bookshelf-clone")
         clone_log = File.read(File.join(p.root, "bookshelf-clone-dev.log"))
         once = clone_log.scan("Pending migrations").size == 1

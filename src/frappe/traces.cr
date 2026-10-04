@@ -41,31 +41,8 @@ module Caramel::Frappe
     # One trace in full, as text or Markdown; false when *ref* matches none.
     def show(ref : String, markdown : Bool) : Bool
       event = @store.find(ref) || return false
-      @output.puts(markdown ? Crema::Render.markdown(event, @root) : detail(event))
+      @output.puts(markdown ? Crema::Render.markdown(event, @root) : Crema::Render.detail(event))
       true
-    end
-
-    private def detail(event : Crema::TraceEvent) : String
-      String.build do |io|
-        io << Crema::Render.line(event) << '\n'
-        io << "trace " << event.trace_id << '\n'
-        event.spans.each { |span| span_line(io, span) }
-        event.error.try { |error| error_lines(io, error) }
-      end
-    end
-
-    private def span_line(io : IO, span : Crema::SpanEvent) : Nil
-      io << "  " << Crema::Render.ms(span.offset_ms).rjust(8) << " ms  "
-      io << span.kind << ' ' << Crema::Render.ms(span.duration_ms) << " ms  "
-      io << (span.detail || span.name).gsub(/\s+/, " ")
-      span.source.try { |source| io << "  (" << source << ')' }
-      io << '\n'
-    end
-
-    private def error_lines(io : IO, error : Crema::ErrorEvent) : Nil
-      io << "error " << error.error_class << '\n'
-      error.message.try { |message| io << "  " << message << '\n' }
-      error.backtrace.try(&.first(12).each { |frame| io << "    " << frame << '\n' })
     end
 
     # Runtime errors and repeated queries, grouped. Agents get MRDP and exit 1 when

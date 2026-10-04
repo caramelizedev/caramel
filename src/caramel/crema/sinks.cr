@@ -167,6 +167,22 @@ module Caramel::Crema
       @lock.synchronize { @errors.dup }
     end
 
+    # Requests since start: how many, how many failed and the 95th percentile in ms.
+    def request_summary : {Int64, Int64, Float64}
+      merged = Histogram.new
+      total = errors = 0_i64
+      slowest = 0.0
+      @durations.each do |kind, _, entry|
+        next unless kind == "request"
+
+        merged.add(entry.histogram)
+        total += entry.count
+        errors += entry.errors
+        slowest = {slowest, entry.max_ms}.max
+      end
+      {total, errors, merged.quantile(0.95, slowest)}
+    end
+
     private def count_request(trace : Trace) : Nil
       key = {trace.method || "", trace.route || "(none)", trace.status || 0}
       @requests[key] = (@requests[key]? || 0_i64) + 1

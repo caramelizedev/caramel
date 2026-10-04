@@ -239,3 +239,59 @@ describe "Crema instrumentation" do
     end
   end
 end
+
+describe "Crema job commands" do
+  it "classifies a queue's jobs as ColdBrew.statuses does" do
+    CremaSpec.reset
+    owner = CremaSpec.owner
+    queued = CremaSpec::Notify.enqueue
+    scheduled = CremaSpec::Notify.enqueue(run_at: 1.hour.from_now)
+    running = CremaSpec::Notify.enqueue
+    retrying = CremaSpec::Notify.enqueue
+    failed = CremaSpec::Notify.enqueue
+    owner.exec("UPDATE caramel_jobs SET locked_at = now() WHERE id = $1", running)
+    owner.exec("UPDATE caramel_jobs SET attempts = 1 WHERE id = $1", retrying)
+    owner.exec("UPDATE caramel_jobs SET failed_at = now() WHERE id = $1", failed)
+
+    row = Caramel::Crema::Jobs.stats(CremaSpec.runtime).rows.find! { |cells| cells[0] == "crema" }
+    row[1..6].should eq(["1", "1", "1", "1", "1", "0"])
+    ids = [queued, scheduled, running, retrying, failed]
+    states = Caramel::ColdBrew.statuses(CremaSpec.runtime, ids)
+    states.values.map(&.state.to_s).sort!.should eq(%w[Failed Queued Retrying Running Scheduled])
+  end
+
+  it "lists failed jobs by class and error, and shows one in full" do
+    CremaSpec.reset
+    id = CremaSpec::Notify.enqueue
+    CremaSpec.owner.exec("UPDATE caramel_jobs SET failed_at = now(), last_error = $2 WHERE id = $1",
+      id, "KeyError: missing key")
+    failed = Caramel::Crema::Jobs.failed(20, CremaSpec.runtime)
+    failed.rows.first.first(3).should eq(["CremaSpec::Notify", "KeyError", "1"])
+    shown = Caramel::Crema::Jobs.show(id, CremaSpec.runtime)
+    shown.rows.first[shown.headers.index!("last_error")].should eq("KeyError: missing key")
+  end
+
+  it "retries a failed job once, by id or by class" do
+    CremaSpec.reset
+    id = CremaSpec::Notify.enqueue
+    sql = "UPDATE caramel_jobs SET failed_at = now(), attempts = 5 WHERE id = $1"
+    CremaSpec.owner.exec(sql, id)
+    Caramel::Crema::Jobs.retry_class("Other", CremaSpec.runtime).should eq(0)
+    Caramel::Crema::Jobs.retry_id(id, CremaSpec.runtime).should eq(1)
+    CremaSpec.drain.should eq(1)
+    Caramel::ColdBrew.status(CremaSpec.runtime, id).not_nil!.state
+      .should eq(Caramel::ColdBrew::JobState::Finished)
+    Caramel::Crema::Jobs.retry_id(id, CremaSpec.runtime).should eq(0)
+  end
+end
+
+describe "Crema db diagnose" do
+  it "prints every section and the pg_stat_statements hint" do
+    CremaSpec.reset
+    output = String.build { |io| Caramel::Crema::Diagnose.run(io, CremaSpec.runtime) }
+    %w[connections long_running blocking cache_hit seq_scans unused_indexes vacuum table_sizes]
+      .each { |name| output.should contain(name) }
+    output.should contain("outliers: pg_stat_statements is not installed in this database.")
+    output.should contain("== table_sizes ==")
+  end
+end

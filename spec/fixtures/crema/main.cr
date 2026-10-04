@@ -32,12 +32,19 @@ module CremaFixture
   end
 end
 
+# `APP ops …` is the ops socket's client, which the check runs from this same binary.
+if ARGV.first? == "ops"
+  exit(Caramel::Crema.run_command("ops", ARGV[1..]) || 2)
+end
+
 Caramel::Crema::Logging.setup
 csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
 app = Caramel::Application.new(CremaFixture::AppRouter.new, csrf)
 server = HTTP::Server.new([app])
 server.bind_unix(ARGV[0])
+runtime = Caramel::Crema.start("serve", "Bookshelf", application: app)
 Process.on_terminate { server.close }
 puts "ready"
 STDOUT.flush
 server.listen
+runtime.stop

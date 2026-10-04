@@ -82,6 +82,15 @@ module Caramel
       Crema::Logging.setup
       command = arguments.first? || "help"
       flags = arguments[1..]? || [] of String
+      Crema.run_command(command, flags) || dispatch(app, command, flags, root)
+    end
+
+    # One of the framework's own commands; application commands registered with
+    # `Crema.command` answer first.
+    private def self.dispatch(app : T.class,
+                              command : String,
+                              flags : Array(String),
+                              root : String) : Int32 forall T
       if command == "work"
         options = WorkOptions.parse(flags) || return refuse_usage
         return run_workers(app, options)
@@ -145,7 +154,8 @@ module Caramel
     end
 
     private def self.usage : String
-      "Usage: #{File.basename(PROGRAM_NAME)} #{USAGE}"
+      syntax = [USAGE, *Crema.command_syntaxes].join('|')
+      "Usage: #{File.basename(PROGRAM_NAME)} #{syntax}"
     end
 
     private def self.refuse_usage : Int32
@@ -190,9 +200,10 @@ module Caramel
 
     # Opens the environment's database, refusing a connection other than the
     # one Frappé verified and any spec database outside Corretto.
-    private def self.with_database(migration : Bool,
-                                   application_name : String = "caramel",
-                                   & : DB::Database, String -> Int32) : Int32
+    # :nodoc:
+    def self.with_database(migration : Bool,
+                           application_name : String = "caramel",
+                           & : DB::Database, String -> Int32) : Int32
       url = Database.url(migration: migration)
       if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
         unless url == expected
@@ -271,8 +282,8 @@ module Caramel
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
-      parent = File.info?(File.dirname(socket_path), follow_symlinks: false)
-      abort("CARAMEL_SOCKET must be in a private owned directory") if exposed?(parent)
+      private_parent = Crema.private_directory?(File.dirname(socket_path))
+      abort("CARAMEL_SOCKET must be in a private owned directory") unless private_parent
       occupied = File.info?(socket_path, follow_symlinks: false)
       abort("Application socket is already occupied") if occupied
       application = Caramel.build(app, db, secret, origin, root)
@@ -301,12 +312,7 @@ module Caramel
         runtime.try(&.stop)
       end
     end
-
-    # True unless *info* is a directory that the current user owns and that
-    # no one else can reach.
-    private def self.exposed?(info : File::Info?) : Bool
-      return true if info.nil? || !info.directory?
-      info.owner_id != LibC.getuid.to_s || (info.permissions.value & 0o077) != 0
-    end
   end
 end
+
+require "./crema/core_commands"

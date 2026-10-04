@@ -10,6 +10,7 @@ require "./crema/error_report"
 require "./crema/tally"
 require "./crema/sinks"
 require "./crema/logging"
+require "./crema/debug_token"
 
 module Caramel
   # Observability: every request, job and schedule run is a trace with a
@@ -27,6 +28,8 @@ module Caramel
     class_property slow_job : Time::Span = 5.seconds
     # An SQL statement at least this slow counts in `slow_queries`.
     class_property slow_query : Time::Span = 100.milliseconds
+    # Signs debug tokens; `Crema.start` sets it from the application's secret.
+    class_property debug_key : Bytes? = nil
 
     @@lock = Mutex.new
     @@metrics = MetricSink.new
@@ -205,6 +208,7 @@ module Caramel
       trace.request_id = Ids.request_id(request.headers["X-Request-ID"]?)
       trace.method = request.method
       trace.path = request.path
+      trace.debug = debug_token?(request)
       start(trace)
     end
 
@@ -212,7 +216,16 @@ module Caramel
     def self.start(trace : Trace) : Trace
       sinks = @@sinks
       sinks.each { |sink| trace.recording = true if sink_records?(sink, trace) }
+      trace.recording = true if trace.debug?
       trace
+    end
+
+    # True when the request carries a debug token signed by this application.
+    private def self.debug_token?(request : HTTP::Request) : Bool
+      key = @@debug_key || return false
+      token = request.headers[DebugToken::HEADER]? ||
+              request.cookies[DebugToken::COOKIE]?.try(&.value) || return false
+      DebugToken.valid?(key, token)
     end
 
     private def self.sink_records?(sink : Sink, trace : Trace) : Bool

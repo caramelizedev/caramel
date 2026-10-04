@@ -149,6 +149,30 @@ module Caramel::Crema
       dumps.each { |span| io << "\n" << span.name << "\n\n```\n" << span.detail << "\n```\n" }
     end
 
+    # The trace as plain text: its line, its spans in order and its error.
+    def self.detail(event : TraceEvent) : String
+      String.build do |io|
+        io << line(event) << '\n'
+        io << "trace " << event.trace_id << '\n'
+        event.spans.each { |span| span_text(io, span) }
+        event.error.try { |error| error_text(io, error) }
+      end
+    end
+
+    private def self.span_text(io : IO, span : SpanEvent) : Nil
+      io << "  " << ms(span.offset_ms).rjust(8) << " ms  "
+      io << span.kind << ' ' << ms(span.duration_ms) << " ms  "
+      io << (span.detail || span.name).gsub(/\s+/, " ")
+      span.source.try { |source| io << "  (" << source << ')' }
+      io << '\n'
+    end
+
+    private def self.error_text(io : IO, error : ErrorEvent) : Nil
+      io << "error " << error.error_class << '\n'
+      error.message.try { |message| io << "  " << message << '\n' }
+      error.backtrace.try(&.first(12).each { |frame| io << "    " << frame << '\n' })
+    end
+
     # True for a backtrace line in the project's app, config, src or db.
     def self.application_frame?(text : String, root : String?) : Bool
       frame = Frames.parse(text) || return false

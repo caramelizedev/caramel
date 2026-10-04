@@ -119,9 +119,10 @@ module Caramel::Crema
       Time.instant - @started
     end
 
-    # Fixes the duration; later calls change nothing.
-    def finish : Time::Span
-      @duration ||= elapsed
+    # Fixes the duration, by default the time since the trace started; later calls
+    # change nothing.
+    def finish(duration : Time::Span = elapsed) : Time::Span
+      @duration ||= duration
     end
 
     def duration : Time::Span
