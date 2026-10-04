@@ -1,5 +1,6 @@
 require "json"
 require "./response"
+require "./crema/dump"
 require "./html"
 require "./wording"
 require "./hypermedia"
@@ -14,6 +15,8 @@ module Caramel
   # `def handle(contract : Contract)` returning either a `Caramel::Response`
   # or a JSON-serializable result that `render(result)` turns into HTML.
   abstract struct Action
+    include Crema::Dumping
+
     VARY = "Accept, HX-Request, HX-Request-Type"
 
     getter context : RequestContext

@@ -99,7 +99,7 @@ module Caramel
     def self.request(request : HTTP::Request, & : Trace -> Response) : Response
       trace = request_trace(request)
       response = begin
-        bound(trace) { guarded(trace) { yield trace } }
+        bound(trace) { guarded { yield trace } }
       rescue error
         trace.status = 500
         finish(trace)
@@ -107,6 +107,37 @@ module Caramel
       end
       complete(trace, response)
       response
+    end
+
+    # Traces one claimed job. *context* is the JSON the enqueuing trace stored: its
+    # `traceparent`, request id and debug flag. Malformed or missing context starts a
+    # fresh trace.
+    def self.job(id : Int64,
+                 class_name : String,
+                 queue : String,
+                 attempt : Int32,
+                 run_at : Time,
+                 context : String?,
+                 & : Trace -> T) : T forall T
+      trace = work_trace(Kind::Job, class_name, context)
+      trace.job_id = id
+      trace.queue = queue
+      trace.attempt = attempt
+      trace.queue_lag = {Time.utc - run_at, Time::Span.zero}.max
+      trace.sql_comment = sql_tag("job", class_name)
+      traced(start(trace)) { |open| yield open }
+    end
+
+    # Traces one run of the schedule *name*. A raising block is reported and raised again.
+    def self.schedule(name : String, & : -> T) : T forall T
+      trace = work_trace(Kind::Schedule, name, nil)
+      trace.sql_comment = sql_tag("schedule", name)
+      traced(start(trace)) { |_| yield }
+    end
+
+    # True when the running fiber has already reported *error*.
+    def self.reported?(error : Exception) : Bool
+      Fiber.current.__crema_reported.same?(error)
     end
 
     # Names the current trace after the route it matched.
@@ -128,10 +159,8 @@ module Caramel
       trace = current?
       report = ErrorReport.build(error, handled, source || trace.try(&.name),
         trace.try(&.request_id) || request_id, trace.try(&.trace_id))
-      if trace
-        trace.error ||= report
-        trace.reported = error
-      end
+      Fiber.current.__crema_reported = error
+      trace.try { |open| open.error ||= report } unless handled
       each_sink(&.reported(report))
       report
     end
@@ -207,11 +236,47 @@ module Caramel
       end
     end
 
-    private def self.guarded(trace : Trace, & : -> T) : T forall T
+    private def self.guarded(& : -> T) : T forall T
       yield
     rescue error
-      report(error, handled: false) unless trace.reported.same?(error)
+      report(error, handled: false) unless reported?(error)
       raise error
+    end
+
+    # Runs the block bound to *trace*, then finishes it. An escaping exception is
+    # reported, the trace finished and the exception raised again.
+    private def self.traced(trace : Trace, & : Trace -> T) : T forall T
+      result = begin
+        bound(trace) { guarded { yield trace } }
+      rescue error
+        finish(trace)
+        raise error
+      end
+      finish(trace)
+      result
+    end
+
+    # A job or schedule trace that continues the trace its *context* names, if any.
+    private def self.work_trace(kind : Kind, name : String, context : String?) : Trace
+      inherited = inherit(context)
+      trace_id, span_id = Ids.generate
+      trace = Trace.new(kind, name, inherited.try(&.[0]) || trace_id, span_id)
+      inherited.try do |found|
+        trace.parent_id = found[1]
+        trace.request_id = found[2]
+        trace.debug = found[3]
+      end
+      trace
+    end
+
+    # The trace id, parent id, request id and debug flag in a job's stored context.
+    private def self.inherit(context : String?) : {String, String, String?, Bool}?
+      data = JSON.parse(context || return).as_h? || return
+      parent = Ids.parse_traceparent(data["traceparent"]?.try(&.as_s?)) || return
+      request_id = data["request_id"]?.try(&.as_s?)
+      {parent[0], parent[1], request_id, data["debug"]?.try(&.as_bool?) == true}
+    rescue JSON::ParseException
+      nil
     end
 
     private def self.log_context(trace : Trace) : Hash(Symbol, String)

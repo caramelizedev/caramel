@@ -89,8 +89,6 @@ module Caramel::Crema
     property? sampled : Bool = true
     property sql_comment : String?
     property error : ErrorReport?
-    # The exception `error` came from; lets `Crema.request` skip a second report.
-    property reported : Exception?
     property db_count : Int32 = 0
     property db_time : Time::Span = Time::Span.zero
     property db_wait : Time::Span = Time::Span.zero
@@ -230,4 +228,7 @@ class Fiber
   # The trace this fiber is working for; set only by `Crema.request`,
   # `Crema.job` and `Crema.schedule`.
   property __crema_trace : Caramel::Crema::Trace? = nil
+  # The exception this fiber last reported, so a rescue further up the stack
+  # does not report it twice.
+  property __crema_reported : Exception? = nil
 end

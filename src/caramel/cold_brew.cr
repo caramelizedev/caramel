@@ -141,7 +141,8 @@ module Caramel::ColdBrew
   def self.start(database_url : String, env = ENV, *, scheduler : Bool = true) : Service
     queues = worker_queues(env)
     concurrency = worker_concurrency(env, queues.size)
-    db = Caramel::Database.open(database_url, queues.size * concurrency + 1)
+    pool_size = queues.size * concurrency + 1
+    db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew")
     broker = Broker.new(database_url)
     self.broker = broker
     workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }

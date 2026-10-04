@@ -1,4 +1,5 @@
 require "../sugar_orm"
+require "./crema"
 
 module Caramel
   # A string cache in the UNLOGGED `caramel_cache` table,
@@ -23,7 +24,9 @@ module Caramel
     end
 
     def self.read(key : String) : String?
-      SugarORM.sql(READ, scoped(key), as: {value: String}).first?.try(&.[:value])
+      value = SugarORM.sql(READ, scoped(key), as: {value: String}).first?.try(&.[:value])
+      Crema.current?.try { |trace| value ? trace.cache_hits += 1 : trace.cache_misses += 1 }
+      value
     end
 
     # The cached value, or the block's value, written with `expires_in`.

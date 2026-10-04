@@ -674,12 +674,16 @@ describe "Caramel::ColdBrew lifecycle hooks" do
     ColdBrewSpec.hook_mode = "raise"
     vanished = ColdBrewSpec.vanished
     ColdBrewSpec::Record.enqueue(label: "after")
-    Log.capture("cold_brew.hooks") do |logs|
+    Log.capture("crema") do |logs|
       ColdBrewSpec.working("default") do
         ColdBrewSpec.eventually { ColdBrewSpec.labels == ["after"] }
       end
-      entry = /\Ahook=on_failed job=#{vanished} class=Vanished::Job error_type=Exception\z/
-      logs.check(:error, entry)
+      # The vanished job's own report comes first, then the failing hook's.
+      logs.check(:error, "error")
+      logs.check(:error, "error")
+      logs.entry.data[:source].should eq("cold_brew.hooks on_failed")
+      logs.entry.data[:error_class].should eq("Exception")
+      logs.entry.data[:message]?.should be_nil
     end
     Brew.status(vanished).not_nil!.state.should eq(Brew::JobState::Failed)
 

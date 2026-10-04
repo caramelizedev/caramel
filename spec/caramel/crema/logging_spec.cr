@@ -79,6 +79,13 @@ describe Caramel::Crema::JsonFormat do
     json["status"].should eq(200)
     json["ts"].as_s.should end_with("Z")
   end
+
+  it "writes an error's source beside the log source, not over it" do
+    entry = entry_at("error", {error_class: "KeyError", source: "GET /books/:id"})
+    json = JSON.parse(Caramel::Crema::JsonFormat.line(entry))
+    json["source"].should eq("crema")
+    json["data_source"].should eq("GET /books/:id")
+  end
 end
 
 describe Caramel::Crema::Logging do

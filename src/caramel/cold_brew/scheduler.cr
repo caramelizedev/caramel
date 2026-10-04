@@ -1,6 +1,7 @@
 require "log"
 require "wait_group"
 require "../../sugar_orm"
+require "../crema"
 
 module Caramel::ColdBrew
   record Schedule, span : Time::Span, name : String, block : Proc(Nil)
@@ -84,7 +85,7 @@ module Caramel::ColdBrew
           next unless held
           period = schedule.span.total_seconds
           next if SugarORM.sql(LEASE, schedule.name, period, as: {name: String}).empty?
-          schedule.block.call
+          Crema.schedule(schedule.name) { schedule.block.call }
           ran = true
         end
       end
@@ -98,7 +99,10 @@ module Caramel::ColdBrew
           run_due(schedule)
           remaining(schedule).clamp(floor, schedule.span)
         rescue error
-          Log.error { "schedule=#{schedule.name} error_type=#{error.class}" }
+          # A block's error was reported by its trace; anything else is reported here.
+          unless Crema.reported?(error)
+            Crema.report(error, handled: false, source: "cold_brew.scheduler")
+          end
           {schedule.span, @retry}.min
         end
         select

@@ -1,6 +1,7 @@
 require "log"
 require "wait_group"
 require "../../sugar_orm"
+require "../crema"
 require "../cache"
 
 module Caramel::ColdBrew
@@ -43,7 +44,7 @@ module Caramel::ColdBrew
           begin
             run_once
           rescue error
-            Log.error { "maintenance failed error_type=#{error.class}" }
+            Crema.report(error, handled: false, source: "cold_brew.maintenance")
           end
           select
           when @stopping.receive?

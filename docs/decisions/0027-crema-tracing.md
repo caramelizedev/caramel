@@ -54,6 +54,32 @@ secrets in logs and without a diagnostic that costs a production binary anything
 10. **Runtime.** `Crema.start` is called by `serve` and `work` with the role, database
     pools, Cold Brew service and application; `Runtime#stop` runs the stoppers that
     start blocks returned, newest first.
+11. **SugarORM stays independent.** `SugarORM::Repo` yields each statement through two
+    hooks, `observe` and `observe_checkout`, that only yield. `caramel/crema/sql`
+    redefines them: it times the statement as an `sql` span, counts slow statements and,
+    when the trace records, statements repeated five or more times. The span's name
+    is the verb and first table (`SELECT books`); its detail is the parameterized SQL,
+    never a bind value.
+12. **Statements name their code.** Inside a trace every statement starts with
+    `/*action='App%3A%3ABooks%3A%3AShow'*/ ` (`job='…'`, `schedule='…'` for background
+    work), so `pg_stat_activity` and PostgreSQL's logs name the code that ran it. The tag
+    is prepended, so a trailing comment or `;` cannot swallow it, and holds nothing that
+    varies per request, so prepared statements stay reusable.
+13. **Work carries its trace.** `caramel_jobs.context` (jsonb, a framework migration) holds
+    the enqueuing trace's `traceparent`, request id and, for a debug trace, `"debug":true`.
+    The job's trace continues that trace; its `parent_id` is the enqueuing span. A schedule
+    run starts a trace of its own. `Caramel::Outbound` times each call as an `http` span and
+    sends `traceparent` unless the caller set one; cache reads count hits and misses; views
+    are `view` spans and only the outermost counts in `view_ms`.
+14. **Cold Brew reports through Crema.** A job's failure, a failing hook and the worker,
+    maintenance and scheduler loops call `Crema.report`; the old per-component `error_type`
+    log lines are gone. A fiber reports an exception once.
+15. **`dump` is a development aid.** `dump value` prints the value and its location and adds
+    a `dump` span in a development build with `CARAMEL_ENV=development`; elsewhere it
+    returns the value untouched. Pools carry an `application_name` (`caramel-web`,
+    `caramel-cold-brew`, `caramel-listen`) so every backend is attributable.
+16. **JSON lines.** A data key equal to `ts`, `level`, `source` or `msg` (an error's
+    `source`) is written with a `data_` prefix.
 
 ## Reasons
 

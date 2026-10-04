@@ -1,6 +1,8 @@
 require "html"
 require "blueprint/html"
 require "./html"
+require "./crema"
+require "./crema/dump"
 require "./islands"
 
 module Caramel
@@ -21,6 +23,7 @@ module Caramel
   # once: build a new one for each response.
   abstract class View
     include Blueprint::HTML
+    include Crema::Dumping
 
     # Writes an island (ADR 0005) in place.
     def island(component : String, props) : Nil
@@ -33,6 +36,21 @@ module Caramel
     # other methods and locals stay available.
     def markup(&) : HTML::Safe
       HTML::Safe.new(Blueprint::HTML::Builder.build { |builder| with builder yield })
+    end
+
+    # Blueprint calls this around every render, nested renders included. A
+    # Crema trace times each as a `view` span; only the outermost counts in
+    # `view_ms`.
+    def around_render(&) : Nil
+      Crema.measure(Crema::SpanKind::View, self.class.name) do
+        trace = Crema.current?
+        trace.try { |open| open.view_depth += 1 }
+        begin
+          yield
+        ensure
+          trace.try { |open| open.view_depth -= 1 }
+        end
+      end
     end
   end
 end

@@ -32,13 +32,16 @@ module Caramel
       sslrootcert : String?,
       sslcert : String?,
       sslkey : String?,
-      pool_options : DB::Pool::Options do
+      pool_options : DB::Pool::Options,
+      application_name : String = "caramel" do
       SUPPORTED_QUERY_PARAMS = %w[host port sslmode sslrootcert sslcert sslkey]
       DEFAULT_POOL_SIZE      =  4
       MAX_POOL_SIZE          = 32
 
       # ameba:disable Metrics/CyclomaticComplexity -- one branch per supported URL parameter
-      def self.parse(url : String, pool_size : Int = DEFAULT_POOL_SIZE) : self
+      def self.parse(url : String,
+                     pool_size : Int = DEFAULT_POOL_SIZE,
+                     application_name : String = "caramel") : self
         unless (1..MAX_POOL_SIZE).includes?(pool_size)
           raise ArgumentError.new("pool_size must be between 1 and #{MAX_POOL_SIZE}")
         end
@@ -117,6 +120,7 @@ module Caramel
           sslcert: sslcert,
           sslkey: sslkey,
           pool_options: pool_options,
+          application_name: application_name,
         )
       end
 
@@ -133,7 +137,7 @@ module Caramel
 
       def conninfo : PQ::ConnInfo
         mode = @sslmode == :verify_full ? :"verify-full" : :disable
-        PQ::ConnInfo.new(@host, @database, @user, @password, @port, mode, "caramel")
+        PQ::ConnInfo.new(@host, @database, @user, @password, @port, mode, @application_name)
       end
 
       def inspect(io : IO) : Nil
@@ -242,8 +246,11 @@ module Caramel
       ENV[key]? || raise "Missing database configuration: #{key}"
     end
 
-    def self.open(url : String, pool_size : Int = Config::DEFAULT_POOL_SIZE) : DB::Database
-      config = Config.parse(url, pool_size)
+    # *application_name* labels the pool's backends in `pg_stat_activity`.
+    def self.open(url : String,
+                  pool_size : Int = Config::DEFAULT_POOL_SIZE,
+                  application_name : String = "caramel") : DB::Database
+      config = Config.parse(url, pool_size, application_name)
       connection_options = config.connection_options
       DB::Database.new(connection_options, config.pool_options) do
         build_connection(config, connection_options)
@@ -255,7 +262,7 @@ module Caramel
     # IO_TIMEOUT, later reads wait indefinitely. The protocol connection is
     # for the caller's own frame loop.
     def self.listener(url : String) : {PG::Connection, PQ::Connection}
-      config = Config.parse(url, 1)
+      config = Config.parse(url, 1, "caramel-listen")
       if config.unix_socket?
         listener_on(unix_socket(config), config)
       else

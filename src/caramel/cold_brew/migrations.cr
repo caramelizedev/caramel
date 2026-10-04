@@ -121,5 +121,9 @@ module Caramel::ColdBrew
         )
         SQL
     ]),
+    # Crema's job context: the ids of the trace that enqueued the job. Never a message.
+    SugarORM::Migration.new(20260927000004_i64, "add_caramel_jobs_context", [
+      "ALTER TABLE caramel_jobs ADD COLUMN context jsonb",
+    ]),
   ]
 end

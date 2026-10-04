@@ -93,7 +93,8 @@ module Caramel
       when "routes", "schema", "translations"
         describe(app, command, root)
       when "serve", "seed", "migrate", "lint", "drift"
-        with_database(command == "migrate") do |db, url|
+        name = command == "serve" ? "caramel-web" : "caramel"
+        with_database(command == "migrate", name) do |db, url|
           database_command(app, command, db, url, dev_override, root)
         end
       else
@@ -189,7 +190,9 @@ module Caramel
 
     # Opens the environment's database, refusing a connection other than the
     # one Frappé verified and any spec database outside Corretto.
-    private def self.with_database(migration : Bool, & : DB::Database, String -> Int32) : Int32
+    private def self.with_database(migration : Bool,
+                                   application_name : String = "caramel",
+                                   & : DB::Database, String -> Int32) : Int32
       url = Database.url(migration: migration)
       if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
         unless url == expected
@@ -198,7 +201,7 @@ module Caramel
       elsif ENV["CARAMEL_ENV"]? == "test"
         abort("Run specs through frappe corretto")
       end
-      db = Database.open(url)
+      db = Database.open(url, application_name: application_name)
       begin
         SugarORM::Repo.database = db
         yield db, url

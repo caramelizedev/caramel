@@ -16,8 +16,11 @@ module Caramel::Crema
   end
 
   # One JSON object per line: `ts`, `level`, `source`, `msg`, then the
-  # entry's context and data, flattened.
+  # entry's context and data, flattened. A data key that is one of those four
+  # (an error's `source`) is written as `data_source`.
   module JsonFormat
+    RESERVED = {"ts", "level", "source", "msg"}
+
     def self.line(entry : ::Log::Entry) : String
       fields = Crema.entry_fields(entry)
       JSON.build do |json|
@@ -26,10 +29,14 @@ module Caramel::Crema
           json.field "level", entry.severity.to_s.downcase
           json.field "source", entry.source
           json.field "msg", entry.message
-          fields.each { |key, value| json.field key, value }
+          fields.each { |key, value| json.field(field_name(key), value) }
           entry.exception.try { |error| json.field "error_type", error.class.to_s }
         end
       end
+    end
+
+    private def self.field_name(key : String) : String
+      RESERVED.includes?(key) ? "data_#{key}" : key
     end
   end
 
