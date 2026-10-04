@@ -565,8 +565,10 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
       TREE.entries
     end
 
+    # With a tenant block, even an empty one, a request in a tenant matches
+    # only the tenant routes.
     def match(request : HTTP::Request) : ::Caramel::Router::Match
-      {% if tenants.includes?(true) %}
+      {% if tenant %}
         TREE.route(request.path, request.method, ::Caramel::Tenancy.bound?)
       {% else %}
         TREE.route(request.path, request.method)
