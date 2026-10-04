@@ -34,6 +34,7 @@ module TenancyZeroCost
   end
 end
 
+Log.setup(:none)
 csrf = Caramel::CSRF.new("s" * 64, "https://zero.caramel")
 app = Caramel::Application.new(TenancyZeroCost::AppRouter.new, csrf)
 headers = HTTP::Headers{"Host" => "zero.caramel"}

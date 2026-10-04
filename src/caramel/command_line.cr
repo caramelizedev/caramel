@@ -3,6 +3,7 @@ require "./application"
 require "./csrf"
 require "./database"
 require "./cold_brew"
+require "./crema/runtime"
 require "../sugar_orm"
 
 module Caramel
@@ -78,6 +79,7 @@ module Caramel
     # Runs one command and returns its exit status. `App` provides TITLE,
     # MIGRATIONS, AppRouter and `seed`.
     def self.run(app : T.class, arguments : Array(String), root : String) : Int32 forall T
+      Crema::Logging.setup
       command = arguments.first? || "help"
       flags = arguments[1..]? || [] of String
       if command == "work"
@@ -121,6 +123,7 @@ module Caramel
     def self.work(title : String, url : String, options : WorkOptions,
                   stop : Channel(Nil), output : IO = STDOUT) : Int32
       service = ColdBrew.start(url, options.environment, scheduler: options.scheduler)
+      runtime = Crema.start("work", title, database: service.database, cold_brew: service)
       begin
         output.puts "#{title} worker is ready: #{readiness(service, options)}"
         output.flush
@@ -128,6 +131,7 @@ module Caramel
       ensure
         # In-flight jobs finish; no new ones start.
         service.stop
+        runtime.stop
       end
       0
     end
@@ -172,21 +176,15 @@ module Caramel
     end
 
     private def self.routes(entries : Array(Router::Entry)) : Int32
-      width = entries.max_of? { |entry| listed_path(entry).size } || 0
+      width = entries.max_of?(&.listed_path.size) || 0
       entries.each do |entry|
-        line = "#{entry.method.ljust(7)} #{listed_path(entry).ljust(width)}  #{entry.action}"
+        line = "#{entry.method.ljust(7)} #{entry.listed_path.ljust(width)}  #{entry.action}"
         line += "  #{entry.contract}" unless entry.contract.empty?
         ingress = entry.ingress.summary
         line += "  [#{ingress}]" unless ingress.empty?
         puts line
       end
       0
-    end
-
-    # A route's path as listed: a tenant route under `/:tenant`.
-    private def self.listed_path(entry : Router::Entry) : String
-      return entry.path unless entry.tenant
-      entry.path == "/" ? "/:tenant" : "/:tenant#{entry.path}"
     end
 
     # Opens the environment's database, refusing a connection other than the
@@ -274,16 +272,21 @@ module Caramel
       abort("CARAMEL_SOCKET must be in a private owned directory") if exposed?(parent)
       occupied = File.info?(socket_path, follow_symlinks: false)
       abort("Application socket is already occupied") if occupied
-      server = HTTP::Server.new([Caramel.build(app, db, secret, origin, root)])
+      application = Caramel.build(app, db, secret, origin, root)
+      server = HTTP::Server.new([application])
       # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
       bound = false
       cold_brew : ColdBrew::Service? = nil
+      # ameba:disable Lint/UselessAssign -- read by the ensure below when startup fails
+      runtime : Crema::Runtime? = nil
       begin
         server.bind_unix(socket_path)
         bound = true
         File.chmod(socket_path, 0o600)
         # Invalid worker settings raise here; the ensure still frees the socket.
         cold_brew = ColdBrew.start(url) unless ENV["CARAMEL_ENV"]? == "test"
+        runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
+          application: application)
         Process.on_terminate { server.close }
         puts "#{T::TITLE} is ready at #{origin}"
         server.listen
@@ -292,6 +295,7 @@ module Caramel
         File.delete?(socket_path) if bound
         # In-flight jobs finish; no new ones start.
         cold_brew.try(&.stop)
+        runtime.try(&.stop)
       end
     end
 

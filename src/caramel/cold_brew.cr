@@ -107,6 +107,11 @@ module Caramel::ColdBrew
     getter workers : Array(Worker)
     getter broker : Broker
 
+    # The pool Cold Brew's workers and maintenance use.
+    def database : DB::Database
+      @db
+    end
+
     def initialize(@db : DB::Database,
                    @workers : Array(Worker),
                    @maintenance : Maintenance,

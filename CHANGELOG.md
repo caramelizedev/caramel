@@ -6,6 +6,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ### Upgrade notes
 
+- Crema, Caramel's observability ([ADR 0027](docs/decisions/0027-crema-tracing.md)), traces every routed request. Each response carries `X-Request-ID`, and a valid inbound `traceparent` continues the caller's trace. The application logs one canonical line per request through the `crema` log source, and `serve` and `work` set up logging themselves: JSON in production, text in development and test (`CARAMEL_LOG_FORMAT`, `LOG_LEVEL`). The old `request_id=… error_type=…` error line is gone; the `error` line carries `error_class` and `fingerprint` instead. `Caramel::DevelopmentError.response` now takes a `Caramel::Crema::ErrorReport`.
 - `frappe new` writes an `AGENTS.md` that maps the application for coding agents, a `CLAUDE.md` that imports it, and a shorter `README.md`. Existing applications keep their files; copy `AGENTS.md` and `CLAUDE.md` from `templates/application` in the release source to adopt them.
 - The `Caramel/ServiceNoun` lint message and description no longer cite the design RFC. The rule is unchanged.
 - The release source no longer ships the design RFC, the research notes or the separate testing, views and editor-tools guides. The notes are in [caramel-notes](https://github.com/caramelizedev/caramel-notes), and the guides are on the website.

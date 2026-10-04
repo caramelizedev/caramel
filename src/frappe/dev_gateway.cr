@@ -4,6 +4,7 @@ require "socket/unix_socket"
 require "crypto/subtle"
 require "./project"
 require "../caramel/html"
+require "../caramel/crema/redact"
 require "../caramel/response"
 
 module Caramel::Frappe
@@ -306,11 +307,7 @@ module Caramel::Frappe
     end
 
     private def redact(message : String) : String
-      result = message.scrub
-      secrets = @secrets.reject(&.empty?).sort_by!(&.bytesize)
-      secrets.reverse_each { |secret| result = result.gsub(secret, "[redacted]") }
-      result = result.gsub(/postgres(?:ql)?:\/\/[^\s"'<>]+/, "[database URL redacted]")
-      result.byte_slice(0, Math.min(result.bytesize, 32_768)).scrub
+      Caramel::Crema::Redact.text(message, @secrets, 32_768)
     end
 
     private def remove_hop_headers(headers : HTTP::Headers) : Nil

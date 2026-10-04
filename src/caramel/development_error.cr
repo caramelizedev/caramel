@@ -1,3 +1,4 @@
+require "./crema"
 require "./html"
 require "./response"
 
@@ -10,23 +11,17 @@ module Caramel
                            "Expand the stack below for the failing dependency.</p>"
     NEXT_STEP = "<p>Check the first application frame, fix the failing operation, " \
                 "and save your changes. Frappé will rebuild the application.</p>"
-    # A credential written as `name=value` or `name: "value"`.
-    CREDENTIAL =
-      /\b[A-Za-z0-9_]*(?:password|secret|token|api_key)\s*[=:]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/i
 
-    def self.response(error : Exception, request_id : String, request : HTTP::Request) : Response
-      root = File.expand_path(ENV["CARAMEL_PROJECT_ROOT"]? || Dir.current)
-      secrets = environment_secrets
+    def self.response(error : Exception,
+                      report : Crema::ErrorReport,
+                      request : HTTP::Request) : Response
+      request_id = report.request_id || ""
+      root = Crema::Frames.root
+      secrets = Crema.secrets
       frames = error.backtrace?.try(&.first(80)) || [] of String
       application, internal = frames.partition do |frame|
-        if location = frame.match(/\A(.+?):\d+(?::\d+)?(?: |\z)/)
-          # Crystal renders paths relative to the process's initial directory.
-          # Normalize for classification without opening arbitrary source files.
-          path = File.expand_path(location[1], Process::INITIAL_PWD || Dir.current)
-          %w[app config src db].any? { |directory| path.starts_with?("#{root}/#{directory}/") }
-        else
-          false
-        end
+        parsed = Crema::Frames.parse(frame)
+        parsed ? Crema::Frames.application?(parsed, root) : false
       end
       name = HTML.escape(error.class.to_s)
       message = HTML.escape(redact(error.message || "No exception message", secrets, 8192))
@@ -59,31 +54,12 @@ module Caramel
       response
     end
 
-    # The values of secret-looking environment variables, and the password
-    # in each PostgreSQL URL among them.
-    private def self.environment_secrets : Array(String)
-      secrets = [] of String
-      ENV.each do |key, value|
-        next unless key.matches?(/SECRET|PASSWORD|TOKEN|API_KEY|DATABASE_URL/i)
-        secrets << value unless value.empty?
-        if value.starts_with?("postgres://") || value.starts_with?("postgresql://")
-          password = URI.parse(value).password
-          secrets << URI.decode(password) if password && !password.empty?
-        end
-      end
-      secrets
-    end
-
     private def self.write_frame(io : IO, frame : String, secrets : Array(String)) : Nil
       io << "<li><code>" << HTML.escape(redact(frame, secrets, 2048)) << "</code></li>"
     end
 
     private def self.redact(text : String, secrets : Array(String), limit : Int32) : String
-      safe = text.scrub
-      secrets.sort_by(&.bytesize).reverse_each { |secret| safe = safe.gsub(secret, "[redacted]") }
-      safe = safe.gsub(/postgres(?:ql)?:\/\/[^\s"'<>]+/, "[database URL redacted]")
-      safe = safe.gsub(CREDENTIAL, "[credential redacted]")
-      safe.byte_slice(0, Math.min(safe.bytesize, limit)).scrub
+      Crema::Redact.text(text, secrets, limit)
     end
   end
 end
