@@ -3,6 +3,7 @@ require "file_utils"
 require "json"
 require "random/secure"
 require "socket"
+require "../../src/sugar_orm"
 require "../../src/caramel/database"
 require "../../src/latte/postgres"
 
@@ -101,6 +102,50 @@ describe "Latte managed PostgreSQL" do
       db.query_one("SHOW file_copy_method", as: String).should eq("clone")
     ensure
       db.close
+    end
+  end
+
+  it "preloads pg_stat_statements and auto_explain" do
+    admin.call("SHOW shared_preload_libraries;").should eq("pg_stat_statements,auto_explain")
+    admin.call("SHOW auto_explain.log_min_duration;").should eq("250ms")
+    admin.call("SHOW auto_explain.log_parameter_max_length;").should eq("0")
+  end
+
+  it "keeps pg_stat_statements in its own schema of the development database only" do
+    where = "SELECT extnamespace::regnamespace::text FROM pg_extension " \
+            "WHERE extname = 'pg_stat_statements'"
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      runtime.query_one(where, as: String).should eq("caramel_stats")
+      runtime.query_one("SELECT count(*) FROM caramel_stats.pg_stat_statements", as: Int64)
+        .should be >= 0_i64
+    ensure
+      runtime.close
+    end
+    spec = open_database(credentials.spec_runtime, 1)
+    begin
+      spec.query_all(where, as: String).should be_empty
+    ensure
+      spec.close
+    end
+    migration = open_database(credentials.development_migration, 1)
+    begin
+      names = SugarORM::Introspection.read(migration).tables.map(&.name)
+      names.none?(&.includes?("pg_stat_statements")).should be_true
+    ensure
+      migration.close
+    end
+  end
+
+  it "stays idempotent when provisioned again" do
+    again = service.provision(site)
+    again.development_runtime.should eq(credentials.development_runtime)
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      count = "SELECT count(*) FROM pg_extension WHERE extname = 'pg_stat_statements'"
+      runtime.query_one(count, as: Int64).should eq(1_i64)
+    ensure
+      runtime.close
     end
   end
 

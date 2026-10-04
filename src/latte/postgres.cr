@@ -13,8 +13,11 @@ module Caramel::Latte
   # Projects receive databases and non-privileged roles inside this cluster;
   # project removal never removes those databases.
   class Postgres
-    MAJOR                      = Toolchain::POSTGRES_MAJOR
-    MAX_CONNECTIONS            = 64
+    MAJOR           = Toolchain::POSTGRES_MAJOR
+    MAX_CONNECTIONS = 64
+    # The schema of `pg_stat_statements` in the development database (ADR 0029).
+    STATISTICS_SCHEMA          = "caramel_stats"
+    PRELOADED_LIBRARIES        = "pg_stat_statements,auto_explain"
     RUNTIME_CONNECTION_LIMIT   = 24
     MIGRATION_CONNECTION_LIMIT =  1
     MAX_TEST_WORKERS           =  8 # Corretto workers; each may hold one spec migration connection
@@ -354,6 +357,7 @@ module Caramel::Latte
       run_with_password_file(role, password) do |passfile|
         result = ProcessRunner.run(
           [@toolchain.pg_dump, "--format=custom", "--no-owner", "--file", destination,
+           "--exclude-schema=#{STATISTICS_SCHEMA}", "--exclude-extension=pg_stat_statements",
            "--dbname", socket_url(role, "", database)],
           env: @toolchain.environment({"PGPASSFILE" => passfile}),
           timeout: 120.seconds,
@@ -665,6 +669,7 @@ module Caramel::Latte
           AND current_setting('log_min_error_statement') = 'panic'
           AND current_setting('log_parameter_max_length') = '0'
           AND current_setting('log_parameter_max_length_on_error') = '0'
+          AND current_setting('shared_preload_libraries') = '#{PRELOADED_LIBRARIES}'
           AND current_setting('file_copy_method') = 'clone';
         SQL
       run_admin_psql(sql).strip == "t"
@@ -775,6 +780,12 @@ module Caramel::Latte
         log_min_error_statement = 'panic'
         log_parameter_max_length = 0
         log_parameter_max_length_on_error = 0
+        shared_preload_libraries = '#{PRELOADED_LIBRARIES}'
+        pg_stat_statements.track = top
+        auto_explain.log_min_duration = '250ms'
+        auto_explain.log_analyze = off
+        auto_explain.log_format = text
+        auto_explain.log_parameter_max_length = 0
         # STRATEGY FILE_COPY branches clone files copy-on-write (APFS clonefile).
         file_copy_method = clone
         CONF
@@ -1074,8 +1085,9 @@ module Caramel::Latte
       ensure_database(databases.development, roles.development_migration)
       ensure_database(databases.spec, roles.spec_migration)
       configure_database(databases.development,
-        roles.development_migration, roles.development_runtime)
-      configure_database(databases.spec, roles.spec_migration, roles.spec_runtime)
+        roles.development_migration, roles.development_runtime, statistics: true)
+      configure_database(databases.spec, roles.spec_migration, roles.spec_runtime,
+        statistics: false)
     end
 
     private def ensure_role(role : String, password : String, connection_limit : Int32) : Nil
@@ -1138,7 +1150,8 @@ module Caramel::Latte
 
     private def configure_database(database : String,
                                    migration_role : String,
-                                   runtime_role : String) : Nil
+                                   runtime_role : String,
+                                   statistics : Bool) : Nil
       name = self.class.quote_identifier(database)
       migration = self.class.quote_identifier(migration_role)
       runtime = self.class.quote_identifier(runtime_role)
@@ -1147,6 +1160,7 @@ module Caramel::Latte
         ALTER DATABASE #{name} SET timezone TO 'UTC';
         REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{name} FROM PUBLIC;
         GRANT CONNECT ON DATABASE #{name} TO #{migration}, #{runtime};
+        #{"GRANT pg_read_all_stats TO #{runtime};" if statistics}
         SQL
       run_admin_psql(sql)
 
@@ -1170,7 +1184,19 @@ module Caramel::Latte
         REVOKE ALL ON TABLE caramel_migrations FROM #{runtime};
         GRANT SELECT ON TABLE caramel_migrations TO #{runtime};
         SQL
+      database_sql += statistics_sql(migration, runtime) if statistics
       run_psql(database_sql, database, ADMIN_USER, admin_material.password)
+    end
+
+    # `pg_stat_statements` in a schema of its own, so its views stay out of `public`, which
+    # SugarORM's introspection and Corretto's catalog fingerprint read.
+    private def statistics_sql(migration : String, runtime : String) : String
+      schema = self.class.quote_identifier(STATISTICS_SCHEMA)
+      <<-SQL
+        CREATE SCHEMA IF NOT EXISTS #{schema};
+        CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA #{schema};
+        GRANT USAGE ON SCHEMA #{schema} TO #{migration}, #{runtime};
+        SQL
     end
 
     # Runs *sql* as the cluster's administrator in the postgres database.
