@@ -1,6 +1,6 @@
 require "../../../src/caramel"
 
-# The RFC-0003 code blocks, verbatim between the scaffolding markers.
+# Cold Brew usage examples, between the scaffolding markers.
 # scripts/check cold-brew-compilation type-checks this file; nothing runs.
 
 # --- scaffolding ---
@@ -21,7 +21,7 @@ struct CleanupJob < Caramel::ColdBrew::Job
   end
 end
 
-# --- RFC-0003 §2.1 ---
+# --- jobs ---
 # app/jobs/send_invitation.cr
 struct SendInvitation < Caramel::ColdBrew::Job
   queue "mailers"
@@ -38,10 +38,10 @@ SugarORM::Repo.transaction do
   SendInvitation.enqueue(invite_id: invite.id)   # same transaction: no dual write
 end
 
-# --- RFC-0003 §2.2 ---
+# --- schedules ---
 Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }
 
-# --- RFC-0003 §2.3 ---
+# --- streaming ---
 struct Boards::Live < Caramel::Action
   contract do
     field board_id : Int64

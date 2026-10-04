@@ -35,7 +35,7 @@ private CAPTURED = {
     "compile_non_literal_default"       => {"COMPILE", "6:11"},
     "compile_param_not_field"           => {"COMPILE", "4:9"},
     "compile_param_wrong_type"          => {"COMPILE", "4:9"},
-    "compile_rfc_n_plus_one"            => {"N_PLUS_ONE", "5:29"},
+    "compile_usage_n_plus_one"          => {"N_PLUS_ONE", "5:29"},
     "compile_unknown_changeset_keyword" => {"NO_OVERLOAD", "4:23"},
     "compile_unknown_facade_keyword"    => {"NO_OVERLOAD", "3:21"},
     "compile_unknown_order"             => {"NO_OVERLOAD", "3:44"},
@@ -75,7 +75,7 @@ describe Caramel::Frappe::Diagnostics do
     Dir.children(File.join(ROOT, "spec/fixtures/compiler_output")).size.should eq(29)
   end
 
-  it "turns a missing route field into the RFC's MRDP with a PATCH into the contract block" do
+  it "turns a missing route field into MRDP with a PATCH into the contract block" do
     diagnostic = diagnose("routes_compile_missing_contract_field")
     mrdp(diagnostic).should eq(<<-MRDP)
       ERR CONTRACT_MISMATCH:422 at spec/fixtures/routes/compile_missing_contract_field.cr:5:5
@@ -100,8 +100,8 @@ describe Caramel::Frappe::Diagnostics do
 
   it "reads the association and remedy from SugarORM's sentinel type " \
      "and patches a same-line query" do
-    mrdp(diagnose("sugar_orm_compile_rfc_n_plus_one")).should eq(<<-MRDP)
-      ERR N_PLUS_ONE at spec/fixtures/sugar_orm/compile_rfc_n_plus_one.cr:5:29
+    mrdp(diagnose("sugar_orm_compile_usage_n_plus_one")).should eq(<<-MRDP)
+      ERR N_PLUS_ONE at spec/fixtures/sugar_orm/compile_usage_n_plus_one.cr:5:29
       MSG: Association 'users' of Team was not preloaded.
       PATCH: INSERT ".preload(:users)" AFTER 5:12\n
       MRDP
@@ -147,7 +147,7 @@ describe Caramel::Frappe::Diagnostics do
     {diagnostic.code, diagnostic.location, diagnostic.message}.should eq(expected)
   end
 
-  it "renders the RFC-0008 typography, with ANSI only when asked" do
+  it "renders the terminal typography, with ANSI only when asked" do
     diagnostic = diagnose("sugar_orm_compile_n_plus_one")
     plain = String.build { |io| diagnostic.render(io, color: false) }
     plain.should eq(<<-TEXT)

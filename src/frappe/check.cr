@@ -3,7 +3,7 @@ require "./tools"
 require "./diagnostics"
 
 module Caramel::Frappe
-  # `frappe check` (RFC-0005 §2.2, Tier 1): type-checks the application's
+  # `frappe check` (Tier 1): type-checks the application's
   # main target with the development defines and no code generation. Without
   # --error-trace the compiler prints only the frame Diagnostics parses.
   class Check

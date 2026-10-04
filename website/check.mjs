@@ -46,6 +46,7 @@ const commandsPage = read(`docs/${version}/commands`);
 for (const {syntax} of [...frappeCommands(), ...applicationCommands(), ...latteCommands()]) {
   assert(commandsPage.includes(`<code>${escapeHTML(syntax)}</code>`), `Command reference omits ${syntax}`);
 }
+assert(read(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page omits the agent guide');
 const catalog = fs.readFileSync(new URL('../src/caramel/i18n/catalog.cr', import.meta.url), 'utf8');
 const i18nPage = read(`docs/${version}/internationalization`);
 for (const [, key] of catalog.matchAll(/\{"((?:errors|pages)\.[a-z_]+)", "::/g)) {

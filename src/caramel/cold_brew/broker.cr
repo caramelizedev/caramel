@@ -3,7 +3,7 @@ require "pg"
 require "../database"
 
 module Caramel::ColdBrew
-  # Bridges PostgreSQL LISTEN/NOTIFY to Crystal channels (RFC-0003 §2.3)
+  # Bridges PostgreSQL LISTEN/NOTIFY to Crystal channels
   # over one dedicated connection per process. It LISTENs when a channel
   # gains its first subscriber and UNLISTENs when it loses its last, and
   # after a lost connection it reconnects with backoff and LISTENs again;

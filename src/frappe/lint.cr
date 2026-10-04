@@ -4,7 +4,7 @@ require "./tools"
 require "./mrdp"
 
 module Caramel::Frappe
-  # `frappe lint` (ADR 0017): checks the application against the RFC-0008
+  # `frappe lint` (ADR 0017): checks the application against Caramel's
   # rule set in its .ameba.yml. The linter, Ameba plus Caramel's own rules,
   # is built when a release is installed, or on first use in a registered
   # checkout, and again after its sources change. It reports and never

@@ -2,40 +2,30 @@
 
 Date: 2026-09-27
 
-Status: accepted. Amends [RFC-0001](../rfc.md) §2.5.
+Status: accepted.
 
 ## Context
 
-RFC-0001 §2.5 says that a request carrying `HX-Request: true` receives the compiled HTML fragment. The vendored htmx 4.0.0 (`vendor/htmx/htmx-4.0.0.min.js`) sends `HX-Request: true` on every request it issues. It also sends `HX-Request-Type`:
-
-- `full` when the swap target is `document.body` or the request uses `hx-select`;
-- `partial` otherwise.
-
-History restoration, body-targeted boosts and `hx-select` requests all need the complete document. If they received a fragment, they would drop the layout's `<head>`, assets and navigation.
+The vendored htmx 4.0.0 (`vendor/htmx/htmx-4.0.0.min.js`) sends `HX-Request: true` on every
+request it issues, so that header cannot tell a fragment request from a full-document request.
+It also sends `HX-Request-Type`: `full` when the swap target is `document.body` or the request
+uses `hx-select`, and `partial` otherwise. History restoration, body-targeted boosts and
+`hx-select` requests need the complete document; a fragment would drop the layout's `<head>`,
+assets and navigation.
 
 ## Decision
 
-- `RequestContext#partial?` is true exactly when `HX-Request-Type: partial` is present.
-- `Action#page` returns the page body with its `<title>` for a partial request, which htmx extracts, and the full layout otherwise.
-- `HX-Request: true` alone still marks the request as coming from htmx, and it has two effects:
-  - htmx requests never negotiate JSON;
-  - `redirect_to` answers with `HX-Location` instead of a 303. `redirect_external`, which sends the browser to another site, answers with `HX-Redirect` instead of a `Location` redirect, so htmx navigates the page rather than fetching that site.
-- Responses vary on `Accept, HX-Request, HX-Request-Type`.
-- JSON egress applies when the client prefers `application/json` by q-value, does not send `HX-Request`, and `handle` returned a value rather than a `Caramel::Response`. A returned `Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) means the action chose its egress explicitly, so it passes through unchanged.
+1. `RequestContext#partial?` is true exactly when `HX-Request-Type: partial` is present.
+2. `Action#page` returns the page body with its `<title>` for a partial request, which htmx extracts, and the full layout otherwise.
+3. `HX-Request: true` alone still marks the request as coming from htmx, and it has two effects:
+   - htmx requests never negotiate JSON;
+   - `redirect_to` answers with `HX-Location` instead of a 303. `redirect_external`, which sends the browser to another site, answers with `HX-Redirect` instead of a `Location` redirect, so htmx navigates the page rather than fetching that site.
+4. Responses vary on `Accept, HX-Request, HX-Request-Type`.
+5. JSON egress applies when the client prefers `application/json` by q-value, does not send `HX-Request`, and `handle` returned a value rather than a `Caramel::Response`. A returned `Response` (`page`, `morph`, `partials`, `redirect_to`, `stream`) means the action chose its egress explicitly, so it passes through unchanged.
+6. `redirect_external` refuses anything but an absolute http or https URL without credentials and a redirect status; other clients receive `Location`. `cs.validate_url` holds to the same rule.
 
 ## Reasons
 
-- The header the RFC names cannot tell a fragment request from a full-document request under htmx 4, the engine the RFC mandates. `HX-Request-Type` is htmx 4's own signal for exactly this choice.
+- `HX-Request-Type` is htmx 4's own signal for the fragment-or-document choice.
 - Returning a full document whenever the client asks for one keeps boosted navigation, history and `hx-select` correct with no per-action code.
-
-Principles followed:
-
-- Manifesto 2: state lives in the database and the hypermedia. The server must answer each hypermedia request in the form the client needs.
-- RFC-0008 §2.5: egress is one line in the action, and negotiation stays invisible.
-
-## Verification
-
-- `spec/caramel/action_spec.cr` covers fragments versus full pages, JSON negotiation and `HX-Location` redirects.
-- `spec/caramel/http_spec.cr` covers `redirect_external`: `Location` for other clients, `HX-Redirect` for htmx, and refusal of anything but an absolute http or https URL without credentials and a redirect status. `spec/caramel/validate_url_spec.cr` holds `cs.validate_url` to the same rule.
-- The generated application's request specs (`templates/application/spec/requests/home_spec.cr` and `templates/resource/spec/requests/@@PLURAL@@_spec.cr`) cover full and partial responses (`scripts/check frappe-project`).
-- `scripts/check browser` shows in Safari that htmx-issued swaps receive fragments and never nest a second layout.
+- Rejected: `HX-Request: true` as the fragment signal, because htmx 4 sends it on full-document requests too.

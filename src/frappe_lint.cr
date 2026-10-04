@@ -1,4 +1,4 @@
-# `frappe lint`: Ameba 1.7.0's rules plus Caramel's rules for RFC-0008
+# `frappe lint`: Ameba 1.7.0's rules plus Caramel's rules
 # (ADR 0017). Built separately into bin/frappe-lint by scripts/build-lint.
 require "ameba/cli/cmd"
 require "./frappe/lint/*"

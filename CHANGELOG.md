@@ -4,6 +4,12 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+### Upgrade notes
+
+- `frappe new` writes an `AGENTS.md` that maps the application for coding agents, a `CLAUDE.md` that imports it, and a shorter `README.md`. Existing applications keep their files; copy `AGENTS.md` and `CLAUDE.md` from `templates/application` in the release source to adopt them.
+- The `Caramel/ServiceNoun` lint message and description no longer cite the design RFC. The rule is unchanged.
+- The release source no longer ships the design RFC, the research notes or the separate testing, views and editor-tools guides. The notes are in [caramel-notes](https://github.com/caramelizedev/caramel-notes), and the guides are on the website.
+
 ## 0.7.1 - 2026-10-02
 
 ### Upgrade notes

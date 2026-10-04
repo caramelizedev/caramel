@@ -36,6 +36,8 @@ describe Caramel::Frappe::NewProject do
         .gitignore
         .zed/settings.json
         README.md
+        AGENTS.md
+        CLAUDE.md
         public/assets/htmx-4.0.0.min.js
         public/assets/caramel-islands.js
       ]
