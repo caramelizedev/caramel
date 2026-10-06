@@ -67,6 +67,7 @@ module Caramel::Latte
     getter state : String = "stopped"
     getter error : String? = nil
     @server : HTTP::Server? = nil
+    @failure_logged = false
 
     def initialize(@port : Int32 = 4318)
       @lock = Mutex.new
@@ -134,9 +135,14 @@ module Caramel::Latte
       body = read_body(request) || return answer(response, 413, %({"error":"body too large"}))
       ingest(body)
       answer(response, 200, "{}")
-    rescue
-      # An untrusted body, whatever its shape, answers 400 and never crashes the connection.
+    rescue JSON::ParseException
       answer(context.response, 400, %({"error":"malformed OTLP JSON"}))
+    rescue error
+      # Parsing guards every shape an exporter can send, so this is a collector bug: say so
+      # once on stderr (the daemon log) and answer 500, not a misleading 400.
+      STDERR.puts("Latte collector failed: #{error.class}") unless @failure_logged
+      @failure_logged = true
+      answer(context.response, 500, %({"error":"collector failed"}))
     end
 
     # Every answer closes the connection, so an exporter never holds one the server will

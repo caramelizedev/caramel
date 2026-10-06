@@ -63,9 +63,11 @@ describe Caramel::Crema::ErrorReport do
   end
 
   it "redacts more credential names, quoted names and bearer tokens" do
-    text = %(passwd=a "api-key": "b" Authorization: Bearer c.d-e and Bearer f.g)
+    secrets = ["hunter2-passwd", "k3y-api-value", "bearer-tok.en", "second-tok.en"]
+    text = %(passwd=#{secrets[0]} "api-key": "#{secrets[1]}" ) +
+           %(Authorization: Bearer #{secrets[2]} and Bearer #{secrets[3]})
     redacted = Caramel::Crema::Redact.text(text, [] of String, 1000)
-    ["passwd=a", %("b"), "c.d-e", "f.g"].each { |secret| redacted.should_not contain(secret) }
+    secrets.each { |secret| redacted.should_not contain(secret) }
   end
 
   it "leaves credential-looking text alone when asked, still hiding secrets" do

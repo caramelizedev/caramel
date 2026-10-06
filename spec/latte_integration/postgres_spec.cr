@@ -128,6 +128,27 @@ describe "Latte managed PostgreSQL" do
     end
   end
 
+  it "gives the runtime role no read access to other roles' statements" do
+    runtime_role = credentials.roles.development_runtime
+    member = "SELECT pg_has_role('#{runtime_role}', 'pg_read_all_stats', 'member');"
+    # A cluster provisioned before the fix still holds the grant; provisioning removes it.
+    admin.call("GRANT pg_read_all_stats TO #{runtime_role};")
+    admin.call(member).should eq("t")
+    service.provision(site)
+    admin.call(member).should eq("f")
+
+    probe = "crema-probe-#{Random::Secure.hex(8)}"
+    admin.call("SELECT '#{probe}';")
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      rows = runtime.query_all("SELECT query FROM caramel_stats.pg_stat_statements", as: String)
+      rows.none?(&.includes?(probe)).should be_true
+      rows.should contain("<insufficient privilege>")
+    ensure
+      runtime.close
+    end
+  end
+
   it "keeps pg_stat_statements in its own schema of the development database only" do
     where = "SELECT extnamespace::regnamespace::text FROM pg_extension " \
             "WHERE extname = 'pg_stat_statements'"
