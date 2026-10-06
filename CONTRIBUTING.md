@@ -111,7 +111,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `ty
 
 A release is a tag `vX.Y.Z` of this repository and its source archive ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). During 0.x a minor release may break compatibility and a patch release never does.
 
-1. Write the upgrade notes a user needs under `## Unreleased` in `CHANGELOG.md`, and commit them.
+1. Write the upgrade notes a user needs under `## Unreleased` in `CHANGELOG.md` as bullets, with no heading of their own (`scripts/release` adds `### Upgrade notes`), and commit them.
 2. Run `scripts/release --dry-run` to see the next version and its changelog section.
 3. Run `scripts/release`. It refuses a dirty working tree and an edited released framework migration. It sets the version in `shard.yml`, which `Caramel::VERSION` and `Latte.app` read, and writes the changelog. It runs `scripts/check all`, then commits `chore(release): vX.Y.Z` and creates the annotated tag. When a check fails it restores both files and tags nothing.
 4. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`.
