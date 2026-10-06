@@ -76,7 +76,10 @@ describe Caramel::Latte::Collector do
 
   it "ignores documents that are not OTLP objects" do
     collector = Caramel::Latte::Collector.new(0)
-    ["[]", %({"resourceSpans":[1]}), "42", "null", %({"resourceSpans":[{"scopeSpans":[2]}]})]
+    ["[]", "42", "null"].each do |body|
+      expect_raises(JSON::ParseException) { collector.ingest(body) }
+    end
+    [%({"resourceSpans":[1]}), %({"resourceSpans":[{"scopeSpans":[2]}]})]
       .each { |body| collector.ingest(body) }
     collector.traces.should be_empty
   end
@@ -121,6 +124,9 @@ describe Caramel::Latte::Collector do
       huge = " " * (Caramel::Latte::Collector::MAX_BODY + 1)
       HTTP::Client.post(url, json, huge).status_code.should eq(413)
       HTTP::Client.post(url, json, "{not json").status_code.should eq(400)
+      ["[]", "42", %("text")].each do |body|
+        HTTP::Client.post(url, json, body).status_code.should eq(400)
+      end
       HTTP::Client.get(url).status_code.should eq(404)
       metrics = "http://127.0.0.1:#{port}/v1/metrics"
       HTTP::Client.post(metrics, json, "{}").status_code.should eq(404)

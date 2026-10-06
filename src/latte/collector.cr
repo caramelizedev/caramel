@@ -114,9 +114,10 @@ module Caramel::Latte
 
     # Stores every span in an OTLP JSON *body*. The whole document is read before any
     # span is stored, so a malformed one stores nothing.
+    # A body that is valid JSON but not an object is as malformed as one that does not parse.
     def ingest(body : String) : Nil
       collected = [] of {String, Crema::CollectedSpan}
-      document = JSON.parse(body).as_h? || return
+      document = JSON.parse(body).as_h? || raise JSON::ParseException.new("not an object", 1, 1)
       (document["resourceSpans"]?.try(&.as_a?) || [] of JSON::Any).each do |resource|
         collect_resource(resource, collected)
       end
