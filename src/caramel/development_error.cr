@@ -133,6 +133,8 @@ module Caramel
         lines = source_lines(parsed) || return
         first = {parsed.line - SOURCE_CONTEXT, 1}.max
         last = {parsed.line + SOURCE_CONTEXT, lines.size}.min
+        return if first > last
+
         io << "<figure class=\"source\"><figcaption>"
         io << HTML.escape(Crema::Frames.relative(parsed.path, @root)) << ':' << parsed.line
         io << "</figcaption><pre><code>"
@@ -149,7 +151,8 @@ module Caramel
       private def source_lines(frame : Crema::Frame) : Array(String)?
         path = File.expand_path(frame.path, Process::INITIAL_PWD || Dir.current)
         real = File.realpath(path)
-        inside = Crema::Frames::DIRECTORIES.any? { |name| real.starts_with?("#{@root}/#{name}/") }
+        root = File.realpath(@root)
+        inside = Crema::Frames::DIRECTORIES.any? { |name| real.starts_with?("#{root}/#{name}/") }
         return unless inside && File.size(real) <= MAX_SOURCE_FILE
 
         File.read_lines(real)

@@ -8,6 +8,7 @@
   let stopped = false;
   let seen = null;
   let toolbar = null;
+  let following = false;
 
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-caramel-copy]');
@@ -82,26 +83,40 @@
     while (toolbar.recent.children.length > 10) toolbar.recent.lastChild.remove();
   }
 
+  function pause(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+  }
+
   async function start() {
     if (!requestId || !document.body) return;
     toolbar = buildToolbar();
     try {
-      const own = await feed('request=' + encodeURIComponent(requestId));
-      seen = own.latest;
-      if (own.traces.length) showCurrent(own.traces[0]);
-      else toolbar.badge.prepend('no trace');
+      // The application's trace can reach the event store a moment after its response.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const own = await feed('request=' + encodeURIComponent(requestId));
+        if (seen === null) seen = own.latest;
+        if (own.traces.length) { showCurrent(own.traces[0]); return; }
+        await pause(300);
+      }
+      toolbar.badge.prepend('no trace');
     } catch (_) { /* The toolbar is a convenience; the page works without it. */ }
   }
 
   async function follow(latest) {
     if (seen === null) seen = latest;
     if (latest <= seen) return;
-    const banner = document.querySelector('p.new');
+    const banner = document.querySelector('[data-caramel-new]');
     if (banner) banner.hidden = false;
     if (!toolbar) { seen = latest; return; }
-    const news = await feed('after=' + seen);
-    seen = news.latest;
-    prepend(news.traces.slice().reverse());
+    if (following) return;
+    following = true;
+    try {
+      const news = await feed('after=' + seen);
+      seen = news.latest;
+      prepend(news.traces.slice().reverse());
+    } finally {
+      following = false;
+    }
   }
 
   async function check() {
@@ -117,7 +132,7 @@
           location.reload();
           return;
         }
-        if (typeof current.latest === 'number') await follow(current.latest);
+        if (typeof current.latest === 'number') follow(current.latest).catch(() => {});
       }
     } catch (_) { /* A restart keeps the same origin; reconnect on the next poll. */ }
     if (!stopped) setTimeout(check, 400);

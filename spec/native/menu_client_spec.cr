@@ -176,6 +176,17 @@ describe "native Latte menu client" do
     end
   end
 
+  it "still lists a site whose errors fields are malformed" do
+    with_menu_fixture do |fixture|
+      rest = %(,"state":"running","errors":"many","last_error":{"fingerprint":7})
+      fixture.serve(sites: bookshelf_sites(fixture, rest: rest))
+      result = fixture.check
+      result.success?.should be_true
+      result.stdout.should contain("errors: 0")
+      result.stdout.should_not contain("last error")
+    end
+  end
+
   it "rejects an origin that does not match the validated domain" do
     with_menu_fixture do |fixture|
       fixture.serve(sites: bookshelf_sites(fixture, origin: "https://evil.example"))

@@ -308,14 +308,15 @@ module Caramel::Frappe
       event = Crema::BuildEvent.new(Time.utc.to_rfc3339(fraction_digits: 3), state, elapsed)
       event.diagnostics = diagnostics.map { |item| build_diagnostic(item) }
       if command && diagnostics.empty?
-        event.message = Crema::Redact.text(command.output.contents, @secrets, 32_768)
+        event.message = Crema::Redact.text(command.output.contents, @secrets, 32_768,
+          credentials: false)
       end
       events.build(event)
     end
 
     private def build_diagnostic(item : Diagnostic) : Crema::BuildDiagnostic
       Crema::BuildDiagnostic.new(item.code, item.file, item.line, item.column,
-        Crema::Redact.text(item.message, @secrets, 4096), item.remediation)
+        Crema::Redact.text(item.message, @secrets, 4096, credentials: false), item.remediation)
     end
 
     # Takes the build lock, waiting while a command builds (ADR 0013 §5);

@@ -74,6 +74,32 @@ describe Caramel::Latte::Collector do
     collector.traces.should be_empty
   end
 
+  it "ignores documents that are not OTLP objects" do
+    collector = Caramel::Latte::Collector.new(0)
+    ["[]", %({"resourceSpans":[1]}), "42", "null", %({"resourceSpans":[{"scopeSpans":[2]}]})]
+      .each { |body| collector.ingest(body) }
+    collector.traces.should be_empty
+  end
+
+  it "clamps kinds, drops bad timestamps and ids, and truncates names" do
+    collector = Caramel::Latte::Collector.new(0)
+    span = ->(id : String, kind : String, start : String, name : String) do
+      %({"traceId":"#{TRACE}","spanId":"#{id}","kind":#{kind},"name":"#{name}",) +
+      %("startTimeUnixNano":"#{start}","endTimeUnixNano":"5"})
+    end
+    spans = [
+      span.call("aaaaaaaaaaaaaaaa", "999999", "1790000000000000000", "x" * 600),
+      span.call("bbbbbbbbbbbbbbbb", "2", "-5", "negative"),
+      span.call("not-a-span-id", "2", "1790000000000000000", "badid"),
+    ]
+    collector.ingest(%({"resourceSpans":[{"scopeSpans":[{"spans":[#{spans.join(',')}]}]}]}))
+    stored = collector.spans(TRACE).not_nil!
+    stored.size.should eq(1)
+    stored[0].kind.should eq(0)
+    stored[0].name.bytesize.should eq(256)
+    stored[0].end_unix_nano.should eq(stored[0].start_unix_nano)
+  end
+
   it "answers OTLP over loopback HTTP and refuses what it does not accept" do
     port = free_port
     collector = Caramel::Latte::Collector.new(port)

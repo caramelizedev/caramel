@@ -191,12 +191,17 @@ module Caramel::Checks
         assert!(application_log.includes?("start bookshelf"), application_log)
         assert!(body.includes?("data-request="), "the served page does not name its request")
         feed = ["X-Caramel-Dev: 1"]
+        found_traces = [] of JSON::Any
         listed_trace = Checks.wait_until(10.seconds, 100.milliseconds) do
-          request("bookshelf", "/__caramel/dev/traces.json", feed)[1].includes?("GET /")
+          listed = JSON.parse(request("bookshelf", "/__caramel/dev/traces.json", feed)[1])
+          match = listed["traces"].as_a.find { |item| item["name"].as_s == "GET /" }
+          found_traces << match if match
+          !match.nil?
+        rescue JSON::ParseException | KeyError | TypeCastError
+          false
         end
         assert!(listed_trace, "traces.json does not list GET /")
-        feed_body = request("bookshelf", "/__caramel/dev/traces.json", feed)[1]
-        page_trace = JSON.parse(feed_body)["traces"].as_a.find! { |item| item["name"] == "GET /" }
+        page_trace = found_traces.last
         page_request = page_trace["request_id"].as_s
         in_access_log = Checks.wait_until(15.seconds, 500.milliseconds) do
           access = p.attempt([frappe, "logs", "access"], chdir: project, timeout: 30.seconds)
@@ -204,16 +209,20 @@ module Caramel::Checks
         end
         assert!(in_access_log, "frappe logs access does not show the page's request id")
         page_trace_id = page_trace["trace_id"].as_s
+        last_rpc = "no answer yet"
         collected = Checks.wait_until(15.seconds, 500.milliseconds) do
           spans = p.rpc("GET", "/v2/traces/#{page_trace_id}")["spans"].as_a
           spans.any? { |span| span["service"].as_s == "bookshelf" }
-        rescue
+        rescue ex
+          last_rpc = "#{ex.class}: #{ex.message}"
           false
         end
-        assert!(collected, "Latte's collector holds no span of service bookshelf for the page")
+        collector_failure = "Latte's collector holds no span of service bookshelf for the page " \
+                            "(last rpc: #{last_rpc})"
+        assert!(collected, collector_failure)
         runtime_url = p.local_values(project)["DATABASE_URL"]
         recorded = Checks.wait_until(30.seconds, 1.second) do
-          p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").to_i > 0
+          (p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").strip.to_i? || 0) > 0
         end
         assert!(recorded, "the recorder wrote no caramel_metrics row")
         # Under scripts/check all the build step has already built Latte.app.

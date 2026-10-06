@@ -32,7 +32,8 @@ module Caramel::Frappe
 
     # The event on one log line, or nil for anything else.
     def self.parse(line : String) : Event?
-      case JSON.parse(line)["type"]?.try(&.as_s?)
+      document = JSON.parse(line).as_h? || return
+      case document["type"]?.try(&.as_s?)
       when "trace" then Crema::TraceEvent.from_json(line)
       when "error" then Crema::ErrorEvent.from_json(line)
       when "build" then Crema::BuildEvent.from_json(line)
@@ -113,9 +114,11 @@ module Caramel::Frappe
       @lock.synchronize { error_entries.map(&.[0]) }
     end
 
-    # Error reports grouped by fingerprint, the most recent kind first.
-    def error_groups : Array(ErrorGroup)
+    # Error reports grouped by fingerprint, the most recent kind first. With *since*,
+    # reports from before that time are left out.
+    def error_groups(since : Time? = nil) : Array(ErrorGroup)
       entries = @lock.synchronize { error_entries }
+      entries = entries.select { |error, _| self.class.newer?(error.at, since) } if since
       groups = entries.group_by { |error, _| error.fingerprint }
       found = groups.values.map { |group| ErrorGroup.new(group.last[0], group.last[1], group.size) }
       found.sort_by!(&.error.at).reverse!
@@ -123,6 +126,32 @@ module Caramel::Frappe
 
     def builds : Array(Crema::BuildEvent)
       @lock.synchronize { @builds.dup }
+    end
+
+    # When the newest build or type check that succeeded finished, if any. An error
+    # from before it was probably fixed by that build.
+    def last_good_build : Time?
+      @lock.synchronize do
+        good = @builds.reverse_each.find do |build|
+          build.state == "built" || build.state == "passed"
+        end
+        good.try { |build| self.class.time(build.at) }
+      end
+    end
+
+    # *text* as a time, or nil when it is not RFC 3339.
+    def self.time(text : String) : Time?
+      Time.parse_rfc3339(text)
+    rescue Time::Format::Error
+      nil
+    end
+
+    # Whether *text* is not before *since*; an unreadable time counts as newer.
+    def self.newer?(text : String, since : Time?) : Bool
+      return true unless since
+
+      moment = time(text)
+      moment.nil? || moment >= since
     end
 
     private def error_entries : Array({Crema::ErrorEvent, Crema::TraceEvent?})

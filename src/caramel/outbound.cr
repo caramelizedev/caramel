@@ -32,7 +32,7 @@ module Caramel
         raise ArgumentError.new("Unsupported HTTP method: #{method.inspect}")
       end
       name = "#{method} #{uri.host}"
-      Crema.measure(Crema::SpanKind::Http, name, "#{uri.scheme}://#{uri.host}#{uri.path}") do |span|
+      Crema.measure(Crema::SpanKind::Http, name, span_detail(uri)) do |span|
         sent = propagated(headers)
         response = if proxy = @@proxy
                      through(proxy, method, url, uri, sent, body)
@@ -43,6 +43,19 @@ module Caramel
         response
       end
     end
+
+    {% if flag?(:caramel_development) %}
+      # Development spans name the path too; production keeps scheme and host only.
+      private def self.span_detail(uri : URI) : String
+        return "#{uri.scheme}://#{uri.host}" unless Crema.development?
+
+        "#{uri.scheme}://#{uri.host}#{uri.path}"
+      end
+    {% else %}
+      private def self.span_detail(uri : URI) : String
+        "#{uri.scheme}://#{uri.host}"
+      end
+    {% end %}
 
     def self.get(url : String,
                  headers : HTTP::Headers = HTTP::Headers.new) : HTTP::Client::Response

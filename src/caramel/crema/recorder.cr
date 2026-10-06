@@ -19,6 +19,7 @@ module Caramel::Crema
     MAX_SQL_KEY = 500
     OTHER       = "(other)"
     PRUNE_EVERY = 1.hour
+    STOP_WAIT   = 5.seconds
 
     UPSERT = <<-SQL
       INSERT INTO caramel_metrics AS m
@@ -42,9 +43,10 @@ module Caramel::Crema
       @lock = Mutex.new
       @window = Tally.new
       @keys = {} of String => Set(String)
+      @keys_bucket = Time.utc.at_beginning_of_minute
       @stopping = Channel(Nil).new
       @done = Channel(Nil).new
-      @last_prune = Time.instant
+      @last_prune = Time.instant - PRUNE_EVERY
     end
 
     def name : String
@@ -65,17 +67,21 @@ module Caramel::Crema
       end
     end
 
-    # Writes the window recorded so far, synchronously. The loop, the stopper and
-    # specs use it.
-    def flush : Nil
+    # Writes the window recorded so far into the minute bucket of *at*,
+    # synchronously. The loop, the stopper and specs use it.
+    def flush(at : Time = Time.utc) : Nil
+      bucket = at.at_beginning_of_minute
       window = @lock.synchronize do
-        @keys.clear
+        unless @keys_bucket == bucket
+          @keys.clear
+          @keys_bucket = bucket
+        end
         @window.swap
       end
       rows = window.size
       return if rows == 0
 
-      write(window, Time.utc.at_beginning_of_minute)
+      write(window, bucket)
     rescue error
       LOG.warn { "recorder flush failed error_type=#{error.class}" }
       Crema.drop("recorder", (rows || 0).to_i64)
@@ -86,11 +92,16 @@ module Caramel::Crema
       self
     end
 
-    # Stops the loop, then writes what remains.
+    # Stops the loop, then writes what remains. A loop that does not finish within
+    # `STOP_WAIT` is left behind and the final write is skipped. Safe to call twice.
     def stop : Nil
-      @stopping.close
-      @done.receive?
-      flush
+      @stopping.close unless @stopping.closed?
+      select
+      when @done.receive?
+        flush
+      when timeout(STOP_WAIT)
+        LOG.warn { "recorder did not stop within #{STOP_WAIT.total_seconds.to_i}s" }
+      end
     end
 
     private def run : Nil
@@ -117,13 +128,25 @@ module Caramel::Crema
     end
 
     private def add(kind : String, key : String, duration : Float64, failed : Bool) : Nil
+      key = key.delete('\0')
       known = (@keys[kind] ||= Set(String).new)
       known << key if known.size < MAX_KEYS || known.includes?(key)
       @window.record(kind, known.includes?(key) ? key : OTHER, duration, failed)
     end
 
+    # The statement as one aggregate key: literals, numbers and `IN` lists become
+    # `?`, whitespace collapses, NUL bytes go, and the result is cut to `MAX_SQL_KEY`.
+    def self.sql_key(sql : String) : String
+      sql.delete('\0')
+        .gsub(/'(?:[^']|'')*'/, "?")
+        .gsub(/(?<![\w$])\d+(?!\w)/, "?")
+        .gsub(/\bIN\s*\(\s*(?:\?|\$\d+)(?:\s*,\s*(?:\?|\$\d+))*\s*\)/i, "IN (?)")
+        .gsub(/\s+/, " ").strip
+        .byte_slice(0, MAX_SQL_KEY).scrub
+    end
+
     private def sql_key(sql : String) : String
-      sql.gsub(/\s+/, " ").strip.byte_slice(0, MAX_SQL_KEY).scrub
+      self.class.sql_key(sql)
     end
 
     private def write(window : Tally, bucket : Time) : Nil

@@ -675,9 +675,29 @@ module Caramel::Frappe
 
     private def traces(invocation : Commands::Invocation) : Int32
       agent = MRDP.agent?(invocation.flags, @output)
-      limit = invocation["--limit"]?.try(&.to_i?) || Traces::DEFAULT_LIMIT
-      slow = invocation["--slow"]?.try(&.to_f?)
+      limit = positive_limit!(invocation)
+      slow = slow_threshold!(invocation)
       development_traces.list(agent, invocation.flag?("--errors"), slow, limit)
+    end
+
+    private def positive_limit!(invocation : Commands::Invocation) : Int32
+      text = invocation["--limit"]? || return Traces::DEFAULT_LIMIT
+      number = text.to_i?
+      return number if number && number >= 1
+
+      raise usage_failure(invocation, "--limit must be a whole number of 1 or more, not #{text}")
+    end
+
+    private def slow_threshold!(invocation : Commands::Invocation) : Float64?
+      text = invocation["--slow"]? || return
+      number = text.to_f?
+      return number if number && number >= 0 && number.finite?
+
+      raise usage_failure(invocation, "--slow must be a number of milliseconds, not #{text}")
+    end
+
+    private def usage_failure(invocation : Commands::Invocation, message : String) : Commands::Usage
+      Commands::Usage.new(message, "frappe #{invocation.command.name}", [invocation.command])
     end
 
     private def trace(invocation : Commands::Invocation) : Int32

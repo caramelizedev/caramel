@@ -40,7 +40,7 @@ describe Caramel::Crema::Prometheus do
       caramel_job_duration_seconds_count{job="App::Mail"} 1
       # HELP caramel_job_queue_lag_seconds Time a job waited past its run_at.
       # TYPE caramel_job_queue_lag_seconds histogram
-      caramel_job_queue_lag_seconds_sum{queue="default"} 0.0
+      caramel_job_queue_lag_seconds_sum{queue="default"} 0.002
       caramel_job_queue_lag_seconds_count{queue="default"} 1
       # HELP caramel_schedules_total Schedule runs finished, by outcome.
       # TYPE caramel_schedules_total counter

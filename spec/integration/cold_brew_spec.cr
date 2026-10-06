@@ -680,6 +680,7 @@ describe "Caramel::ColdBrew lifecycle hooks" do
       end
       # The vanished job's own report comes first, then the failing hook's.
       logs.check(:error, "error")
+      logs.entry.data[:source].should eq("Vanished::Job")
       logs.check(:error, "error")
       logs.entry.data[:source].should eq("cold_brew.hooks on_failed")
       logs.entry.data[:error_class].should eq("Exception")

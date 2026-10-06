@@ -50,6 +50,19 @@ private def canonical(logs : Log::EntriesChecker, message : String) : Log::Entry
   logs.entry
 end
 
+# Keeps the `handled` flag of the error each finished trace holds, if any.
+class ErrorCaptureSink < Caramel::Crema::Sink
+  getter handled = [] of Bool?
+
+  def name : String
+    "error-capture"
+  end
+
+  def finished(trace : Caramel::Crema::Trace) : Nil
+    @handled << trace.error.try(&.handled?)
+  end
+end
+
 describe "Crema request tracing" do
   it "gives every response a request id: 200, 404 and 500" do
     ["/books/7", "/missing", "/broken"].each do |path|
@@ -110,5 +123,58 @@ describe "Crema request tracing" do
       crema_app.handle(crema_request("/missing"))
       canonical(logs, "request").data[:name].should eq("GET (none)")
     end
+  end
+
+  it "names a trace after a known method, and OTHER for any other label" do
+    names = {} of String => String
+    ["GET", "BREW"].each do |method|
+      Caramel::Crema.request(HTTP::Request.new(method, "/x")) do |trace|
+        names[method] = trace.name
+        Caramel::Response.new(body: "ok")
+      end
+    end
+    names.should eq({"GET" => "GET (none)", "BREW" => "OTHER (none)"})
+  end
+
+  it "takes the sampled bit from the inbound traceparent and a job's context" do
+    header = HTTP::Headers{"traceparent" => "00-#{"a" * 32}-#{"b" * 16}-00"}
+    Caramel::Crema.request(HTTP::Request.new("GET", "/x", header)) do |trace|
+      trace.sampled?.should be_false
+      trace.parent_sampled.should be_false
+      Caramel::Response.new(body: "ok")
+    end
+    context = %({"traceparent":"00-#{"a" * 32}-#{"b" * 16}-01"})
+    Caramel::Crema.job(1_i64, "App::Job", "default", 1, Time.utc, context) do |trace|
+      trace.sampled?.should be_true
+      trace.parent_sampled.should be_true
+    end
+  end
+
+  it "marks only unhandled reports as reported, and clears the mark when the trace ends" do
+    error = KeyError.new("x")
+    Caramel::Crema.request(HTTP::Request.new("GET", "/x")) do
+      Caramel::Crema.report(error, handled: true)
+      Caramel::Crema.reported?(error).should be_false
+      Caramel::Crema.report(error, handled: false)
+      Caramel::Crema.reported?(error).should be_true
+      Caramel::Response.new(body: "ok")
+    end
+    Caramel::Crema.reported?(error).should be_false
+  end
+
+  it "still records the unhandled error when a handled report is raised again" do
+    sink = Caramel::Crema.subscribe(ErrorCaptureSink.new).as(ErrorCaptureSink)
+    begin
+      expect_raises(KeyError) do
+        Caramel::Crema.request(HTTP::Request.new("GET", "/x")) do
+          error = KeyError.new("x")
+          Caramel::Crema.report(error, handled: true)
+          raise error
+        end
+      end
+    ensure
+      Caramel::Crema.unsubscribe(sink)
+    end
+    sink.handled.should eq([false])
   end
 end

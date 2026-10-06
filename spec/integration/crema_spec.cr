@@ -211,7 +211,7 @@ describe "Crema instrumentation" do
     job.request_id.should eq(request.request_id)
     job.name.should eq("CremaSpec::Notify")
     job.queue.should eq("crema")
-    job.queue_lag_ms.should_not be_nil
+    job.queue_lag_ms.not_nil!.should be >= 0
   end
 
   it "ends a failing job's trace in error with the exception's class" do
@@ -247,7 +247,8 @@ describe "Crema instrumentation" do
     CremaSpec.reset
     db = Caramel::Database.open(CremaSpec.runtime_url, 2, application_name: "caramel-spec")
     begin
-      db.scalar("SELECT current_setting('application_name')").should eq("caramel-spec")
+      sql = "SELECT application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()"
+      db.scalar(sql).should eq("caramel-spec")
     ensure
       db.close
     end
@@ -300,36 +301,49 @@ describe "Crema job commands" do
 end
 
 describe "Crema db diagnose" do
-  it "prints every section and the pg_stat_statements hint" do
+  it "prints every section under its header and the pg_stat_statements hint" do
     CremaSpec.reset
-    output = String.build { |io| Caramel::Crema::Diagnose.run(io, CremaSpec.runtime) }
-    %w[connections long_running blocking cache_hit seq_scans unused_indexes vacuum table_sizes]
-      .each { |name| output.should contain(name) }
+    ok = false
+    output = String.build { |io| ok = Caramel::Crema::Diagnose.run(io, CremaSpec.runtime) }
+    ok.should be_true
+    %w[connections long_running blocking cache_hit seq_scans unused_indexes vacuum table_sizes
+      outliers].each { |name| output.should contain("== #{name} ==") }
+    output.should_not contain(": unavailable (")
     output.should contain("outliers: pg_stat_statements is not installed in this database.")
-    output.should contain("== table_sizes ==")
   end
 end
 
 describe Caramel::Crema::Recorder do
+  it "normalizes SQL keys: literals, numbers and IN lists become ?, identifiers stay" do
+    key = ->(sql : String) { Caramel::Crema::Recorder.sql_key(sql) }
+    key.call("SELECT * FROM table1 WHERE id = 42 AND name = 'it''s'")
+      .should eq("SELECT * FROM table1 WHERE id = ? AND name = ?")
+    key.call("SELECT $1::int, x2 FROM t WHERE id IN (1, 2, 3)")
+      .should eq("SELECT $1::int, x2 FROM t WHERE id IN (?)")
+    key.call("WHERE id IN ($1, $2, $3)").should eq("WHERE id IN (?)")
+    key.call("SELECT\n  1\u0000 FROM t").should eq("SELECT ? FROM t")
+    key.call("SELECT " + "x" * 800).bytesize.should eq(Caramel::Crema::Recorder::MAX_SQL_KEY)
+  end
+
   it "keeps per-minute aggregates, never a message, and adds to a row it wrote" do
     CremaSpec.reset
     recorder = Caramel::Crema::Recorder.new(CremaSpec.runtime)
     Caramel::Crema.subscribe(recorder)
+    minute = Time.utc.at_beginning_of_minute
     begin
       CremaSpec.get("/flaky")
       CremaSpec.get("/flaky?fail=1")
-      recorder.flush
+      recorder.flush(minute)
       CremaSpec.get("/flaky")
-      recorder.flush
+      recorder.flush(minute)
     ensure
       Caramel::Crema.unsubscribe(recorder)
     end
     owner = CremaSpec.owner
-    totals = "SELECT sum(count)::int, sum(errors)::int FROM caramel_metrics " \
-             "WHERE kind = 'request' AND key = 'GET /flaky'"
-    owner.query_one(totals, as: {Int32, Int32}).should eq({3, 1})
-    sizes = "SELECT array_length(histogram, 1) FROM caramel_metrics WHERE kind = 'request'"
-    owner.query_all(sizes, as: Int32).uniq.should eq([12])
+    rows = "SELECT count, errors, array_length(histogram, 1), " \
+           "(SELECT sum(n) FROM unnest(histogram) AS n)::int FROM caramel_metrics " \
+           "WHERE kind = 'request' AND key = 'GET /flaky'"
+    owner.query_all(rows, as: {Int64, Int64, Int32, Int32}).should eq([{3_i64, 1_i64, 12, 3}])
     statement = "SELECT count(*) FROM caramel_metrics WHERE kind = 'sql' " \
                 "AND key = 'SELECT $1::int AS n'"
     owner.scalar(statement).as(Int64).should be >= 1

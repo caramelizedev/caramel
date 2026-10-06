@@ -81,8 +81,7 @@ module Caramel::Crema
 
   command("db", "db diagnose") do |_|
     CommandLine.with_database(false) do |_, _|
-      Diagnose.run(STDOUT)
-      0
+      Diagnose.run(STDOUT) ? 0 : 1
     end
   end
 

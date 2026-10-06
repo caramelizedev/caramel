@@ -56,6 +56,31 @@ describe Caramel::Crema::ErrorReport do
     redacted.should_not contain("pw9")
   end
 
+  it "keeps a secret whose value is not a valid URL instead of raising" do
+    env = {"DATABASE_URL" => "postgres://u:pw@[broken/app"}
+    secrets = Caramel::Crema::Redact.secrets(env)
+    secrets.should contain("postgres://u:pw@[broken/app")
+  end
+
+  it "redacts more credential names, quoted names and bearer tokens" do
+    text = %(passwd=a "api-key": "b" Authorization: Bearer c.d-e and Bearer f.g)
+    redacted = Caramel::Crema::Redact.text(text, [] of String, 1000)
+    ["passwd=a", %("b"), "c.d-e", "f.g"].each { |secret| redacted.should_not contain(secret) }
+  end
+
+  it "leaves credential-looking text alone when asked, still hiding secrets" do
+    text = "password=visible token9"
+    redacted = Caramel::Crema::Redact.text(text, ["token9"], 1000, credentials: false)
+    redacted.should eq("password=visible [redacted]")
+  end
+
+  it "reduces a report to its class when it cannot be built" do
+    report = Caramel::Crema::ErrorReport.minimal(KeyError.new("x"), false, "source")
+    report.message.should eq("[unavailable]")
+    report.fingerprint.should eq(Caramel::Crema::ErrorReport.fingerprint_of("KeyError", nil))
+    report.backtrace.should be_empty
+  end
+
   it "never puts the message in a production event" do
     event = report_of(KeyError.new("secret detail")).to_event(Caramel::Crema::Detail::Production)
     event.to_json.should_not contain("secret detail")

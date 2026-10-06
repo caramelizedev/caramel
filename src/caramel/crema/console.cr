@@ -173,8 +173,8 @@ module Caramel::Crema
       db = ops.runtime.database
       return "<p>This process has no database.</p>" unless db
 
-      Diagnose.sections(db).join do |name, text|
-        "<h2>#{HTML.escape(name)}</h2><pre>#{HTML.escape(text)}</pre>"
+      Diagnose.sections(db).join do |section|
+        "<h2>#{HTML.escape(section.name)}</h2><pre>#{HTML.escape(section.text)}</pre>"
       end
     end
 

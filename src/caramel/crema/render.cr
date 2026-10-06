@@ -2,6 +2,7 @@ require "../html"
 require "./editor"
 require "./event"
 require "./frames"
+require "./redact"
 
 module Caramel::Crema
   # Pure functions over the wire-format events, shared by `ops tail`,
@@ -9,6 +10,8 @@ module Caramel::Crema
   # take events, not live objects, so Frappé and Latte can use them.
   module Render
     APPLICATION_DIRECTORIES = {"app/", "config/", "src/", "db/"}
+
+    @@secrets : Array(String)? = nil
 
     # One line, as the canonical log line reads without its time and level.
     def self.line(event : TraceEvent | ErrorEvent) : String
@@ -84,7 +87,7 @@ module Caramel::Crema
                       root : String? = nil,
                       across : Array(CollectedSpan) = [] of CollectedSpan) : String
       String.build do |io|
-        io << "# " << (event.error.try(&.error_class) || event.name) << "\n\n"
+        io << "# " << inline(event.error.try(&.error_class) || event.name) << "\n\n"
         summary_list(io, event)
         error_section(io, event.error)
         backtrace_section(io, event.error, root)
@@ -122,7 +125,7 @@ module Caramel::Crema
     end
 
     private def self.summary_list(io : IO, event : TraceEvent) : Nil
-      io << "- kind: " << event.kind << "\n- name: " << event.name << '\n'
+      io << "- kind: " << event.kind << "\n- name: " << inline(event.name) << '\n'
       event.status.try { |status| io << "- status: " << status << '\n' }
       io << "- duration: " << ms(event.duration_ms) << " ms\n"
       event.request_id.try { |id| io << "- request id: " << id << '\n' }
@@ -133,10 +136,28 @@ module Caramel::Crema
     private def self.error_section(io : IO, error : ErrorEvent?) : Nil
       return unless error
 
-      io << "\n## Error\n\n- class: " << error.error_class << '\n'
-      error.message.try { |message| io << "- message: " << message << '\n' }
-      error.location.try { |location| io << "- location: " << location << '\n' }
-      io << "- causes: " << error.causes.join(", ") << '\n' unless error.causes.empty?
+      io << "\n## Error\n\n- class: " << inline(error.error_class) << '\n'
+      error.message.try { |message| io << "- message: " << inline(message) << '\n' }
+      error.location.try { |location| io << "- location: " << inline(location) << '\n' }
+      io << "- causes: " << inline(error.causes.join(", ")) << '\n' unless error.causes.empty?
+    end
+
+    # *text* on one line, for a Markdown list item.
+    private def self.inline(text : String) : String
+      text.gsub(/[\r\n]+/, " ")
+    end
+
+    # *text* in a code fence longer than any run of backticks inside it.
+    private def self.fenced(io : IO, text : String, language : String = "") : Nil
+      longest = text.scan(/`+/).max_of?(&.[0].size) || 0
+      fence = "`" * {3, longest + 1}.max
+      io << fence << language << '\n' << text << '\n' << fence << '\n'
+    end
+
+    # Bind values and dumps may hold secrets; redact before they enter a report.
+    private def self.scrubbed(text : String, limit : Int32) : String
+      secrets = @@secrets ||= Redact.secrets
+      Redact.text(text, secrets, limit)
     end
 
     private def self.backtrace_section(io : IO, error : ErrorEvent?, root : String?) : Nil
@@ -144,9 +165,8 @@ module Caramel::Crema
       return if frames.empty?
 
       ours, others = frames.partition { |frame| application_frame?(frame, root) }
-      io << "\n## Backtrace\n\n```\n"
-      (ours + others).each { |frame| io << frame << '\n' }
-      io << "```\n"
+      io << "\n## Backtrace\n\n"
+      fenced(io, (ours + others).join('\n'))
     end
 
     private def self.query_section(io : IO, event : TraceEvent) : Nil
@@ -157,9 +177,15 @@ module Caramel::Crema
       queries.each_with_index do |span, index|
         io << '\n' << index + 1 << ". " << ms(span.duration_ms) << " ms"
         span.rows.try { |rows| io << ", " << rows << " rows" }
-        span.source.try { |source| io << ", " << source }
-        io << "\n\n```sql\n" << (span.detail || span.name) << "\n```\n"
-        span.binds.try { |binds| io << "\nbinds: " << binds.inspect << '\n' unless binds.empty? }
+        span.source.try { |source| io << ", " << inline(source) }
+        io << "\n\n"
+        fenced(io, span.detail || span.name, "sql")
+        span.binds.try do |binds|
+          next if binds.empty?
+
+          shown = binds.map { |bind| scrubbed(bind, 200) }
+          io << "\nbinds: " << inline(shown.inspect) << '\n'
+        end
       end
     end
 
@@ -168,7 +194,9 @@ module Caramel::Crema
       return if logs.empty?
 
       io << "\n## Logs\n\n"
-      logs.each { |span| io << "- [" << (span.level || "info") << "] " << span.name << '\n' }
+      logs.each do |span|
+        io << "- [" << (span.level || "info") << "] " << inline(span.name) << '\n'
+      end
     end
 
     private def self.dump_section(io : IO, event : TraceEvent) : Nil
@@ -176,7 +204,10 @@ module Caramel::Crema
       return if dumps.empty?
 
       io << "\n## Dumps\n"
-      dumps.each { |span| io << "\n" << span.name << "\n\n```\n" << span.detail << "\n```\n" }
+      dumps.each do |span|
+        io << '\n' << inline(span.name) << "\n\n"
+        fenced(io, scrubbed(span.detail.to_s, 8192))
+      end
     end
 
     # The trace as plain text: its line, its spans in order and its error.
@@ -392,7 +423,8 @@ module Caramel::Crema
     end
 
     private def self.trace_row(io : IO, event : TraceEvent, link_prefix : String) : Nil
-      io << "<tr><td>" << HTML.escape(event.started_at[11, 8]) << "</td><td>"
+      at = event.started_at
+      io << "<tr><td>" << HTML.escape(at[11, 8]? || at) << "</td><td>"
       io << HTML.escape(event.kind) << "</td><td><a href=\"" << HTML.escape(link_prefix)
       io << HTML.escape(event.trace_id) << "\">" << HTML.escape(event.name) << "</a></td><td>"
       io << (event.status || event.outcome) << "</td><td>"

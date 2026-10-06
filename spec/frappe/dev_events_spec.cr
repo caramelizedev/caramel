@@ -64,3 +64,20 @@ describe Caramel::Frappe::DevEvents do
     FileUtils.rm_rf(root) if root
   end
 end
+
+describe Caramel::Frappe::EventStore do
+  it "skips lines that are valid JSON but not an event, on ingest and replay" do
+    root, logs = event_directories
+    lines = ["null", "[]", "42", %("text"), %({"type":"trace"}), %({"type":"other"})]
+    lines << EventFixtures.line(EventFixtures.trace("GET /", "1" * 32))
+    File.write(File.join(logs, "events.jsonl"), lines.join("\n") + "\n", perm: 0o600)
+    store = Caramel::Frappe::EventStore.new
+    lines.each { |line| store.ingest(line) }
+    store.latest.should eq(1)
+    replayed = Caramel::Frappe::EventStore.new
+    replayed.replay(logs)
+    replayed.latest.should eq(1)
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+end

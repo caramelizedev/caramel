@@ -153,19 +153,33 @@ module Caramel
       trace.sql_comment = sql_tag("action", action)
     end
 
-    # Reports *error* to every sink and returns the report. It never raises.
+    # Reports *error* to every sink and returns the report. It never raises: a report
+    # that cannot be built is reduced to its class. Only an unhandled report marks the
+    # error as reported, so a handled one that is raised again is still recorded.
     def self.report(error : Exception,
                     *,
                     handled : Bool = true,
                     source : String? = nil,
                     request_id : String? = nil) : ErrorReport
       trace = current?
-      report = ErrorReport.build(error, handled, source || trace.try(&.name),
+      report = build_report(error, handled, source || trace.try(&.name),
         trace.try(&.request_id) || request_id, trace.try(&.trace_id))
-      Fiber.current.__crema_reported = error
-      trace.try { |open| open.error ||= report } unless handled
+      unless handled
+        Fiber.current.__crema_reported = error
+        trace.try { |open| open.error ||= report }
+      end
       each_sink(&.reported(report))
       report
+    end
+
+    private def self.build_report(error : Exception,
+                                  handled : Bool,
+                                  source : String?,
+                                  request_id : String?,
+                                  trace_id : String?) : ErrorReport
+      ErrorReport.build(error, handled, source, request_id, trace_id)
+    rescue
+      ErrorReport.minimal(error, handled, source, request_id, trace_id)
     end
 
     # Times the block as a *kind* step of the current trace. With no trace it
@@ -198,15 +212,19 @@ module Caramel
       "/*#{key}='#{encoded}'*/ "
     end
 
+    # The methods a trace is named after; any other label is client-chosen.
+    METHODS = %w[GET HEAD POST PUT PATCH DELETE OPTIONS]
+
     private def self.request_trace(request : HTTP::Request) : Trace
       trace_id, span_id = Ids.generate
       parent = Ids.parse_traceparent(request.headers["traceparent"]?)
       trace_id = parent[0] if parent
-      trace = Trace.new(Kind::Request, "#{request.method} (none)", trace_id, span_id)
+      method = METHODS.includes?(request.method) ? request.method : "OTHER"
+      trace = Trace.new(Kind::Request, "#{method} (none)", trace_id, span_id)
       trace.parent_id = parent.try(&.[1])
-      trace.parent_sampled = parent.try(&.[2])
+      parent.try { |found| trace.parent_sampled = trace.sampled = found[2] }
       trace.request_id = Ids.request_id(request.headers["X-Request-ID"]?)
-      trace.method = request.method
+      trace.method = method
       trace.path = request.path
       trace.debug = debug_token?(request)
       start(trace)
@@ -245,6 +263,7 @@ module Caramel
         ::Log.with_context(log_context(trace)) { yield }
       ensure
         fiber.__crema_trace = previous
+        fiber.__crema_reported = nil
         @@lock.synchronize { @@active.delete(trace) }
       end
     end
@@ -278,16 +297,17 @@ module Caramel
         trace.parent_id = found[1]
         trace.request_id = found[2]
         trace.debug = found[3]
+        trace.parent_sampled = trace.sampled = found[4]
       end
       trace
     end
 
-    # The trace id, parent id, request id and debug flag in a job's stored context.
-    private def self.inherit(context : String?) : {String, String, String?, Bool}?
+    # The trace id, parent id, request id, debug flag and sampled bit in a job's stored context.
+    private def self.inherit(context : String?) : {String, String, String?, Bool, Bool}?
       data = JSON.parse(context || return).as_h? || return
       parent = Ids.parse_traceparent(data["traceparent"]?.try(&.as_s?)) || return
       request_id = data["request_id"]?.try(&.as_s?)
-      {parent[0], parent[1], request_id, data["debug"]?.try(&.as_bool?) == true}
+      {parent[0], parent[1], request_id, data["debug"]?.try(&.as_bool?) == true, parent[2]}
     rescue JSON::ParseException
       nil
     end

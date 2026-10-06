@@ -8,8 +8,11 @@ module Caramel::Crema
   # `APP ops …`: the ops socket's command-line client. It speaks the same JSON API the
   # console does, over the Unix socket, so it works from the machine the app runs on.
   class OpsClient
-    MISSING = "No ops socket at %s. Is the application running with CARAMEL_OPS_SOCKET?"
-    FORWARD = 8765
+    MISSING      = "No ops socket at %s. Is the application running with CARAMEL_OPS_SOCKET?"
+    FORWARD      = 8765
+    READ_TIMEOUT = 10.seconds
+    COMMANDS     = %w[status requests fibers metrics tail errors error traces trace debug-token
+      console]
 
     struct Options
       getter words = [] of String
@@ -34,6 +37,10 @@ module Caramel::Crema
       end
     end
 
+    # What a closed, wedged or foreign socket can make the client raise.
+    alias Unexpected = IO::Error | JSON::ParseException | JSON::SerializableError |
+                       KeyError | TypeCastError
+
     def initialize(arguments : Array(String), @output : IO = STDOUT, @error : IO = STDERR)
       @options = Options.new(arguments)
       @path = @options["--socket"]? || Ops.path || ""
@@ -41,12 +48,27 @@ module Caramel::Crema
 
     def run : Int32
       command = @options.words.first? || return usage
+      return usage unless COMMANDS.includes?(command) && valid_arguments?(command)
+      return console if command == "console"
       return missing if @path.empty? || !File.exists?(@path)
 
       dispatch(command)
     rescue error : Socket::Error | File::Error
       @error.puts(error.is_a?(Socket::ConnectError) ? MISSING % @path : error.message)
       1
+    rescue error : Unexpected
+      @error.puts("The ops socket gave an unexpected answer (#{error.class}).")
+      1
+    end
+
+    # A command that needs a reference has one, and numeric flags are numbers.
+    private def valid_arguments?(command : String) : Bool
+      return false if {"error", "trace"}.includes?(command) && argument.empty?
+
+      {"--slow", "--limit", "--minutes"}.all? do |flag|
+        value = @options[flag]?
+        value.nil? || !value.to_i?.nil?
+      end
     end
 
     private def dispatch(command : String) : Int32
@@ -81,8 +103,10 @@ module Caramel::Crema
       @options.words[1]? || ""
     end
 
-    private def connect : HTTP::Client
-      HTTP::Client.new(UNIXSocket.new(@path), "ops")
+    private def connect(timeout : Time::Span? = READ_TIMEOUT) : HTTP::Client
+      client = HTTP::Client.new(UNIXSocket.new(@path), "ops")
+      client.read_timeout = timeout if timeout
+      client
     end
 
     private def get(path : String) : HTTP::Client::Response
@@ -183,7 +207,7 @@ module Caramel::Crema
       limit = @options["--limit"]?.try(&.to_i?) || 50
       query = String.build do |io|
         io << "/v1/traces?limit=" << limit
-        io << "&reason=" << reason if reason
+        io << "&reason=" << URI.encode_www_form(reason) if reason
       end
       document = answer(query) || return 1
       return pretty(document) if @options.flag?("--json")
@@ -212,12 +236,17 @@ module Caramel::Crema
       query = String.build do |io|
         io << "/v1/tail?logs=" << (@options.flag?("--logs") ? 1 : 0)
         io << "&errors=1" if @options.flag?("--errors")
-        @options["--slow"]?.try { |limit| io << "&slow=" << limit }
+        @options["--slow"]?.try { |limit| io << "&slow=" << URI.encode_www_form(limit) }
       end
-      connect.get(query, HTTP::Headers{"Host" => "ops"}) do |response|
-        response.body_io.each_line { |line| show_event(line) }
+      status = 0
+      connect(nil).get(query, HTTP::Headers{"Host" => "ops"}) do |response|
+        if response.success?
+          response.body_io.each_line { |line| show_event(line) }
+        else
+          status = failure(response)
+        end
       end
-      0
+      status
     end
 
     private def show_event(line : String) : Nil

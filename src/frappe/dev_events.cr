@@ -139,14 +139,28 @@ module Caramel::Frappe
       client.write_timeout = 2.seconds
       announced = false
       while event = queue.receive?
-        body = Crema::OtlpJson.encode([event], service: service, environment: "development")
-        next if post(client, body)
-
-        @warnings.puts(UNAVAILABLE) unless announced
-        announced = true
+        if delivered?(client, event, service)
+          announced = false
+        else
+          @warnings.puts(UNAVAILABLE) unless announced
+          announced = true
+        end
       end
     ensure
       client.try(&.close)
+    end
+
+    # Whether Latte's collector accepted *event*. Any failure, including one encoding
+    # the event, counts as a failed delivery and never ends the forwarding fiber.
+    private def delivered?(
+      client : HTTP::Client,
+      event : Crema::TraceEvent,
+      service : String,
+    ) : Bool
+      body = Crema::OtlpJson.encode([event], service: service, environment: "development")
+      post(client, body)
+    rescue
+      false
     end
 
     # Whether Latte's collector accepted *body*.

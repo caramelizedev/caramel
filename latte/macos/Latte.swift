@@ -96,6 +96,23 @@ private struct Site: Decodable {
         case lastError = "last_error"
     }
 
+    /// Decodes every field tolerantly, so one malformed `errors` or `last_error` cannot
+    /// hide the site, and with it every other site in the snapshot.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        directory = try values.decode(String.self, forKey: .directory)
+        suffix = try values.decode(String.self, forKey: .suffix)
+        domain = try values.decode(String.self, forKey: .domain)
+        origin = try values.decode(String.self, forKey: .origin)
+        upstream = try values.decodeIfPresent(String.self, forKey: .upstream)
+        state = try values.decodeIfPresent(String.self, forKey: .state)
+        owner = try values.decodeIfPresent(String.self, forKey: .owner)
+        errors = try? values.decode(Int.self, forKey: .errors)
+        lastError = try? values.decode(LastError.self, forKey: .lastError)
+    }
+
     /// How many errors the development application reported since `frappe dev` started.
     var errorCount: Int { errors ?? 0 }
 
@@ -698,9 +715,8 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     private var requestInFlight = false
     private var refreshTimer: Timer?
     private var sitesByID: [String: Site] = [:]
-    /// Errors and build failures announced since the menu last opened.
+    /// Errors and build failures announced since the menu last closed.
     private var alertsPending = 0
-    private var notificationsAllowed = false
     /// The first snapshot after launch only seeds what is already known.
     private var seeded = false
     private var seenFingerprints: [String: Set<String>] = [:]
@@ -744,9 +760,12 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
         refreshTimer = nil
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
+    func menuDidClose(_ menu: NSMenu) {
         alertsPending = 0
         updateBadge()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
         refresh()
     }
 
@@ -1003,15 +1022,21 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
     private func announce(_ site: Site, title: String, body: String, path: String) {
         alertsPending += 1
         updateBadge()
-        guard notificationsAllowed, let origin = try? site.validatedURL(),
+        guard Bundle.main.bundleIdentifier != nil, let origin = try? site.validatedURL(),
               let target = URL(string: path, relativeTo: origin)?.absoluteURL else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.userInfo = ["url": target.absoluteString]
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { _ in }
+        let center = UNUserNotificationCenter.current()
+        // Re-read the permission each time: the user may change it while Latte runs.
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional else { return }
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            center.add(request) { _ in }
+        }
     }
 
     private func updateBadge() {
@@ -1025,9 +1050,7 @@ private final class LatteAppDelegate: NSObject, NSApplicationDelegate, NSMenuDel
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
-            DispatchQueue.main.async { self?.notificationsAllowed = granted }
-        }
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

@@ -49,6 +49,10 @@ private def attribute(span : JSON::Any, key : String) : String?
   found.try(&.["value"].as_h.values.first.as_s)
 end
 
+private def sampler_named(name : String) : Caramel::Crema::Otlp::Sampler
+  Caramel::Crema::Otlp::Sampler.from({"OTEL_TRACES_SAMPLER" => name})
+end
+
 describe Caramel::Crema::Otlp do
   it "exports a request as a server span with its route and a client span per query" do
     collector = Collector.new
@@ -136,5 +140,51 @@ describe Caramel::Crema::Otlp do
     sampler = Caramel::Crema::Otlp::Sampler.new("traceidratio", 0.5)
     sampler.sample?(low).should be_true
     sampler.sample?(high).should be_false
+  end
+
+  it "honours parent-based always on and always off, and falls back for an unknown name" do
+    request = Caramel::Crema::Kind::Request
+    trace = Caramel::Crema::Trace.new(request, "GET /", "a" * 32, "b" * 16)
+    always_on = sampler_named("parentbased_always_on")
+    always_off = sampler_named("parentbased_always_off")
+    always_on.sample?(trace).should be_true
+    always_off.sample?(trace).should be_false
+    trace.parent_sampled = false
+    always_on.sample?(trace).should be_false
+    trace.parent_sampled = true
+    always_off.sample?(trace).should be_true
+    unknown = sampler_named("bogus")
+    unknown.sample?(trace).should be_true
+  end
+
+  it "marks a failed trace without an error class but adds no exception event" do
+    collector = Collector.new
+    exporting(collector) do
+      Caramel::Crema.request(HTTP::Request.new("GET", "/")) { Caramel::Response.new(500, "failed") }
+    end
+    root = spans_of(collector.bodies.first).first
+    root["status"]["code"].should eq(2)
+    root["events"]?.should be_nil
+  end
+
+  it "keeps log text and dumps out of production events and the export" do
+    collector = Collector.new
+    exporting(collector) do
+      Caramel::Crema.request(HTTP::Request.new("GET", "/")) do |trace|
+        log = trace.open_span(Caramel::Crema::SpanKind::Log, "app: login password=hunter2",
+          nil, Time.instant).not_nil!
+        log.level = "info"
+        trace.open_span(Caramel::Crema::SpanKind::Dump, "app/x.cr:3", "hunter2", Time.instant)
+        production = trace.to_event(Caramel::Crema::Detail::Production)
+        production.to_json.should_not contain("hunter2")
+        production.spans.map(&.name).should eq(["app"])
+        production.spans.first.level.should eq("info")
+        trace.to_event(Caramel::Crema::Detail::Development).to_json.should contain("hunter2")
+        Caramel::Response.new(body: "ok")
+      end
+    end
+    body = collector.bodies.first
+    body.should_not contain("hunter2")
+    spans_of(body).size.should eq(1)
   end
 end

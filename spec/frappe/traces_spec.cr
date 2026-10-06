@@ -66,4 +66,23 @@ describe Caramel::Frappe::Traces do
     status.should eq(0)
     output.to_s.should eq("OK errors 0\n")
   end
+
+  it "ignores errors from before the newest successful build" do
+    store = store_with(error_trace("1" * 32, "2026-10-03T12:00:01.000Z"))
+    store.add(Caramel::Crema::BuildEvent.new("2026-10-03T12:00:10.000Z", "built", 800.0))
+    output = IO::Memory.new
+    Caramel::Frappe::Traces.new(store, "/proj", output).errors(agent: true).should eq(0)
+    output.to_s.should eq("OK errors 0\n")
+
+    store.add(error_trace("2" * 32, "2026-10-03T12:00:20.000Z"))
+    output = IO::Memory.new
+    Caramel::Frappe::Traces.new(store, "/proj", output).errors(agent: true).should eq(1)
+  end
+
+  it "keeps errors when the newest build failed" do
+    store = store_with(error_trace("1" * 32, "2026-10-03T12:00:01.000Z"))
+    store.add(Caramel::Crema::BuildEvent.new("2026-10-03T12:00:10.000Z", "failed", 800.0))
+    output = IO::Memory.new
+    Caramel::Frappe::Traces.new(store, "/proj", output).errors(agent: true).should eq(1)
+  end
 end

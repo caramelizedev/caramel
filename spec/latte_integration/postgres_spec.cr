@@ -109,6 +109,23 @@ describe "Latte managed PostgreSQL" do
     admin.call("SHOW shared_preload_libraries;").should eq("pg_stat_statements,auto_explain")
     admin.call("SHOW auto_explain.log_min_duration;").should eq("250ms")
     admin.call("SHOW auto_explain.log_parameter_max_length;").should eq("0")
+    admin.call("SHOW pg_stat_statements.track_utility;").should eq("off")
+  end
+
+  it "keeps utility statement literals out of pg_stat_statements" do
+    marker = "marker-#{Random::Secure.hex(8)}"
+    role = "crema_probe_#{Random::Secure.hex(4)}"
+    admin.call("CREATE ROLE #{role} LOGIN PASSWORD '#{marker}-secret';")
+    admin.call("ALTER ROLE #{role} PASSWORD '#{marker}-again';")
+    admin.call("DROP ROLE #{role};")
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      rows = runtime.query_all(
+        "SELECT query FROM caramel_stats.pg_stat_statements", as: String)
+      rows.none?(&.includes?(marker)).should be_true
+    ensure
+      runtime.close
+    end
   end
 
   it "keeps pg_stat_statements in its own schema of the development database only" do

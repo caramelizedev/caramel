@@ -64,7 +64,9 @@ module Caramel::Crema
     private def self.spans(json : JSON::Builder, event : TraceEvent) : Nil
       started = nanoseconds(Time.parse_rfc3339(event.started_at))
       root(json, event, started)
-      event.spans.each { |span| child(json, event, span, started) }
+      event.spans.each do |span|
+        child(json, event, span, started) unless span.kind.in?("log", "dump")
+      end
     end
 
     private def self.root(json : JSON::Builder, event : TraceEvent, started : Int64) : Nil
@@ -144,18 +146,20 @@ module Caramel::Crema
       end
     end
 
-    # Status "error" and an `exception` event that names only the class.
+    # Status "error", and an `exception` event naming the class when it is known.
     private def self.failure(json : JSON::Builder, error_class : String?, finished : Int64) : Nil
       json.field "status" do
         json.object { json.field "code", ERROR }
       end
+      return unless error_class
+
       json.field "events" do
         json.array do
           json.object do
             json.field "timeUnixNano", finished.to_s
             json.field "name", "exception"
             json.field "attributes" do
-              json.array { string(json, "exception.type", error_class || "Exception") }
+              json.array { string(json, "exception.type", error_class) }
             end
           end
         end

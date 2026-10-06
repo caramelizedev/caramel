@@ -17,12 +17,15 @@ belong.
 1. **The managed cluster collects statement statistics.** Latte preloads
    `pg_stat_statements` and `auto_explain` (`shared_preload_libraries =
    'pg_stat_statements,auto_explain'`, `pg_stat_statements.track = top`,
-   `auto_explain.log_min_duration = '250ms'`, `auto_explain.log_analyze = off`,
-   `auto_explain.log_format = text`, `auto_explain.log_parameter_max_length = 0`). A
-   cluster that lacks the preload restarts once through the ordinary start path.
+   `pg_stat_statements.track_utility = off`, `auto_explain.log_min_duration = '250ms'`,
+   `auto_explain.log_analyze = off`, `auto_explain.log_format = text`,
+   `auto_explain.log_parameter_max_length = 0`). Utility statements are not tracked, so
+   no `ALTER ROLE … PASSWORD` literal reaches the statistics. A cluster that lacks the
+   preload or the setting restarts once through the ordinary start path.
 2. **Statistics live in the `caramel_stats` schema** of each site's development database
    only. The extension is created there, the development migration and runtime roles
-   may use the schema, and the runtime role is granted `pg_read_all_stats`. The spec
+   may use the schema, and no role is granted `pg_read_all_stats`, so a role reads the
+   statement text of its own statements only. The spec
    database has none. Keeping the views out of `public` keeps them out of SugarORM's
    introspection and Corretto's catalog fingerprint.
 3. **Dumps leave it out.** `frappe db dump` excludes the schema and the extension, because
@@ -64,8 +67,10 @@ belong.
 ## Reasons
 
 - `pg_stat_statements` answers "which statement is slow" with the cost the database
-  measured, and `auto_explain` writes the plan of a slow one to the PostgreSQL log with
-  no bind values, as `ecto_psql_extras` and Django Debug Toolbar users reach for.
+  measured, and `auto_explain` writes the text and plan of a statement of 250 ms or more
+  to `postgres.log`; application statements carry placeholders, so no bind values reach
+  it. Utility statements are not tracked, because `ALTER ROLE … PASSWORD` carries a
+  literal, and a role sees only its own statements' text.
 - The statement tags Crema adds (ADR 0027) make those statistics attributable.
 - Local OTLP SDKs speak HTTP over TCP, so the collector is an exception to the Unix-socket
   rule. Any local process may write, as with any OpenTelemetry collector; only the owner

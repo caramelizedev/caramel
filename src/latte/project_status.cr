@@ -117,11 +117,11 @@ module Caramel::Latte
     # The error count and newest error a gateway reports. A gateway that predates them
     # reports none.
     private def self.errors_of(document : JSON::Any) : {Int32, LastError?}
-      count = document["errors"]?.try(&.as_i?) || 0
+      count = (document["errors"]?.try(&.as_i64?) || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
       newest = document["last_error"]?
       last = newest.try { |error| error.as_h? ? LastError.from_json(error.to_json) : nil }
       {count, last}
-    rescue JSON::SerializableError
+    rescue JSON::SerializableError | OverflowError | TypeCastError
       {0, nil}
     end
 

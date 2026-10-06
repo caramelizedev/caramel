@@ -32,9 +32,9 @@ module Caramel::Crema
       push(trace.to_event(Detail::Development))
     end
 
-    # An error inside a trace travels in its trace; only the others go alone.
+    # An error that is its trace's own travels in that trace; every other one goes alone.
     def reported(report : ErrorReport) : Nil
-      return if Crema.current?
+      return if Crema.current?.try(&.error) == report
 
       push(report.to_event(Detail::Development))
     end
@@ -80,7 +80,8 @@ module Caramel::Crema
       socket = @socket ||= UNIXSocket.new(@path)
       socket << item.to_json << '\n'
       socket.flush
-    rescue IO::Error
+    rescue
+      Crema.drop("dev")
       @socket.try { |open| open.close rescue nil }
       @socket = nil
       @paused_until = Time.instant + PAUSE

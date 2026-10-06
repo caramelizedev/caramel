@@ -37,7 +37,7 @@ module Caramel::Frappe
       text = Crema::Render.line(event)
       return text if agent
 
-      stamp = Time.parse_rfc3339(event.started_at).to_local.to_s("%H:%M:%S")
+      stamp = EventStore.time(event.started_at).try(&.to_local.to_s("%H:%M:%S")) || "--:--:--"
       "#{stamp} #{text}"
     end
 
@@ -57,8 +57,9 @@ module Caramel::Frappe
     # Runtime errors and repeated queries, grouped. Agents get MRDP and exit 1 when
     # anything prints; people get a list.
     def errors(agent : Bool) : Int32
-      groups = @store.error_groups
-      repeats = repeated_queries
+      since = @store.last_good_build
+      groups = @store.error_groups(since)
+      repeats = repeated_queries(since)
       if groups.empty? && repeats.empty?
         agent ? @output.puts("OK errors 0") : @output.puts("No errors or repeated queries yet.")
         return 0
@@ -71,8 +72,10 @@ module Caramel::Frappe
     record Repeat, trace : Crema::TraceEvent, entry : Crema::RepeatEvent
 
     # The most-repeated statement of each route, worst first.
-    private def repeated_queries : Array(Repeat)
-      all = @store.traces(0, EventStore::MAX_TRACES).flat_map do |_, trace|
+    private def repeated_queries(since : Time?) : Array(Repeat)
+      recent = @store.traces(0, EventStore::MAX_TRACES)
+        .select { |_, trace| EventStore.newer?(trace.started_at, since) }
+      all = recent.flat_map do |_, trace|
         trace.repeated.map { |entry| Repeat.new(trace, entry) }
       end
       worst = all.group_by { |repeat| {repeat.trace.name, repeat.entry.sql} }
@@ -93,7 +96,12 @@ module Caramel::Frappe
     end
 
     private def times(group : EventStore::ErrorGroup) : String
-      "#{group.count} #{group.count == 1 ? "time" : "times"}, last #{group.error.at[11, 8]}"
+      "#{group.count} #{group.count == 1 ? "time" : "times"}, last #{clock(group.error.at)}"
+    end
+
+    # The `HH:MM:SS` of an RFC 3339 time, or dashes when it is shorter.
+    private def clock(at : String) : String
+      at.size >= 19 ? at[11, 8] : "--:--:--"
     end
 
     private def runtime_text(group : EventStore::ErrorGroup) : Nil

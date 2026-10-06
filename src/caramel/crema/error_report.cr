@@ -54,6 +54,18 @@ module Caramel::Crema
         handled, source, request_id, trace_id, Time.utc, causes_of(error))
     end
 
+    # What `build` falls back to when redaction or frame parsing itself fails: the
+    # class, a fingerprint from the class alone, and no message or backtrace.
+    def self.minimal(error : Exception,
+                     handled : Bool,
+                     source : String?,
+                     request_id : String? = nil,
+                     trace_id : String? = nil) : ErrorReport
+      error_class = error.class.to_s
+      new(error_class, "[unavailable]", [] of String, fingerprint_of(error_class, nil),
+        nil, handled, source, request_id, trace_id, Time.utc, [] of String)
+    end
+
     # The first 12 hex characters of a digest of the class and the fingerprint
     # frame's file and method. Lines, columns and messages never enter it.
     def self.fingerprint_of(error_class : String, frame : Frame?) : String

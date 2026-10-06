@@ -60,10 +60,11 @@ module Caramel::Crema
 
     private def self.cells(row) : Array(String)
       histogram = Histogram.new(row[:histogram])
+      max = row[:max_ms]
       [row[:key], row[:count].to_s, row[:errors].to_s,
-       Render.ms(histogram.quantile(0.5, row[:max_ms])),
-       Render.ms(histogram.quantile(0.95, row[:max_ms])),
-       Render.ms(row[:max_ms]), (row[:total_ms] / 1000.0).round(1).to_s]
+       Render.ms(Math.min(histogram.quantile(0.5, max), max)),
+       Render.ms(Math.min(histogram.quantile(0.95, max), max)),
+       Render.ms(max), (row[:total_ms] / 1000.0).round(1).to_s]
     end
 
     def self.run(arguments : Array(String), db : DB::Database) : Int32

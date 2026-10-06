@@ -67,8 +67,6 @@ describe "Latte network configuration" do
       mapped = server["logs"]["logger_names"].as_h
       mapped["bookshelf.caramel"].as_a.map(&.as_s).should eq(["site_#{bookshelf.id}"])
       mapped["notes.caramel"].as_a.map(&.as_s).should eq(["site_#{notes.id}"])
-      File.info(File.dirname(writer["filename"].as_s)).permissions.value.should eq(0o700)
-      proxy.configuration.should eq(proxy.configuration)
       site = registry.list.find! { |entry| entry.name == "bookshelf" }
       socket_path = File.join(paths.site_run_dir(site.id), "app.sock")
       listener = UNIXServer.new(socket_path)
@@ -84,10 +82,30 @@ describe "Latte network configuration" do
       https_routes(proxy)[0]["handle"][0]["status_code"].as_i.should eq(503)
       proxy.write
       File.info(proxy.config_file).permissions.value.should eq(0o600)
+      File.info(File.dirname(writer["filename"].as_s)).permissions.value.should eq(0o700)
       registry.unregister(registry.list.first.id)
       https_routes(proxy).size.should eq(2)
     ensure
       FileUtils.rm_rf(paths.run_dir) if paths
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "writes the same configuration whatever order sites were registered in" do
+    root = File.join("/private/tmp", "latte-network-order-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    begin
+      registry = Caramel::Latte::Registry.new(root)
+      %w[bookshelf notes].each { |name| Dir.mkdir(File.join(root, name), 0o700) }
+      proxy = Caramel::Latte::Proxy.new(registry, https_port: 18443, http_port: 18080)
+      %w[bookshelf notes].each { |name| registry.register(name, File.join(root, name)) }
+      forward = proxy.configuration
+      %w[bookshelf notes].each { |name| registry.unregister(name) }
+      %w[notes bookshelf].each { |name| registry.register(name, File.join(root, name)) }
+      proxy.configuration.should eq(forward)
+      File.exists?(File.join(root, "logs", "sites")).should be_false
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir) if registry
       FileUtils.rm_rf(root)
     end
   end

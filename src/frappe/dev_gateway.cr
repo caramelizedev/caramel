@@ -218,8 +218,8 @@ module Caramel::Frappe
     private def newest(error : Crema::ErrorEvent)
       {
         fingerprint: error.fingerprint,
-        error_class: error.error_class,
-        location:    error.location.try(&.[0, 200]),
+        error_class: error.error_class.byte_slice(0, 200).scrub,
+        location:    error.location.try(&.byte_slice(0, 200).scrub),
         at:          error.at,
       }
     end
@@ -439,7 +439,7 @@ module Caramel::Frappe
     end
 
     private def redact(message : String) : String
-      Caramel::Crema::Redact.text(message, @secrets, 32_768)
+      Caramel::Crema::Redact.text(message, @secrets, 32_768, credentials: false)
     end
 
     private def remove_hop_headers(headers : HTTP::Headers) : Nil

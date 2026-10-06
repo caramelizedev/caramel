@@ -22,6 +22,12 @@ describe Caramel::Crema::Histogram do
     histogram.observe(20_000.0)
     histogram.quantile(0.99, 20_000.0).should eq(20_000.0)
   end
+
+  it "never answers more than the maximum" do
+    histogram = Caramel::Crema::Histogram.new
+    10.times { histogram.observe(20.0) }
+    histogram.quantile(1.0, 12.0).should eq(12.0)
+  end
 end
 
 describe Caramel::Crema::Tally do
@@ -33,5 +39,16 @@ describe Caramel::Crema::Tally do
     entry = filled["request", "GET /"].not_nil!
     {entry.count, entry.errors, entry.total_ms, entry.max_ms}.should eq({2, 1, 34.0, 30.0})
     tally.size.should eq(0)
+  end
+
+  it "folds rows beyond the cap into (other) and copies a snapshot" do
+    tally = Caramel::Crema::Tally.new(2)
+    %w[a b c d].each { |key| tally.record("request", key, 1.0, false) }
+    tally.size.should eq(3)
+    copy = tally.snapshot
+    tally.record("request", "a", 1.0, false)
+    other = copy.find! { |row| row[1] == "(other)" }[2]
+    other.count.should eq(2)
+    copy.find! { |row| row[1] == "a" }[2].count.should eq(1)
   end
 end

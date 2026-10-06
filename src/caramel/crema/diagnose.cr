@@ -92,50 +92,57 @@ module Caramel::Crema
       {"vacuum", VACUUM}, {"table_sizes", TABLE_SIZES},
     ]
 
+    # One section of the report: its text, and whether it could be read.
+    record Section, name : String, text : String, ok : Bool = true
+
     # The report as sections: each name with its table, or the reason it is missing.
-    def self.sections(db : DB::Database? = nil) : Array({String, String})
+    def self.sections(db : DB::Database? = nil) : Array(Section)
       found = SECTIONS.map do |name, sql|
-        {name, attempt(name) { Table.query(sql, db: db).to_text }}
+        attempt(name) { Table.query(sql, db: db).to_text }
       end
-      found << {"outliers", outliers(db)}
+      found << outliers(db)
     end
 
-    # Prints every section under `== name ==`.
-    def self.run(io : IO, db : DB::Database? = nil) : Nil
-      sections(db).each do |name, text|
-        if text.starts_with?("outliers:") || text.includes?(": unavailable (")
-          io << text << '\n'
-        else
-          io << "== " << name << " ==\n" << text << '\n'
-        end
+    # Prints every readable section under `== name ==` and the reason for each
+    # other. True when at least one section was readable.
+    def self.run(io : IO, db : DB::Database? = nil) : Bool
+      found = sections(db)
+      found.each do |section|
+        io << "== " << section.name << " ==\n" if section.ok
+        io << section.text << '\n'
       end
+      found.any?(&.ok)
     end
 
-    private def self.outliers(db : DB::Database?) : String
-      lookup = Table.query(STATEMENTS_SCHEMA, db: db)
-      schema = attempt("outliers") { lookup.rows.first?.try(&.first) }
-      return NOT_INSTALLED if schema.nil? || schema.empty?
-      return schema if schema.includes?(": unavailable (")
+    private def self.outliers(db : DB::Database?) : Section
+      lookup = attempt("outliers") { statements_schema(db) }
+      return lookup unless lookup.ok
+      return Section.new("outliers", NOT_INSTALLED) if lookup.text.empty?
 
       sql = <<-SQL
         SELECT calls::text AS calls, round(total_exec_time::numeric, 1)::text AS total_ms,
           round(mean_exec_time::numeric, 1)::text AS mean_ms, rows::text AS rows,
           left(query, 200) AS query
-        FROM #{schema}.pg_stat_statements
+        FROM #{lookup.text}.pg_stat_statements
         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND userid = (SELECT oid FROM pg_roles WHERE rolname = current_user)
         ORDER BY total_exec_time DESC
         LIMIT 10
         SQL
       attempt("outliers") { Table.query(sql, db: db).to_text }
     end
 
+    private def self.statements_schema(db : DB::Database?) : String?
+      Table.query(STATEMENTS_SCHEMA, db: db).rows.first?.try(&.first)
+    end
+
     # The block's text, or `name: unavailable (SQLSTATE or class)` when it raises.
-    private def self.attempt(name : String, & : -> String?) : String
-      yield || ""
+    private def self.attempt(name : String, & : -> String?) : Section
+      Section.new(name, yield || "")
     rescue error : PQ::PQError
-      "#{name}: unavailable (#{error.field_message(:code)})"
+      Section.new(name, "#{name}: unavailable (#{error.field_message(:code)})", false)
     rescue error
-      "#{name}: unavailable (#{error.class})"
+      Section.new(name, "#{name}: unavailable (#{error.class})", false)
     end
   end
 end

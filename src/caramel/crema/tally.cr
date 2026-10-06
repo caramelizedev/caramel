@@ -39,7 +39,7 @@ module Caramel::Crema
     end
 
     # Prometheus `histogram_quantile`: linear interpolation inside the bucket
-    # holding the rank. The overflow bucket answers *max_ms*.
+    # holding the rank, never above *max_ms*. The overflow bucket answers *max_ms*.
     def quantile(q : Float64, max_ms : Float64) : Float64
       count = total
       return 0.0 if count == 0
@@ -50,7 +50,7 @@ module Caramel::Crema
         inside = @counts[index]
         if seen + inside >= rank && inside > 0
           lower = index == 0 ? 0.0 : BOUNDS_MS[index - 1].to_f
-          return lower + (bound - lower) * ((rank - seen) / inside)
+          return {lower + (bound - lower) * ((rank - seen) / inside), max_ms}.min
         end
         seen += inside
       end
@@ -67,20 +67,35 @@ module Caramel::Crema
       property total_ms : Float64 = 0.0
       property max_ms : Float64 = 0.0
       property histogram : Histogram = Histogram.new
+
+      def copy : Entry
+        entry = Entry.new
+        entry.count = @count
+        entry.errors = @errors
+        entry.total_ms = @total_ms
+        entry.max_ms = @max_ms
+        entry.histogram = Histogram.new(@histogram.to_a)
+        entry
+      end
     end
 
-    def initialize
+    OTHER = "(other)"
+
+    # *max_keys* bounds the distinct rows when set: a row beyond it folds into `(other)`
+    # of its kind.
+    def initialize(@max_keys : Int32? = nil)
       @entries = {} of {String, String} => Entry
       @lock = Mutex.new
     end
 
     def initialize(@entries : Hash({String, String}, Entry))
+      @max_keys = nil
       @lock = Mutex.new
     end
 
     def record(kind : String, key : String, duration_ms : Float64, error : Bool) : Nil
       @lock.synchronize do
-        entry = @entries[{kind, key}] ||= Entry.new
+        entry = @entries[row(kind, key)] ||= Entry.new
         entry.count += 1
         entry.errors += 1 if error
         entry.total_ms += duration_ms
@@ -89,9 +104,14 @@ module Caramel::Crema
       end
     end
 
-    # Yields a snapshot of every row; the Mutex is held, so do not block.
+    # Yields every row; the Mutex is held, so do not block.
     def each(& : String, String, Entry ->) : Nil
       @lock.synchronize { @entries.each { |(kind, key), entry| yield kind, key, entry } }
+    end
+
+    # Copies of every row, taken under the Mutex and safe to read at leisure.
+    def snapshot : Array({String, String, Entry})
+      @lock.synchronize { @entries.map { |(kind, key), entry| {kind, key, entry.copy} } }
     end
 
     def size : Int32
@@ -109,6 +129,13 @@ module Caramel::Crema
         @entries = {} of {String, String} => Entry
         filled
       end
+    end
+
+    private def row(kind : String, key : String) : {String, String}
+      return {kind, key} unless @max_keys.try { |limit| @entries.size >= limit }
+      return {kind, key} if @entries.has_key?({kind, key})
+
+      {kind, OTHER}
     end
   end
 end

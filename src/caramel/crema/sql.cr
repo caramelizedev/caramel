@@ -6,9 +6,10 @@ require "./summary"
 module Caramel::Crema
   # Times and tags the statements SugarORM runs for the current trace.
   module Sql
-    MAX_SOURCES = 200
-    MAX_BINDS   =  20
-    MAX_BIND    = 200
+    MAX_SOURCES    =  50
+    MAX_STATEMENTS = 500
+    MAX_BINDS      =  20
+    MAX_BIND       = 200
 
     # Runs the block with *tagged*, the statement with the trace's leading
     # comment, and notes the statement on *trace*.
@@ -43,6 +44,8 @@ module Caramel::Crema
       return unless trace.recording?
 
       counts = trace.statement_counts ||= {} of String => Int32
+      return if counts.size >= MAX_STATEMENTS && !counts.has_key?(sql)
+
       count = counts[sql] = (counts[sql]? || 0) + 1
       repeat(trace, sql, summary, count) if count >= Trace::REPEATED_QUERY
     end

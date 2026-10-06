@@ -62,6 +62,7 @@ module Caramel::Latte
       ConfigFile.directory(@registry.paths.caddy_dir)
       ConfigFile.directory(storage_dir)
       environment.each_value { |path| ConfigFile.directory(path) }
+      @registry.list.each { |site| @registry.paths.site_log_dir(site.id) }
       ConfigFile.write(config_file, configuration)
     end
 
@@ -93,7 +94,7 @@ module Caramel::Latte
     end
 
     private def access_log(site : Site) : JSON::Any
-      filename = File.join(@registry.paths.site_log_dir(site.id), ACCESS_LOG)
+      filename = File.join(@registry.paths.logs_dir, "sites", site.id, ACCESS_LOG)
       writer = {
         output: "file", filename: filename, roll: true,
         roll_size_mb: 1, roll_keep: 1, mode: "0600",

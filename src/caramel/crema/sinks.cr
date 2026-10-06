@@ -114,13 +114,17 @@ module Caramel::Crema
   # Aggregates since the process started: what `/v1/metrics` and the
   # console's overview read.
   class MetricSink < Sink
-    getter durations : Tally = Tally.new
+    # Distinct series kept; a client that invents labels folds into `(other)`.
+    MAX_KEYS = 1000
+
+    getter durations : Tally = Tally.new(MAX_KEYS)
 
     def initialize
       @lock = Mutex.new
       @requests = {} of {String, String, Int32} => Int64
       @outcomes = {} of {String, String, String} => Int64
       @lag = {} of String => Histogram
+      @lag_ms = {} of String => Float64
       @errors = {} of String => Int64
     end
 
@@ -156,10 +160,10 @@ module Caramel::Crema
       @lock.synchronize { @outcomes.dup }
     end
 
-    # How long jobs waited past their `run_at`, per queue.
-    def lag : Hash(String, Histogram)
+    # How long jobs waited past their `run_at`, per queue: the histogram and the sum in ms.
+    def lag : Hash(String, {Histogram, Float64})
       @lock.synchronize do
-        @lag.transform_values { |histogram| Histogram.new(histogram.to_a) }
+        @lag.to_h { |queue, histogram| {queue, {Histogram.new(histogram.to_a), @lag_ms[queue]}} }
       end
     end
 
@@ -172,7 +176,7 @@ module Caramel::Crema
       merged = Histogram.new
       total = errors = 0_i64
       slowest = 0.0
-      @durations.each do |kind, _, entry|
+      @durations.snapshot.each do |kind, _, entry|
         next unless kind == "request"
 
         merged.add(entry.histogram)
@@ -185,6 +189,7 @@ module Caramel::Crema
 
     private def count_request(trace : Trace) : Nil
       key = {trace.method || "", trace.route || "(none)", trace.status || 0}
+      key = {key[0], "(other)", key[2]} if @requests.size >= MAX_KEYS && !@requests.has_key?(key)
       @requests[key] = (@requests[key]? || 0_i64) + 1
     end
 
@@ -195,7 +200,9 @@ module Caramel::Crema
       lag = trace.queue_lag
       return unless queue && lag
 
-      (@lag[queue] ||= Histogram.new).observe(Trace.ms(lag))
+      ms = Trace.ms(lag)
+      (@lag[queue] ||= Histogram.new).observe(ms)
+      @lag_ms[queue] = (@lag_ms[queue]? || 0.0) + ms
     end
   end
 

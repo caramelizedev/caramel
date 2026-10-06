@@ -41,9 +41,12 @@ module Caramel::Crema
     def initialize(@kind : SpanKind, @name : String, @offset : Time::Span)
     end
 
+    # Production events name a log span's source only: log text can hold secrets.
     def to_event(detail : Detail) : SpanEvent
-      event = SpanEvent.new(@kind.wire, @name, Trace.ms(@offset), Trace.ms(@duration))
-      event.detail = @detail
+      bare = @kind.log? && !detail.development?
+      name = bare ? @name.partition(": ")[0] : @name
+      event = SpanEvent.new(@kind.wire, name, Trace.ms(@offset), Trace.ms(@duration))
+      event.detail = @detail unless bare
       event.rows = @rows
       event.status = @status
       event.level = @level
@@ -179,10 +182,16 @@ module Caramel::Crema
         @started_at.to_rfc3339(fraction_digits: 3), Trace.ms(duration), outcome)
       copy_identity(event, detail)
       copy_counters(event)
-      event.spans = @spans.map(&.to_event(detail))
+      shown = @spans.reject { |span| hidden?(span, detail) }
+      event.spans = shown.map(&.to_event(detail))
       event.repeated = (@repeats || [] of RepeatEvent).map { |repeat| repeat_event(repeat, detail) }
       event.error = @error.try(&.to_event(detail))
       event
+    end
+
+    # Dump spans carry values of any shape, so only development events hold them.
+    private def hidden?(span : Span, detail : Detail) : Bool
+      span.kind.dump? && !detail.development?
     end
 
     private def copy_identity(event : TraceEvent, detail : Detail) : Nil

@@ -133,6 +133,35 @@ describe Caramel::Crema::Ops do
     Caramel::Crema::Ops.path(from_socket.merge({"CARAMEL_OPS_SOCKET" => "off"})).should be_nil
     Caramel::Crema::Ops.path({} of String => String).should be_nil
   end
+
+  it "answers 413 to a debug-token body over 1 KiB and 400 to a bad minutes value" do
+    Caramel::Crema.debug_key = Bytes.new(32, 7_u8)
+    with_ops do |path, _|
+      json = {"Content-Type" => "application/json"}
+      big = %({"minutes":5,"pad":"#{"x" * 2000}"})
+      response = ops(path, "POST", "/v1/debug-tokens", json, big)
+      response.status_code.should eq(413)
+      JSON.parse(response.body)["error"]["code"].as_s.should eq("request_too_large")
+      ops(path, "POST", "/v1/debug-tokens", json, %({"minutes":"soon"})).status_code.should eq(400)
+      ops(path, "POST", "/v1/debug-tokens", json, "{").status_code.should eq(400)
+      ops(path, "POST", "/v1/debug-tokens", json, "{}").status_code.should eq(200)
+    end
+  ensure
+    Caramel::Crema.debug_key = nil
+  end
+
+  it "leaves a regular file at the socket path alone and does not bind" do
+    directory = private_directory
+    path = File.join(directory, "ops.sock")
+    File.write(path, "keep me")
+    begin
+      runtime = Caramel::Crema::Runtime.new("serve", "Bookshelf")
+      Caramel::Crema::Ops.start(runtime, {"CARAMEL_OPS_SOCKET" => path}).should be_nil
+      File.read(path).should eq("keep me")
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
 end
 
 describe Caramel::Crema::DebugToken do

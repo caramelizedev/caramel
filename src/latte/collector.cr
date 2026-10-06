@@ -14,6 +14,8 @@ module Caramel::Latte
     MAX_SPANS      =  200
     MAX_ATTRIBUTES =   32
     MAX_VALUE      =  256
+    TRACE_ID       = /\A[0-9a-f]{32}\z/
+    SPAN_ID        = /\A[0-9a-f]{16}\z/
     DEADLINE       = 10.seconds
     JSON_ONLY      = "{\"error\":\"Latte accepts OTLP/HTTP JSON; " \
                      "set OTEL_EXPORTER_OTLP_PROTOCOL=http/json\"}"
@@ -31,19 +33,28 @@ module Caramel::Latte
     end
 
     # A server that gives each connection a read timeout and a total lifetime, so a
-    # client that trickles a request cannot hold a fiber.
+    # client that trickles a request cannot hold a fiber. The timer ends with the
+    # connection.
     private class BoundedServer < HTTP::Server
       protected def dispatch(io)
+        done = Channel(Nil).new
         if socket = io.as?(TCPSocket)
           socket.read_timeout = DEADLINE
           socket.write_timeout = DEADLINE
-          spawn do
-            sleep DEADLINE
-            socket.close unless socket.closed?
-          rescue IO::Error
-          end
+          spawn(name: "latte:collector:timer") { expire(socket, done) }
         end
         super
+      ensure
+        done.try(&.close)
+      end
+
+      private def expire(socket : TCPSocket, done : Channel(Nil)) : Nil
+        select
+        when done.receive?
+        when timeout(DEADLINE)
+          socket.close unless socket.closed?
+        end
+      rescue IO::Error
       end
     end
 
@@ -100,12 +111,15 @@ module Caramel::Latte
       @lock.synchronize { @traces.sum(0) { |_, trace| trace.dropped } }
     end
 
-    # Stores every span in an OTLP JSON *body*.
+    # Stores every span in an OTLP JSON *body*. The whole document is read before any
+    # span is stored, so a malformed one stores nothing.
     def ingest(body : String) : Nil
-      document = JSON.parse(body)
-      document["resourceSpans"]?.try(&.as_a?).try do |resources|
-        resources.each { |resource| ingest_resource(resource) }
+      collected = [] of {String, Crema::CollectedSpan}
+      document = JSON.parse(body).as_h? || return
+      (document["resourceSpans"]?.try(&.as_a?) || [] of JSON::Any).each do |resource|
+        collect_resource(resource, collected)
       end
+      collected.each { |trace_id, span| store(trace_id, span) }
     end
 
     private def handle(context : HTTP::Server::Context) : Nil
@@ -120,7 +134,8 @@ module Caramel::Latte
       body = read_body(request) || return answer(response, 413, %({"error":"body too large"}))
       ingest(body)
       answer(response, 200, "{}")
-    rescue JSON::ParseException | TypeCastError | KeyError
+    rescue
+      # An untrusted body, whatever its shape, answers 400 and never crashes the connection.
       answer(context.response, 400, %({"error":"malformed OTLP JSON"}))
     end
 
@@ -142,9 +157,9 @@ module Caramel::Latte
       end
 
       io = request.body || return ""
-      bytes = Bytes.new(MAX_BODY + 1)
-      size = io.read_greedy(bytes)
-      size > MAX_BODY ? nil : String.new(bytes[0, size])
+      buffer = IO::Memory.new
+      IO.copy(io, buffer, MAX_BODY + 1)
+      buffer.size > MAX_BODY ? nil : buffer.to_s
     end
 
     # Reads past a refused body of up to four times MAX_BODY, so an honest exporter sees
@@ -157,28 +172,35 @@ module Caramel::Latte
       nil
     end
 
-    private def ingest_resource(resource : JSON::Any) : Nil
-      service = service_of(resource)
-      resource["scopeSpans"]?.try(&.as_a?).try do |scopes|
-        scopes.each do |scope|
-          scope["spans"]?.try(&.as_a?).try do |spans|
-            spans.each { |span| store(service, span) }
-          end
+    private def collect_resource(
+      resource : JSON::Any,
+      into : Array({String, Crema::CollectedSpan}),
+    ) : Nil
+      fields = resource.as_h? || return
+      service = service_of(fields)
+      (fields["scopeSpans"]?.try(&.as_a?) || [] of JSON::Any).each do |scope|
+        spans = scope.as_h?.try(&.["spans"]?).try(&.as_a?) || next
+        spans.each do |entry|
+          span = entry.as_h? || next
+          trace_id = span["traceId"]?.try(&.as_s?) || next
+          next unless trace_id.matches?(TRACE_ID)
+
+          collected = parse(service, span) || next
+          into << {trace_id, collected}
         end
       end
     end
 
-    private def service_of(resource : JSON::Any) : String
-      attributes = resource["resource"]?.try(&.["attributes"]?).try(&.as_a?) || [] of JSON::Any
-      found = attributes.find { |item| item["key"]? == "service.name" }
-      found.try(&.["value"]?).try(&.["stringValue"]?).try(&.as_s?) || "unknown"
+    private def service_of(resource : Hash(String, JSON::Any)) : String
+      attributes = resource["resource"]?.try(&.as_h?).try(&.["attributes"]?).try(&.as_a?)
+      found = (attributes || [] of JSON::Any).find do |item|
+        item.as_h?.try(&.["key"]?).try(&.as_s?) == "service.name"
+      end
+      name = found.try(&.as_h?).try(&.["value"]?).try(&.as_h?).try(&.["stringValue"]?)
+      clip(name.try(&.as_s?) || "unknown")
     end
 
-    private def store(service : String, span : JSON::Any) : Nil
-      trace_id = span["traceId"]?.try(&.as_s?) || return
-      return unless trace_id.matches?(/\A[0-9a-f]{32}\z/)
-
-      collected = parse(service, span) || return
+    private def store(trace_id : String, collected : Crema::CollectedSpan) : Nil
       @lock.synchronize do
         trace = (@traces[trace_id] ||= Trace.new)
         if trace.spans.size >= MAX_SPANS
@@ -190,14 +212,33 @@ module Caramel::Latte
       end
     end
 
-    private def parse(service : String, span : JSON::Any) : Crema::CollectedSpan?
+    private def parse(service : String, span : Hash(String, JSON::Any)) : Crema::CollectedSpan?
       span_id = span["spanId"]?.try(&.as_s?) || return
-      parent = span["parentSpanId"]?.try(&.as_s?).try { |id| id.empty? ? nil : id }
+      return unless span_id.matches?(SPAN_ID)
+
+      parent = span["parentSpanId"]?.try(&.as_s?)
+      parent = nil if parent && parent.empty?
+      return if parent && !parent.matches?(SPAN_ID)
+
       started = nanoseconds(span["startTimeUnixNano"]?) || return
-      finished = nanoseconds(span["endTimeUnixNano"]?) || started
-      Crema::CollectedSpan.new(service, span_id, parent, span["name"]?.try(&.as_s?) || "",
-        span["kind"]?.try(&.as_i?) || 0, started, finished,
-        span["status"]?.try(&.["code"]?).try(&.as_i?) == 2, attributes_of(span))
+      return unless started > 0
+
+      finished = Math.max(nanoseconds(span["endTimeUnixNano"]?) || started, started)
+      Crema::CollectedSpan.new(service, span_id, parent, clip(span["name"]?.try(&.as_s?) || ""),
+        kind_of(span), started, finished, error_of(span), attributes_of(span))
+    end
+
+    private def kind_of(span : Hash(String, JSON::Any)) : Int32
+      kind = span["kind"]?.try(&.as_i64?)
+      kind && kind >= 0 && kind <= 5 ? kind.to_i : 0
+    end
+
+    private def error_of(span : Hash(String, JSON::Any)) : Bool
+      span["status"]?.try(&.as_h?).try(&.["code"]?).try(&.as_i64?) == 2
+    end
+
+    private def clip(text : String, limit : Int32 = 256) : String
+      text.byte_slice(0, limit).scrub
     end
 
     # OTLP JSON carries 64-bit integers as strings.
@@ -205,14 +246,15 @@ module Caramel::Latte
       value.try { |any| any.as_s?.try(&.to_i64?) || any.as_i64? }
     end
 
-    private def attributes_of(span : JSON::Any) : Hash(String, String)
+    private def attributes_of(span : Hash(String, JSON::Any)) : Hash(String, String)
       found = {} of String => String
-      (span["attributes"]?.try(&.as_a?) || [] of JSON::Any).each do |item|
+      (span["attributes"]?.try(&.as_a?) || [] of JSON::Any).each do |entry|
         break if found.size >= MAX_ATTRIBUTES
 
+        item = entry.as_h? || next
         key = item["key"]?.try(&.as_s?) || next
         value = scalar(item["value"]?) || next
-        found[key] = value.byte_slice(0, MAX_VALUE).scrub
+        found[clip(key)] = value.byte_slice(0, MAX_VALUE).scrub
       end
       found
     end

@@ -32,7 +32,7 @@ module Caramel::Crema
           labels(method: method, route: route, status: status))
       end
       family(io, "caramel_request_duration_seconds", "histogram", "Request duration.")
-      metrics.durations.each do |kind, key, entry|
+      metrics.durations.snapshot.each do |kind, key, entry|
         next unless kind == "request"
 
         method, _, route = key.partition(' ')
@@ -45,15 +45,15 @@ module Caramel::Crema
       family(io, "caramel_jobs_total", "counter", "Job runs finished, by class and outcome.")
       outcomes(io, metrics, "job", "caramel_jobs_total")
       family(io, "caramel_job_duration_seconds", "histogram", "Job run duration.")
-      metrics.durations.each do |kind, key, entry|
+      metrics.durations.snapshot.each do |kind, key, entry|
         next unless kind == "job"
 
         histogram(io, "caramel_job_duration_seconds", entry.histogram,
           entry.total_ms / 1000.0, labels(job: key))
       end
       family(io, "caramel_job_queue_lag_seconds", "histogram", "Time a job waited past its run_at.")
-      metrics.lag.each do |queue, lag|
-        histogram(io, "caramel_job_queue_lag_seconds", lag, 0.0, labels(queue: queue))
+      metrics.lag.each do |queue, (lag, sum_ms)|
+        histogram(io, "caramel_job_queue_lag_seconds", lag, sum_ms / 1000.0, labels(queue: queue))
       end
     end
 

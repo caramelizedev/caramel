@@ -29,8 +29,9 @@ secrets in logs and without a diagnostic that costs a production binary anything
      trace id and `parent_id`; its sampled bit is kept as `parent_sampled`.
 4. **Wire format version 1.** `TraceEvent`, `SpanEvent`, `RepeatEvent`, `ErrorEvent` and
    `BuildEvent` in `crema/event.cr` are the one definition the application, Frappé and
-   Latte share. Nil fields are omitted. Production detail omits the request path, bind
-   values, source locations, messages and backtraces.
+   `ErrorEvent.location`, a project-relative `file:line:column` of the fingerprint frame,
+   stays in production. Production detail omits request paths, bind values, SQL source
+   lines, messages and backtraces.
 5. **Canonical log lines.** The `crema` source writes one entry per finished trace
    (message `request`, `job` or `schedule`) and one per error report (message `error`).
    `CARAMEL_LOG_FORMAT` chooses `json` or `text`; the default is text in development
@@ -93,7 +94,8 @@ secrets in logs and without a diagnostic that costs a production binary anything
     unattached error there as a JSON line. The newest 500 traces stay in memory and every
     line is appended to the site log's `events.jsonl`, which `frappe traces`,
     `frappe trace REF [--md]` and `frappe errors` read without a session. `frappe errors`
-    prints MRDP `RUNTIME` and `REPEATED_QUERY`.
+    prints MRDP `RUNTIME` and `REPEATED_QUERY`, and leaves out what happened before the
+    newest successful build.
 20. **The inspector** is at `/__caramel/dev/inspector` on the development origin: requests,
     traces with a waterfall, errors by fingerprint and builds. A toolbar on each page
     links to its trace. Compile errors link to the editor, and Latte.app opens the

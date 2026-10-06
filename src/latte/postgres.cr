@@ -670,6 +670,7 @@ module Caramel::Latte
           AND current_setting('log_parameter_max_length') = '0'
           AND current_setting('log_parameter_max_length_on_error') = '0'
           AND current_setting('shared_preload_libraries') = '#{PRELOADED_LIBRARIES}'
+          AND current_setting('pg_stat_statements.track_utility') = 'off'
           AND current_setting('file_copy_method') = 'clone';
         SQL
       run_admin_psql(sql).strip == "t"
@@ -782,6 +783,7 @@ module Caramel::Latte
         log_parameter_max_length_on_error = 0
         shared_preload_libraries = '#{PRELOADED_LIBRARIES}'
         pg_stat_statements.track = top
+        pg_stat_statements.track_utility = off
         auto_explain.log_min_duration = '250ms'
         auto_explain.log_analyze = off
         auto_explain.log_format = text
@@ -1160,7 +1162,7 @@ module Caramel::Latte
         ALTER DATABASE #{name} SET timezone TO 'UTC';
         REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{name} FROM PUBLIC;
         GRANT CONNECT ON DATABASE #{name} TO #{migration}, #{runtime};
-        #{"GRANT pg_read_all_stats TO #{runtime};" if statistics}
+        REVOKE pg_read_all_stats FROM #{runtime};
         SQL
       run_admin_psql(sql)
 

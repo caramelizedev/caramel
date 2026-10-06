@@ -10,12 +10,21 @@ module Caramel::Crema
   module Otlp
     # Decides once per trace whether its spans are exported.
     struct Sampler
+      KINDS = %w[always_on always_off traceidratio parentbased_always_on
+        parentbased_always_off parentbased_traceidratio]
+
       def initialize(@kind : String, @ratio : Float64)
       end
 
+      # An unknown sampler name warns and falls back to `traceidratio`.
       def self.from(env) : Sampler
         ratio = env["OTEL_TRACES_SAMPLER_ARG"]?.try(&.to_f?) || 1.0
-        new(env["OTEL_TRACES_SAMPLER"]? || "traceidratio", ratio.clamp(0.0, 1.0))
+        kind = env["OTEL_TRACES_SAMPLER"]?.presence || "traceidratio"
+        unless KINDS.includes?(kind)
+          LOG.warn { "unknown OTEL_TRACES_SAMPLER #{kind.inspect}; using traceidratio" }
+          kind = "traceidratio"
+        end
+        new(kind, ratio.clamp(0.0, 1.0))
       end
 
       def sample?(trace : Trace) : Bool
@@ -24,6 +33,10 @@ module Caramel::Crema
         case @kind
         when "always_on"  then true
         when "always_off" then false
+        when "parentbased_always_on"
+          trace.parent_sampled.nil? ? true : trace.parent_sampled == true
+        when "parentbased_always_off"
+          trace.parent_sampled == true
         when "parentbased_traceidratio"
           parent = trace.parent_sampled
           parent.nil? ? ratio?(trace.trace_id) : parent

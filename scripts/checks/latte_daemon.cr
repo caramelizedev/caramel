@@ -25,6 +25,9 @@ module Caramel::Checks::LatteDaemon
   # socket, and shows that version 1 knows nothing of traces. A busy OTLP port is the one
   # allowed excuse: the daemon must then say so.
   private def verify_collector(socket : String) : Nil
+    status, _ = Checks::UnixHTTP.request(socket, "GET", "/v1/traces/#{TRACE_ID}")
+    raise "Control API 1 answered /traces with #{status}" unless status == 404
+
     collector = request(socket, "GET", "/v2/status")["collector"]
     return if collector_unavailable?(collector)
     running = collector["state"] == "running"
@@ -38,8 +41,6 @@ module Caramel::Checks::LatteDaemon
     end
     listed = request(socket, "GET", "/v2/traces")["traces"].as_a
     raise "The trace is not listed: #{listed.to_json}" unless listed.first["trace_id"] == TRACE_ID
-    status, _ = Checks::UnixHTTP.request(socket, "GET", "/v1/traces/#{TRACE_ID}")
-    raise "Control API 1 answered /traces with #{status}" unless status == 404
   end
 
   # Whether *collector* (the status document's) says its port is in use.

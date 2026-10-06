@@ -70,6 +70,38 @@ describe Caramel::Crema::Render do
     html.should contain("&lt;b&gt;")
     html.should_not contain("<b>")
   end
+
+  it "fences code longer than any backtick run it holds" do
+    event = EventFixtures.trace
+    event.spans = [EventFixtures.query("SELECT '```' FROM books")]
+    text = Caramel::Crema::Render.markdown(event)
+    text.should contain("````sql\nSELECT '```' FROM books\n````\n")
+  end
+
+  it "keeps single-line fields on one line" do
+    event = EventFixtures.trace("GET /books/:id", failing: true)
+    event.error.try(&.message = "first\n## Injected")
+    text = Caramel::Crema::Render.markdown(event)
+    text.should contain("- message: first ## Injected\n")
+  end
+
+  it "redacts bind values and dump text in the Markdown" do
+    event = EventFixtures.trace
+    query = EventFixtures.query("SELECT 1")
+    query.binds = ["password=hunter2"]
+    dump = Caramel::Crema::SpanEvent.new("dump", "app/x.cr:3", 0.0, 0.0)
+    dump.detail = "token=abc123"
+    event.spans = [query, dump]
+    text = Caramel::Crema::Render.markdown(event)
+    text.should_not contain("hunter2")
+    text.should_not contain("abc123")
+  end
+
+  it "tolerates a started_at too short for a clock time" do
+    event = EventFixtures.trace(at: "now")
+    html = Caramel::Crema::Render.traces_table_html([event], "/t/")
+    html.should contain("<td>now</td>")
+  end
 end
 
 describe Caramel::Crema::Editor do

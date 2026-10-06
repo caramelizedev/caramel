@@ -61,7 +61,8 @@ module Caramel::Crema
   # debug token, each with the spans it recorded. It asks every trace to
   # record, so one that turns out to be worth keeping has its spans.
   class TraceRing < Sink
-    CAPACITY = 200
+    CAPACITY     =  200
+    DETAIL_LIMIT = 2048
 
     def initialize
       @lock = Mutex.new
@@ -80,9 +81,17 @@ module Caramel::Crema
       reason = reason_for(trace) || return
       event = trace.to_event(Detail::Production)
       event.reason = reason
+      trim_details(event)
       @lock.synchronize do
         @traces << event
         @traces.shift if @traces.size > CAPACITY
+      end
+    end
+
+    private def trim_details(event : TraceEvent) : Nil
+      event.spans.each do |span|
+        detail = span.detail || next
+        span.detail = detail.byte_slice(0, DETAIL_LIMIT).scrub if detail.bytesize > DETAIL_LIMIT
       end
     end
 

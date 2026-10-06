@@ -20,6 +20,9 @@ module Caramel::Crema
     DEFAULT_MINUTES =  15
     MAX_MINUTES     = 120
     PING            = 15.seconds
+    MAX_BODY        = 1024
+    MAX_TAILS       =    8
+    IO_TIMEOUT      = 10.seconds
 
     alias Route = Proc(HTTP::Server::Context, Nil)
 
@@ -27,6 +30,8 @@ module Caramel::Crema
     getter errors : ErrorRing
     getter traces : TraceRing
     @routes : Hash(String, Route)? = nil
+    @tails = Atomic(Int32).new(0)
+    @stopping = Channel(Nil).new
 
     # The socket path `CARAMEL_OPS_SOCKET` and `CARAMEL_SOCKET` ask for, or nil for none:
     # `off` disables it, and without either the process has no ops socket.
@@ -187,6 +192,7 @@ module Caramel::Crema
     end
 
     private def tail(context : HTTP::Server::Context) : Nil
+      return refuse(context, 429, "too_many_tails", "At most #{MAX_TAILS} tails") if tail_full?
       params = context.request.query_params
       filter = TailSink::Filter.new(
         errors: params["errors"]? == "1",
@@ -203,6 +209,17 @@ module Caramel::Crema
       nil
     ensure
       subscriber.try { |open| Crema.tail.unsubscribe(open) }
+      @tails.sub(1)
+    end
+
+    # Counts this tail in; true when `MAX_TAILS` others are already open.
+    private def tail_full? : Bool
+      @tails.add(1) >= MAX_TAILS
+    end
+
+    # Ends every open tail so its handler returns.
+    def stop_tails : Nil
+      @stopping.close unless @stopping.closed?
     end
 
     private def stream(response : HTTP::Server::Response, subscriber : TailSink::Subscriber) : Nil
@@ -210,6 +227,8 @@ module Caramel::Crema
         select
         when line = subscriber.channel.receive
           response.print("data: ", line, "\n\n")
+        when @stopping.receive?
+          return
         when timeout(PING)
           response.print(": ping\n\n")
         end
@@ -283,7 +302,10 @@ module Caramel::Crema
       unless type && type.starts_with?(JSON_TYPE)
         return refuse(context, 415, "unsupported_media_type", "Send application/json")
       end
-      minutes = requested_minutes(context.request)
+      body = request_body(context.request)
+      return refuse(context, 413, "request_too_large", "Body is limited to 1 KiB") unless body
+
+      minutes = requested_minutes(body)
       return refuse(context, 400, "bad_request", "minutes must be 1 to 120") unless minutes
 
       token, expires = DebugToken.issue(key, minutes)
@@ -293,12 +315,20 @@ module Caramel::Crema
       end
     end
 
-    private def requested_minutes(request : HTTP::Request) : Int32?
-      body = request.body.try(&.gets_to_end).presence || return DEFAULT_MINUTES
-      value = JSON.parse(body)["minutes"]? || return DEFAULT_MINUTES
+    # The body, or nil when it is longer than `MAX_BODY` bytes.
+    private def request_body(request : HTTP::Request) : String?
+      source = request.body || return ""
+      text = IO::Sized.new(source, MAX_BODY + 1).gets_to_end
+      text.bytesize > MAX_BODY ? nil : text
+    end
+
+    private def requested_minutes(body : String) : Int32?
+      return DEFAULT_MINUTES if body.blank?
+
+      value = JSON.parse(body).as_h?.try(&.["minutes"]?) || return DEFAULT_MINUTES
       minutes = value.as_i? || return
       (1..MAX_MINUTES).includes?(minutes) ? minutes : nil
-    rescue
+    rescue JSON::ParseException
       nil
     end
 
@@ -315,7 +345,7 @@ module Caramel::Crema
 
       ops = new(runtime)
       server = HTTP::Server.new([ops])
-      server.bind_unix(path)
+      server.bind(TimedServer.new(path))
       File.chmod(path, 0o600)
       Crema.subscribe(ops.errors)
       Crema.subscribe(ops.traces)
@@ -327,6 +357,7 @@ module Caramel::Crema
       -> do
         Crema.unsubscribe(ops.errors)
         Crema.unsubscribe(ops.traces)
+        ops.stop_tails
         server.close unless server.closed?
         File.delete?(path)
         nil
@@ -336,9 +367,25 @@ module Caramel::Crema
       nil
     end
 
+    # A listener whose connections time out, so a stalled client cannot hold a fiber.
+    class TimedServer < UNIXServer
+      def accept? : UNIXSocket?
+        super.try do |client|
+          client.read_timeout = IO_TIMEOUT
+          client.write_timeout = IO_TIMEOUT
+          client
+        end
+      end
+    end
+
     # True when nothing answers on *path*; a socket left by a crash is removed.
+    # Anything that is not a socket of ours is left alone.
     private def self.free?(path : String) : Bool
-      return true unless File.info?(path, follow_symlinks: false)
+      info = File.info?(path, follow_symlinks: false) || return true
+      unless info.type.socket? && info.owner_id == LibC.getuid.to_s
+        LOG.warn { "ops socket disabled: #{path} exists and is not a socket" }
+        return false
+      end
 
       socket = Socket.unix
       begin

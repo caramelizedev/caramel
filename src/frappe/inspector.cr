@@ -79,7 +79,7 @@ module Caramel::Frappe
       events = @events.traces(0, EventStore::MAX_TRACES).map(&.[1])
       filter = only.try { |name| FILTERS[name]? }
       events = events.select { |event| filter.call(event) } if filter
-      body = "<p class=\"new\" hidden>New requests have arrived. " \
+      body = "<p class=\"new\" data-caramel-new hidden>New requests have arrived. " \
              "<a href=\"#{PREFIX}\">Reload</a></p>" \
              "<p class=\"filters\">#{filter_links(only)}</p>" \
              "#{Crema::Render.traces_table_html(events, TRACES)}"
@@ -119,7 +119,7 @@ module Caramel::Frappe
     private def error_row(group : Array(Crema::ErrorEvent)) : String
       newest = group.last
       where = Crema::Render.source_link(newest.location, @editor, @root)
-      "<tr><td>#{group.size}</td><td>#{Caramel::HTML.escape(newest.at[11, 8])}</td>" \
+      "<tr><td>#{group.size}</td><td>#{Caramel::HTML.escape(clock(newest.at))}</td>" \
       "<td>#{Caramel::HTML.escape(newest.error_class)}</td><td>#{where}</td>" \
       "<td>#{trace_link(newest)}</td></tr>"
     end
@@ -139,10 +139,16 @@ module Caramel::Frappe
     private def build(event : Crema::BuildEvent) : String
       diagnostics = event.diagnostics.join { |item| diagnostic(item) }
       message = event.message.try { |text| "<pre>#{Caramel::HTML.escape(text)}</pre>" }
-      "<section class=\"build #{event.state}\"><h2>#{event.state.capitalize}" \
+      state = Caramel::HTML.escape(event.state)
+      "<section class=\"build #{state}\"><h2>#{Caramel::HTML.escape(event.state.capitalize)}" \
       " <small>#{Crema::Render.ms(event.duration_ms)} ms · " \
-      "#{Caramel::HTML.escape(event.at[11, 8])}" \
+      "#{Caramel::HTML.escape(clock(event.at))}" \
       "</small></h2>#{diagnostics}#{message}</section>"
+    end
+
+    # The `HH:MM:SS` of an RFC 3339 time, or dashes when it is shorter.
+    private def clock(at : String) : String
+      at.size >= 19 ? at[11, 8] : "--:--:--"
     end
 
     private def diagnostic(item : Crema::BuildDiagnostic) : String
