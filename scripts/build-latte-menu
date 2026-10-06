@@ -19,7 +19,8 @@ mkdir -p "$MACOS" "$RESOURCES" "$CACHE_ROOT"
   -o "$MACOS/Latte" \
   -framework AppKit \
   -framework Foundation \
-  -framework CryptoKit
+  -framework CryptoKit \
+  -framework UserNotifications
 
 cp "$ROOT/latte/macos/Info.plist" "$CONTENTS/Info.plist"
 # shard.yml is the only version source (ADR 0016). Bundle versions take the

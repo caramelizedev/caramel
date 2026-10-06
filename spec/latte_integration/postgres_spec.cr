@@ -3,6 +3,7 @@ require "file_utils"
 require "json"
 require "random/secure"
 require "socket"
+require "../../src/sugar_orm"
 require "../../src/caramel/database"
 require "../../src/latte/postgres"
 
@@ -101,6 +102,88 @@ describe "Latte managed PostgreSQL" do
       db.query_one("SHOW file_copy_method", as: String).should eq("clone")
     ensure
       db.close
+    end
+  end
+
+  it "preloads pg_stat_statements and auto_explain" do
+    admin.call("SHOW shared_preload_libraries;").should eq("pg_stat_statements,auto_explain")
+    admin.call("SHOW auto_explain.log_min_duration;").should eq("250ms")
+    admin.call("SHOW auto_explain.log_parameter_max_length;").should eq("0")
+    admin.call("SHOW pg_stat_statements.track_utility;").should eq("off")
+  end
+
+  it "keeps utility statement literals out of pg_stat_statements" do
+    marker = "marker-#{Random::Secure.hex(8)}"
+    role = "crema_probe_#{Random::Secure.hex(4)}"
+    admin.call("CREATE ROLE #{role} LOGIN PASSWORD '#{marker}-secret';")
+    admin.call("ALTER ROLE #{role} PASSWORD '#{marker}-again';")
+    admin.call("DROP ROLE #{role};")
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      rows = runtime.query_all(
+        "SELECT query FROM caramel_stats.pg_stat_statements", as: String)
+      rows.none?(&.includes?(marker)).should be_true
+    ensure
+      runtime.close
+    end
+  end
+
+  it "gives the runtime role no read access to other roles' statements" do
+    runtime_role = credentials.roles.development_runtime
+    member = "SELECT pg_has_role('#{runtime_role}', 'pg_read_all_stats', 'member');"
+    # A cluster provisioned before the fix still holds the grant; provisioning removes it.
+    admin.call("GRANT pg_read_all_stats TO #{runtime_role};")
+    admin.call(member).should eq("t")
+    service.provision(site)
+    admin.call(member).should eq("f")
+
+    probe = "crema-probe-#{Random::Secure.hex(8)}"
+    admin.call("SELECT '#{probe}';")
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      rows = runtime.query_all("SELECT query FROM caramel_stats.pg_stat_statements", as: String)
+      rows.none?(&.includes?(probe)).should be_true
+      rows.should contain("<insufficient privilege>")
+    ensure
+      runtime.close
+    end
+  end
+
+  it "keeps pg_stat_statements in its own schema of the development database only" do
+    where = "SELECT extnamespace::regnamespace::text FROM pg_extension " \
+            "WHERE extname = 'pg_stat_statements'"
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      runtime.query_one(where, as: String).should eq("caramel_stats")
+      runtime.query_one("SELECT count(*) FROM caramel_stats.pg_stat_statements", as: Int64)
+        .should be >= 0_i64
+    ensure
+      runtime.close
+    end
+    spec = open_database(credentials.spec_runtime, 1)
+    begin
+      spec.query_all(where, as: String).should be_empty
+    ensure
+      spec.close
+    end
+    migration = open_database(credentials.development_migration, 1)
+    begin
+      names = SugarORM::Introspection.read(migration).tables.map(&.name)
+      names.none?(&.includes?("pg_stat_statements")).should be_true
+    ensure
+      migration.close
+    end
+  end
+
+  it "stays idempotent when provisioned again" do
+    again = service.provision(site)
+    again.development_runtime.should eq(credentials.development_runtime)
+    runtime = open_database(credentials.development_runtime, 1)
+    begin
+      count = "SELECT count(*) FROM pg_extension WHERE extname = 'pg_stat_statements'"
+      runtime.query_one(count, as: Int64).should eq(1_i64)
+    ensure
+      runtime.close
     end
   end
 

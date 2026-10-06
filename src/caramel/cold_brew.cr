@@ -107,12 +107,21 @@ module Caramel::ColdBrew
     getter workers : Array(Worker)
     getter broker : Broker
 
+    # The pool Cold Brew's workers and maintenance use.
+    def database : DB::Database
+      @db
+    end
+
     def initialize(@db : DB::Database,
                    @workers : Array(Worker),
                    @maintenance : Maintenance,
                    @scheduler : Scheduler,
-                   @broker : Broker)
+                   @broker : Broker,
+                   @scheduler_on : Bool = true)
     end
+
+    # False when `--no-scheduler` left `every` schedules to other processes.
+    getter? scheduler_on : Bool
 
     # Fetches no new jobs, lets in-flight jobs and schedule blocks finish,
     # then closes the LISTEN connection and the pool.
@@ -136,13 +145,14 @@ module Caramel::ColdBrew
   def self.start(database_url : String, env = ENV, *, scheduler : Bool = true) : Service
     queues = worker_queues(env)
     concurrency = worker_concurrency(env, queues.size)
-    db = Caramel::Database.open(database_url, queues.size * concurrency + 1)
+    pool_size = queues.size * concurrency + 1
+    db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew")
     broker = Broker.new(database_url)
     self.broker = broker
     workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }
     maintenance = Maintenance.new(db).start
     ticks = Scheduler.new(scheduler ? schedules : [] of Schedule, db).start
-    Service.new(db, workers, maintenance, ticks, broker)
+    Service.new(db, workers, maintenance, ticks, broker, scheduler)
   end
 
   # The distinct queue names CARAMEL_WORKER_QUEUES lists, default `default`.

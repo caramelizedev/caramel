@@ -28,5 +28,6 @@ end
 app = Caramel::Application.new(RuntimeFixture::AppRouter.new, Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel"))
 headers = HTTP::Headers{"Host" => "bookshelf.caramel"}
 headers["HX-Request-Type"] = "partial" if ARGV.includes?("partial")
+headers["Accept"] = "application/json" if ARGV.includes?("json")
 response = app.handle(HTTP::Request.new("GET", "/broken", headers))
 puts({status: response.status, body: response.body, headers: response.headers.to_h}.to_json)

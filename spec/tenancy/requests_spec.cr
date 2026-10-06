@@ -147,3 +147,54 @@ describe "SugarORM::Changeset#validate_tenant_slug" do
     TenancySpec::AccountChangeset.new(name: "Acme", slug: "acme-2").errors.should be_empty
   end
 end
+
+# Keeps every finished trace.
+private class TenancyTraceSink < Caramel::Crema::Sink
+  getter events = [] of Caramel::Crema::TraceEvent
+
+  def name : String
+    "tenancy-spec"
+  end
+
+  def finished(trace : Caramel::Crema::Trace) : Nil
+    @events << trace.to_event(Caramel::Crema::Detail::Production)
+  end
+end
+
+# The traces finished while the block ran.
+private def traced(& : ->) : Array(Caramel::Crema::TraceEvent)
+  sink = TenancyTraceSink.new
+  Caramel::Crema.subscribe(sink)
+  begin
+    yield
+  ensure
+    Caramel::Crema.unsubscribe(sink)
+  end
+  sink.events
+end
+
+describe "Crema in a tenant" do
+  it "names a tenant route under /:tenant" do
+    acme_with_a_book
+    request = traced { TenancySpec.get("/acme/books") }.first
+    request.name.should eq("GET /:tenant/books")
+    request.route.should eq("/:tenant/books")
+  end
+
+  it "runs a job enqueued in a tenant in the request's trace and in the tenant" do
+    acme = TenancySpec.account("acme")
+    events = traced do
+      probe = HTTP::Request.new("GET", "/probe", HTTP::Headers.new)
+      Caramel::Crema.request(probe) do
+        Tenancy.with(acme) { TenancySpec::Record.enqueue }
+        Caramel::Response.new
+      end
+      TenancySpec.drain
+    end
+    request = events.find! { |event| event.kind == "request" }
+    job = events.find! { |event| event.kind == "job" }
+    job.trace_id.should eq(request.trace_id)
+    job.parent_id.should eq(request.span_id)
+    TenancySpec::Run.query.order_by(:id).to_a.map(&.slug).should eq(["acme"])
+  end
+end

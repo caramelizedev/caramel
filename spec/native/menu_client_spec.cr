@@ -34,7 +34,7 @@ private class FakeMenuDaemon
       break if line.strip.empty?
     end
     key = "#{request[0]} #{request[1]}"
-    body = @responses[key]? || %({"version":1,"error":{"code":"not_found","message":"missing"}})
+    body = @responses[key]? || %({"version":2,"error":{"code":"not_found","message":"missing"}})
     status = @responses.has_key?(key) ? "200 OK" : "404 Not Found"
     if delay = @delays[key]?
       sleep delay
@@ -89,12 +89,12 @@ private class MenuFixture
             proxy : String = "stopped",
             status_error : String? = nil) : Nil
     services = [service("postgres", postgres), service("dns", dns), service("proxy", proxy)]
-    status = %({"version":1,"services":{#{services.join(',')}})
+    status = %({"version":2,"services":{#{services.join(',')}})
     status += %(,"error":#{status_error.to_json}) if status_error
     status += "}"
-    version = include_sites_version ? %(,"version":1) : ""
+    version = include_sites_version ? %(,"version":2) : ""
     sites_response = %({"sites":#{sites}#{version}})
-    responses = {"GET /v1/status" => status, "GET /v1/sites" => sites_response}
+    responses = {"GET /v2/status" => status, "GET /v2/sites" => sites_response}
     @daemon = FakeMenuDaemon.new(@socket, responses, trickle, delays)
   end
 
@@ -150,6 +150,40 @@ describe "native Latte menu client" do
       result.stdout.should contain("Terminal session")
       logs = File.join(fixture.home, "logs/sites/0123456789abcdef")
       result.stdout.should contain("logs: #{logs}")
+      result.stdout.should contain("inspector: https://bookshelf.caramel/__caramel/dev/inspector")
+    end
+  end
+
+  it "reports a site's error count and newest error" do
+    with_menu_fixture do |fixture|
+      rest = %(,"state":"running","owner":"terminal","errors":2,) +
+             %("last_error":{"fingerprint":"9f2c4e1a7b3d","error_class":"KeyError",) +
+             %("location":"app/actions/books/show.cr:12:7","at":"2026-10-03T12:00:03.000Z"})
+      fixture.serve(sites: bookshelf_sites(fixture, rest: rest))
+      result = fixture.check
+      result.success?.should be_true
+      result.stdout.should contain("errors: 2")
+      result.stdout.should contain("last error: KeyError at app/actions/books/show.cr:12:7")
+    end
+  end
+
+  it "reads a site from a gateway that reports no errors as having none" do
+    with_menu_fixture do |fixture|
+      fixture.serve(sites: bookshelf_sites(fixture, rest: %(,"state":"running")))
+      result = fixture.check
+      result.stdout.should contain("errors: 0")
+      result.stdout.should_not contain("last error")
+    end
+  end
+
+  it "still lists a site whose errors fields are malformed" do
+    with_menu_fixture do |fixture|
+      rest = %(,"state":"running","errors":"many","last_error":{"fingerprint":7})
+      fixture.serve(sites: bookshelf_sites(fixture, rest: rest))
+      result = fixture.check
+      result.success?.should be_true
+      result.stdout.should contain("errors: 0")
+      result.stdout.should_not contain("last error")
     end
   end
 
@@ -201,7 +235,7 @@ describe "native Latte menu client" do
 
   it "applies one deadline across status and sites requests" do
     with_menu_fixture do |fixture|
-      fixture.serve(delays: {"GET /v1/status" => 1.2.seconds, "GET /v1/sites" => 1.2.seconds})
+      fixture.serve(delays: {"GET /v2/status" => 1.2.seconds, "GET /v2/sites" => 1.2.seconds})
       started = Time.instant
       result = fixture.check
       result.success?.should be_false

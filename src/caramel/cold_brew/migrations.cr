@@ -121,5 +121,25 @@ module Caramel::ColdBrew
         )
         SQL
     ]),
+    # Crema's job context: the ids of the trace that enqueued the job. Never a message.
+    SugarORM::Migration.new(20260927000004_i64, "add_caramel_jobs_context", [
+      "ALTER TABLE caramel_jobs ADD COLUMN context jsonb",
+    ]),
+    # Crema's per-minute aggregates. Every application has the table; only one that
+    # requires "caramel/crema/recorder" writes it. It holds counts and latency
+    # histograms under route templates and parameterized SQL, never a message or a path.
+    SugarORM::Migration.new(20260927000005_i64, "create_caramel_metrics", [<<-SQL]),
+      CREATE TABLE caramel_metrics (
+        bucket timestamptz NOT NULL,
+        kind text NOT NULL,
+        key text NOT NULL,
+        count bigint NOT NULL,
+        errors bigint NOT NULL,
+        total_ms double precision NOT NULL,
+        max_ms double precision NOT NULL,
+        histogram bigint[] NOT NULL,
+        PRIMARY KEY (bucket, kind, key)
+      )
+      SQL
   ]
 end

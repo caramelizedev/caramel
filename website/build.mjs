@@ -16,7 +16,7 @@ const sections = {
   learn: 'docs/getting-started', map: 'docs/project-map',
   agents: 'docs/agents', deploy: 'docs/deployment',
   testing: 'docs/testing-html', releases: 'docs/releases',
-  i18n: 'docs/internationalization', tenancy: 'docs/multi-tenancy', practices: 'docs/best-practices',
+  i18n: 'docs/internationalization', tenancy: 'docs/multi-tenancy', crema: 'docs/observability', practices: 'docs/best-practices',
   routing: 'docs/routes-and-contracts', actions: 'docs/actions-and-responses',
   views: 'docs/views', sugarorm: 'docs/sugarorm', coldbrew: 'docs/cold-brew',
   corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',

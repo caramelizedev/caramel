@@ -9,9 +9,9 @@ private def all_running
   {postgres: running, dns: running, proxy: running}
 end
 
-# Latte's reply to a client whose control API version, 1, it does not serve.
+# Latte's reply to a client whose control API version, 2, it does not serve.
 private def unsupported_api(version : Int32, latte : String, api : Array(Int32)) : String
-  message = "Latte #{latte} serves control API #{api.join(", ")}, not 1"
+  message = "Latte #{latte} serves control API #{api.join(", ")}, not 2"
   error = {code: "unsupported_api", message: message}
   {version: version, latte: latte, api: api, error: error}.to_json
 end
@@ -28,25 +28,25 @@ describe Caramel::Frappe::LatteClient do
     root = "/private/tmp/caramel-client-live-#{Random::Secure.hex(8)}"
     paths = Caramel::Latte::Paths.new(root)
     removed = Channel(String).new(1)
-    status = {version: 1, latte: "0.1.0", api: [1], services: all_running, error: nil}
-    conflict = {version: 1, error: {message: "Project is already registered"}}
+    status = {version: 2, latte: "0.1.0", api: [1, 2], services: all_running, error: nil}
+    conflict = {version: 2, error: {message: "Project is already registered"}}
     server = HTTP::Server.new do |context|
       context.response.headers["Content-Type"] = "application/json"
       context.response.headers["Connection"] = "close"
       case context.request.path
-      when "/v1/sites/0123456789abcdef"
+      when "/v2/sites/0123456789abcdef"
         removed.send("#{context.request.method} #{context.request.path}")
-        context.response.print(%({"version":1}))
-      when "/v1/status"
+        context.response.print(%({"version":2}))
+      when "/v2/status"
         context.response.print(status.to_json)
       when "/old"
-        context.response.print(%({"version":2}))
+        context.response.print(%({"version":3}))
       when "/newer-latte"
         context.response.status_code = 404
-        context.response.print(unsupported_api(3, "0.9.0", [2, 3]))
+        context.response.print(unsupported_api(4, "0.9.0", [3, 4]))
       when "/older-latte"
         context.response.status_code = 404
-        context.response.print(unsupported_api(0, "0.0.9", [0]))
+        context.response.print(unsupported_api(1, "0.0.9", [1]))
       when "/large"
         context.response.print(" " * (Caramel::Frappe::LatteClient::MAX_RESPONSE + 1))
       when "/invalid"
@@ -56,11 +56,11 @@ describe Caramel::Frappe::LatteClient do
         context.response.print(conflict.to_json)
       end
     end
-    newer = "Latte 0.9.0 no longer serves control API 1, " \
+    newer = "Latte 0.9.0 no longer serves control API 2, " \
             "which Frappé #{Caramel::VERSION} uses. " \
             "Upgrade this project to Caramel 0.9.0."
     older = "Latte 0.0.9 is running, but Frappé #{Caramel::VERSION} needs " \
-            "control API 1, from Caramel #{Caramel::VERSION} or newer. " \
+            "control API 2, from Caramel #{Caramel::VERSION} or newer. " \
             "Run latte stop so the next command starts the newest installed Latte, " \
             "or install this release: frappe installations install #{Caramel::VERSION}"
     begin
@@ -79,7 +79,7 @@ describe Caramel::Frappe::LatteClient do
         client.request("POST", "/conflict", "{}")
       end
       client.unregister("0123456789abcdef")
-      removed.receive.should eq("DELETE /v1/sites/0123456789abcdef")
+      removed.receive.should eq("DELETE /v2/sites/0123456789abcdef")
     ensure
       server.close
       FileUtils.rm_rf(paths.run_dir)
@@ -102,7 +102,7 @@ describe Caramel::Frappe::LatteClient do
     File.write(launcher, "#!/bin/sh\necho \"$@\" > '#{launched}'\n", perm: 0o700)
     server = HTTP::Server.new do |context|
       context.response.headers["Content-Type"] = "application/json"
-      context.response.print({version: 1, services: all_running}.to_json)
+      context.response.print({version: 2, services: all_running}.to_json)
     end
     # Plays the daemon the launcher started.
     spawn do

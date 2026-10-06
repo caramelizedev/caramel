@@ -175,7 +175,7 @@ module Corretto
       UNIXSocket.open(socket) do |io|
         io.read_timeout = 20.seconds
         client = HTTP::Client.new(io, "latte")
-        path = "/v1/sites/#{site}/test-workers/#{index}"
+        path = "/v2/sites/#{site}/test-workers/#{index}"
         headers = HTTP::Headers{
           "Content-Type" => "application/json",
           "Connection"   => "close",

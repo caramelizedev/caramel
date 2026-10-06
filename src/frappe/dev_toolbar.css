@@ -1,0 +1,10 @@
+:host{all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483647;font:12px/1.4 system-ui}
+.badge{display:inline-block;padding:6px 10px;background:#332d27;color:#faf8f3;border-radius:999px;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.badge.error{background:#a3301f}
+.badge.warn{background:#8a4b12}
+.badge small{opacity:.75}
+button.toggle{all:unset;cursor:pointer;margin-left:6px;padding:0 6px;color:#faf8f3}
+ol.recent{position:absolute;right:0;bottom:36px;margin:0;padding:8px 12px;list-style:none;background:#fff;color:#332d27;border:1px solid #e5dfd4;border-radius:8px;min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+ol.recent li{white-space:nowrap;padding:2px 0}
+ol.recent a{color:#8a4b12;text-decoration:none}
+ol.recent[hidden]{display:none}

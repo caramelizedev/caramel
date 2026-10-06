@@ -179,7 +179,19 @@ module Caramel::Frappe
         "Clone the development database into branch NAME and print its connection URL."),
       Command.new("db branch list", "List this project's database branches."),
       Command.new("db branch delete NAME", "Drop database branch NAME."),
-      Command.new("logs [app|compiler] [--follow]", "Show the development app or compiler log."),
+      Command.new("db diagnose",
+        "Report database health: connections, locks, cache hits, unused indexes " \
+        "and the slowest statements."),
+      Command.new("logs [app|compiler|access] [--follow]",
+        "Show the development app or compiler log, or Caddy's access log."),
+      Command.new("traces [--errors] [--slow=MS] [--limit=N] #{MODE}",
+        "List the development session's recent requests, jobs and schedule runs, " \
+        "newest first."),
+      Command.new("trace REF [--md]",
+        "Show one development trace: its summary, queries, logs and error. " \
+        "REF is last, last-error, or a trace or request id prefix."),
+      Command.new("errors #{MODE}",
+        "List development runtime errors and repeated queries, grouped."),
       Command.new("services [status|start|stop]",
         "Show, start or stop Latte's PostgreSQL, DNS and HTTPS services.",
         project: false),

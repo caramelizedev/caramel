@@ -3,6 +3,7 @@ require "./application"
 require "./csrf"
 require "./database"
 require "./cold_brew"
+require "./crema/runtime"
 require "../sugar_orm"
 
 module Caramel
@@ -78,8 +79,18 @@ module Caramel
     # Runs one command and returns its exit status. `App` provides TITLE,
     # MIGRATIONS, AppRouter and `seed`.
     def self.run(app : T.class, arguments : Array(String), root : String) : Int32 forall T
+      Crema::Logging.setup
       command = arguments.first? || "help"
       flags = arguments[1..]? || [] of String
+      Crema.run_command(command, flags) || dispatch(app, command, flags, root)
+    end
+
+    # One of the framework's own commands; application commands registered with
+    # `Crema.command` answer first.
+    private def self.dispatch(app : T.class,
+                              command : String,
+                              flags : Array(String),
+                              root : String) : Int32 forall T
       if command == "work"
         options = WorkOptions.parse(flags) || return refuse_usage
         return run_workers(app, options)
@@ -91,7 +102,8 @@ module Caramel
       when "routes", "schema", "translations"
         describe(app, command, root)
       when "serve", "seed", "migrate", "lint", "drift"
-        with_database(command == "migrate") do |db, url|
+        name = command == "serve" ? "caramel-web" : "caramel"
+        with_database(command == "migrate", name) do |db, url|
           database_command(app, command, db, url, dev_override, root)
         end
       else
@@ -121,6 +133,7 @@ module Caramel
     def self.work(title : String, url : String, options : WorkOptions,
                   stop : Channel(Nil), output : IO = STDOUT) : Int32
       service = ColdBrew.start(url, options.environment, scheduler: options.scheduler)
+      runtime = Crema.start("work", title, database: service.database, cold_brew: service)
       begin
         output.puts "#{title} worker is ready: #{readiness(service, options)}"
         output.flush
@@ -128,6 +141,7 @@ module Caramel
       ensure
         # In-flight jobs finish; no new ones start.
         service.stop
+        runtime.stop
       end
       0
     end
@@ -140,7 +154,8 @@ module Caramel
     end
 
     private def self.usage : String
-      "Usage: #{File.basename(PROGRAM_NAME)} #{USAGE}"
+      syntax = [USAGE, *Crema.command_syntaxes].join('|')
+      "Usage: #{File.basename(PROGRAM_NAME)} #{syntax}"
     end
 
     private def self.refuse_usage : Int32
@@ -172,9 +187,9 @@ module Caramel
     end
 
     private def self.routes(entries : Array(Router::Entry)) : Int32
-      width = entries.max_of? { |entry| listed_path(entry).size } || 0
+      width = entries.max_of?(&.listed_path.size) || 0
       entries.each do |entry|
-        line = "#{entry.method.ljust(7)} #{listed_path(entry).ljust(width)}  #{entry.action}"
+        line = "#{entry.method.ljust(7)} #{entry.listed_path.ljust(width)}  #{entry.action}"
         line += "  #{entry.contract}" unless entry.contract.empty?
         ingress = entry.ingress.summary
         line += "  [#{ingress}]" unless ingress.empty?
@@ -183,15 +198,12 @@ module Caramel
       0
     end
 
-    # A route's path as listed: a tenant route under `/:tenant`.
-    private def self.listed_path(entry : Router::Entry) : String
-      return entry.path unless entry.tenant
-      entry.path == "/" ? "/:tenant" : "/:tenant#{entry.path}"
-    end
-
     # Opens the environment's database, refusing a connection other than the
     # one Frappé verified and any spec database outside Corretto.
-    private def self.with_database(migration : Bool, & : DB::Database, String -> Int32) : Int32
+    # :nodoc:
+    def self.with_database(migration : Bool,
+                           application_name : String = "caramel",
+                           & : DB::Database, String -> Int32) : Int32
       url = Database.url(migration: migration)
       if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
         unless url == expected
@@ -200,7 +212,7 @@ module Caramel
       elsif ENV["CARAMEL_ENV"]? == "test"
         abort("Run specs through frappe corretto")
       end
-      db = Database.open(url)
+      db = Database.open(url, application_name: application_name)
       begin
         SugarORM::Repo.database = db
         yield db, url
@@ -270,20 +282,25 @@ module Caramel
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
-      parent = File.info?(File.dirname(socket_path), follow_symlinks: false)
-      abort("CARAMEL_SOCKET must be in a private owned directory") if exposed?(parent)
+      private_parent = Crema.private_directory?(File.dirname(socket_path))
+      abort("CARAMEL_SOCKET must be in a private owned directory") unless private_parent
       occupied = File.info?(socket_path, follow_symlinks: false)
       abort("Application socket is already occupied") if occupied
-      server = HTTP::Server.new([Caramel.build(app, db, secret, origin, root)])
+      application = Caramel.build(app, db, secret, origin, root)
+      server = HTTP::Server.new([application])
       # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
       bound = false
       cold_brew : ColdBrew::Service? = nil
+      # ameba:disable Lint/UselessAssign -- read by the ensure below when startup fails
+      runtime : Crema::Runtime? = nil
       begin
         server.bind_unix(socket_path)
         bound = true
         File.chmod(socket_path, 0o600)
         # Invalid worker settings raise here; the ensure still frees the socket.
         cold_brew = ColdBrew.start(url) unless ENV["CARAMEL_ENV"]? == "test"
+        runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
+          application: application)
         Process.on_terminate { server.close }
         puts "#{T::TITLE} is ready at #{origin}"
         server.listen
@@ -292,14 +309,10 @@ module Caramel
         File.delete?(socket_path) if bound
         # In-flight jobs finish; no new ones start.
         cold_brew.try(&.stop)
+        runtime.try(&.stop)
       end
-    end
-
-    # True unless *info* is a directory that the current user owns and that
-    # no one else can reach.
-    private def self.exposed?(info : File::Info?) : Bool
-      return true if info.nil? || !info.directory?
-      info.owner_id != LibC.getuid.to_s || (info.permissions.value & 0o077) != 0
     end
   end
 end
+
+require "./crema/core_commands"

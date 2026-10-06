@@ -18,6 +18,9 @@ Excluded:
 Caramel/ServiceNoun:
   Enabled: true
 
+Caramel/Dump:
+  Enabled: true
+
 # The framework keeps Ameba's default limit of 12; the methods that exceed it,
 # dispatch tables, parsers, validation and process-lifecycle code, say why
 # inline. Applications use 10. Crystal under scripts/, the checks and the

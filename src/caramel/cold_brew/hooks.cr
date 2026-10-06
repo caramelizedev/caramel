@@ -1,10 +1,8 @@
 require "json"
-require "log"
 require "../../sugar_orm"
+require "../crema"
 
 module Caramel::ColdBrew
-  HookLog = ::Log.for("cold_brew.hooks")
-
   # A failed run that Cold Brew rescheduled: the job's row holds the new
   # `run_at` and the run's error. `error_class` names the exception; its
   # message stays in the database.
@@ -72,9 +70,6 @@ module Caramel::ColdBrew
   private def self.call_hook(hook : T ->, event : T, name : String) : Nil forall T
     SugarORM::Repo.transaction { hook.call(event) }
   rescue error
-    # The message may carry connection details; the class is enough to act on.
-    HookLog.error do
-      "hook=#{name} job=#{event.id} class=#{event.class_name} error_type=#{error.class}"
-    end
+    Crema.report(error, handled: false, source: "cold_brew.hooks #{name}")
   end
 end

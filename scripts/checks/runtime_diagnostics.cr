@@ -20,15 +20,17 @@ begin
     Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
     present = File.read(binary).includes?(marker)
     Caramel::Checks.fail(PRODUCTION_LEAK) unless present == (mode == "development")
+    Caramel::Checks.fail(PRODUCTION_LEAK) if File.read(binary).includes?("CARAMEL_DEV_EVENTS")
     {"production", "development", "test"}.each do |environment|
-      {false, true}.each do |partial|
+      {"full", "partial", "json"}.each do |variant|
+        partial = variant == "partial"
         env = {
           "CARAMEL_PROJECT_ROOT" => fixture,
           "APP_SECRET"           => "s" * 64,
           "DATABASE_URL"         => "postgresql://user:database-secret@private-host/app",
           "CARAMEL_ENV"          => environment,
         } of String => String?
-        arguments = partial ? ["partial"] : [] of String
+        arguments = variant == "full" ? [] of String : [variant]
         result = Caramel::Checks.run([binary] + arguments, env: env, timeout: 1.hour)
         Caramel::Checks.fail(result.stdout + result.stderr) unless result.success?
         response = JSON.parse(result.stdout)
@@ -39,7 +41,13 @@ begin
         {"s" * 64, "private-password", "database-secret"}.each do |secret|
           Caramel::Checks.fail("secret was reflected in diagnostics") if body.includes?(secret)
         end
-        if mode == environment && environment == "development"
+        if mode == environment && environment == "development" && variant == "json"
+          error = JSON.parse(body)["error"]
+          Caramel::Checks.fail(body) unless error["class"] == "Exception"
+          Caramel::Checks.fail(body) if error["backtrace"].as_a.empty?
+          content_type = response["headers"]["Content-Type"][0].as_s
+          Caramel::Checks.fail(body) unless content_type.includes?("json")
+        elsif mode == environment && environment == "development"
           message = "Missing helper <unsafe> [credential redacted] " \
                     "[credential redacted] [redacted]"
           content = have_html {
@@ -60,6 +68,12 @@ begin
           Caramel::Checks.fail(body) unless located
           page = render_page("Caramel development")
           Caramel::Checks.fail(body) unless page.match(Caramel::Response.new(500, body)) != partial
+          editor = body.includes?(%(<a class="editor" href="zed://file/))
+          source = body.includes?(%(<figure class="source">)) && body.includes?("<mark>")
+          copy = body.includes?("data-caramel-copy")
+          Caramel::Checks.fail("error page lacks an editor link") unless editor
+          Caramel::Checks.fail("error page lacks its source excerpt") unless source
+          Caramel::Checks.fail("error page lacks Copy as Markdown") unless copy
         else
           revealed = body.includes?(marker) || body.includes?("Missing helper")
           Caramel::Checks.fail(body) if revealed

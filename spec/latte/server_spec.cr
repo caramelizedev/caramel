@@ -10,9 +10,9 @@ private class TestServices < Caramel::Latte::ServiceControl
   def initialize(@registry : Caramel::Latte::Registry)
   end
 
-  def status_json : String
+  def status_json(version : Int32) : String
     stopped = {state: "stopped"}
-    {version: 1, services: {postgres: stopped, dns: stopped, proxy: stopped}}.to_json
+    {version: version, services: {postgres: stopped, dns: stopped, proxy: stopped}}.to_json
   end
 
   def start_services : Nil
@@ -52,6 +52,21 @@ private class TestServices < Caramel::Latte::ServiceControl
       SPEC_DATABASE_URL: "private-test-spec",
     }
     {version: 1, environment: environment}.to_json
+  end
+
+  getter limits = [] of Int32
+
+  def traces_json(limit : Int32) : String
+    @limits << limit
+    {version: 2, traces: [] of Int32}.to_json
+  end
+
+  def trace_json(trace_id : String) : String
+    unless trace_id == "0123456789abcdef0123456789abcdef"
+      raise Caramel::Latte::PublicError.new("not_found", "No such trace", 404)
+    end
+
+    {version: 2, trace_id: trace_id, spans: [] of Int32}.to_json
   end
 
   getter branches = [] of String
@@ -192,7 +207,7 @@ describe Caramel::Latte::Server do
       services.starts.should eq(1)
       answer(server, "POST", "/v1/services/stop", "{}").status.should eq(200)
       services.stops.should eq(1)
-      other = answer(server, "GET", "/v2/status")
+      other = answer(server, "GET", "/v3/status")
       other.status.should eq(404)
       refusal = JSON.parse(other.body)
       reported = {
@@ -200,7 +215,7 @@ describe Caramel::Latte::Server do
         refusal["latte"].as_s,
         refusal["api"].as_a.map(&.as_i),
       }
-      reported.should eq({"unsupported_api", Caramel::VERSION, [1]})
+      reported.should eq({"unsupported_api", Caramel::VERSION, [1, 2]})
       oversized = "{" + " " * 16384
       answer(server, "POST", "/v1/services/start", oversized).status.should eq(413)
       services.starts.should eq(1)
@@ -212,6 +227,59 @@ describe Caramel::Latte::Server do
       Dir.exists?(root).should be_true
       registry.list.should be_empty
       answer(server, "GET", "/unknown").status.should eq(404)
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "serves collected traces from version 2 only and bounds the listing limit" do
+    root = File.join("/private/tmp", "latte-api-traces-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      services = TestServices.new(registry)
+      server = Caramel::Latte::Server.new(registry, services)
+      id = "0123456789abcdef0123456789abcdef"
+      found = JSON.parse(answer(server, "GET", "/v2/traces/#{id}").body)
+      {found["version"].as_i, found["trace_id"].as_s}.should eq({2, id})
+      missing = answer(server, "GET", "/v2/traces/#{"f" * 32}")
+      {missing.status, JSON.parse(missing.body)["error"]["code"].as_s}.should eq({404, "not_found"})
+      answer(server, "GET", "/v2/traces/not-hex").status.should eq(404)
+      answer(server, "GET", "/v1/traces").status.should eq(404)
+      answer(server, "GET", "/v1/traces/#{id}").status.should eq(404)
+      answer(server, "POST", "/v2/traces", "{}").status.should eq(404)
+      answer(server, "GET", "/v2/traces")
+      answer(server, "GET", "/v2/traces?limit=9999")
+      answer(server, "GET", "/v2/traces?limit=0")
+      answer(server, "GET", "/v2/traces?limit=nope")
+      services.limits.should eq([50, 200, 1, 50])
+    ensure
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "adds error fields to a site in version 2 only, and stamps bodies with the version asked" do
+    root = File.join("/private/tmp", "latte-api-v2-#{Random::Secure.hex(8)}")
+    Dir.mkdir(root, 0o700)
+    registry = Caramel::Latte::Registry.new(root)
+    begin
+      server = Caramel::Latte::Server.new(registry, TestServices.new(registry))
+      registration = {name: "bookshelf", directory: root}.to_json
+      answer(server, "POST", "/v2/sites", registration).status.should eq(201)
+      v2 = JSON.parse(answer(server, "GET", "/v2/sites").body)
+      v2["version"].as_i.should eq(2)
+      listed = v2["sites"][0]
+      listed["errors"].as_i.should eq(0)
+      listed["last_error"].raw.should be_nil
+      v1 = JSON.parse(answer(server, "GET", "/v1/sites").body)
+      v1["version"].as_i.should eq(1)
+      v1["sites"][0].as_h.has_key?("errors").should be_false
+      v1["sites"][0].as_h.has_key?("last_error").should be_false
+      missing = JSON.parse(answer(server, "DELETE", "/v2/sites/0123456789abcdef").body)
+      {missing["version"].as_i, missing["error"]["code"].as_s}.should eq({2, "not_found"})
+      answer(server, "GET", "/status").status.should eq(404)
     ensure
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)

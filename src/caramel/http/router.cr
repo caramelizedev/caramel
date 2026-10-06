@@ -1,5 +1,6 @@
 require "uri"
 require "../response"
+require "../crema"
 require "../action"
 require "../wording"
 require "./request_input"
@@ -19,7 +20,14 @@ module Caramel
       action : String,
       contract : String,
       ingress : Ingress = Ingress::DEFAULT,
-      tenant : Bool = false
+      tenant : Bool = false do
+      # The path as `frappe routes` and Crema list it: a tenant route under `/:tenant`.
+      def listed_path : String
+        return path unless tenant
+
+        path == "/" ? "/:tenant" : "/:tenant#{path}"
+      end
+    end
 
     # The route a request's real method and path select. It is found before
     # the body is read, so the route's ingress decides how to read it; an
@@ -595,6 +603,8 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
         headers = HTTP::Headers{"Allow" => ::Caramel::Router.allow_header(mask)}
         return ::Caramel::Response.new(405, "Method not allowed", headers)
       end
+      entry = TREE.entries[index]
+      ::Caramel::Crema.routed(entry.method, entry.listed_path, entry.action)
       {% if routes.empty? %}
         response = ::Caramel::Router.not_found
       {% else %}

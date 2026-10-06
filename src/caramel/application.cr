@@ -2,6 +2,7 @@ require "http/server"
 require "mime"
 require "uuid"
 require "log"
+require "./crema"
 require "./csrf"
 require "./http/request_input"
 require "./http/request_context"
@@ -42,7 +43,9 @@ module Caramel
       if static = static_response(request)
         return secure(static)
       end
-      secure(tenanted(request) { |found| localized(found) { |routed| route(routed) } })
+      Crema.request(request) do
+        secure(tenanted(request) { |found| localized(found) { |routed| route(routed) } })
+      end
     end
 
     def call(context : HTTP::Server::Context) : Nil
@@ -55,8 +58,10 @@ module Caramel
         rescue IO::Error | HTTP::Server::ClientError
           # The client disconnected; the server wraps socket errors in ClientError.
         rescue error
-          # The status line has already been sent; only the log can report this.
-          Log.error { "request_id=#{UUID.random} error_type=#{error.class} streaming=true" }
+          # The status line has already been sent; the request id joins this report to
+          # the request's canonical line.
+          request_id = response.headers["X-Request-ID"]?
+          Crema.report(error, handled: false, source: "stream", request_id: request_id)
         end
       else
         context.response.print(response.body)
@@ -96,17 +101,18 @@ module Caramel
 
     # The 500 response to *error*, an exception routing *request* raised.
     private def failure(error : Exception, request : HTTP::Request) : Response
-      request_id = UUID.random.to_s
-      # Do not log arbitrary exception messages: dependency errors may include
+      # The report holds a redacted message for the in-memory error ring only; logs and
+      # responses carry its class and fingerprint, since dependency errors may include
       # connection URLs, form values, or other secrets.
-      Log.error { "request_id=#{request_id} error_type=#{error.class}" }
+      report = Crema.report(error, handled: false)
       {% if flag?(:caramel_development) %}
         if ENV["CARAMEL_ENV"]? == "development"
-          return DevelopmentError.response(error, request_id, request)
+          return DevelopmentError.response(error, report, request)
         end
       {% end %}
+      request_id = report.request_id
       headers = HTTP::Headers{
-        "X-Request-ID"  => request_id,
+        "X-Request-ID"  => request_id || "",
         "Cache-Control" => "no-store",
         "Content-Type"  => "text/plain; charset=utf-8",
       }

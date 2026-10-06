@@ -153,6 +153,18 @@ module Caramel::Checks::LatteNetwork
         output = eventually("HTTPS #{name}") { request(config, name, https_port) }
         raise output unless output.includes?("<h1>#{name}</h1>")
       end
+      bookshelf = config["sites"].as_a.find! { |site| site["name"] == "bookshelf" }
+      access_log = bookshelf["access_log"].as_s
+      eventually("access log") do
+        text = File.read(access_log)
+        raise "no access line yet" unless text.includes?(%("status":200)) &&
+                                          text.includes?("bookshelf.caramel")
+        text
+      end
+      access_mode = File.info(access_log).permissions.value & 0o777
+      raise "access log mode is #{access_mode.to_s(8)}" unless access_mode == 0o600
+      proxy_log = File.read(File.join(root, "proxy.log"))
+      raise "access lines reached proxy.log" if proxy_log.includes?("http.log.access")
       headers = ["--dump-header", "-", "-H", "Host: bookshelf.caramel"]
       redirect = run!(CURL + headers + ["http://127.0.0.1:#{http_port}/books?q=novel"])
       secure = "https://bookshelf.caramel:#{https_port}/books?q=novel"

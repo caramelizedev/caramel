@@ -134,6 +134,8 @@ module Caramel::Checks
         session_builds = Dir.glob(File.join(@clone, ".caramel/dev/application-*"))
         assert!(session_builds.any? { |build| File.same?(build, command_build) },
           "frappe migrate rebuilt the sources frappe dev had built")
+        diagnosis = p.command([frappe, "db", "diagnose"], chdir: @clone, echo: false).stdout
+        assert!(diagnosis.includes?("== table_sizes =="), diagnosis)
         wait_ready("bookshelf-clone")
         clone_log = File.read(File.join(p.root, "bookshelf-clone-dev.log"))
         once = clone_log.scan("Pending migrations").size == 1
@@ -187,12 +189,49 @@ module Caramel::Checks
         assert!(steps.all? { |step| compiler_log.includes?(step) }, compiler_log)
         application_log = p.command([frappe, "logs"], chdir: project, echo: false).stdout
         assert!(application_log.includes?("start bookshelf"), application_log)
+        assert!(body.includes?("data-request="), "the served page does not name its request")
+        feed = ["X-Caramel-Dev: 1"]
+        found_traces = [] of JSON::Any
+        listed_trace = Checks.wait_until(10.seconds, 100.milliseconds) do
+          listed = JSON.parse(request("bookshelf", "/__caramel/dev/traces.json", feed)[1])
+          match = listed["traces"].as_a.find { |item| item["name"].as_s == "GET /" }
+          found_traces << match if match
+          !match.nil?
+        rescue JSON::ParseException | KeyError | TypeCastError
+          false
+        end
+        assert!(listed_trace, "traces.json does not list GET /")
+        page_trace = found_traces.last
+        page_request = page_trace["request_id"].as_s
+        in_access_log = Checks.wait_until(15.seconds, 500.milliseconds) do
+          access = p.attempt([frappe, "logs", "access"], chdir: project, timeout: 30.seconds)
+          access.stdout.includes?(page_request)
+        end
+        assert!(in_access_log, "frappe logs access does not show the page's request id")
+        page_trace_id = page_trace["trace_id"].as_s
+        last_rpc = "no answer yet"
+        collected = Checks.wait_until(15.seconds, 500.milliseconds) do
+          spans = p.rpc("GET", "/v2/traces/#{page_trace_id}")["spans"].as_a
+          spans.any? { |span| span["service"].as_s == "bookshelf" }
+        rescue ex
+          last_rpc = "#{ex.class}: #{ex.message}"
+          false
+        end
+        collector_failure = "Latte's collector holds no span of service bookshelf for the page " \
+                            "(last rpc: #{last_rpc})"
+        assert!(collected, collector_failure)
+        runtime_url = p.local_values(project)["DATABASE_URL"]
+        recorded = Checks.wait_until(30.seconds, 1.second) do
+          (p.sql(runtime_url, "SELECT count(*) FROM caramel_metrics").strip.to_i? || 0) > 0
+        end
+        assert!(recorded, "the recorder wrote no caramel_metrics row")
         # Under scripts/check all the build step has already built Latte.app.
         p.command([File.join(p.repo, "scripts/build-latte-menu")]) unless Checks.prebuilt?
         latte = File.join(p.repo, "bin/Latte.app/Contents/MacOS/Latte")
         menu = p.command([latte, "--check"], echo: false).stdout
         assert!(menu.includes?("[Build error] · Terminal session"), menu)
         assert!(menu.includes?("/logs/sites/#{site("bookshelf")["id"].as_s}"), menu)
+        assert!(menu.includes?("/__caramel/dev/inspector"), menu)
         puts "PASS: persistent per-site compiler and application logs " \
              "through frappe logs and the menu"
         assert!(request("bookshelf-clone")[0] == 200)
@@ -212,6 +251,7 @@ module Caramel::Checks
         tail = body[Math.max(0, body.size - 3000)..]
         operator = body.includes?("to &#39;Int32#+&#39;")
         assert!(operator && body.includes?("not String"), tail)
+        assert!(body.includes?("zed://file/"), "the type error page has no editor link")
         reported = Checks.wait_until(5.seconds, 50.milliseconds) do
           File.read(log_path).scan(/Type check failed in \d+ ms/).size == failures + 1
         end
@@ -244,6 +284,21 @@ module Caramel::Checks
         assert!(escaped && body.includes?("app/actions/home/show.cr:"), excerpt(body))
         assert_located!(body)
         assert!(body.includes?("Internal stack frames"))
+        errors = p.attempt([frappe, "errors", "--agent"], chdir: project, timeout: 30.seconds)
+        reported = Checks.wait_until(10.seconds, 200.milliseconds) do
+          errors = p.attempt([frappe, "errors", "--agent"], chdir: project, timeout: 30.seconds)
+          errors.stdout.includes?("ERR RUNTIME:500 at app/")
+        end
+        assert!(reported && !errors.success?, "frappe errors did not report the planted error")
+        last = p.command([frappe, "trace", "last-error", "--md"], chdir: project, echo: false)
+        assert!(last.stdout.includes?("## Backtrace"), last.stdout)
+        counted = Checks.wait_until(10.seconds, 500.milliseconds) do
+          p.command([latte, "--check"], echo: false).stdout.matches?(/errors: [1-9]\d*\b/)
+        end
+        assert!(counted, "Latte.app --check did not report the planted runtime error")
+        menu = p.command([latte, "--check"], echo: false).stdout
+        assert!(menu.includes?("last error: "), menu)
+        assert!(site("bookshelf")["errors"].as_i > 0, "the control API lists no errors")
         assert!(site("bookshelf")["state"].as_s == "running")
         wait_ready("bookshelf")
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])

@@ -15,6 +15,7 @@ require "./dev_session"
 require "./site_log"
 require "./schema_diff"
 require "./editor_tools"
+require "./traces"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -142,6 +143,11 @@ module Caramel::Frappe
         runner.run(paths.empty? ? ["spec"] : paths, concurrency)
       when "db dump", "db restore"
         backup(invocation["FILE"]?)
+      when "db diagnose"
+        project = Project.load
+        values = development_environment(project).merge({"CARAMEL_ENV" => "development"})
+        values["CARAMEL_EXPECTED_DATABASE_URL"] = values["DATABASE_URL"]
+        Tools.new(@framework_root, @output, @error).app_command(project, ["db", "diagnose"], values)
       when "db diff"
         project = Project.load
         tools = Tools.new(@framework_root, @output, @error)
@@ -154,7 +160,13 @@ module Caramel::Frappe
       when "db branch create", "db branch list", "db branch delete"
         branch(invocation)
       when "logs"
-        return logs(invocation["app|compiler"]? || "app", invocation.flag?("--follow"))
+        return logs(invocation["app|compiler|access"]? || "app", invocation.flag?("--follow"))
+      when "traces"
+        return traces(invocation)
+      when "trace"
+        return trace(invocation)
+      when "errors"
+        return errors(invocation)
       when "services"
         return services(invocation["status|start|stop"]? || "status")
       when "sites"
@@ -442,11 +454,21 @@ module Caramel::Frappe
       document["services"].as_h.each do |name, value|
         @output.puts("#{name.ljust(12)} #{value["state"].as_s}")
       end
+      collector_line(document)
       if message = document["error"]?.try(&.as_s?)
         @error.puts(message)
         return 1
       end
       0
+    end
+
+    # The trace collector's line of `frappe services`: its state, and its port or why it
+    # is unavailable (ADR 0029).
+    private def collector_line(document : JSON::Any) : Nil
+      collector = document["collector"]? || return
+      state = collector["state"].as_s
+      detail = collector["error"]?.try(&.as_s?) || "127.0.0.1:#{collector["port"]}"
+      @output.puts("#{"collector".ljust(12)} #{state} (#{detail})")
     end
 
     private def doctor : Int32
@@ -634,6 +656,59 @@ module Caramel::Frappe
                 "lowercase letters, digits or underscores"
       raise Commands::Usage.new(message,
         "frappe #{invocation.command.name}", [invocation.command])
+    end
+
+    # The development events of this project, read from the log `frappe dev` keeps, and
+    # the other services' spans for a trace from Latte's collector.
+    private def development_traces : Traces
+      project = Project.load
+      id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
+      store = EventStore.new
+      client = LatteClient.new
+      client.site_log_directory(id, create: false).try { |found| store.replay(found) }
+      name = project.name
+      across = ->(trace_id : String) do
+        Crema::Render.across(client.collected(trace_id), name)
+      end
+      Traces.new(store, project.root, @output, across)
+    end
+
+    private def traces(invocation : Commands::Invocation) : Int32
+      agent = MRDP.agent?(invocation.flags, @output)
+      limit = positive_limit!(invocation)
+      slow = slow_threshold!(invocation)
+      development_traces.list(agent, invocation.flag?("--errors"), slow, limit)
+    end
+
+    private def positive_limit!(invocation : Commands::Invocation) : Int32
+      text = invocation["--limit"]? || return Traces::DEFAULT_LIMIT
+      number = text.to_i?
+      return number if number && number >= 1
+
+      raise usage_failure(invocation, "--limit must be a whole number of 1 or more, not #{text}")
+    end
+
+    private def slow_threshold!(invocation : Commands::Invocation) : Float64?
+      text = invocation["--slow"]? || return
+      number = text.to_f?
+      return number if number && number >= 0 && number.finite?
+
+      raise usage_failure(invocation, "--slow must be a number of milliseconds, not #{text}")
+    end
+
+    private def usage_failure(invocation : Commands::Invocation, message : String) : Commands::Usage
+      Commands::Usage.new(message, "frappe #{invocation.command.name}", [invocation.command])
+    end
+
+    private def trace(invocation : Commands::Invocation) : Int32
+      ref = invocation["REF"]
+      return 0 if development_traces.show(ref, invocation.flag?("--md"))
+
+      raise Error.new("No trace matches #{ref} in this project's development history.")
+    end
+
+    private def errors(invocation : Commands::Invocation) : Int32
+      development_traces.errors(MRDP.agent?(invocation.flags, @output))
     end
 
     private def logs(kind : String, follow : Bool) : Int32

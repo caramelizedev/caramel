@@ -1,6 +1,7 @@
 require "log"
 require "wait_group"
 require "../../sugar_orm"
+require "../crema"
 require "./queue"
 
 module Caramel::ColdBrew
@@ -51,8 +52,8 @@ module Caramel::ColdBrew
           worked = @db.using_connection { |connection| SugarORM::Repo.bind(connection) { work } }
           pause(@idle) unless worked
         rescue error
-          # The message may carry connection details; the class is enough to act on.
-          Log.error { "queue=#{@queue} error_type=#{error.class}" }
+          # Crema keeps the redacted message in memory; logs carry the class.
+          Crema.report(error, handled: false, source: "cold_brew.worker")
           pause(1.second)
         end
       end
@@ -62,12 +63,7 @@ module Caramel::ColdBrew
 
     private def work : Bool
       job = Queue.claim(@queue) || return false
-      if error = Queue.run(job)
-        Log.warn do
-          "queue=#{@queue} job=#{job.id} class=#{job.class_name} " \
-          "attempt=#{job.attempts} error_type=#{error.class}"
-        end
-      end
+      Queue.run(job)
       true
     end
 

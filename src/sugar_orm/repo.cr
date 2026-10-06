@@ -117,7 +117,7 @@ module SugarORM
     # it afterwards, as `DB::Database#using_connection` does, with one `yield`.
     def self.connection(& : ::DB::Connection -> R) : R forall R
       bound = Fiber.current.__sugar_connection
-      connection = bound || database.checkout
+      connection = bound || observe_checkout { database.checkout }
       begin
         yield connection
       ensure
@@ -148,7 +148,9 @@ module SugarORM
     end
 
     def self.exec(sql : String, args : Array(Value) = [] of Value) : ::DB::ExecResult
-      connection { |connection| statement { connection.exec(sql, args: args) } }
+      connection do |connection|
+        observe(sql, args) { |tagged| statement { connection.exec(tagged, args: args) } }
+      end
     end
 
     # Yields the open result set, positioned before the first row.
@@ -156,7 +158,9 @@ module SugarORM
                    args : Array(Value),
                    & : ::DB::ResultSet -> R) : R forall R
       connection do |connection|
-        statement { connection.query(sql, args: args) { |rows| yield rows } }
+        observe(sql, args) do |tagged|
+          statement { connection.query(tagged, args: args) { |rows| yield rows } }
+        end
       end
     end
 
@@ -207,6 +211,19 @@ module SugarORM
         using(db) { {{ name.id }}(target) }
       end
     {% end %}
+
+    # Runs one statement. `caramel/crema` replaces it to time the statement and
+    # to hand the block SQL that carries a leading comment naming the code that
+    # ran it. SugarORM alone yields *sql* as written.
+    private def self.observe(sql : String, args : Array(Value), & : String -> R) : R forall R
+      yield sql
+    end
+
+    # Checks a connection out of the pool. `caramel/crema` replaces it to time
+    # the wait.
+    private def self.observe_checkout(& : -> ::DB::Connection) : ::DB::Connection
+      yield
+    end
 
     private def self.statement(&)
       @@statements_executed += 1

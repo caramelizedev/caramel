@@ -1,5 +1,6 @@
 require "json"
 require "../../sugar_orm"
+require "../crema/dump"
 
 module Caramel::ColdBrew
   QUEUE_NAME = /\A[a-z0-9_.:-]{1,63}\z/
@@ -83,6 +84,7 @@ module Caramel::ColdBrew
   #
   #     SendInvitation.enqueue(invite_id: 42, run_at: 10.minutes.from_now, priority: 5) # => job id
   abstract struct Job
+    include Crema::Dumping
     include JSON::Serializable
 
     abstract def perform

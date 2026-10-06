@@ -18,6 +18,7 @@ module Caramel::Checks::Lint
       Checks.fail(built.stdout + built.stderr) unless built.success?
     end
     service_nouns
+    dump_calls
     line_length
     no_exemptions
     html_expectations
@@ -57,6 +58,19 @@ module Caramel::Checks::Lint
     refuse("Caramel/ServiceNoun", names, result) if result.success? || names != expected
     puts "PASS: Caramel/ServiceNoun reports InvitationService and " \
          "AbstractDataTransformerFactory, not Teams::Invite or Team"
+  end
+
+  # Leftover `dump` calls are reported; other receivers and mentions are not.
+  private def dump_calls : Nil
+    result = probe(<<-CRYSTAL)
+      dump(1)
+      Caramel.dump(2)
+      value.dump
+      # Caramel::Crema::Dumping
+      CRYSTAL
+    lines = issues(result, "Caramel/Dump").map(&.[0])
+    refuse("Caramel/Dump", lines, result) if result.success? || lines != [1, 2]
+    puts "PASS: Caramel/Dump reports dump(1) and Caramel.dump(2), not value.dump"
   end
 
   # ADR 0021: the framework's configuration holds a line to 100 characters.

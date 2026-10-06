@@ -63,7 +63,7 @@ describe Caramel::Frappe::TenancyGenerator do
   it "requires caramel/tenancy after caramel" do
     tenancy_project do |project, generator|
       generator.generate(project, "Account", version: VERSION)
-      expected = %(require "caramel"\nrequire "caramel/tenancy"\n\nmodule App\n)
+      expected = %(require "caramel"\nrequire "caramel/tenancy"\nrequire "caramel/crema/recorder"\n)
       read(project, "config/application.cr").should start_with(expected)
     end
   end

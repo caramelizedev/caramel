@@ -17,6 +17,8 @@ module I18nZeroCost
   end
 end
 
+# The canonical request lines would share stdout with the answers.
+Log.setup(:none)
 csrf = Caramel::CSRF.new("s" * 64, "https://zero.caramel")
 app = Caramel::Application.new(I18nZeroCost::AppRouter.new, csrf)
 headers = HTTP::Headers{"Host" => "zero.caramel", "Accept-Language" => "fr"}

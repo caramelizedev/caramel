@@ -1,4 +1,5 @@
 require "../../sugar_orm"
+require "../crema"
 require "./job"
 require "./hooks"
 
@@ -9,7 +10,10 @@ module Caramel::ColdBrew
     enqueued_at : Time,
     class_name : String,
     payload : String,
-    attempts : Int32
+    attempts : Int32,
+    queue : String,
+    run_at : Time,
+    context : String?
 
   # :nodoc:
   # The SQL shared by workers and drains. Every statement runs on
@@ -18,8 +22,8 @@ module Caramel::ColdBrew
     ERROR_LIMIT = 4000
 
     PUSH = <<-SQL
-      INSERT INTO caramel_jobs (queue, class_name, payload, priority, run_at)
-      VALUES ($1, $2, $3::jsonb, $4, COALESCE($5::timestamptz, now()))
+      INSERT INTO caramel_jobs (queue, class_name, payload, priority, run_at, context)
+      VALUES ($1, $2, $3::jsonb, $4, COALESCE($5::timestamptz, now()), $6::jsonb)
       RETURNING id
       SQL
 
@@ -41,7 +45,8 @@ module Caramel::ColdBrew
         FROM selected
         WHERE jobs.id = selected.id AND jobs.enqueued_at = selected.enqueued_at
         RETURNING jobs.id, jobs.enqueued_at, jobs.class_name, \
-                  jobs.payload::text AS payload, jobs.attempts
+                  jobs.payload::text AS payload, jobs.attempts, \
+                  jobs.queue, jobs.run_at, jobs.context::text AS context
         SQL
     end
 
@@ -74,7 +79,10 @@ module Caramel::ColdBrew
       RETURNING queue, failed_at
       SQL
 
-    CLAIMED = {id: Int64, enqueued_at: Time, class_name: String, payload: String, attempts: Int32}
+    CLAIMED = {
+      id: Int64, enqueued_at: Time, class_name: String, payload: String, attempts: Int32,
+      queue: String, run_at: Time, context: String?,
+    }
 
     # What a retry or a failure returns about the row it wrote.
     RESCHEDULED = {queue: String, run_at: Time}
@@ -86,7 +94,11 @@ module Caramel::ColdBrew
                   run_at : Time?,
                   priority : Int32) : Int64
       stored = ColdBrew.carry(payload)
-      SugarORM.sql(PUSH, queue, class_name, stored, priority, run_at, as: {id: Int64}).first[:id]
+      context = Crema.current?.try(&.propagation)
+      Crema.measure(Crema::SpanKind::Enqueue, class_name, queue) do
+        values = {queue, class_name, stored, priority, run_at, context}
+        SugarORM.sql(PUSH, *values, as: {id: Int64}).first[:id]
+      end
     end
 
     # The next due job of `queue`, locked for this connection's backend.
@@ -113,6 +125,13 @@ module Caramel::ColdBrew
     # transaction rolls back, the job is rescheduled or failed, and the
     # lifecycle hooks see the transition; the error is returned.
     def self.run(job : Claim) : Exception?
+      Crema.job(job.id, job.class_name, job.queue, job.attempts, job.run_at, job.context) do
+        run_traced(job)
+      end
+    end
+
+    # The body of `run`, inside the job's trace.
+    private def self.run_traced(job : Claim) : Exception?
       finished = false
       SugarORM::Repo.transaction do
         ColdBrew.carried(job.payload) { Job.__cold_brew_perform(job.class_name, job.payload) }
@@ -123,6 +142,7 @@ module Caramel::ColdBrew
       finish(job) unless finished
       nil
     rescue error
+      Crema.report(error, handled: false)
       if event = record_failure(job, error)
         ColdBrew.notify(event)
       end

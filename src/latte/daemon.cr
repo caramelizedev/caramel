@@ -97,9 +97,11 @@ module Caramel::Latte
         Process.on_terminate { server.close }
         begin
           @supervisor.start_services
+          @supervisor.collector.start
           @supervisor.monitor
           server.listen
         ensure
+          @supervisor.collector.stop
           # Exit abandons in-flight fibers, including a guarded clone whose
           # own release would never run.
           @supervisor.release_guards

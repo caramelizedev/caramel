@@ -2,6 +2,7 @@ require "./server"
 require "./postgres"
 require "./dns"
 require "./proxy"
+require "./collector"
 require "./deadline"
 require "./logs"
 require "openssl"
@@ -18,6 +19,7 @@ module Caramel::Latte
     getter postgres : Postgres
     getter dns : DNS
     getter proxy : Proxy
+    getter collector : Collector
     @states = {"postgres" => "stopped", "dns" => "stopped", "proxy" => "stopped"}
     @error : String? = nil
     @busy = false
@@ -33,11 +35,13 @@ module Caramel::Latte
                    @toolchain : Toolchain = Toolchain.for_checkout,
                    dns_port : Int32 = 15353,
                    http_port : Int32 = 18080,
-                   https_port : Int32 = 18443)
+                   https_port : Int32 = 18443,
+                   otlp_port : Int32 = 4318)
       paths = @registry.paths
       @postgres = Postgres.new(paths, @toolchain)
       @dns = DNS.new(paths, dns_port)
       @proxy = Proxy.new(@registry, https_port, http_port, public_https_port: 443)
+      @collector = Collector.new(otlp_port)
       @dns_child = ManagedChild.new(
         name: "dns",
         executable: @toolchain.coredns,
@@ -58,14 +62,34 @@ module Caramel::Latte
       )
     end
 
-    def status_json : String
-      {
-        version:  1,
+    def status_json(version : Int32 = 1) : String
+      status = {
+        version:  version,
         latte:    Caramel::VERSION,
         api:      ControlAPI::VERSIONS,
         services: @states.transform_values { |state| {state: state} },
         error:    @error,
-      }.to_json
+      }
+      return status.to_json if version < 2
+
+      status.merge(collector: collector_status).to_json
+    end
+
+    # The traces the collector holds, newest first (control API 2).
+    def traces_json(limit : Int32) : String
+      {version: 2, traces: @collector.traces(limit)}.to_json
+    end
+
+    # The spans of one collected trace (control API 2).
+    def trace_json(trace_id : String) : String
+      spans = @collector.spans(trace_id)
+      raise PublicError.new("not_found", "No such trace", 404) unless spans
+
+      {version: 2, trace_id: trace_id, spans: spans}.to_json
+    end
+
+    private def collector_status
+      {state: @collector.state, port: @collector.port, error: @collector.error}
     end
 
     def start_services : Nil

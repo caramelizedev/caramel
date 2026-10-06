@@ -93,7 +93,7 @@ describe "Caramel streaming responses" do
     request = HTTP::Request.new("GET", "/ticks", host)
     response = HTTP::Server::Response.new(StreamingSpecClosedSocket.new)
     context = HTTP::Server::Context.new(request, response)
-    Log.capture do |logs|
+    Log.capture(Log::Severity::Warn) do |logs|
       streaming_spec_app.call(context)
       logs.empty
     end

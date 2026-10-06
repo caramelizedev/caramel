@@ -1,6 +1,7 @@
 require "http/client"
 require "socket/unix_socket"
 require "./project"
+require "../caramel/crema/event"
 require "../latte/postgres"
 require "../latte/installed_releases"
 
@@ -10,7 +11,7 @@ module Caramel::Frappe
   class LatteClient
     MAX_RESPONSE = 1024 * 1024
     # The control API version this Frappé speaks (ADR 0016).
-    API_VERSION = 1
+    API_VERSION = 2
     getter socket_path : String
     getter root : String
 
@@ -35,19 +36,42 @@ module Caramel::Frappe
     end
 
     def status : JSON::Any
-      request("GET", "/v1/status")
+      request("GET", "/v#{API_VERSION}/status")
     end
 
     def sites : Array(JSON::Any)
-      request("GET", "/v1/sites")["sites"].as_a
+      request("GET", "/v#{API_VERSION}/sites")["sites"].as_a
     end
 
     def start_services : JSON::Any
-      request("POST", "/v1/services/start", "{}")
+      request("POST", "/v#{API_VERSION}/services/start", "{}")
     end
 
     def stop_services : JSON::Any
-      request("POST", "/v1/services/stop", "{}")
+      request("POST", "/v#{API_VERSION}/services/stop", "{}")
+    end
+
+    # The port of Latte's local trace collector, or nil when Latte is unreachable or the
+    # collector does not run (ADR 0029).
+    def collector_port : Int32?
+      collector = status["collector"]?
+      return unless collector && collector["state"]?.try(&.as_s?) == "running"
+
+      collector["port"].as_i
+    rescue Error | KeyError | TypeCastError
+      nil
+    end
+
+    # The spans the collector holds for *trace_id*, from every service that exported to
+    # it; empty when there are none, or when Latte does not answer within half a second.
+    def collected(trace_id : String) : Array(Crema::CollectedSpan)
+      return [] of Crema::CollectedSpan unless trace_id.matches?(/\A[0-9a-f]{32}\z/)
+
+      path = "/v#{API_VERSION}/traces/#{trace_id}"
+      found = request("GET", path, patience: 500.milliseconds)["spans"].as_a
+      found.map { |span| Crema::CollectedSpan.from_json(span.to_json) }
+    rescue Error | KeyError | TypeCastError | JSON::ParseException | JSON::SerializableError
+      [] of Crema::CollectedSpan
     end
 
     # Starts Latte when it is not running, then its services, and waits
@@ -138,48 +162,49 @@ module Caramel::Frappe
         directory: project.root,
         suffix:    project.metadata.domain_suffix,
       }
-      request("POST", "/v1/sites", site.to_json)["site"]
+      request("POST", "/v#{API_VERSION}/sites", site.to_json)["site"]
     end
 
     def unregister(id : String) : Nil
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}")
       nil
     end
 
     def environment(id : String, directory : String) : Hash(String, String)
       validate_id(id)
       body = {directory: directory}.to_json
-      values = request("POST", "/v1/sites/#{id}/environment", body)["environment"]
+      values = request("POST", "/v#{API_VERSION}/sites/#{id}/environment", body)["environment"]
       values.as_h.transform_values(&.as_s)
     end
 
     def set_upstream(id : String, socket : String) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/upstream", {socket: socket}.to_json)["site"]
     end
 
     def clear_upstream(id : String, socket : String) : Bool
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}/upstream", {socket: socket}.to_json)["cleared"].as_bool
+      body = {socket: socket}.to_json
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/upstream", body)["cleared"].as_bool
     end
 
     # A disposable copy of the site's development database. The returned
     # document holds `name`, `database`, `migration_url` and `runtime_url`.
     def create_branch(id : String, name : String) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/branches", {name: name}.to_json)["branch"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/branches", {name: name}.to_json)["branch"]
     end
 
     def branches(id : String) : Array(JSON::Any)
       validate_id(id)
-      request("GET", "/v1/sites/#{id}/branches")["branches"].as_a
+      request("GET", "/v#{API_VERSION}/sites/#{id}/branches")["branches"].as_a
     end
 
     def drop_branch(id : String, name : String) : Nil
       validate_id(id)
       raise Error.new("Invalid branch name") unless name.matches?(Latte::Postgres::BRANCH_NAME)
-      request("DELETE", "/v1/sites/#{id}/branches/#{name}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/branches/#{name}")
       nil
     end
 
@@ -197,12 +222,12 @@ module Caramel::Frappe
     # and `runtime_url`.
     def test_worker(id : String, index : Int32) : JSON::Any
       validate_id(id)
-      request("POST", "/v1/sites/#{id}/test-workers/#{index}", "{}")["worker"]
+      request("POST", "/v#{API_VERSION}/sites/#{id}/test-workers/#{index}", "{}")["worker"]
     end
 
     def drop_test_worker(id : String, index : Int32) : Nil
       validate_id(id)
-      request("DELETE", "/v1/sites/#{id}/test-workers/#{index}")
+      request("DELETE", "/v#{API_VERSION}/sites/#{id}/test-workers/#{index}")
       nil
     end
 
@@ -255,7 +280,10 @@ module Caramel::Frappe
       raise Error.new("Latte returned an invalid service status")
     end
 
-    def request(method : String, path : String, body : String? = nil) : JSON::Any
+    def request(method : String,
+                path : String,
+                body : String? = nil,
+                patience : Time::Span = 13.seconds) : JSON::Any
       begin
         Latte::StateSecurity.validate_owned_directory(@root)
         Latte::StateSecurity.validate_owned_directory(@runtime)
@@ -269,12 +297,12 @@ module Caramel::Frappe
         raise Error.new("Latte is unavailable: #{ex.message}. #{hint}")
       end
       socket = Socket.unix
-      socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: 1.second)
-      socket.read_timeout = 13.seconds
+      socket.connect(Socket::UNIXAddress.new(@socket_path), timeout: {patience, 1.second}.min)
+      socket.read_timeout = patience
       socket.write_timeout = 2.seconds
       finished = false
       spawn do
-        sleep 15.seconds
+        sleep patience + 2.seconds
         socket.close unless finished || socket.closed?
       rescue IO::Error
       end
