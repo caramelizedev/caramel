@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.8.0 - 2026-10-06
+
+### Upgrade notes
+
 ### Upgrade notes
 
 - Crema, Caramel's observability ([ADR 0027](docs/decisions/0027-crema-tracing.md)), traces every routed request. Each response carries `X-Request-ID`, and a valid inbound `traceparent` continues the caller's trace. The application logs one canonical line per request through the `crema` log source, and `serve` and `work` set up logging themselves: JSON in production, text in development and test (`CARAMEL_LOG_FORMAT`, `LOG_LEVEL`). The old `request_id=… error_type=…` error line is gone; the `error` line carries `error_class` and `fingerprint` instead. `Caramel::DevelopmentError.response` now takes a `Caramel::Crema::ErrorReport`.
@@ -21,6 +25,35 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - The release source no longer ships the design RFC, the research notes or the separate testing, views and editor-tools guides. The notes are in [caramel-notes](https://github.com/caramelizedev/caramel-notes), and the guides are on the website.
 - An application can be multi-tenant ([ADR 0025](docs/decisions/0025-multi-tenancy.md)). Nothing changes until it runs `frappe make tenancy MODEL`, such as `frappe make tenancy Account`. That command adds the tenant's schema, migration, sign-up page and home page, `require "caramel/tenancy"` in `config/application.cr`, and a `tenant App::Account, by: :slug do … end` block in `config/routes.cr`. Resources generated after it belong to the tenant and live under `/SLUG`; `frappe make resource … --central` makes one every tenant shares. To make an existing populated table tenanted, follow the ADR's "Plugging in on existing data".
 - `SugarORM::Catalog::ForeignKey` now holds `columns` and `references_columns` arrays instead of `column` and `references_column`, so a key may span several columns. The schema document an application prints for `frappe db diff` is now version 2: upgrade the application's Caramel and Frappé together.
+
+### Breaking changes
+
+- **sugar_orm:** support multi-column foreign keys (bc8ffb0)
+
+### Features
+
+- **core:** add opt-in multi-tenancy with caramel/tenancy (0d7ea4a)
+- **frappe:** add make tenancy and tenant resources (76dfef8)
+- **frappe:** give new applications AGENTS.md and a short README (3074d5a)
+- **crema:** trace requests with request ids, traceparent and wide log lines (7a271cd)
+- **crema:** instrument SQL, jobs, schedules, outbound calls, cache and views (5343a1b)
+- **frappe:** add the development inspector, toolbar and richer error pages (fd8090e)
+- **crema:** add the ops socket, console and production commands (5c458d7)
+- **crema:** add the opt-in Postgres recorder (4ca9978)
+- **crema:** add the opt-in OTLP trace exporter (6e05b8c)
+- **latte:** collect query statistics in the managed PostgreSQL (7ddbcd8)
+- **latte:** show error badges and notifications through control API v2 (938f4fe)
+- **latte:** write per-site access logs (ea9d9b0)
+- **latte:** collect local traces across sites (8fb4dd8)
+
+### Fixes
+
+- **sugar_orm:** drop undeclared foreign keys before column drops (cf0f186)
+- **core:** match only tenant routes in a tenant, even for an empty block (dcbea8f)
+- **frappe:** check tenant names' length and refuse a missing anchored file (7384b6d)
+- **crema:** act on review findings: no log text, paths or statements in production surfaces (5822a1b)
+- **latte:** narrow the collector's rescue and prove the statistics grant is gone (ed9d6af)
+- **latte:** answer 400 to a collector body that is not an object (b3dab3d)
 
 ## 0.7.1 - 2026-10-02
 
