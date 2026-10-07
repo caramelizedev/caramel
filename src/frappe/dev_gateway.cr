@@ -19,7 +19,8 @@ module Caramel::Frappe
     COOKIE          = "__Host-caramel_dev"
     TRACE_ID        = /\A[0-9a-f]{6,32}\z/
     CLIENT          = {{ read_file("#{__DIR__}/dev_client.js") }}
-    INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }} +
+    INSPECTOR_STYLE = {{ read_file("#{__DIR__}/../caramel/crema/palette.css") }} +
+                      {{ read_file("#{__DIR__}/inspector.css") }} +
                       {{ read_file("#{__DIR__}/../caramel/crema/render.css") }}
     TOOLBAR_STYLE = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
     THEME         = {{ read_file("#{__DIR__}/../caramel/crema/theme.js") }}

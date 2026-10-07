@@ -74,6 +74,7 @@ describe Caramel::Frappe::Inspector do
     css = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector.css", HOST)).body
     css.should contain(":root[data-theme=dark]")
     css.should contain("prefers-color-scheme:dark")
+    css.scan(":root[data-theme=dark]").size.should eq(1)
     css.should contain(".bar.view rect")
     css.scan(/var\((--[a-z-]+)\)/).each { |match| css.should contain("#{match[1]}:") }
   ensure

@@ -41,6 +41,15 @@ describe Caramel::Crema::SqlCopy do
     filled.should eq(%(SELECT 1 -- it's $1\n, "a$1" /* $1 */, $$ $1 $$, $tag$ $1 $tag$, 2))
   end
 
+  it "reads E'' strings with backslash escapes, and plain strings without them" do
+    fill = ->(sql : String) { Caramel::Crema::SqlCopy.fill(sql, ["1"]) }
+    fill.call(%(SELECT E'a\\'b $1', $1)).should eq(%(SELECT E'a\\'b $1', 1))
+    fill.call(%(SELECT E'a\\\\', $1)).should eq(%(SELECT E'a\\\\', 1))
+    fill.call(%(SELECT '\\', $1)).should eq(%(SELECT '\\', 1))
+    fill.call(%(SELECT 'it''s $1', $1)).should eq(%(SELECT 'it''s $1', 1))
+    fill.call(%(SELECT e'x $1', $1)).should eq(%(SELECT e'x $1', 1))
+  end
+
   it "does not fail on an absurdly long placeholder number" do
     sql = "SELECT $99999999999999999999"
     Caramel::Crema::SqlCopy.fill(sql, ["1"]).should eq(sql)

@@ -198,8 +198,8 @@ module Caramel
       private def write_query(io : IO, span : Crema::SpanEvent) : Nil
         io << "<li>" << Crema::Render.ms(span.duration_ms) << " ms <code>"
         io << HTML.escape(redact(span.detail || span.name, 2000)) << "</code>"
-        span.binds.try do |binds|
-          io << " <small>" << HTML.escape(Crema::Render.binds_text(binds)) << "</small>"
+        Crema::Render.binds_display(span.binds, span.literals).try do |text|
+          io << " <small>" << HTML.escape(text) << "</small>"
         end
         link = Crema::Render.source_link(span.source, @editor, @root)
         io << ' ' << link unless link.empty?
