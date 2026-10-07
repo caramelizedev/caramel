@@ -83,7 +83,8 @@ secrets in logs and without a diagnostic that costs a production binary anything
     `source`) is written with a `data_` prefix.
 17. **Development surfaces are compiled out of production.** They need
     `-D caramel_development` and `CARAMEL_ENV=development`: the rich error page, the
-    event sink, `Server-Timing` and a query's binds and source line. The error page adds
+    event sink, `Server-Timing` and a query's binds, their PostgreSQL literals and source line.
+    A `nil` bind is recorded as a lone NUL character, shown as `NULL`. The error page adds
     an editor link per application frame, the source around the failing line, the
     request, the queries before the error, the causes and Copy as Markdown; a client
     that lists JSON first gets JSON.
@@ -98,8 +99,13 @@ secrets in logs and without a diagnostic that costs a production binary anything
     newest successful build.
 20. **The inspector** is at `/__caramel/dev/inspector` on the development origin: requests,
     traces with a waterfall, errors by fingerprint and builds. A toolbar on each page
-    links to its trace. Compile errors link to the editor, and Latte.app opens the
-    inspector.
+    links its route, time, queries and flags to the trace page's `#timeline`, `#queries`
+    and `#error`, and **Copy for an agent** fetches `/__caramel/dev/trace.md?id=` (a hex
+    id; session cookie and `X-Caramel-Dev` required). A query offers **Copy SQL** and
+    **Copy with values**, which fills each `$n` from the literals recorded in development
+    detail and leaves what it cannot fill. The toolbar, the inspector and the ops console
+    follow the system's light or dark appearance, and a Theme button overrides it.
+    Compile errors link to the editor, and Latte.app opens the inspector.
 
 ## Reasons
 
