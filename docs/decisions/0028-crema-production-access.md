@@ -74,9 +74,11 @@ nothing.
     `OTEL_EXPORTER_OTLP_PROTOCOL` other than `http/json` leaves it off. It honors
     `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_SERVICE_NAME`.
 12. **Sampling is decided once per trace.** `OTEL_TRACES_SAMPLER` is `always_on`,
-    `always_off`, `traceidratio` (the default) or `parentbased_traceidratio`, with the
-    ratio in `OTEL_TRACES_SAMPLER_ARG` (default 1). A debug trace is always sampled; an
-    unsampled trace that ends in error exports its root span only.
+    `always_off`, `traceidratio` (the default), `parentbased_always_on`,
+    `parentbased_always_off` or `parentbased_traceidratio`; an unknown name warns and
+    uses `traceidratio`. The ratio is in `OTEL_TRACES_SAMPLER_ARG` (default 1). A debug
+    trace is always sampled; an unsampled trace that ends in error exports its root span
+    only.
 13. **The mapping.** A request is a server span, a job a consumer span and a schedule an
     internal span; each SQL statement and outbound call is a client child. Attributes
     follow OpenTelemetry's HTTP, messaging and database conventions and name the route
