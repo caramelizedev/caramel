@@ -3,6 +3,9 @@
 .badge.error{background:#a3301f}
 .badge.warn{background:#8a4b12}
 .badge small{opacity:.75}
+.badge a{color:inherit;text-decoration:none}
+.badge a:hover{text-decoration:underline}
+.badge a:focus-visible,button.toggle:focus-visible{outline:2px solid #faf8f3;outline-offset:2px;border-radius:4px}
 button.toggle{all:unset;cursor:pointer;margin-left:6px;padding:0 6px;color:#faf8f3}
 ol.recent{position:absolute;right:0;bottom:36px;margin:0;padding:8px 12px;list-style:none;background:#fff;color:#332d27;border:1px solid #e5dfd4;border-radius:8px;min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.2)}
 ol.recent li{white-space:nowrap;padding:2px 0}
