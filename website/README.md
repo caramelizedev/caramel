@@ -14,11 +14,13 @@ when the framework ships. `/docs/` and `/cookbook/` lead to the current edition.
 The internationalization guide covers opt-in catalogs, typed messages, locale
 selection, formatting, framework wording, explicit locale scopes for jobs, and the
 catalog's reserved keys. Best practices and the Reference pages (routes and
-contracts, actions, views, SugarORM, Cold Brew, Corretto, security defaults,
+contracts, actions, views, SugarORM, Cold Brew, Corretto, Crema, security defaults,
 commands, and the local environment) document the current APIs. `commands.mjs`
 reads the command lists from `src/frappe/commands.cr`,
-`src/caramel/command_line.cr`, and `src/latte.cr` at build time, and `check.mjs`
-fails when a command or a framework catalog key is missing from its page.
+`src/caramel/command_line.cr`, `src/caramel/crema/core_commands.cr`, and `src/latte.cr` at
+build time, and `check.mjs`
+fails when a command, a framework catalog key, or a Crema metric, environment
+variable or editor preset is missing from its page.
 `source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
 inlines it beside the wordmark in the header and sets it on a dark tile as the
 favicon. `dist` is recreated on every build, so keep authored content under `source`.

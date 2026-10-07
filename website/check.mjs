@@ -40,11 +40,29 @@ assert(currentJS.includes(`/docs/${version}/testing-html/`), 'Current search omi
 assert(currentJS.includes(`/docs/${version}/releases/`), 'Current search omits the release guide');
 assert(currentJS.includes(`/docs/${version}/internationalization/`), 'Current search omits internationalization');
 assert(currentJS.includes(`/docs/${version}/best-practices/`), 'Current search omits best practices');
+assert(currentJS.includes(`/docs/${version}/crema/`), 'Current search omits the Crema reference');
 // The references must keep up with the sources they document.
 const escapeHTML = text => text.replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const commandsPage = read(`docs/${version}/commands`);
 for (const {syntax} of [...frappeCommands(), ...applicationCommands(), ...latteCommands()]) {
   assert(commandsPage.includes(`<code>${escapeHTML(syntax)}</code>`), `Command reference omits ${syntax}`);
+}
+// The Crema reference names every metric, environment variable and editor preset in the source.
+const cremaDirectory = new URL('../src/caramel/crema/', import.meta.url);
+const cremaSource = fs.readdirSync(cremaDirectory, {recursive: true}).filter(file => file.endsWith('.cr'))
+  .map(file => fs.readFileSync(new URL(file, cremaDirectory), 'utf8')).join('\n');
+const cremaPage = read(`docs/${version}/crema`);
+const named = (pattern, text = cremaSource) => new Set([...text.matchAll(pattern)].map(match => match[1] ?? match[2]));
+for (const [what, names] of [
+  ['metric', named(/"(caramel_[a-z_]+)"/g, fs.readFileSync(new URL('prometheus.cr', cremaDirectory), 'utf8'))],
+  ['environment variable', named(/"((?:CARAMEL|OTEL)_[A-Z_]+|LOG_LEVEL)"|ENV\["(CARAMEL_[A-Z_]+)"\]/g)],
+]) {
+  assert(names.size > 0, `No Crema ${what}s found in the source`);
+  for (const name of names) assert(cremaPage.includes(name), `Crema reference omits ${what} ${name}`);
+}
+const editors = fs.readFileSync(new URL('editor.cr', cremaDirectory), 'utf8');
+for (const preset of named(/^\s+"([a-z]+)"\s+=>/gm, editors.slice(editors.indexOf('PRESETS'), editors.indexOf('DEFAULT')))) {
+  assert(cremaPage.includes(`<code>${preset}</code>`), `Crema reference omits editor ${preset}`);
 }
 assert(read(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page omits the agent guide');
 const catalog = fs.readFileSync(new URL('../src/caramel/i18n/catalog.cr', import.meta.url), 'utf8');
