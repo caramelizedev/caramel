@@ -4,9 +4,29 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.9.0 - 2026-10-07
+
+### Upgrade notes
+
 - The development toolbar `frappe dev` adds to each page is redesigned: the route, status, time and query count read as separate parts and link to their place on the request's page in the inspector, flags (`error`, `slow`, `repeated queries`) are words, the recent-requests list opens above the bar and closes on Esc or a click outside, a count shows new requests, and it can be minimised to a dot. `` ` `` opens the list, `j` and `k` move through it, and **Copy for an agent** puts the request, its queries with their binds and its backtrace on the clipboard as Markdown.
 - The inspector and the toolbar follow the system's light or dark appearance and share a **Theme: auto / light / dark** button's choice, which is kept in `localStorage` for the site. The production ops console follows the system appearance too, with its own button and its own stored choice, because it is served from another origin.
 - The inspector's request page shows spans in recorded order, with those inside a view indented and coloured by kind, a time scale, and links from each query to its row. Each query has **Copy SQL** and **Copy with values**, which writes the bind values into the statement as PostgreSQL literals, ready for psql; a query keeps its first 20 binds, and a literal over 2,000 bytes (the value with its quotes) is not kept for copying; those placeholders stay as `$n` and the copy starts with a comment saying so. The Binds column shows values as the copy writes them (`42`, `'acme'`, `NULL`), and a `nil` bind is no longer recorded as `""`. The toolbar's links always land on a section: an empty one says nothing was recorded. Repeated queries are highlighted with their source, and a repeated `SELECT` suggests a preload; an error lists your backtrace frames with editor links.
+
+### Features
+
+- **frappe:** redesign the development toolbar (4645853)
+- **frappe:** add light and dark themes to the development toolbar and inspector (c63943b)
+- **frappe:** copy a query with its values, link the toolbar to the trace, theme the console (5f6ae00)
+
+### Fixes
+
+- **frappe:** style the development toolbar's link so it reads on the dark badge (a2a6c71)
+- **crema:** refuse ops flags that were silently ignored (7765a13)
+- **frappe:** copy queries with typed literals, harden the toolbar's keys and copy, guard trace.md (1012d4d)
+- **crema:** show a nil bind as NULL on the error page (5f918f2)
+- **crema:** copy E-strings correctly, keep every toolbar link on a section, show binds as copied, share one palette (5d56216)
+- **crema:** leave a placeholder inside an identifier alone (fb38c3c)
+- **crema:** act on the review of the copy follow-ups (30d1368)
 
 ## 0.8.0 - 2026-10-06
 
