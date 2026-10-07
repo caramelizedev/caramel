@@ -8,8 +8,11 @@ module Caramel::Crema
   module Sql
     MAX_SOURCES    =  50
     MAX_STATEMENTS = 500
-    MAX_BINDS      =  20
-    MAX_BIND       = 200
+
+    # A bind as the inspector shows it: NULL for nil, otherwise its text, cut at BIND_BYTES.
+    def self.bind_text(arg) : String
+      arg.nil? ? NULL_BIND : arg.to_s.byte_slice(0, BIND_BYTES).scrub
+    end
 
     # Runs the block with *tagged*, the statement with the trace's leading
     # comment, and notes the statement on *trace*.
@@ -66,7 +69,9 @@ module Caramel::Crema
       private def self.annotate(trace : Trace, span : Span?, args : Array(SugarORM::Value)) : Nil
         return unless span && Crema.development?
 
-        span.binds = args.first(MAX_BINDS).map { |arg| arg.to_s.byte_slice(0, MAX_BIND).scrub }
+        kept = args.first(BIND_LIMIT)
+        span.binds = kept.map { |arg| bind_text(arg) }
+        span.literals = kept.map { |arg| Literal.of(arg) }
         return if trace.spans.count(&.kind.sql?) > MAX_SOURCES
 
         root = Frames.root

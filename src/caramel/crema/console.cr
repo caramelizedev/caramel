@@ -22,8 +22,9 @@ module Caramel::Crema
   # shows; it changes nothing. Its pages load only their own stylesheet and script,
   # and the Live tail page streams `/v1/tail`.
   module Console
-    CSS = {{ read_file("#{__DIR__}/console.css") }}
-    JS  = {{ read_file("#{__DIR__}/console.js") }}
+    CSS   = {{ read_file("#{__DIR__}/console.css") }} + {{ read_file("#{__DIR__}/render.css") }}
+    THEME = {{ read_file("#{__DIR__}/theme.js") }}
+    JS    = {{ read_file("#{__DIR__}/console.js") }}
 
     POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " \
              "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
@@ -48,6 +49,7 @@ module Caramel::Crema
         "GET /insights"    => insights(ops),
         "GET /console.css" => asset(ops, CSS, "text/css; charset=utf-8"),
         "GET /console.js"  => asset(ops, JS, "text/javascript; charset=utf-8"),
+        "GET /theme.js"    => asset(ops, THEME, "text/javascript; charset=utf-8"),
       }
     end
 
@@ -102,9 +104,13 @@ module Caramel::Crema
       end
       "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" \
       "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" \
+      "<meta name=\"color-scheme\" content=\"light dark\">" \
       "<title>#{HTML.escape(title)} · Crema</title>" \
+      "<script src=\"/theme.js\"></script>" \
       "<link rel=\"stylesheet\" href=\"/console.css\"></head><body>" \
-      "<header><strong>CREMA</strong><nav>#{nav}</nav></header>" \
+      "<header><strong>CREMA</strong><nav>#{nav}</nav>" \
+      "<button type=\"button\" class=\"theme\" data-caramel-theme " \
+      "title=\"Colour theme: click to change\">Theme: auto</button></header>" \
       "<main><h1>#{HTML.escape(title)}</h1>#{body}</main>" \
       "<script src=\"/console.js\" defer></script></body></html>"
     end
@@ -223,7 +229,7 @@ module Caramel::Crema
     private def self.trace_detail(ops : Ops, ref : String) : String
       event = ops.traces.find(ref) || return "<p>Nothing in this process matches " \
                                              "#{HTML.escape(ref)}. #{SINCE}</p>"
-      Render.trace_html(event, nil, nil)
+      "<h2>#{HTML.escape(event.name)}</h2>#{Render.trace_html(event, nil, nil)}"
     end
   end
 end

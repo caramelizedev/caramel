@@ -59,6 +59,54 @@ describe Caramel::Frappe::Inspector do
     FileUtils.rm_rf(root) if root
   end
 
+  it "offers a colour theme: a blocking script in the head, a button, and the stored choice" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    page = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector", HOST))
+    head = page.body.partition("</head>")[0]
+    head.should contain(%(<script src="/__caramel/dev/theme.js"></script>))
+    head.should contain(%(<meta name="color-scheme" content="light dark">))
+    page.body.should contain("data-caramel-theme")
+    script = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/theme.js", HOST))
+    script.status.should eq(200)
+    script.headers["Content-Type"].should start_with("text/javascript")
+    script.body.should contain("caramel.dev.theme")
+    css = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector.css", HOST)).body
+    css.should contain(":root[data-theme=dark]")
+    css.should contain("prefers-color-scheme:dark")
+    css.should contain(".bar.view rect")
+    css.scan(/var\((--[a-z-]+)\)/).each { |match| css.should contain("#{match[1]}:") }
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "serves a trace as Markdown to the toolbar, only inside the development session" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    address = "/__caramel/dev/trace.md?id=111111"
+    gateway.handle(HTTP::Request.new("GET", address, HOST)).status.should eq(403)
+    headers = HOST.dup
+    headers["Cookie"] = session_cookie(gateway)
+    headers["X-Caramel-Dev"] = "1"
+    found = gateway.handle(HTTP::Request.new("GET", address, headers))
+    found.status.should eq(200)
+    found.headers["Content-Type"].should start_with("text/markdown")
+    foreign = headers.dup
+    foreign["Origin"] = "https://evil.example"
+    gateway.handle(HTTP::Request.new("GET", address, foreign)).status.should eq(403)
+    bare = HOST.dup
+    bare["Cookie"] = session_cookie(gateway)
+    gateway.handle(HTTP::Request.new("GET", address, bare)).status.should eq(403)
+    found.body.should contain("## Queries")
+    found.body.should contain("app/books.cr:12:7")
+    ["ffffff", "11111", "last", "", "..%2Fx", "ZZZZZZ"].each do |id|
+      address = "/__caramel/dev/trace.md?id=#{id}"
+      gateway.handle(HTTP::Request.new("GET", address, headers)).status.should eq(404)
+    end
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
   it "answers 404 for a trace it does not hold and lists requests on the index" do
     root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
     gateway = inspected(root)

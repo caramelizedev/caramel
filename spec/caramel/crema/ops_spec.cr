@@ -120,6 +120,20 @@ describe Caramel::Crema::Ops do
     end
   end
 
+  it "gives the console a theme: a head script, a button, variables and the shared trace styles" do
+    with_ops do |path, _|
+      page = ops(path, "GET", "/").body
+      page.partition("</head>")[0].should contain(%(<script src="/theme.js"></script>))
+      page.should contain("data-caramel-theme")
+      ops(path, "GET", "/theme.js").body.should contain("caramel.dev.theme")
+      css = ops(path, "GET", "/console.css").body
+      css.should contain(":root[data-theme=dark]")
+      css.should contain(".bar.view rect")
+      css.scan(/var\((--[a-z-]+)\)/).each { |match| css.should contain("#{match[1]}:") }
+      ops(path, "GET", "/console.js").body.should contain("data-caramel-theme")
+    end
+  end
+
   it "has no ops socket in a work process unless one is asked for" do
     runtime = Caramel::Crema::Runtime.new("work", "Bookshelf")
     Caramel::Crema::Ops.path_for(runtime, {"CARAMEL_SOCKET" => "/tmp/app.sock"}).should be_nil

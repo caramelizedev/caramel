@@ -9,8 +9,6 @@ module Caramel::Frappe
   # session or the application's binary.
   class Traces
     DEFAULT_LIMIT = 20
-    PRELOAD_FIX   = "preload the association in the query that loads the records, " \
-                    "e.g. .preload(:%s)"
 
     def initialize(@store : EventStore,
                    @root : String,
@@ -131,14 +129,8 @@ module Caramel::Frappe
     end
 
     private def preload_fix(repeat : Repeat) : String
-      table = Crema.summary(repeat.entry.sql).partition(' ')[2]
-      PRELOAD_FIX % singular(table)
-    end
-
-    private def singular(table : String) : String
-      return table.sub(/ies\z/, "y") if table.ends_with?("ies")
-
-      table.ends_with?("s") ? table.rchop : table
+      Crema::Render.preload_hint(repeat.entry.sql) ||
+        "load the records once, with a join or a preload, instead of once per record"
     end
   end
 end

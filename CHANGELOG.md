@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- The development toolbar `frappe dev` adds to each page is redesigned: the route, status, time and query count read as separate parts and link to their place on the request's page in the inspector, flags (`error`, `slow`, `repeated queries`) are words, the recent-requests list opens above the bar and closes on Esc or a click outside, a count shows new requests, and it can be minimised to a dot. `` ` `` opens the list, `j` and `k` move through it, and **Copy for an agent** puts the request, its queries with their binds and its backtrace on the clipboard as Markdown.
+- The inspector and the toolbar follow the system's light or dark appearance and share a **Theme: auto / light / dark** button's choice, which is kept in `localStorage` for the site. The production ops console follows the system appearance too, with its own button and its own stored choice, because it is served from another origin.
+- The inspector's request page shows spans in recorded order, with those inside a view indented and coloured by kind, a time scale, and links from each query to its row. Each query has **Copy SQL** and **Copy with values**, which writes the bind values into the statement as PostgreSQL literals, ready for psql; at most 20 binds of 200 bytes are kept, and placeholders beyond that stay as `$n` with a note. A `nil` bind is shown as `NULL` rather than `""`. Repeated queries are highlighted with their source, and a repeated `SELECT` suggests a preload; an error lists your backtrace frames with editor links.
+
 ## 0.8.0 - 2026-10-06
 
 ### Upgrade notes

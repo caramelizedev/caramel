@@ -1,10 +1,48 @@
 (() => {
-  document.addEventListener('click', event => {
-    const button = event.target.closest?.('[data-caramel-copy]');
+  // Copies the text a [data-caramel-text] button carries, or the text of the element a
+  // [data-caramel-copy] button names, and says so on the button.
+  document.addEventListener('click', async event => {
+    const button = event.target.closest?.('[data-caramel-copy], [data-caramel-text]');
     if (!button) return;
-    const source = document.getElementById(button.dataset.caramelCopy);
-    if (source) navigator.clipboard.writeText(source.textContent);
+    const source = button.dataset.caramelCopy ? document.getElementById(button.dataset.caramelCopy) : null;
+    const text = button.dataset.caramelText ?? source?.textContent;
+    if (text === undefined) return;
+    const label = button.dataset.label || (button.dataset.label = button.textContent);
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = 'Copied';
+    } catch (_) {
+      button.textContent = 'Copy failed';
+    }
+    clearTimeout(button.timer);
+    button.timer = setTimeout(() => { button.textContent = label; }, 1500);
   });
+
+  // The colour theme: follow the system (auto), or force light or dark; kept in localStorage.
+  const THEME = 'caramel.dev.theme';
+  const CHOICES = ['auto', 'light', 'dark'];
+
+  function themeChoice() {
+    try {
+      const saved = localStorage.getItem(THEME);
+      return saved === 'light' || saved === 'dark' ? saved : 'auto';
+    } catch (_) { return 'auto'; }
+  }
+
+  function applyTheme() {
+    const choice = themeChoice();
+    if (choice === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+    for (const button of document.querySelectorAll('[data-caramel-theme]')) button.textContent = 'Theme: ' + choice;
+  }
+
+  document.addEventListener('click', event => {
+    if (!event.target.closest?.('[data-caramel-theme]')) return;
+    const next = CHOICES[(CHOICES.indexOf(themeChoice()) + 1) % CHOICES.length];
+    try { next === 'auto' ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, next); } catch (_) { /* Private mode. */ }
+    applyTheme();
+  });
+  addEventListener('storage', event => { if (event.key === THEME || event.key === null) applyTheme(); });
+  applyTheme();
 
   const list = document.getElementById('tail');
   if (!list) return;

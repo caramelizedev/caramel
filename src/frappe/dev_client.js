@@ -7,6 +7,10 @@
   const session = { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Caramel-Dev': '1' } };
   const RECENT = 10;
   const REMEMBER = 'caramel.dev.toolbar';
+  const THEME = 'caramel.dev.theme';
+  const CHOICES = ['auto', 'light', 'dark'];
+  // The key that opens and closes the recent-requests list; the list's footer names it.
+  const SHORTCUT = '`';
   let stopped = false;
   let seen = null;
   let toolbar = null;
@@ -16,12 +20,60 @@
   let unread = 0;
   let unreadError = false;
 
-  document.addEventListener('click', event => {
-    const button = event.target.closest?.('[data-caramel-copy]');
+  // Copies the text a [data-caramel-text] button carries, or the text of the element a
+  // [data-caramel-copy] button names, and says so on the button.
+  document.addEventListener('click', async event => {
+    const button = event.target.closest?.('[data-caramel-copy], [data-caramel-text]');
     if (!button) return;
-    const source = document.getElementById(button.dataset.caramelCopy);
-    if (source) navigator.clipboard.writeText(source.textContent);
+    const source = button.dataset.caramelCopy ? document.getElementById(button.dataset.caramelCopy) : null;
+    const text = button.dataset.caramelText ?? source?.textContent;
+    if (text === undefined) return;
+    const label = button.dataset.label || (button.dataset.label = button.textContent);
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = 'Copied';
+    } catch (_) {
+      button.textContent = 'Copy failed';
+    }
+    clearTimeout(button.timer);
+    button.timer = setTimeout(() => { button.textContent = label; }, 1500);
   });
+
+  // The colour theme: follow the system (auto), or force light or dark. The choice is shared
+  // by the toolbar and the inspector through localStorage, and by every open tab.
+  let chosen = null;
+
+  function themeChoice() {
+    if (chosen) return chosen;
+    try {
+      const saved = localStorage.getItem(THEME);
+      return saved === 'light' || saved === 'dark' ? saved : 'auto';
+    } catch (_) { return 'auto'; }
+  }
+
+  function applyTheme() {
+    const choice = themeChoice();
+    const targets = [toolbar?.host];
+    if (location.pathname.startsWith(inspector)) targets.push(document.documentElement);
+    for (const node of targets) {
+      if (!node) continue;
+      if (choice === 'auto') delete node.dataset.theme; else node.dataset.theme = choice;
+    }
+    const label = 'Theme: ' + choice;
+    const buttons = [...document.querySelectorAll('[data-caramel-theme]'), toolbar?.theme];
+    for (const button of buttons) if (button) button.textContent = label;
+  }
+
+  function cycleTheme() {
+    const next = CHOICES[(CHOICES.indexOf(themeChoice()) + 1) % CHOICES.length];
+    try { next === 'auto' ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, next); } catch (_) { /* Private mode. */ }
+    applyTheme();
+  }
+
+  document.addEventListener('click', event => {
+    if (event.target.closest?.('[data-caramel-theme]')) cycleTheme();
+  });
+  addEventListener('storage', event => { if (event.key === THEME || event.key === null) { chosen = null; applyTheme(); } });
 
   addEventListener('pagehide', () => { stopped = true; });
   addEventListener('pageshow', event => {
@@ -48,7 +100,8 @@
     const response = await fetch('/__caramel/dev/traces.json?' + query, {
       ...session, signal: AbortSignal.timeout(3000)
     });
-    return response.ok ? response.json() : { latest: 0, traces: [] };
+    if (!response.ok) throw new Error('traces.json answered ' + response.status);
+    return response.json();
   }
 
   function flags(trace) {
@@ -88,17 +141,40 @@
     return element('a', undefined, { class: className, href: inspector + '/traces/' + trace.trace_id, target: '_blank', rel: 'noopener', title: sentence(trace) });
   }
 
+  // The address of one part of a request's page in the inspector.
+  function part(trace, anchor) {
+    return inspector + '/traces/' + trace.trace_id + '#' + anchor;
+  }
+
+  // In the bar each part links to its place on the trace page; in the list the whole row is
+  // one link, so its parts stay plain text.
+  function piece(trace, text, className, anchor, linked) {
+    if (!linked) return element('span', text, { class: className });
+    return element('a', text, { class: className, href: part(trace, anchor), target: '_blank', rel: 'noopener' });
+  }
+
   // One request as parts a developer can scan: its numbers, then what is wrong with it.
-  function numbers(trace) {
+  function numbers(trace, linked) {
     return [
-      element('span', statusText(trace), { class: 'status ' + statusClass(trace) }),
-      element('span', Math.round(trace.duration_ms) + ' ms', { class: 'metric ms' + (trace.slow ? ' hot' : '') }),
-      element('span', queries(trace.db_count), { class: 'metric queries' + (trace.repeated > 0 ? ' hot' : '') })
+      piece(trace, statusText(trace), 'status ' + statusClass(trace), trace.outcome === 'error' ? 'error' : 'timeline', linked),
+      piece(trace, Math.round(trace.duration_ms) + ' ms', 'metric ms' + (trace.slow ? ' hot' : ''), 'timeline', linked),
+      piece(trace, queries(trace.db_count), 'metric queries' + (trace.repeated > 0 ? ' hot' : ''), 'queries', linked)
     ];
   }
 
-  function chips(trace) {
-    return flags(trace).map(flag => element('span', flag, { class: 'flag ' + flag.split(' ')[0] }));
+  const SHORT = { 'repeated queries': 'repeat' };
+  const WHERE = { error: 'error', slow: 'timeline', 'repeated queries': 'queries' };
+
+  // A chip names the problem in words (never colour alone); on a phone it shortens.
+  function chips(trace, linked) {
+    return flags(trace).map(flag => {
+      const chip = element('span', undefined, { class: 'flag ' + flag.split(' ')[0] },
+        element('span', flag, { class: 'long' }), element('span', SHORT[flag] || flag, { class: 'short' }));
+      if (!linked) return chip;
+      const wrap = element('a', undefined, { class: 'flag-link', href: part(trace, WHERE[flag]), target: '_blank', rel: 'noopener' });
+      wrap.append(chip);
+      return wrap;
+    });
   }
 
   function buildToolbar() {
@@ -109,24 +185,78 @@
     const minimise = element('button', '–', { class: 'minimise', type: 'button', 'aria-label': 'Minimise the toolbar', title: 'Minimise' });
     const dot = element('button', undefined, { class: 'dot-only', type: 'button', 'aria-label': 'Show the development toolbar', title: 'Show the toolbar', 'data-state': 'wait' });
     const list = element('ol', undefined, { class: 'recent' });
-    const open = element('a', 'Open inspector', { class: 'inspector', href: inspector, target: '_blank', rel: 'noopener' });
+    const open = element('a', 'Open inspector', { class: 'inspector action', href: inspector, target: '_blank', rel: 'noopener' });
+    const theme = element('button', undefined, { class: 'theme action', type: 'button', title: 'Colour theme: click to change' });
+    const copy = element('button', 'Copy for an agent', { class: 'copy action', type: 'button', title: 'Copy this request as Markdown: the summary, queries with their values, the error and its backtrace' });
     const panel = element('section', undefined, { class: 'panel', id: 'panel', 'aria-label': 'Recent requests' },
-      element('header', undefined, undefined, element('strong', 'Recent requests'), open), list,
-      element('footer', 'Esc closes this list'));
+      element('header', undefined, undefined, element('strong', 'Recent requests'), open, theme), list,
+      element('footer', undefined, undefined, element('span', SHORTCUT + ' opens and closes this list · j / k move · Enter opens · Esc closes', { class: 'hint' })));
     panel.hidden = true;
     root.append(element('link', undefined, { rel: 'stylesheet', href: '/__caramel/dev/toolbar.css' }), bar, panel, dot);
     toggle.addEventListener('click', () => setOpen(panel.hidden));
-    minimise.addEventListener('click', () => setMinimised(true));
-    dot.addEventListener('click', () => setMinimised(false));
+    minimise.addEventListener('click', () => { setMinimised(true); dot.focus(); });
+    theme.addEventListener('click', cycleTheme);
+    copy.addEventListener('click', copyForAgent);
+    dot.addEventListener('click', () => { setMinimised(false); toggle.focus(); });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && !panel.hidden) { setOpen(false); toggle.focus(); }
+      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      const inside = event.composedPath().includes(host);
+      if (event.key === 'Escape' && !panel.hidden) { setOpen(false); if (inside) toggle.focus(); return; }
+      if (editing(event)) return;
+      if (event.key === SHORTCUT && !event.repeat) {
+        setOpen(panel.hidden);
+        if (!panel.hidden) focusRow(0); else if (inside) toggle.focus();
+        return;
+      }
+      if (!inside || panel.hidden || (event.key !== 'j' && event.key !== 'k')) return;
+      if (focusRow(event.key === 'j' ? 1 : -1)) event.preventDefault();
     });
     document.addEventListener('pointerdown', event => {
       if (!panel.hidden && !event.composedPath().includes(host)) setOpen(false);
     });
     document.body.append(host);
-    const made = { host, root, bar, toggle, minimise, dot, panel, list };
-    return made;
+    return { host, root, bar, toggle, minimise, dot, panel, list, theme, copy };
+  }
+
+  // Typing in a field must never trigger a shortcut.
+  function editing(event) {
+    const target = event.composedPath()[0];
+    return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  }
+
+  // Moves focus along the list: to row 0, or by *step* from the focused row. False when the
+  // list has no rows.
+  function focusRow(step) {
+    const rows = [...toolbar.list.querySelectorAll('a.row')];
+    if (!rows.length) return false;
+    const at = rows.indexOf(toolbar.root.activeElement);
+    const next = step === 0 || at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + step));
+    rows[next].focus();
+    return true;
+  }
+
+  // Copies the current request as Markdown, fetched with the development session's header.
+  async function copyForAgent() {
+    const button = toolbar.copy;
+    if (!current || button.disabled) return;
+    button.disabled = true;
+    const address = '/__caramel/dev/trace.md?id=' + encodeURIComponent(current.trace_id);
+    const markdown = fetch(address, { ...session, signal: AbortSignal.timeout(3000) }).then(response => {
+      if (!response.ok) throw new Error('no trace');
+      return response.text();
+    }).then(text => new Blob([text], { type: 'text/plain' }));
+    try {
+      // Handing the clipboard a promise keeps the click's permission while the text loads,
+      // which Safari requires.
+      if (window.ClipboardItem) await navigator.clipboard.write([new ClipboardItem({ 'text/plain': markdown })]);
+      else await navigator.clipboard.writeText(await (await markdown).text());
+      button.textContent = 'Copied';
+    } catch (_) {
+      button.textContent = 'Copy failed';
+    }
+    button.disabled = false;
+    clearTimeout(button.timer);
+    button.timer = setTimeout(() => { button.textContent = 'Copy for an agent'; }, 1500);
   }
 
   function setOpen(open) {
@@ -154,9 +284,9 @@
     toolbar.list.replaceChildren(...rows.map(trace => {
       const mine = trace.request_id === requestId;
       const row = link(trace, 'row ' + stateOf(trace));
-      const marks = mine ? chips(trace).concat(element('span', 'this page', { class: 'flag mine' })) : chips(trace);
+      const marks = mine ? chips(trace, false).concat(element('span', 'this page', { class: 'flag mine' })) : chips(trace, false);
       row.append(element('span', undefined, { class: 'dot ' + stateOf(trace), 'aria-hidden': 'true' }),
-        element('span', trace.name, { class: 'name' }), ...numbers(trace), element('span', undefined, { class: 'flags' }, ...marks));
+        element('span', trace.name, { class: 'name' }), ...numbers(trace, false), element('span', undefined, { class: 'flags' }, ...marks));
       return element('li', undefined, undefined, row);
     }));
     if (!rows.length) toolbar.list.append(element('li', 'Nothing yet. Requests appear here as the page makes them.', { class: 'empty' }));
@@ -169,7 +299,7 @@
     toolbar.dot.dataset.state = state;
     const route = link(trace, 'route');
     route.append(element('span', undefined, { class: 'dot ' + state, 'aria-hidden': 'true' }), element('span', trace.name, { class: 'name' }));
-    toolbar.bar.replaceChildren(route, ...numbers(trace), ...chips(trace), toolbar.toggle, toolbar.minimise);
+    toolbar.bar.replaceChildren(route, ...numbers(trace, true), ...chips(trace, true), toolbar.copy, toolbar.toggle, toolbar.minimise);
     renderToggle();
   }
 
@@ -194,10 +324,12 @@
   }
 
   function prepend(traces) {
+    const known = new Set(rows.map(trace => trace.trace_id));
+    const fresh = traces.filter(trace => !known.has(trace.trace_id) && trace.trace_id !== current?.trace_id);
     keepRows(traces);
     if (toolbar.panel.hidden) {
-      unread += traces.length;
-      unreadError = unreadError || traces.some(trace => stateOf(trace) === 'error');
+      unread += fresh.length;
+      unreadError = unreadError || fresh.some(trace => stateOf(trace) === 'error');
       renderToggle();
     } else {
       renderRows();
@@ -211,6 +343,7 @@
   async function start() {
     if (!requestId || !document.body) return;
     toolbar = buildToolbar();
+    applyTheme();
     setMinimised(remembered());
     showWaiting();
     renderRows();
@@ -240,7 +373,7 @@
     following = true;
     try {
       const news = await feed('after=' + seen);
-      seen = news.latest;
+      seen = Math.max(seen, news.latest);
       prepend(news.traces);
     } finally {
       following = false;
@@ -266,6 +399,7 @@
     if (!stopped) setTimeout(check, 400);
   }
 
+  applyTheme();
   start();
   check();
 })();
