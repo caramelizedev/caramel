@@ -78,6 +78,25 @@ describe Caramel::Frappe::Inspector do
     FileUtils.rm_rf(root) if root
   end
 
+  it "serves a trace as Markdown to the toolbar, only inside the development session" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    address = "/__caramel/dev/trace.md?id=111111"
+    gateway.handle(HTTP::Request.new("GET", address, HOST)).status.should eq(403)
+    headers = HOST.dup
+    headers["Cookie"] = session_cookie(gateway)
+    headers["X-Caramel-Dev"] = "1"
+    found = gateway.handle(HTTP::Request.new("GET", address, headers))
+    found.status.should eq(200)
+    found.headers["Content-Type"].should start_with("text/markdown")
+    found.body.should contain("## Queries")
+    found.body.should contain("app/books.cr:12:7")
+    missing = "/__caramel/dev/trace.md?id=ffffff"
+    gateway.handle(HTTP::Request.new("GET", missing, headers)).status.should eq(404)
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
+
   it "answers 404 for a trace it does not hold and lists requests on the index" do
     root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
     gateway = inspected(root)

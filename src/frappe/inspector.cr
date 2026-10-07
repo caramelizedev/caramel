@@ -58,6 +58,12 @@ module Caramel::Frappe
       end
     end
 
+    # One trace as Markdown, for the toolbar's "Copy for an agent"; nil when none matches.
+    def markdown(ref : String) : String?
+      event = @events.find(ref) || return
+      Crema::Render.markdown(event, @root, @collected.call(event.trace_id))
+    end
+
     private def summary(json : JSON::Builder, seq : Int64, event : Crema::TraceEvent) : Nil
       json.object do
         json.field "seq", seq

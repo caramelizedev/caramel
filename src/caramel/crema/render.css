@@ -1,0 +1,29 @@
+td pre{margin:0;padding:0;border:0;background:transparent}
+dl.summary{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px}
+dl.summary dt{color:var(--muted)}
+dl.summary dd{margin:0}
+td.ms,th.ms{white-space:nowrap}
+td.d1{padding-left:24px}
+td.d2{padding-left:38px}
+td.d3{padding-left:52px}
+td.d4{padding-left:66px}
+th .axis{display:flex;justify-content:space-between;font-weight:400}
+.bar{width:100%;min-width:240px;height:8px;background:var(--track)}
+.bar rect{fill:var(--k-other)}
+.bar.sql rect{fill:var(--k-sql)}
+.bar.http rect{fill:var(--k-http)}
+.bar.view rect{fill:var(--k-view)}
+.bar.enqueue rect{fill:var(--k-enqueue)}
+.bar.log rect{fill:var(--k-log)}
+.bar.dump rect{fill:var(--k-dump)}
+.bar.error rect{fill:var(--bad)}
+.warning{padding:8px 12px;border:1px solid var(--note-line);background:var(--note);border-radius:6px}
+table.queries tr.repeated td{background:var(--note)}
+.repeat-mark{display:inline-block;margin-top:6px;padding:0 8px;border:1px solid var(--note-line);border-radius:999px;font-size:12px;font-weight:600}
+td.copy{white-space:nowrap}
+td.copy button{display:block;margin-bottom:4px;padding:2px 8px;font-size:13px}
+.logs .warn,.logs .error{color:var(--bad)}
+ol.backtrace{padding-left:24px;font:13px ui-monospace,monospace}
+details.internal{margin-top:8px;color:var(--muted)}
+details.internal ol{font:13px ui-monospace,monospace}
+details.markdown summary{cursor:pointer}

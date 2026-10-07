@@ -8,6 +8,12 @@ module Caramel::Crema
     Development
   end
 
+  # The text a recorded bind takes when the value was NULL, how many binds a span keeps and how
+  # many bytes of each. A bind equal to NULL_BIND is written as NULL when a query is copied.
+  NULL_BIND  = "NULL"
+  BIND_LIMIT =  20
+  BIND_BYTES = 200
+
   # Wire format, version 1: one JSON object per line, shared by the
   # application, Frappé, the ops socket and Latte. Nil fields are omitted.
   WIRE_VERSION = 1

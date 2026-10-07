@@ -18,10 +18,11 @@ module Caramel::Frappe
     include HTTP::Handler
     COOKIE          = "__Host-caramel_dev"
     CLIENT          = {{ read_file("#{__DIR__}/dev_client.js") }}
-    INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }}
-    TOOLBAR_STYLE   = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
-    THEME           = {{ read_file("#{__DIR__}/dev_theme.js") }}
-    PREFIX          = "/__caramel/dev/"
+    INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }} +
+                      {{ read_file("#{__DIR__}/../caramel/crema/render.css") }}
+    TOOLBAR_STYLE = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
+    THEME         = {{ read_file("#{__DIR__}/../caramel/crema/theme.js") }}
+    PREFIX        = "/__caramel/dev/"
 
     # The diagnostic page's stylesheet.
     STYLE = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;" \
@@ -157,6 +158,7 @@ module Caramel::Frappe
         "#{PREFIX}toolbar.css"   => ->(_request : HTTP::Request) { stylesheet(TOOLBAR_STYLE) },
         "#{PREFIX}status"        => ->(request : HTTP::Request) { status(request) },
         "#{PREFIX}traces.json"   => ->(request : HTTP::Request) { traces_feed(request) },
+        "#{PREFIX}trace.md"      => ->(request : HTTP::Request) { trace_markdown(request) },
       }
     end
 
@@ -233,6 +235,17 @@ module Caramel::Frappe
       empty = {latest: 0, traces: [] of Int32}.to_json
       inspector = @inspector || return ok(empty, "application/json")
       ok(inspector.feed(request), "application/json")
+    end
+
+    # One trace as Markdown, for the toolbar's copy button; needs the development session.
+    private def trace_markdown(request : HTTP::Request) : Caramel::Response
+      return refused unless session_request?(request)
+
+      inspector = @inspector || return secure(Caramel::Response.new(404, "Not found"))
+      text = inspector.markdown(request.query_params["id"]? || "")
+      return secure(Caramel::Response.new(404, "No such trace")) unless text
+
+      ok(text, "text/markdown; charset=utf-8")
     end
 
     private def inspector_page(request : HTTP::Request) : Caramel::Response

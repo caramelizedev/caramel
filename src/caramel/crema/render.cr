@@ -3,6 +3,7 @@ require "./editor"
 require "./event"
 require "./frames"
 require "./redact"
+require "./summary"
 
 module Caramel::Crema
   # Pure functions over the wire-format events, shared by `ops tail`,
@@ -10,6 +11,9 @@ module Caramel::Crema
   # take events, not live objects, so Frappé and Latte can use them.
   module Render
     APPLICATION_DIRECTORIES = {"app/", "config/", "src/", "db/"}
+    KINDS                   = %w[sql http view enqueue log dump]
+    MAX_DEPTH               = 4
+    SQL_TOKEN               = /'(?:[^']|'')*'|\$(\d+)/
 
     @@secrets : Array(String)? = nil
 
@@ -254,10 +258,10 @@ module Caramel::Crema
         summary_html(io, event)
         waterfall_html(io, event)
         queries_html(io, event, editor, root)
-        repeated_html(io, event)
+        repeated_html(io, event, editor, root)
         logs_html(io, event)
         dumps_html(io, event)
-        error_html(io, event.error)
+        error_html(io, event.error, editor, root)
         across_html(io, across)
         markdown_html(io, event, root, across)
       end
@@ -284,7 +288,7 @@ module Caramel::Crema
     end
 
     private def self.summary_html(io : IO, event : TraceEvent) : Nil
-      io << "<h2>" << HTML.escape(event.name) << "</h2><dl class=\"summary\">"
+      io << "<dl class=\"summary\">"
       pair(io, "Kind", event.kind)
       pair(io, "Outcome", event.outcome)
       pair(io, "Status", event.status.to_s) if event.status
@@ -301,23 +305,75 @@ module Caramel::Crema
       io << "<dt>" << HTML.escape(name) << "</dt><dd>" << HTML.escape(value) << "</dd>"
     end
 
-    # One row per span; each bar is an SVG, because the inspector's CSP
-    # forbids inline styles.
+    # How deeply a span sits inside view spans that contain it, at most MAX_DEPTH.
+    private def self.depth(spans : Array(SpanEvent), index : Int32) : Int32
+      span = spans[index]
+      ending = span.offset_ms + span.duration_ms - 0.001
+      inside = spans.each_with_index.count do |other, position|
+        position != index && other.kind == "view" && other.offset_ms <= span.offset_ms &&
+          other.offset_ms + other.duration_ms >= ending
+      end
+      {inside, MAX_DEPTH}.min
+    end
+
+    # One row per span, in start order; each bar is an SVG, because the inspector's CSP
+    # forbids inline styles. A span inside a view is indented, its bar takes its kind's
+    # colour, and a query's name links to its row in the Queries table.
     private def self.waterfall_html(io : IO, event : TraceEvent) : Nil
       return if event.spans.empty?
 
       ends = event.spans.max_of { |span| span.offset_ms + span.duration_ms }
       total = {event.duration_ms, ends, 0.001}.max
-      io << "<h3>Timeline</h3><table class=\"waterfall\"><tbody>"
-      event.spans.each do |span|
+      io << "<h3 id=\"timeline\">Timeline</h3><table class=\"waterfall\"><thead><tr>"
+      io << "<th>Kind</th><th>Span</th><th class=\"ms\">Duration</th><th><div class=\"axis\">"
+      io << "<span>0 ms</span><span>" << ms(total) << " ms</span></div></th></tr></thead><tbody>"
+      queries = 0
+      event.spans.each_with_index do |span, index|
+        queries += 1 if span.kind == "sql"
         x = (span.offset_ms / total * 1000).round(1)
         width = {(span.duration_ms / total * 1000).round(1), 1.0}.max
-        io << "<tr><td>" << HTML.escape(span.kind) << "</td><td>" << HTML.escape(span.name)
-        io << "</td><td>" << ms(span.duration_ms) << " ms</td><td>"
-        io << "<svg viewBox=\"0 0 1000 8\" class=\"bar\"><rect x=\"" << x
-        io << "\" width=\"" << width << "\" height=\"8\"/></svg></td></tr>"
+        io << "<tr><td>" << HTML.escape(span.kind) << "</td>"
+        io << "<td class=\"d" << depth(event.spans, index) << "\">" << span_name(span, queries)
+        io << "</td><td class=\"ms\">" << ms(span.duration_ms) << " ms</td>"
+        io << "<td><svg viewBox=\"0 0 1000 8\" class=\"bar " << kind_class(span.kind) << "\">"
+        io << "<rect x=\"" << x << "\" width=\"" << width << "\" height=\"8\"/></svg></td></tr>"
       end
       io << "</tbody></table>"
+    end
+
+    private def self.span_name(span : SpanEvent, query_number : Int32) : String
+      name = HTML.escape(span.name)
+      span.kind == "sql" ? "<a href=\"#q#{query_number}\">#{name}</a>" : name
+    end
+
+    private def self.kind_class(kind : String) : String
+      KINDS.includes?(kind) ? kind : "other"
+    end
+
+    # The statement with each `$n` replaced by its bind value, ready to paste into psql.
+    # A value is written as a quoted literal, which PostgreSQL reads as the column's type;
+    # the bind NULL is written bare. A `$n` without a bind, and any text inside a quoted
+    # string, stays as it is.
+    def self.sql_with_values(sql : String, binds : Array(String)?) : String
+      return sql if binds.nil? || binds.empty?
+
+      sql.gsub(SQL_TOKEN) do |token, match|
+        number = match[1]?.try(&.to_i) || 0
+        (1..binds.size).includes?(number) ? literal(binds[number - 1]) : token
+      end
+    end
+
+    private def self.literal(value : String) : String
+      value == Crema::NULL_BIND ? "NULL" : "'#{value.gsub('\'', "''")}'"
+    end
+
+    # Whether the recorded binds may have been cut short: at most BIND_LIMIT values of
+    # BIND_BYTES each are kept.
+    def self.binds_cut?(binds : Array(String)?) : Bool
+      return false unless binds
+
+      long = binds.any? { |bind| bind.bytesize >= Crema::BIND_BYTES }
+      long || binds.size >= Crema::BIND_LIMIT
     end
 
     private def self.queries_html(io : IO,
@@ -327,15 +383,51 @@ module Caramel::Crema
       queries = event.spans.select { |span| span.kind == "sql" }
       return if queries.empty?
 
-      io << "<h3>Queries</h3><table class=\"queries\"><thead><tr><th>Time</th><th>SQL</th>"
-      io << "<th>Binds</th><th>Source</th></tr></thead><tbody>"
-      queries.each do |span|
-        io << "<tr><td>" << ms(span.duration_ms) << " ms</td><td><pre>"
-        io << HTML.escape(span.detail || span.name) << "</pre></td><td>"
-        span.binds.try { |binds| io << HTML.escape(binds.inspect) }
-        io << "</td><td>" << source_link(span.source, editor, root) << "</td></tr>"
+      repeats = event.repeated.to_h { |repeat| {repeat.sql, repeat.count} }
+      io << "<h3 id=\"queries\">Queries</h3><table class=\"queries\"><thead><tr>"
+      io << "<th class=\"ms\">Duration</th><th>SQL</th><th>Binds</th><th>Source</th><th>Copy</th>"
+      io << "</tr></thead><tbody>"
+      queries.each_with_index do |span, index|
+        query_row(io, span, index + 1, repeats[span.detail || span.name]?, editor, root)
       end
       io << "</tbody></table>"
+    end
+
+    private def self.query_row(io : IO,
+                               span : SpanEvent,
+                               number : Int32,
+                               repeats : Int32?,
+                               editor : Editor?,
+                               root : String?) : Nil
+      sql = span.detail || span.name
+      io << "<tr id=\"q" << number << "\"" << (repeats ? " class=\"repeated\"" : "") << ">"
+      io << "<td class=\"ms\">" << ms(span.duration_ms) << " ms</td><td><pre>" << HTML.escape(sql)
+      io << "</pre>"
+      repeats.try { |count| io << "<span class=\"repeat-mark\">ran " << count << " times</span>" }
+      io << "</td><td>"
+      span.binds.try { |binds| io << HTML.escape(binds.inspect) }
+      io << "</td><td>" << source_link(span.source, editor, root) << "</td><td class=\"copy\">"
+      copy_buttons(io, number, sql, span.binds)
+      io << "</td></tr>"
+    end
+
+    # "Copy SQL" always; "Copy with values" when binds were recorded. The text sits in hidden
+    # elements the copy button names, so the page needs no inline script.
+    private def self.copy_buttons(io : IO,
+                                  number : Int32,
+                                  sql : String,
+                                  binds : Array(String)?) : Nil
+      copy_button(io, "sql-#{number}", "Copy SQL", sql)
+      return if binds.nil? || binds.empty?
+
+      note = binds_cut?(binds) ? "-- Some bind values were cut short when recorded.\n" : ""
+      text = note + sql_with_values(sql, binds)
+      copy_button(io, "sql-#{number}-values", "Copy with values", text)
+    end
+
+    private def self.copy_button(io : IO, id : String, label : String, text : String) : Nil
+      io << "<button type=\"button\" data-caramel-copy=\"" << id << "\">" << label << "</button>"
+      io << "<pre hidden id=\"" << id << "\">" << HTML.escape(text) << "</pre>"
     end
 
     # *source* (`app/x.cr:12:7`) as an editor link, plain text without one.
@@ -359,10 +451,22 @@ module Caramel::Crema
       {parts[0, parts.size - count].join(':'), line || 1, column || 1}
     end
 
-    private def self.repeated_html(io : IO, event : TraceEvent) : Nil
+    # The association a repeated query most likely wants preloaded, from its table name.
+    def self.preload_hint(sql : String) : String
+      table = Crema.summary(sql).partition(' ')[2]
+      singular = table.ends_with?("ies") ? table.sub(/ies\z/, "y") : table.rchop('s')
+      "preload the association in the query that loads the records, e.g. .preload(:#{singular})"
+    end
+
+    private def self.repeated_html(io : IO,
+                                   event : TraceEvent,
+                                   editor : Editor?,
+                                   root : String?) : Nil
       event.repeated.each do |repeat|
         io << "<p class=\"warning\">Ran " << repeat.count << " times: <code>"
-        io << HTML.escape(repeat.sql) << "</code></p>"
+        io << HTML.escape(repeat.sql) << "</code>"
+        repeat.source.try { |source| io << " at " << source_link(source, editor, root) }
+        io << "<br><strong>Fix:</strong> " << HTML.escape(preload_hint(repeat.sql)) << "</p>"
       end
     end
 
@@ -389,13 +493,43 @@ module Caramel::Crema
       end
     end
 
-    private def self.error_html(io : IO, error : ErrorEvent?) : Nil
+    private def self.error_html(io : IO,
+                                error : ErrorEvent?,
+                                editor : Editor?,
+                                root : String?) : Nil
       return unless error
 
-      io << "<h3>Error</h3><p><strong>" << HTML.escape(error.error_class) << "</strong>"
+      io << "<h3 id=\"error\">Error</h3><p>"
+      io << "<strong>" << HTML.escape(error.error_class) << "</strong>"
       error.location.try { |location| io << " at <code>" << HTML.escape(location) << "</code>" }
       io << "</p>"
       error.message.try { |message| io << "<pre>" << HTML.escape(message) << "</pre>" }
+      backtrace_html(io, error.backtrace, editor, root)
+    end
+
+    # Your application's frames first, each with an editor link; the rest folded away.
+    private def self.backtrace_html(io : IO,
+                                    frames : Array(String)?,
+                                    editor : Editor?,
+                                    root : String?) : Nil
+      return if frames.nil? || frames.empty?
+
+      ours, others = frames.partition { |frame| application_frame?(frame, root) }
+      io << "<h4>Backtrace</h4><ol class=\"backtrace\">"
+      ours.each { |frame| io << "<li>" << frame_html(frame, editor, root) << "</li>" }
+      io << "</ol>"
+      return if others.empty?
+
+      io << "<details class=\"internal\"><summary>" << others.size << " other frames</summary><ol>"
+      others.each { |frame| io << "<li><code>" << HTML.escape(frame) << "</code></li>" }
+      io << "</ol></details>"
+    end
+
+    private def self.frame_html(frame : String, editor : Editor?, root : String?) : String
+      parsed = Frames.parse(frame) || return "<code>#{HTML.escape(frame)}</code>"
+      location = "#{parsed.path}:#{parsed.line}#{parsed.column.try { |column| ":#{column}" }}"
+      label = parsed.label.try { |name| " in <code>#{HTML.escape(name)}</code>" } || ""
+      "#{source_link(location, editor, root)}#{label}"
     end
 
     private def self.markdown_html(io : IO,
