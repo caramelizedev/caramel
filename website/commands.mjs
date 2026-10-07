@@ -17,6 +17,10 @@ const APPLICATION = {
   translations: 'List the keys each locale still takes from the default locale; exits 1 while any is missing.',
   migrate: 'Lint and apply pending migrations; --dev-override relaxes the linter in development.',
   lint: 'Lint pending migrations without applying them; --dev-override relaxes the linter in development.',
+  ops: 'Ask a running application, through its owner-only ops socket, for its status, in-flight work, Prometheus text, a live tail, errors and traces; issue a debug token; print the console’s ssh line. Details are in the Crema reference.',
+  jobs: 'Count each queue’s jobs, list failures, show one job with its stored error, or retry failed jobs. Needs the database, not a running application.',
+  db: 'Report database health: connections, locks, cache hits, unused indexes and the slowest statements. Needs the database, not a running application.',
+  insights: 'Show the recorder’s per-minute latency history for routes, jobs, schedules, SQL or outbound hosts. Needs require "caramel/crema/recorder".',
 };
 
 // Frappé's commands: each `Command.new` in Commands::TABLE, with adjacent
@@ -70,12 +74,28 @@ export function frappeCommands() {
   return commands;
 }
 
-// The application binary's commands, from CommandLine::USAGE.
+// The commands Crema registers with Crema.command: each `command("name", "syntax")`
+// in core_commands.cr, except that the recorder's own usage line replaces the
+// stub for `insights`.
+function registeredCommands() {
+  const source = read('src/caramel/crema/core_commands.cr');
+  const recorder = read('src/caramel/crema/recorder/insights.cr').match(/USAGE\s*=\s*"([^"]+)"/);
+  if (!recorder) throw new Error('src/caramel/crema/recorder/insights.cr has no USAGE');
+  const commands = [...source.matchAll(/command\("(\w+)",\s*((?:"[^"]*"\s*\\?\s*)+)\)\s*do/g)].map(([, name, strings]) => ({
+    name,
+    syntax: name === 'insights' ? recorder[1] : [...strings.matchAll(/"([^"]*)"/g)].map(([, part]) => part).join(''),
+  }));
+  if (commands.length === 0) throw new Error('No Crema commands found in src/caramel/crema/core_commands.cr');
+  return commands;
+}
+
+// The application binary's commands: CommandLine::USAGE, then Crema's.
 export function applicationCommands() {
   const source = read('src/caramel/command_line.cr');
   const usage = source.slice(source.indexOf('USAGE = ['), source.indexOf('].join', source.indexOf('USAGE = [')));
-  return [...usage.matchAll(/"([^"]+)"/g)].map(([, syntax]) => {
-    const name = syntax.split(' ')[0];
+  const commands = [...usage.matchAll(/"([^"]+)"/g)].map(([, syntax]) => ({name: syntax.split(' ')[0], syntax}))
+    .concat(registeredCommands());
+  return commands.map(({name, syntax}) => {
     if (!APPLICATION[name]) throw new Error(`Describe the application command ${name} in website/commands.mjs`);
     return {syntax: `APP ${syntax}`, description: APPLICATION[name]};
   });
