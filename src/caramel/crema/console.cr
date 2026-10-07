@@ -22,7 +22,8 @@ module Caramel::Crema
   # shows; it changes nothing. Its pages load only their own stylesheet and script,
   # and the Live tail page streams `/v1/tail`.
   module Console
-    CSS   = {{ read_file("#{__DIR__}/console.css") }} + {{ read_file("#{__DIR__}/render.css") }}
+    CSS = {{ read_file("#{__DIR__}/palette.css") }} + {{ read_file("#{__DIR__}/console.css") }} +
+          {{ read_file("#{__DIR__}/render.css") }}
     THEME = {{ read_file("#{__DIR__}/theme.js") }}
     JS    = {{ read_file("#{__DIR__}/console.js") }}
 

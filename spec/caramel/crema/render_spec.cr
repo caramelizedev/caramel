@@ -170,6 +170,46 @@ describe Caramel::Crema::Render do
     Caramel::Crema::Render.trace_html(event, nil, nil).should contain(%(class="bar http error"))
   end
 
+  it "shows the binds the way the copied statement writes them" do
+    render = Caramel::Crema::Render
+    nothing = Caramel::Crema::NULL_BIND
+    binds = ["42", "acme", nothing, "NULL", "x"]
+    literals = ["42", "'acme'", "NULL", "'NULL'", ""]
+    render.binds_display(binds, literals).should eq(%([42, 'acme', NULL, 'NULL', "x"]))
+    render.binds_display(binds, nil).should eq(%(["42", "acme", NULL, "NULL", "x"]))
+    render.binds_display(nil, nil).should be_nil
+    long = "'#{"y" * 300}'"
+    shown = render.binds_display(["y" * 300], [long]).to_s
+    shown.should eq("['#{"y" * 201}…]")
+  end
+
+  it "keeps the toolbar's links on the page when a trace has no spans, queries or error report" do
+    event = EventFixtures.trace
+    event.outcome = "error"
+    event.error = nil
+    event.spans = [] of Caramel::Crema::SpanEvent
+    html = Caramel::Crema::Render.trace_html(event, nil, nil)
+    html.should contain(%(<h3 id="timeline">Timeline</h3><p>No spans were recorded))
+    html.should contain(%(<h3 id="queries">Queries</h3><p>No query text was recorded))
+    html.should contain(%(<h3 id="error">Error</h3><p>No error report was recorded.</p>))
+    event.outcome = "ok"
+    Caramel::Crema::Render.trace_html(event, nil, nil).should_not contain(%(id="error"))
+    event.spans = [Caramel::Crema::SpanEvent.new("view", "Page", 0.0, 1.0)]
+    html = Caramel::Crema::Render.trace_html(event, nil, nil)
+    html.should contain(%(<h3 id="queries">Queries</h3><p>No query text was recorded))
+    html.should_not contain("No spans were recorded")
+  end
+
+  it "does not mark a bind that fits as cut, and marks one that does not" do
+    render = Caramel::Crema::Render
+    fits = "y" * 200
+    render.binds_display([fits], ["'#{fits}'"]).should eq("['#{fits}']")
+    many = "y" * 300
+    shown = render.binds_display([many], ["'#{many}'"]).to_s
+    shown.should end_with("…]")
+    shown.bytesize.should be < 215
+  end
+
   it "keeps the ids the toolbar links to" do
     event = EventFixtures.trace(failing: true)
     event.spans = [EventFixtures.query("SELECT 1", "app/x.cr:3:1")]

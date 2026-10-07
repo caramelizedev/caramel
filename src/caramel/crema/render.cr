@@ -265,7 +265,7 @@ module Caramel::Crema
         repeated_html(io, event, editor, root)
         logs_html(io, event)
         dumps_html(io, event)
-        error_html(io, event.error, editor, root)
+        error_html(io, event, editor, root)
         across_html(io, across)
         markdown_html(io, event, root, across)
       end
@@ -325,7 +325,10 @@ module Caramel::Crema
     # forbids inline styles. A span inside a view is indented, its bar takes its kind's
     # colour, and a query's name links to its row in the Queries table.
     private def self.waterfall_html(io : IO, event : TraceEvent) : Nil
-      return if event.spans.empty?
+      if event.spans.empty?
+        io << "<h3 id=\"timeline\">Timeline</h3><p>No spans were recorded for this trace.</p>"
+        return
+      end
 
       ends = event.spans.max_of { |span| span.offset_ms + span.duration_ms }
       total = {event.duration_ms, ends, 0.001}.max
@@ -370,9 +373,36 @@ module Caramel::Crema
       binds.try(&.map { |bind| bind == Crema::NULL_BIND ? "NULL" : SqlCopy.quote(bind) })
     end
 
-    # The binds as the table shows them: strings quoted, a nil bind as a bare NULL.
+    # The binds as text: strings quoted, a nil bind as a bare NULL.
     def self.binds_text(binds : Array(String)) : String
-      "[#{binds.map { |bind| bind == Crema::NULL_BIND ? "NULL" : bind.inspect }.join(", ")}]"
+      "[#{binds.map { |bind| bind_text(bind) }.join(", ")}]"
+    end
+
+    private def self.bind_text(bind : String) : String
+      bind == Crema::NULL_BIND ? "NULL" : bind.inspect
+    end
+
+    private def self.recorded_bind(binds : Array(String)?, index : Int32) : String
+      binds.try(&.[index]?).try { |bind| bind_text(bind) } || ""
+    end
+
+    private def self.shortened(text : String) : String
+      limit = Crema::BIND_BYTES + 2
+      return text if text.bytesize <= limit
+
+      "#{text.byte_slice(0, limit).scrub("")}…"
+    end
+
+    # The binds as the Queries table shows them, the way the copied statement writes them:
+    # `42`, `'acme'`, `NULL`, each cut to BIND_BYTES. A bind with no literal (too long to
+    # keep) shows as recorded. Nil when the span has neither.
+    def self.binds_display(binds : Array(String)?, literals : Array(String)?) : String?
+      return binds.try { |recorded| binds_text(recorded) } if literals.nil? || literals.empty?
+
+      shown = literals.map_with_index do |literal, index|
+        literal.empty? ? recorded_bind(binds, index) : shortened(literal)
+      end
+      "[#{shown.join(", ")}]"
     end
 
     private def self.queries_html(io : IO,
@@ -380,7 +410,10 @@ module Caramel::Crema
                                   editor : Editor?,
                                   root : String?) : Nil
       queries = event.spans.select { |span| span.kind == "sql" }
-      return if queries.empty?
+      if queries.empty?
+        io << "<h3 id=\"queries\">Queries</h3><p>No query text was recorded for this trace.</p>"
+        return
+      end
 
       repeats = event.repeated.to_h { |repeat| {repeat.sql, repeat.count} }
       io << "<h3 id=\"queries\">Queries</h3><table class=\"queries\"><thead><tr>"
@@ -404,7 +437,7 @@ module Caramel::Crema
       io << "</pre>"
       repeats.try { |count| io << "<span class=\"repeat-mark\">ran " << count << " times</span>" }
       io << "</td><td>"
-      span.binds.try { |binds| io << HTML.escape(binds_text(binds)) }
+      binds_display(span.binds, span.literals).try { |text| io << HTML.escape(text) }
       io << "</td><td>" << source_link(span.source, editor, root) << "</td><td class=\"copy\">"
       copy_buttons(io, number, sql, span)
       io << "</td></tr>"
@@ -501,10 +534,15 @@ module Caramel::Crema
     end
 
     private def self.error_html(io : IO,
-                                error : ErrorEvent?,
+                                event : TraceEvent,
                                 editor : Editor?,
                                 root : String?) : Nil
-      return unless error
+      error = event.error
+      if error.nil?
+        failed = event.outcome == "error"
+        io << "<h3 id=\"error\">Error</h3><p>No error report was recorded.</p>" if failed
+        return
+      end
 
       io << "<h3 id=\"error\">Error</h3><p>"
       io << "<strong>" << HTML.escape(error.error_class) << "</strong>"

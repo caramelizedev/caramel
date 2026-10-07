@@ -4,16 +4,17 @@ module Caramel::Crema
   # pass so `$1` can never match inside `$10`.
   module SqlCopy
     # A placeholder, or text that may hold something that looks like one and must stay as it
-    # is: a quoted string or identifier, a comment, a dollar-quoted body. `E'..\\'..'` strings
-    # are not understood; they are rare in application SQL.
+    # is: a quoted string (an `E'..'` string honours backslash escapes) or identifier, a
+    # comment, a dollar-quoted body.
     TOKEN = /
-      '(?:[^']++|'')*+'            # a string
+      (?<![A-Za-z0-9_$])[eE]'(?:[^'\\]++|\\.|'')*+'   # an escape string
+      | '(?:[^']++|'')*+'          # a string
       | "(?:[^"]++|"")*+"          # an identifier
       | --[^\n]*+                  # a line comment
       | \/\*.*?\*\/                # a block comment
-      | \$\$.*?\$\$                # a dollar-quoted body
-      | \$(?<tag>[A-Za-z_]\w*)\$.*?\$\k<tag>\$
-      | \$(?<n>\d+)                # a placeholder
+      | (?<![A-Za-z0-9_$])\$\$.*?\$\$   # a dollar-quoted body
+      | (?<![A-Za-z0-9_$])\$(?<tag>[A-Za-z_]\w*)\$.*?\$\k<tag>\$
+      | (?<![A-Za-z0-9_$])\$(?<n>\d+)                # a placeholder
     /mx
 
     # Longest literal kept; a longer value is left as its `$n`.
