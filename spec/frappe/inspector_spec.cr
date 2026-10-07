@@ -74,6 +74,8 @@ describe Caramel::Frappe::Inspector do
     css = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector.css", HOST)).body
     css.should contain(":root[data-theme=dark]")
     css.should contain("prefers-color-scheme:dark")
+    css.should contain(".bar.view rect")
+    css.scan(/var\((--[a-z-]+)\)/).each { |match| css.should contain("#{match[1]}:") }
   ensure
     FileUtils.rm_rf(root) if root
   end
@@ -89,10 +91,18 @@ describe Caramel::Frappe::Inspector do
     found = gateway.handle(HTTP::Request.new("GET", address, headers))
     found.status.should eq(200)
     found.headers["Content-Type"].should start_with("text/markdown")
+    foreign = headers.dup
+    foreign["Origin"] = "https://evil.example"
+    gateway.handle(HTTP::Request.new("GET", address, foreign)).status.should eq(403)
+    bare = HOST.dup
+    bare["Cookie"] = session_cookie(gateway)
+    gateway.handle(HTTP::Request.new("GET", address, bare)).status.should eq(403)
     found.body.should contain("## Queries")
     found.body.should contain("app/books.cr:12:7")
-    missing = "/__caramel/dev/trace.md?id=ffffff"
-    gateway.handle(HTTP::Request.new("GET", missing, headers)).status.should eq(404)
+    ["ffffff", "11111", "last", "", "..%2Fx", "ZZZZZZ"].each do |id|
+      address = "/__caramel/dev/trace.md?id=#{id}"
+      gateway.handle(HTTP::Request.new("GET", address, headers)).status.should eq(404)
+    end
   ensure
     FileUtils.rm_rf(root) if root
   end

@@ -8,9 +8,9 @@ module Caramel::Crema
     Development
   end
 
-  # The text a recorded bind takes when the value was NULL, how many binds a span keeps and how
-  # many bytes of each. A bind equal to NULL_BIND is written as NULL when a query is copied.
-  NULL_BIND  = "NULL"
+  # The text a recorded bind takes when the value was nil (a lone NUL character, which no text
+  # holds), how many binds a span keeps and how many bytes of each.
+  NULL_BIND  = "\u0000"
   BIND_LIMIT =  20
   BIND_BYTES = 200
 
@@ -43,6 +43,9 @@ module Caramel::Crema
     property error_class : String?
     property source : String?
     property binds : Array(String)?
+    # The binds as PostgreSQL literals, for copying the statement with its values. Development
+    # only, like `binds`.
+    property literals : Array(String)?
 
     def initialize(@kind : String,
                    @name : String,

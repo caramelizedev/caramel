@@ -129,7 +129,8 @@ module Caramel::Frappe
     end
 
     private def preload_fix(repeat : Repeat) : String
-      Crema::Render.preload_hint(repeat.entry.sql)
+      Crema::Render.preload_hint(repeat.entry.sql) ||
+        "load the records once, with a join or a preload, instead of once per record"
     end
   end
 end

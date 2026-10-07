@@ -3,6 +3,7 @@ require "./editor"
 require "./event"
 require "./frames"
 require "./redact"
+require "./sql_copy"
 require "./summary"
 
 module Caramel::Crema
@@ -13,7 +14,10 @@ module Caramel::Crema
     APPLICATION_DIRECTORIES = {"app/", "config/", "src/", "db/"}
     KINDS                   = %w[sql http view enqueue log dump]
     MAX_DEPTH               = 4
-    SQL_TOKEN               = /'(?:[^']|'')*'|\$(\d+)/
+    SHOWN_FRAMES            = 8
+    UNFILLED_NOTE           = "-- Some values could not be filled in; their $n stays.\n"
+    VALUES_TITLE            = "Values are written as PostgreSQL literals: numbers and booleans " \
+                              "bare, text, times and bytes quoted, nil as NULL, arrays as ARRAY[…]"
 
     @@secrets : Array(String)? = nil
 
@@ -187,8 +191,8 @@ module Caramel::Crema
         span.binds.try do |binds|
           next if binds.empty?
 
-          shown = binds.map { |bind| scrubbed(bind, 200) }
-          io << "\nbinds: " << inline(shown.inspect) << '\n'
+          shown = binds.map { |bind| bind == Crema::NULL_BIND ? bind : scrubbed(bind, 200) }
+          io << "\nbinds: " << inline(binds_text(shown)) << '\n'
         end
       end
     end
@@ -280,7 +284,8 @@ module Caramel::Crema
         width = {(span_ms(span) / total * 1000).round(1), 1.0}.max
         io << "<tr><td>" << HTML.escape(span.service) << "</td><td>" << HTML.escape(span.name)
         io << "</td><td>" << ms(span_ms(span)) << " ms</td><td>"
-        io << "<svg viewBox=\"0 0 1000 8\" class=\"bar" << (span.error? ? " error" : "")
+        io << "<svg viewBox=\"0 0 1000 8\" preserveAspectRatio=\"none\" aria-hidden=\"true\" "
+        io << "class=\"bar" << (span.error? ? " error" : "")
         io << "\"><rect x=\"" << x << "\" width=\"" << width << "\" height=\"8\"/></svg>"
         io << "</td></tr>"
       end
@@ -335,7 +340,9 @@ module Caramel::Crema
         io << "<tr><td>" << HTML.escape(span.kind) << "</td>"
         io << "<td class=\"d" << depth(event.spans, index) << "\">" << span_name(span, queries)
         io << "</td><td class=\"ms\">" << ms(span.duration_ms) << " ms</td>"
-        io << "<td><svg viewBox=\"0 0 1000 8\" class=\"bar " << kind_class(span.kind) << "\">"
+        io << "<td><svg viewBox=\"0 0 1000 8\" preserveAspectRatio=\"none\" aria-hidden=\"true\" "
+        io << "class=\"bar " << kind_class(span.kind)
+        io << (span.error_class ? " error" : "") << "\">"
         io << "<rect x=\"" << x << "\" width=\"" << width << "\" height=\"8\"/></svg></td></tr>"
       end
       io << "</tbody></table>"
@@ -350,30 +357,22 @@ module Caramel::Crema
       KINDS.includes?(kind) ? kind : "other"
     end
 
-    # The statement with each `$n` replaced by its bind value, ready to paste into psql.
-    # A value is written as a quoted literal, which PostgreSQL reads as the column's type;
-    # the bind NULL is written bare. A `$n` without a bind, and any text inside a quoted
-    # string, stays as it is.
-    def self.sql_with_values(sql : String, binds : Array(String)?) : String
-      return sql if binds.nil? || binds.empty?
-
-      sql.gsub(SQL_TOKEN) do |token, match|
-        number = match[1]?.try(&.to_i) || 0
-        (1..binds.size).includes?(number) ? literal(binds[number - 1]) : token
-      end
+    # The statement with each `$n` replaced by its value, ready to paste into psql: the span's
+    # literals when it has them, else its recorded binds written as quoted strings (a nil bind
+    # as NULL), which PostgreSQL reads as the column's type.
+    def self.sql_with_values(sql : String,
+                             binds : Array(String)?,
+                             literals : Array(String)? = nil) : String
+      SqlCopy.fill(sql, literals || literals_from_binds(binds))
     end
 
-    private def self.literal(value : String) : String
-      value == Crema::NULL_BIND ? "NULL" : "'#{value.gsub('\'', "''")}'"
+    private def self.literals_from_binds(binds : Array(String)?) : Array(String)?
+      binds.try(&.map { |bind| bind == Crema::NULL_BIND ? "NULL" : SqlCopy.quote(bind) })
     end
 
-    # Whether the recorded binds may have been cut short: at most BIND_LIMIT values of
-    # BIND_BYTES each are kept.
-    def self.binds_cut?(binds : Array(String)?) : Bool
-      return false unless binds
-
-      long = binds.any? { |bind| bind.bytesize >= Crema::BIND_BYTES }
-      long || binds.size >= Crema::BIND_LIMIT
+    # The binds as the table shows them: strings quoted, a nil bind as a bare NULL.
+    def self.binds_text(binds : Array(String)) : String
+      "[#{binds.map { |bind| bind == Crema::NULL_BIND ? "NULL" : bind.inspect }.join(", ")}]"
     end
 
     private def self.queries_html(io : IO,
@@ -405,29 +404,31 @@ module Caramel::Crema
       io << "</pre>"
       repeats.try { |count| io << "<span class=\"repeat-mark\">ran " << count << " times</span>" }
       io << "</td><td>"
-      span.binds.try { |binds| io << HTML.escape(binds.inspect) }
+      span.binds.try { |binds| io << HTML.escape(binds_text(binds)) }
       io << "</td><td>" << source_link(span.source, editor, root) << "</td><td class=\"copy\">"
-      copy_buttons(io, number, sql, span.binds)
+      copy_buttons(io, number, sql, span)
       io << "</td></tr>"
     end
 
-    # "Copy SQL" always; "Copy with values" when binds were recorded. The text sits in hidden
-    # elements the copy button names, so the page needs no inline script.
-    private def self.copy_buttons(io : IO,
-                                  number : Int32,
-                                  sql : String,
-                                  binds : Array(String)?) : Nil
-      copy_button(io, "sql-#{number}", "Copy SQL", sql)
-      return if binds.nil? || binds.empty?
+    # "Copy SQL" always; "Copy with values" when binds were recorded (development only).
+    private def self.copy_buttons(io : IO, number : Int32, sql : String, span : SpanEvent) : Nil
+      copy_button(io, "Copy SQL", sql)
+      return if span.binds.nil? && span.literals.nil?
 
-      note = binds_cut?(binds) ? "-- Some bind values were cut short when recorded.\n" : ""
-      text = note + sql_with_values(sql, binds)
-      copy_button(io, "sql-#{number}-values", "Copy with values", text)
+      filled = sql_with_values(sql, span.binds, span.literals)
+      note = SqlCopy.unfilled?(filled) ? UNFILLED_NOTE : ""
+      copy_button(io, "Copy with values", note + filled, VALUES_TITLE)
     end
 
-    private def self.copy_button(io : IO, id : String, label : String, text : String) : Nil
-      io << "<button type=\"button\" data-caramel-copy=\"" << id << "\">" << label << "</button>"
-      io << "<pre hidden id=\"" << id << "\">" << HTML.escape(text) << "</pre>"
+    # A button that copies *text*, which sits in the button's own attribute: no hidden
+    # element per query, and no inline script.
+    private def self.copy_button(io : IO,
+                                 label : String,
+                                 text : String,
+                                 title : String? = nil) : Nil
+      io << "<button type=\"button\" data-caramel-text=\"" << HTML.escape(text) << "\""
+      title.try { |hint| io << " title=\"" << HTML.escape(hint) << "\"" }
+      io << ">" << label << "</button>"
     end
 
     # *source* (`app/x.cr:12:7`) as an editor link, plain text without one.
@@ -451,9 +452,12 @@ module Caramel::Crema
       {parts[0, parts.size - count].join(':'), line || 1, column || 1}
     end
 
-    # The association a repeated query most likely wants preloaded, from its table name.
-    def self.preload_hint(sql : String) : String
-      table = Crema.summary(sql).partition(' ')[2]
+    # The association a repeated SELECT most likely wants preloaded, from its table name; nil
+    # for any other statement, or one that names no table.
+    def self.preload_hint(sql : String) : String?
+      verb, _, table = Crema.summary(sql).partition(' ')
+      return if verb != "SELECT" || table.empty?
+
       singular = table.ends_with?("ies") ? table.sub(/ies\z/, "y") : table.rchop('s')
       "preload the association in the query that loads the records, e.g. .preload(:#{singular})"
     end
@@ -466,7 +470,10 @@ module Caramel::Crema
         io << "<p class=\"warning\">Ran " << repeat.count << " times: <code>"
         io << HTML.escape(repeat.sql) << "</code>"
         repeat.source.try { |source| io << " at " << source_link(source, editor, root) }
-        io << "<br><strong>Fix:</strong> " << HTML.escape(preload_hint(repeat.sql)) << "</p>"
+        preload_hint(repeat.sql).try do |hint|
+          io << "<br><strong>Likely fix:</strong> " << HTML.escape(hint)
+        end
+        io << "</p>"
       end
     end
 
@@ -515,6 +522,7 @@ module Caramel::Crema
       return if frames.nil? || frames.empty?
 
       ours, others = frames.partition { |frame| application_frame?(frame, root) }
+      ours, others = {others.first(SHOWN_FRAMES), others.skip(SHOWN_FRAMES)} if ours.empty?
       io << "<h4>Backtrace</h4><ol class=\"backtrace\">"
       ours.each { |frame| io << "<li>" << frame_html(frame, editor, root) << "</li>" }
       io << "</ol>"

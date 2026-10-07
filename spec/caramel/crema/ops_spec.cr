@@ -129,6 +129,7 @@ describe Caramel::Crema::Ops do
       css = ops(path, "GET", "/console.css").body
       css.should contain(":root[data-theme=dark]")
       css.should contain(".bar.view rect")
+      css.scan(/var\((--[a-z-]+)\)/).each { |match| css.should contain("#{match[1]}:") }
       ops(path, "GET", "/console.js").body.should contain("data-caramel-theme")
     end
   end

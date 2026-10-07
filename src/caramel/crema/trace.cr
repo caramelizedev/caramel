@@ -37,6 +37,7 @@ module Caramel::Crema
     property error_class : String?
     property source : String?
     property binds : Array(String)?
+    property literals : Array(String)?
 
     def initialize(@kind : SpanKind, @name : String, @offset : Time::Span)
     end
@@ -55,6 +56,7 @@ module Caramel::Crema
 
       event.source = @source
       event.binds = @binds
+      event.literals = @literals
       event
     end
   end

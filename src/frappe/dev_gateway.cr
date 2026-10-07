@@ -17,6 +17,7 @@ module Caramel::Frappe
   class DevGateway
     include HTTP::Handler
     COOKIE          = "__Host-caramel_dev"
+    TRACE_ID        = /\A[0-9a-f]{6,32}\z/
     CLIENT          = {{ read_file("#{__DIR__}/dev_client.js") }}
     INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }} +
                       {{ read_file("#{__DIR__}/../caramel/crema/render.css") }}
@@ -242,7 +243,8 @@ module Caramel::Frappe
       return refused unless session_request?(request)
 
       inspector = @inspector || return secure(Caramel::Response.new(404, "Not found"))
-      text = inspector.markdown(request.query_params["id"]? || "")
+      id = request.query_params["id"]? || ""
+      text = inspector.markdown(id) if TRACE_ID.matches?(id)
       return secure(Caramel::Response.new(404, "No such trace")) unless text
 
       ok(text, "text/markdown; charset=utf-8")

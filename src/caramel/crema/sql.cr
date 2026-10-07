@@ -69,7 +69,9 @@ module Caramel::Crema
       private def self.annotate(trace : Trace, span : Span?, args : Array(SugarORM::Value)) : Nil
         return unless span && Crema.development?
 
-        span.binds = args.first(BIND_LIMIT).map { |arg| bind_text(arg) }
+        kept = args.first(BIND_LIMIT)
+        span.binds = kept.map { |arg| bind_text(arg) }
+        span.literals = kept.map { |arg| Literal.of(arg) }
         return if trace.spans.count(&.kind.sql?) > MAX_SOURCES
 
         root = Frames.root

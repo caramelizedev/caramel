@@ -1,18 +1,21 @@
 (() => {
-  // Copies the text of the element a [data-caramel-copy] button names, and says so on the button.
+  // Copies the text a [data-caramel-text] button carries, or the text of the element a
+  // [data-caramel-copy] button names, and says so on the button.
   document.addEventListener('click', async event => {
-    const button = event.target.closest?.('[data-caramel-copy]');
+    const button = event.target.closest?.('[data-caramel-copy], [data-caramel-text]');
     if (!button) return;
-    const source = document.getElementById(button.dataset.caramelCopy);
-    if (!source) return;
+    const source = button.dataset.caramelCopy ? document.getElementById(button.dataset.caramelCopy) : null;
+    const text = button.dataset.caramelText ?? source?.textContent;
+    if (text === undefined) return;
     const label = button.dataset.label || (button.dataset.label = button.textContent);
     try {
-      await navigator.clipboard.writeText(source.textContent);
+      await navigator.clipboard.writeText(text);
       button.textContent = 'Copied';
     } catch (_) {
       button.textContent = 'Copy failed';
     }
-    setTimeout(() => { button.textContent = label; }, 1500);
+    clearTimeout(button.timer);
+    button.timer = setTimeout(() => { button.textContent = label; }, 1500);
   });
 
   // The colour theme: follow the system (auto), or force light or dark; kept in localStorage.
@@ -38,7 +41,7 @@
     try { next === 'auto' ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, next); } catch (_) { /* Private mode. */ }
     applyTheme();
   });
-  addEventListener('storage', event => { if (event.key === THEME) applyTheme(); });
+  addEventListener('storage', event => { if (event.key === THEME || event.key === null) applyTheme(); });
   applyTheme();
 
   const list = document.getElementById('tail');

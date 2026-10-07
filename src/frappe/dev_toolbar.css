@@ -1,4 +1,4 @@
-:host{all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483647;display:flex;flex-direction:column-reverse;align-items:flex-end;gap:8px;max-width:calc(100vw - 24px);font:12px/1.4 system-ui,sans-serif;color-scheme:dark;--ink:#faf8f3;--muted:#c4baad;--panel:#2b2622;--line:#4a4239;--rule:#4a4239;--ok:#86d493;--warn:#f2bd62;--bad:#ff9482;--wait:#c4baad;--chip:rgba(255,255,255,.08);--hover:rgba(255,255,255,.07);--errrow:rgba(255,148,130,.1);--ring:rgba(255,148,130,.35);--shadow:rgba(0,0,0,.3);--unread-ink:#1d1a16}
+:host{all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483647;display:flex;flex-direction:column-reverse;align-items:flex-end;gap:8px;max-width:calc(100vw - 24px);font:12px/1.4 system-ui,sans-serif;color-scheme:dark;--ink:#faf8f3;--muted:#c4baad;--panel:#2b2622;--line:#8a8178;--rule:#4a4239;--ok:#86d493;--warn:#f2bd62;--bad:#ff9482;--wait:#c4baad;--chip:rgba(255,255,255,.08);--hover:rgba(255,255,255,.07);--errrow:rgba(255,148,130,.1);--ring:rgba(255,148,130,.35);--shadow:rgba(0,0,0,.3);--unread-ink:#1d1a16}
 @media (prefers-color-scheme:light){:host(:not([data-theme=dark])){color-scheme:light;--ink:#332d27;--muted:#5e564c;--panel:#fff;--line:#8a8178;--rule:#e5dfd4;--ok:#1d7a35;--warn:#8a5a00;--bad:#b3261e;--wait:#6b6358;--chip:rgba(0,0,0,.06);--hover:rgba(0,0,0,.05);--errrow:rgba(179,38,30,.08);--ring:rgba(179,38,30,.25);--shadow:rgba(0,0,0,.18);--unread-ink:#fff}}
 :host([data-theme=light]){color-scheme:light;--ink:#332d27;--muted:#5e564c;--panel:#fff;--line:#8a8178;--rule:#e5dfd4;--ok:#1d7a35;--warn:#8a5a00;--bad:#b3261e;--wait:#6b6358;--chip:rgba(0,0,0,.06);--hover:rgba(0,0,0,.05);--errrow:rgba(179,38,30,.08);--ring:rgba(179,38,30,.25);--shadow:rgba(0,0,0,.18);--unread-ink:#fff}
 *{box-sizing:border-box}
@@ -64,6 +64,5 @@ ol.recent .empty{padding:10px 14px;color:var(--muted)}
 @keyframes pulse{50%{opacity:.3}}
 @media (prefers-reduced-motion:reduce){.dot.wait{animation:none}}
 @media (max-width:520px){.bar .metric.queries,.bar .copy{display:none}.bar{gap:8px}.long{display:none}.short{display:inline}.row{grid-template-columns:8px minmax(0,1fr) 40px 62px auto}.row .queries{display:none}.row .flags{max-width:92px}}
-@media (hover:none){.hint{display:none}}
-@media (max-width:520px){.hint{display:none}}
+@media (hover:none),(max-width:520px){.panel footer{display:none}}
 .minimise{font-size:15px;line-height:1}
