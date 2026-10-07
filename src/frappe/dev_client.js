@@ -7,6 +7,8 @@
   const session = { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Caramel-Dev': '1' } };
   const RECENT = 10;
   const REMEMBER = 'caramel.dev.toolbar';
+  const THEME = 'caramel.dev.theme';
+  const CHOICES = ['auto', 'light', 'dark'];
   let stopped = false;
   let seen = null;
   let toolbar = null;
@@ -22,6 +24,39 @@
     const source = document.getElementById(button.dataset.caramelCopy);
     if (source) navigator.clipboard.writeText(source.textContent);
   });
+
+  // The colour theme: follow the system (auto), or force light or dark. The choice is shared
+  // by the toolbar and the inspector through localStorage, and by every open tab.
+  function themeChoice() {
+    try {
+      const saved = localStorage.getItem(THEME);
+      return saved === 'light' || saved === 'dark' ? saved : 'auto';
+    } catch (_) { return 'auto'; }
+  }
+
+  function applyTheme() {
+    const choice = themeChoice();
+    const targets = [toolbar?.host];
+    if (location.pathname.startsWith(inspector)) targets.push(document.documentElement);
+    for (const node of targets) {
+      if (!node) continue;
+      if (choice === 'auto') delete node.dataset.theme; else node.dataset.theme = choice;
+    }
+    const label = 'Theme: ' + choice;
+    const buttons = [...document.querySelectorAll('[data-caramel-theme]'), toolbar?.theme];
+    for (const button of buttons) if (button) button.textContent = label;
+  }
+
+  function cycleTheme() {
+    const next = CHOICES[(CHOICES.indexOf(themeChoice()) + 1) % CHOICES.length];
+    try { next === 'auto' ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, next); } catch (_) { /* Private mode. */ }
+    applyTheme();
+  }
+
+  document.addEventListener('click', event => {
+    if (event.target.closest?.('[data-caramel-theme]')) cycleTheme();
+  });
+  addEventListener('storage', event => { if (event.key === THEME) applyTheme(); });
 
   addEventListener('pagehide', () => { stopped = true; });
   addEventListener('pageshow', event => {
@@ -110,13 +145,15 @@
     const dot = element('button', undefined, { class: 'dot-only', type: 'button', 'aria-label': 'Show the development toolbar', title: 'Show the toolbar', 'data-state': 'wait' });
     const list = element('ol', undefined, { class: 'recent' });
     const open = element('a', 'Open inspector', { class: 'inspector', href: inspector, target: '_blank', rel: 'noopener' });
+    const theme = element('button', undefined, { class: 'theme', type: 'button', title: 'Colour theme: click to change' });
     const panel = element('section', undefined, { class: 'panel', id: 'panel', 'aria-label': 'Recent requests' },
-      element('header', undefined, undefined, element('strong', 'Recent requests'), open), list,
+      element('header', undefined, undefined, element('strong', 'Recent requests'), open, theme), list,
       element('footer', 'Esc closes this list'));
     panel.hidden = true;
     root.append(element('link', undefined, { rel: 'stylesheet', href: '/__caramel/dev/toolbar.css' }), bar, panel, dot);
     toggle.addEventListener('click', () => setOpen(panel.hidden));
     minimise.addEventListener('click', () => setMinimised(true));
+    theme.addEventListener('click', cycleTheme);
     dot.addEventListener('click', () => setMinimised(false));
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && !panel.hidden) { setOpen(false); toggle.focus(); }
@@ -125,7 +162,7 @@
       if (!panel.hidden && !event.composedPath().includes(host)) setOpen(false);
     });
     document.body.append(host);
-    const made = { host, root, bar, toggle, minimise, dot, panel, list };
+    const made = { host, root, bar, toggle, minimise, dot, panel, list, theme };
     return made;
   }
 
@@ -211,6 +248,7 @@
   async function start() {
     if (!requestId || !document.body) return;
     toolbar = buildToolbar();
+    applyTheme();
     setMinimised(remembered());
     showWaiting();
     renderRows();
@@ -266,6 +304,7 @@
     if (!stopped) setTimeout(check, 400);
   }
 
+  applyTheme();
   start();
   check();
 })();

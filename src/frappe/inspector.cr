@@ -170,9 +170,13 @@ module Caramel::Frappe
       nav = NAV.join(" ") { |name, href| "<a href=\"#{href}\">#{name}</a>" }
       html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" \
              "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" \
+             "<meta name=\"color-scheme\" content=\"light dark\">" \
              "<title>#{Caramel::HTML.escape(title)} · Frappé inspector</title>" \
+             "<script src=\"/__caramel/dev/theme.js\"></script>" \
              "<link rel=\"stylesheet\" href=\"/__caramel/dev/inspector.css\"></head>" \
-             "<body><header><strong>FRAPPÉ INSPECTOR</strong><nav>#{nav}</nav></header>" \
+             "<body><header><strong>FRAPPÉ INSPECTOR</strong><nav>#{nav}</nav>" \
+             "<button type=\"button\" class=\"theme\" data-caramel-theme " \
+             "title=\"Colour theme: click to change\">Theme: auto</button></header>" \
              "<main><h1>#{Caramel::HTML.escape(title)}</h1>#{body}</main></body></html>"
       headers = HTTP::Headers{"Content-Type" => "text/html; charset=utf-8"}
       Caramel::Response.new(200, html, headers)

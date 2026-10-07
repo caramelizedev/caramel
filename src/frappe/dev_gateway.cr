@@ -20,6 +20,7 @@ module Caramel::Frappe
     CLIENT          = {{ read_file("#{__DIR__}/dev_client.js") }}
     INSPECTOR_STYLE = {{ read_file("#{__DIR__}/inspector.css") }}
     TOOLBAR_STYLE   = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
+    THEME           = {{ read_file("#{__DIR__}/dev_theme.js") }}
     PREFIX          = "/__caramel/dev/"
 
     # The diagnostic page's stylesheet.
@@ -150,6 +151,7 @@ module Caramel::Frappe
     private def endpoints : Hash(String, Proc(HTTP::Request, Caramel::Response))
       {
         "#{PREFIX}client.js"     => ->(_request : HTTP::Request) { script_asset(CLIENT) },
+        "#{PREFIX}theme.js"      => ->(_request : HTTP::Request) { script_asset(THEME) },
         "#{PREFIX}style.css"     => ->(_request : HTTP::Request) { stylesheet(STYLE) },
         "#{PREFIX}inspector.css" => ->(_request : HTTP::Request) { stylesheet(INSPECTOR_STYLE) },
         "#{PREFIX}toolbar.css"   => ->(_request : HTTP::Request) { stylesheet(TOOLBAR_STYLE) },
