@@ -240,3 +240,27 @@ describe "The ops socket's error ring" do
     end
   end
 end
+
+describe Caramel::Crema::OpsClient do
+  # Exit status of the client against a socket that does not exist: 2 means the arguments
+  # were refused as usage, 1 means they were accepted and only the socket was missing.
+  exit_status = ->(arguments : Array(String)) do
+    socket = "--socket=/private/tmp/caramel-no-such-ops.sock"
+    Caramel::Crema::OpsClient.new(arguments + [socket], IO::Memory.new, IO::Memory.new).run
+  end
+
+  it "refuses a value on a reason flag of traces instead of reading it as no filter" do
+    exit_status.call(["traces", "--slow=500"]).should eq(2)
+    exit_status.call(["traces", "--errors=1"]).should eq(2)
+    exit_status.call(["traces", "--slow"]).should eq(1)
+    exit_status.call(["traces", "--debug", "--limit=5"]).should eq(1)
+  end
+
+  it "refuses a numeric option given without a number, so tail's bare --slow is not ignored" do
+    exit_status.call(["tail", "--slow"]).should eq(2)
+    exit_status.call(["tail", "--slow=abc"]).should eq(2)
+    exit_status.call(["traces", "--limit"]).should eq(2)
+    exit_status.call(["debug-token", "--minutes"]).should eq(2)
+    exit_status.call(["tail", "--slow=500", "--errors"]).should eq(1)
+  end
+end

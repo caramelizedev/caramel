@@ -13,6 +13,7 @@ module Caramel::Crema
     READ_TIMEOUT = 10.seconds
     COMMANDS     = %w[status requests fibers metrics tail errors error traces trace debug-token
       console]
+    REASON_FLAGS = %w[--errors --slow --debug]
 
     struct Options
       getter words = [] of String
@@ -61,13 +62,18 @@ module Caramel::Crema
       1
     end
 
-    # A command that needs a reference has one, and numeric flags are numbers.
+    # A command that needs a reference has one. `traces` takes its reason flags bare, so
+    # `--slow=500` is refused instead of being read as no filter; every other numeric
+    # option takes a whole number, so a bare `--slow` is refused too.
     private def valid_arguments?(command : String) : Bool
       return false if {"error", "trace"}.includes?(command) && argument.empty?
 
-      {"--slow", "--limit", "--minutes"}.all? do |flag|
+      traces = command == "traces"
+      return false if traces && REASON_FLAGS.any? { |flag| @options[flag]? }
+
+      (traces ? {"--limit"} : {"--slow", "--limit", "--minutes"}).all? do |flag|
         value = @options[flag]?
-        value.nil? || !value.to_i?.nil?
+        !@options.flag?(flag) && (value.nil? || !value.to_i?.nil?)
       end
     end
 
