@@ -47,7 +47,8 @@ describe Caramel::Crema::SqlCopy do
     fill.call(%(SELECT E'a\\\\', $1)).should eq(%(SELECT E'a\\\\', 1))
     fill.call(%(SELECT '\\', $1)).should eq(%(SELECT '\\', 1))
     fill.call(%(SELECT 'it''s $1', $1)).should eq(%(SELECT 'it''s $1', 1))
-    fill.call(%(SELECT e'x $1', $1)).should eq(%(SELECT e'x $1', 1))
+    fill.call(%(SELECT e'a\\'b $1', $1)).should eq(%(SELECT e'a\\'b $1', 1))
+    fill.call(%(SELECT a$$ $1 b$$, $1)).should eq(%(SELECT a$$ 1 b$$, 1))
     fill.call(%(SELECT a AS name$1, $1)).should eq(%(SELECT a AS name$1, 1))
   end
 

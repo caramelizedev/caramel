@@ -12,8 +12,8 @@ module Caramel::Crema
       | "(?:[^"]++|"")*+"          # an identifier
       | --[^\n]*+                  # a line comment
       | \/\*.*?\*\/                # a block comment
-      | \$\$.*?\$\$                # a dollar-quoted body
-      | \$(?<tag>[A-Za-z_]\w*)\$.*?\$\k<tag>\$
+      | (?<![A-Za-z0-9_$])\$\$.*?\$\$   # a dollar-quoted body
+      | (?<![A-Za-z0-9_$])\$(?<tag>[A-Za-z_]\w*)\$.*?\$\k<tag>\$
       | (?<![A-Za-z0-9_$])\$(?<n>\d+)                # a placeholder
     /mx
 

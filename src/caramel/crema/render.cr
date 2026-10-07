@@ -387,9 +387,10 @@ module Caramel::Crema
     end
 
     private def self.shortened(text : String) : String
-      return text if text.bytesize <= Crema::BIND_BYTES
+      limit = Crema::BIND_BYTES + 2
+      return text if text.bytesize <= limit
 
-      "#{text.byte_slice(0, Crema::BIND_BYTES).scrub}…"
+      "#{text.byte_slice(0, limit).scrub("")}…"
     end
 
     # The binds as the Queries table shows them, the way the copied statement writes them:
