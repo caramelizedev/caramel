@@ -7,14 +7,14 @@ module Caramel::Crema
     # is: a quoted string (an `E'..'` string honours backslash escapes) or identifier, a
     # comment, a dollar-quoted body.
     TOKEN = /
-      (?<![A-Za-z0-9_])[eE]'(?:[^'\\]++|\\.|'')*+'   # an escape string
+      (?<![A-Za-z0-9_$])[eE]'(?:[^'\\]++|\\.|'')*+'   # an escape string
       | '(?:[^']++|'')*+'          # a string
       | "(?:[^"]++|"")*+"          # an identifier
       | --[^\n]*+                  # a line comment
       | \/\*.*?\*\/                # a block comment
       | \$\$.*?\$\$                # a dollar-quoted body
       | \$(?<tag>[A-Za-z_]\w*)\$.*?\$\k<tag>\$
-      | \$(?<n>\d+)                # a placeholder
+      | (?<![A-Za-z0-9_$])\$(?<n>\d+)                # a placeholder
     /mx
 
     # Longest literal kept; a longer value is left as its `$n`.

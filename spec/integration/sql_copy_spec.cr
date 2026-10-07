@@ -57,6 +57,7 @@ describe "a statement copied with its values" do
           {"SELECT * FROM copy_books WHERE (name = E'it\\'s a \\\\ test' OR n = $1) " \
            "AND E'a $1' = 'a $1' #{order}",
            [4] of SugarORM::Value},
+          {"SELECT id AS id$1 FROM copy_books WHERE n = $1 #{order}", [2] of SugarORM::Value},
           {"SELECT * FROM copy_books WHERE name <> '\\' AND n = $1 #{order}",
            [1] of SugarORM::Value},
           {"SELECT * FROM copy_books WHERE note LIKE $1 AND n = $2 #{order}",
