@@ -6,6 +6,9 @@ include Corretto::Matchers
 
 PRODUCTION_LEAK = "development diagnostic code must be absent from production binary"
 REQUEST_ID      = /\A[0-9a-f-]{36}\z/
+SINK            = "CARAMEL_DEV_EVENTS"
+UNLINKED_SINK   = "the development build must carry the dev sink; " \
+                  "the fixture does not link the Crema runtime"
 
 fixture = File.join(Caramel::Checks::REPO, "spec/fixtures/runtime_errors")
 marker = "CARAMEL DEVELOPMENT EXCEPTION"
@@ -18,9 +21,11 @@ begin
     command.concat(["-D", "caramel_development"]) if mode == "development"
     build = Caramel::Checks.crystal(command, timeout: 1.hour)
     Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
-    present = File.read(binary).includes?(marker)
-    Caramel::Checks.fail(PRODUCTION_LEAK) unless present == (mode == "development")
-    Caramel::Checks.fail(PRODUCTION_LEAK) if File.read(binary).includes?("CARAMEL_DEV_EVENTS")
+    contents = File.read(binary)
+    development = mode == "development"
+    Caramel::Checks.fail(PRODUCTION_LEAK) unless contents.includes?(marker) == development
+    Caramel::Checks.fail(PRODUCTION_LEAK) if !development && contents.includes?(SINK)
+    Caramel::Checks.fail(UNLINKED_SINK) if development && !contents.includes?(SINK)
     {"production", "development", "test"}.each do |environment|
       {"full", "partial", "json"}.each do |variant|
         partial = variant == "partial"

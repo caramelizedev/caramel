@@ -3,6 +3,8 @@ require "../../../src/caramel/action"
 require "../../../src/caramel/http/router"
 require "json"
 require "./app/controller"
+# Links the Crema runtime, so a development build carries the dev sink.
+require "../../../src/caramel/crema/runtime"
 
 Log.setup(:error, Log::IOBackend.new(STDERR))
 
