@@ -62,6 +62,18 @@ module Caramel::Checks
       };
       JS
 
+    ROSTER_EVIDENCE = <<-JS
+      const p = window.__probe;
+      return JSON.stringify({
+        requests: p.requests.slice(arguments[0]),
+        responses: p.responses.slice(arguments[0]),
+        settled: p.settled,
+        inflight: p.inflight,
+        count: document.getElementById('roster-count')?.textContent ?? null,
+        roster: document.getElementById('roster')?.innerHTML.slice(0, 4000) ?? null,
+      }, null, 2);
+      JS
+
     @driver : WebDriver?
 
     # Safari delivers WebDriver clicks through the window server, which
@@ -228,9 +240,20 @@ module Caramel::Checks
           JS
         driver.send_keys(driver.find("#enroll-name"), "Katherine Johnson")
         driver.click(driver.find("#enroll-submit"))
-        wait_for("the roster count to reach 3") do
-          js("return window.__probe.inflight === 0 && " \
-             "document.getElementById('roster-count').textContent === '3'").as_bool
+        clicked = Time.instant
+        begin
+          wait_within(clicked, "htmx to start the POST after the click") do
+            js("return window.__probe.requests.length > arguments[0]", baseline).as_bool
+          end
+          wait_within(clicked, "the POST to finish") do
+            js("return window.__probe.responses.length > arguments[0] && " \
+               "window.__probe.inflight === 0", baseline).as_bool
+          end
+          wait_within(clicked, "the roster count to reach 3") do
+            js("return document.getElementById('roster-count').textContent === '3'").as_bool
+          end
+        rescue ex
+          raise "#{ex.message}\n#{roster_evidence(baseline)}"
         end
         state = js(<<-JS, baseline)
           const note = document.getElementById('roster-note');
@@ -521,11 +544,37 @@ module Caramel::Checks
       "(page diagnostics unavailable: #{ex.message})"
     end
 
+    private def roster_evidence(baseline : Int32) : String
+      state = begin
+        js(ROSTER_EVIDENCE, baseline).as_s
+      rescue ex
+        "(roster state unavailable: #{ex.message})"
+      end
+      "Roster state: #{state}\nApp log, last 40 lines:\n#{app_log_tail(40)}"
+    end
+
+    private def app_log_tail(count : Int32) : String
+      File.read_lines(File.join(@fixture.root, "app.log")).last(count).join('\n')
+    rescue ex : File::Error
+      "(app.log unavailable: #{ex.message})"
+    end
+
     private def wait_for(description : String,
                          timeout : Time::Span = 10.seconds,
                          &condition : -> Bool) : Nil
       return if Checks.wait_until(timeout, 50.milliseconds, &condition)
       raise "Timed out after #{timeout.total_seconds.to_i}s waiting for #{description}"
+    end
+
+    # Waits for one stage of a sequence that shares a single budget measured from *started*,
+    # so the stages together are exactly as strict as one wait of that length.
+    private def wait_within(started : Time::Instant, description : String,
+                            budget : Time::Span = 10.seconds,
+                            &condition : -> Bool) : Nil
+      remaining = {budget - (Time.instant - started), Time::Span.zero}.max
+      return if Checks.wait_until(remaining, 50.milliseconds, &condition)
+      raise "Timed out after #{budget.total_seconds.to_i}s from the click " \
+            "waiting for #{description}"
     end
 
     private def js(script : String, *args) : JSON::Any
