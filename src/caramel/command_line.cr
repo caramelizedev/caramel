@@ -204,7 +204,12 @@ module Caramel
     def self.with_database(migration : Bool,
                            application_name : String = "caramel",
                            & : DB::Database, String -> Int32) : Int32
-      url = Database.url(migration: migration)
+      url = begin
+        Database.url(migration: migration)
+      rescue ex : Database::ConfigurationError
+        STDERR.puts(ex.message)
+        return 1
+      end
       if expected = ENV["CARAMEL_EXPECTED_DATABASE_URL"]?
         unless url == expected
           abort("Database connection differs from the verified launcher configuration")
@@ -212,7 +217,7 @@ module Caramel
       elsif ENV["CARAMEL_ENV"]? == "test"
         abort("Run specs through frappe corretto")
       end
-      db = Database.open(url, application_name: application_name)
+      db = open_database(url, application_name) || return 1
       begin
         SugarORM::Repo.database = db
         yield db, url
@@ -229,6 +234,22 @@ module Caramel
       ensure
         db.close
       end
+    end
+
+    # Opens the pool, or prints why it could not and returns nil. Failures after
+    # the pool opens belong to the command and stay unhandled.
+    private def self.open_database(url : String, application_name : String) : DB::Database?
+      Database.open(url, application_name: application_name)
+    rescue ex : ArgumentError | URI::Error | OverflowError
+      STDERR.puts("Invalid database configuration: #{ex.message}")
+      nil
+    rescue ex : DB::ConnectionRefused
+      reason = ex.cause.try(&.message).presence || "connection refused"
+      STDERR.puts("Could not connect to the database: #{reason}")
+      nil
+    rescue ex : IO::Error | OpenSSL::SSL::Error
+      STDERR.puts("Could not connect to the database: #{ex.message.presence || ex.class.name}")
+      nil
     end
 
     private def self.database_command(app : T.class,
