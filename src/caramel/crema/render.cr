@@ -4,6 +4,7 @@ require "./event"
 require "./frames"
 require "./redact"
 require "./sql_copy"
+require "./sql_format"
 require "./summary"
 
 module Caramel::Crema
@@ -414,16 +415,19 @@ module Caramel::Crema
       "#{text.byte_slice(0, limit).scrub("")}…"
     end
 
-    # The binds as the Queries table shows them, the way the copied statement writes them:
-    # `42`, `'acme'`, `NULL`, each cut to BIND_BYTES. A bind with no literal (too long to
-    # keep) shows as recorded. Nil when the span has neither.
-    def self.binds_display(binds : Array(String)?, literals : Array(String)?) : String?
-      return binds.try { |recorded| binds_text(recorded) } if literals.nil? || literals.empty?
+    # Each bind as the copy writes it (`42`, `'acme'`, `NULL`), cut to BIND_BYTES. A bind with
+    # no literal (too long to keep) shows as recorded. Nil when the span has neither.
+    def self.bind_values(binds : Array(String)?, literals : Array(String)?) : Array(String)?
+      return binds.try(&.map { |bind| bind_text(bind) }) if literals.nil? || literals.empty?
 
-      shown = literals.map_with_index do |literal, index|
+      literals.map_with_index do |literal, index|
         literal.empty? ? recorded_bind(binds, index) : shortened(literal)
       end
-      "[#{shown.join(", ")}]"
+    end
+
+    # The binds as one line, the way the development error page shows them.
+    def self.binds_display(binds : Array(String)?, literals : Array(String)?) : String?
+      bind_values(binds, literals).try { |values| "[#{values.join(", ")}]" }
     end
 
     private def self.queries_html(io : IO,
@@ -437,39 +441,81 @@ module Caramel::Crema
       end
 
       repeats = event.repeated.to_h { |repeat| {repeat.sql, repeat.count} }
-      io << "<h3 id=\"queries\">Queries</h3><table class=\"queries\"><thead><tr>"
-      io << "<th class=\"ms\">Duration</th><th>SQL</th><th>Binds</th><th>Source</th><th>Copy</th>"
-      io << "</tr></thead><tbody>"
+      io << "<h3 id=\"queries\">Queries</h3><ol class=\"queries\">"
       queries.each_with_index do |span, index|
-        query_row(io, span, index + 1, repeats[span.detail || span.name]?, editor, root)
+        query_card(io, span, index + 1, repeats[span.detail || span.name]?, editor, root)
       end
-      io << "</tbody></table>"
+      io << "</ol>"
     end
 
-    private def self.query_row(io : IO,
-                               span : SpanEvent,
-                               number : Int32,
-                               repeats : Int32?,
-                               editor : Editor?,
-                               root : String?) : Nil
+    # One query: a header line, the statement laid out, then each bind beside its `$n`.
+    private def self.query_card(io : IO,
+                                span : SpanEvent,
+                                number : Int32,
+                                repeats : Int32?,
+                                editor : Editor?,
+                                root : String?) : Nil
       sql = span.detail || span.name
-      io << "<tr id=\"q" << number << "\"" << (repeats ? " class=\"repeated\"" : "") << ">"
-      io << "<td class=\"ms\">" << ms(span.duration_ms) << " ms</td><td><pre>" << HTML.escape(sql)
-      io << "</pre>"
+      filled = (span.binds || span.literals) ? sql_with_values(sql, span.binds, span.literals) : nil
+      io << "<li id=\"q" << number << "\" class=\"query" << (repeats ? " repeated" : "") << "\">"
+      query_head(io, span, number, repeats, source_link(span.source, editor, root), sql, filled)
+      io << SqlFormat.html(sql)
+      binds_list(io, bind_values(span.binds, span.literals), filled)
+      io << "</li>"
+    end
+
+    private def self.query_head(io : IO,
+                                span : SpanEvent,
+                                number : Int32,
+                                repeats : Int32?,
+                                source : String,
+                                sql : String,
+                                filled : String?) : Nil
+      io << "<div class=\"query-head\"><a class=\"query-no\" href=\"#q" << number << "\">#"
+      io << number << "</a><span class=\"query-ms\">" << ms(span.duration_ms) << " ms</span>"
+      io << "<span class=\"query-name\">" << HTML.escape(span.name) << "</span>"
       repeats.try { |count| io << "<span class=\"repeat-mark\">ran " << count << " times</span>" }
-      io << "</td><td>"
-      binds_display(span.binds, span.literals).try { |text| io << HTML.escape(text) }
-      io << "</td><td>" << source_link(span.source, editor, root) << "</td><td class=\"copy\">"
-      copy_buttons(io, number, sql, span)
-      io << "</td></tr>"
+      io << "<span class=\"query-end\">"
+      io << "<span class=\"query-source\">" << source << "</span>" unless source.empty?
+      io << "<span class=\"query-copy\">"
+      copy_buttons(io, sql, filled)
+      io << "</span></span></div>"
+    end
+
+    # The binds as a `$n` and value row each, with a note when the copy cannot fill every `$n`.
+    private def self.binds_list(io : IO, values : Array(String)?, filled : String?) : Nil
+      return if values.nil? || values.empty?
+
+      io << "<dl class=\"binds\" aria-label=\"Bind values\">"
+      values.each_with_index { |value, index| bind_row(io, index + 1, value) }
+      io << "</dl>"
+      return unless filled && SqlCopy.unfilled?(filled)
+
+      io << "<p class=\"binds-note\">Some placeholders have no recorded value; "
+      io << "Copy with values leaves them as $n.</p>"
+    end
+
+    private def self.bind_row(io : IO, number : Int32, value : String) : Nil
+      kind = value_class(value).try { |name| " class=\"#{name}\"" }
+      io << "<dt data-n=\"" << number << "\">$" << number << "</dt>"
+      io << "<dd data-n=\"" << number << "\"><code" << kind << ">" << HTML.escape(value)
+      io << "</code></dd>"
+    end
+
+    # How a bind value is coloured: the class its kind takes in the statement above it.
+    private def self.value_class(value : String) : String?
+      return "str" if value.starts_with?('\'') || value.starts_with?('"')
+      return "num" if value.matches?(/\A-?\d/)
+      return "null" if value == "NULL"
+
+      "kw" if value == "true" || value == "false"
     end
 
     # "Copy SQL" always; "Copy with values" when binds were recorded (development only).
-    private def self.copy_buttons(io : IO, number : Int32, sql : String, span : SpanEvent) : Nil
+    private def self.copy_buttons(io : IO, sql : String, filled : String?) : Nil
       copy_button(io, "Copy SQL", sql)
-      return if span.binds.nil? && span.literals.nil?
+      return unless filled
 
-      filled = sql_with_values(sql, span.binds, span.literals)
       note = SqlCopy.unfilled?(filled) ? UNFILLED_NOTE : ""
       copy_button(io, "Copy with values", note + filled, VALUES_TITLE)
     end

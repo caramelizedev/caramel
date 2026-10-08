@@ -1,4 +1,3 @@
-td pre{margin:0;padding:0;border:0;background:transparent}
 dl.summary{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px}
 dl.summary dt{color:var(--muted)}
 dl.summary dd{margin:0}
@@ -18,10 +17,32 @@ th .axis{display:flex;justify-content:space-between;font-weight:400}
 .bar.dump rect{fill:var(--k-dump)}
 .bar.error rect{fill:var(--bad)}
 .warning{padding:8px 12px;border:1px solid var(--note-line);background:var(--note);border-radius:6px}
-table.queries tr.repeated td{background:var(--note)}
-.repeat-mark{display:inline-block;margin-top:6px;padding:0 8px;border:1px solid var(--note-line);border-radius:999px;font-size:12px;font-weight:600}
-td.copy{white-space:nowrap}
-td.copy button{display:block;margin-bottom:4px;padding:2px 8px;font-size:13px}
+.repeat-mark{display:inline-block;margin:0;padding:0 8px;border:1px solid var(--note-line);border-radius:999px;font-size:12px;font-weight:600}
+ol.queries{list-style:none;margin:0;padding:0}
+li.query{margin:0 0 10px;padding:10px 14px 12px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+li.query.repeated{background:var(--note);border-color:var(--note-line);border-left-width:4px}
+li.query:target{outline:2px solid var(--link);outline-offset:2px}
+.query-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;margin-bottom:8px}
+.query-no{color:var(--muted);text-decoration:none;font:13px ui-monospace,monospace}
+.query-ms{font-variant-numeric:tabular-nums;white-space:nowrap}
+.query-name{font:600 13px ui-monospace,monospace;overflow-wrap:anywhere}
+.query-end{margin-left:auto;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.query-source{font-size:13px;overflow-wrap:anywhere}
+.query-copy{display:flex;gap:6px}
+.query-copy button{padding:1px 8px;font-size:12px;background:transparent}
+code.sql{display:block;font:13px/1.6 ui-monospace,monospace}
+code.sql .line{display:block;white-space:pre-wrap;overflow-wrap:break-word;padding-left:4ch;text-indent:-4ch}
+code.sql .line.cond{padding-left:6ch}
+code.sql .kw,dl.binds .kw{color:var(--k-view);font-weight:600}
+code.sql .str,dl.binds .str{color:var(--k-enqueue)}
+code.sql .num,dl.binds .num{color:var(--k-http)}
+code.sql .ph{color:var(--k-sql);font-weight:600}
+code.sql .cm,dl.binds .null{color:var(--muted);font-style:italic}
+dl.binds{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 12px;margin:10px 0 0;padding-top:8px;border-top:1px solid var(--rule);font:13px/1.5 ui-monospace,monospace}
+dl.binds dt{color:var(--k-sql);font-weight:600}
+dl.binds dd{margin:0}
+dl.binds dd code{white-space:pre-wrap;overflow-wrap:anywhere}
+.binds-note{margin:6px 0 0;color:var(--muted);font-size:13px}
 .logs .warn,.logs .error{color:var(--bad)}
 ol.backtrace{padding-left:24px;font:13px ui-monospace,monospace}
 details.internal{margin-top:8px;color:var(--muted)}
