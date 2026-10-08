@@ -17,6 +17,7 @@ PROBLEMS = [
   {"twice", "locale 'en' is declared twice"},
   {"key_identifier", "catalog key 'home.Title' is not a lowercase identifier"},
   {"key_reserved", "catalog key 'home.class' is reserved by Crystal or Caramel"},
+  {"key_finalize", "catalog key 'home.finalize' is reserved by Crystal or Caramel"},
   {"interpolation", "catalog text is literal: 'home.greeting' interpolates Crystal; " \
                     "write %{name} placeholders"},
   {"extra_key", "fr defines 'home.extra', which the default locale en does not"},

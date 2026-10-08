@@ -198,7 +198,8 @@ module Caramel
                            "\nRemediation: start it with a letter and use only lowercase " +
                            "letters, digits and single underscores." %}
           {% end %}
-          {% if ::Caramel::I18n::RESERVED_KEYS.includes?(name) %}
+          {% if ::Caramel::I18n::RESERVED_KEYS.includes?(name) ||
+                  ::Caramel::I18n::KEY_ONLY_RESERVED.includes?(name) %}
             {% value.raise "catalog key '#{path.id}' is reserved by Crystal or Caramel" + at +
                            "\nRemediation: rename the key." %}
           {% end %}
