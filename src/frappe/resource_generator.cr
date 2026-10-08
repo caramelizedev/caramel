@@ -407,7 +407,9 @@ module Caramel::Frappe
                         "choose another with --plural")
       end
       fields.each do |field|
-        next unless I18n::RESERVED_KEYS.includes?(field.name) || field.name.includes?("__")
+        reserved = I18n::RESERVED_KEYS.includes?(field.name) ||
+                   I18n::KEY_ONLY_RESERVED.includes?(field.name)
+        next unless reserved || field.name.includes?("__")
         raise Error.new("The field #{field.name} cannot be a catalog key; " \
                         "choose another name")
       end

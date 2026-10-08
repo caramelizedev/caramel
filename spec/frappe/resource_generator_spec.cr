@@ -402,6 +402,14 @@ describe Caramel::Frappe::ResourceGenerator do
     end
   end
 
+  it "refuses a field named finalize, which a struct cannot define" do
+    localized_project do |project, generator|
+      expect_raises(Caramel::Frappe::Error, "The field finalize cannot be a catalog key") do
+        generator.generate(project, "Book", ["finalize:string"])
+      end
+    end
+  end
+
   it "refuses a plural that names a framework catalog group" do
     localized_project do |project, generator|
       expect_raises(Caramel::Frappe::Error, "The plural common is a catalog group") do

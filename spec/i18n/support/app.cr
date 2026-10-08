@@ -7,6 +7,7 @@ Caramel.locale "en", {
     greeting: "Hello, %{name}!",
     help:     "Read %{link} first.",
     farewell: "Goodbye",
+    closing:  "Closed by %{finalize}",
   },
   books: {
     count: {"=0": "No books", one: "%{count} book", other: "%{count} books"},

@@ -18,6 +18,10 @@ describe "Caramel::Messages" do
     t(Locale::Ru).home.title.should eq("Welcome")
   end
 
+  it "accepts finalize as a placeholder name, though not as a key" do
+    t(Locale::En).home.closing(finalize: "Ann").should eq("Closed by Ann")
+  end
+
   it "escapes a placeholder's text where a page writes it" do
     page = I18nSpec.get("/")
     page.body.should contain("<span>Hello, &lt;Ann&gt;!</span>")
