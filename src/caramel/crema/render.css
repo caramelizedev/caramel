@@ -43,6 +43,8 @@ dl.binds dt{color:var(--k-sql);font-weight:600}
 dl.binds dd{margin:0}
 dl.binds dd code{white-space:pre-wrap;overflow-wrap:anywhere}
 .binds-note{margin:6px 0 0;color:var(--muted);font-size:13px}
+li.query.repeated dl.binds{border-top-color:var(--note-line)}
+code.sql .lit,dl.binds .lit{background:var(--track);box-shadow:0 0 0 1px var(--k-sql);border-radius:3px}
 .logs .warn,.logs .error{color:var(--bad)}
 ol.backtrace{padding-left:24px;font:13px ui-monospace,monospace}
 details.internal{margin-top:8px;color:var(--muted)}

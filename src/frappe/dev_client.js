@@ -75,6 +75,18 @@
   });
   addEventListener('storage', event => { if (event.key === THEME || event.key === null) { chosen = null; applyTheme(); } });
 
+  // Reading aid on a trace page: pointing at a placeholder or a bind lights up both.
+  function light(event, on) {
+    const target = event.target.closest?.('[data-n]');
+    const card = target?.closest('li.query');
+    if (!card) return;
+    for (const node of card.querySelectorAll(`[data-n="${target.dataset.n}"]`)) {
+      node.classList.toggle('lit', on);
+    }
+  }
+  document.addEventListener('pointerover', event => light(event, true));
+  document.addEventListener('pointerout', event => light(event, false));
+
   addEventListener('pagehide', () => { stopped = true; });
   addEventListener('pageshow', event => {
     if (event.persisted) { stopped = false; check(); }
