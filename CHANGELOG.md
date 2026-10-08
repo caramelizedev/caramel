@@ -4,6 +4,17 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.9.1 - 2026-10-08
+
+### Fixes
+
+- **latte:** let the latte-daemon check run the collector on a free port (b76b1f7)
+- **core:** report a missing or unreachable database in one line (f0552b2)
+- **frappe:** resolve an error outside a trace in frappe trace (ae30d7d)
+- **latte:** start PostgreSQL after a crash left a stale postmaster.pid (96a0a7d)
+- **core:** reserve the catalog key finalize (b706350)
+- **latte:** replace DNS and proxy processes an earlier toolchain started (c2d9844)
+
 ## 0.9.0 - 2026-10-07
 
 ### Upgrade notes
