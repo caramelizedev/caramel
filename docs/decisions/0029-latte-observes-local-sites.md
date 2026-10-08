@@ -56,9 +56,11 @@ belong.
 7. **Latte collects local traces.** The daemon listens on `127.0.0.1:4318`, the OTLP/HTTP
    port, for `POST /v1/traces` with a JSON body of at most 4 MiB. It keeps the newest 2000
    traces with at most 200 spans each, in memory, and refuses protobuf with 415. A busy
-   port leaves the collector `unavailable` and the daemon running. It serves no reads:
-   control API 2 lists traces (`GET /v2/traces?limit=N`), returns one (`GET
-   /v2/traces/<id>`) and reports the collector in `/v2/status`. Version 1 has none of it.
+   port leaves the collector `unavailable` and the daemon running. `CARAMEL_LATTE_OTLP_PORT`
+   moves the collector's port; the latte-daemon check uses that to pick a free port. The
+   collector serves no reads: control API 2 lists traces (`GET /v2/traces?limit=N`),
+   returns one (`GET /v2/traces/<id>`) and reports the collector in `/v2/status`. Version 1
+   has none of it.
    `frappe dev` forwards each trace of the application to the collector as
    OTLP JSON under the project's name, and the inspector and `frappe trace --md` add an
    "Across services" section when another service joined the trace. The services stay

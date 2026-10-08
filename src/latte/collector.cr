@@ -2,6 +2,7 @@ require "http/server"
 require "json"
 require "socket"
 require "../caramel/crema/event"
+require "./server"
 
 module Caramel::Latte
   # A local OTLP/HTTP collector (ADR 0029). Any local process may write traces to
@@ -9,6 +10,8 @@ module Caramel::Latte
   # reads: they go through the control API on the owner-only socket. Only JSON is
   # accepted, and only the fields a trace view needs are kept.
   class Collector
+    DEFAULT_PORT   = 4318
+    PORT_VARIABLE  = "CARAMEL_LATTE_OTLP_PORT"
     MAX_BODY       = 4 * 1024 * 1024
     MAX_TRACES     = 2000
     MAX_SPANS      =  200
@@ -69,7 +72,17 @@ module Caramel::Latte
     @server : HTTP::Server? = nil
     @failure_logged = false
 
-    def initialize(@port : Int32 = 4318)
+    # The OTLP port: 4318, or CARAMEL_LATTE_OTLP_PORT, which the latte-daemon check sets to a
+    # free port.
+    def self.port(value : String? = ENV[PORT_VARIABLE]?) : Int32
+      return DEFAULT_PORT unless value
+      port = value.to_i?
+      return port if port && port.in?(1..65535)
+      raise PublicError.new("collector_port",
+        "#{PORT_VARIABLE} must be a port from 1 to 65535, not #{value.inspect}")
+    end
+
+    def initialize(@port : Int32 = DEFAULT_PORT)
       @lock = Mutex.new
       @traces = {} of String => Trace
     end

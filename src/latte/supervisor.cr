@@ -36,7 +36,7 @@ module Caramel::Latte
                    dns_port : Int32 = 15353,
                    http_port : Int32 = 18080,
                    https_port : Int32 = 18443,
-                   otlp_port : Int32 = 4318)
+                   otlp_port : Int32 = Collector::DEFAULT_PORT)
       paths = @registry.paths
       @postgres = Postgres.new(paths, @toolchain)
       @dns = DNS.new(paths, dns_port)
