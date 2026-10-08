@@ -4,7 +4,16 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.10.0 - 2026-10-08
+
+### Upgrade notes
+
 - The inspector's request page shows each query as a card instead of a table row: the statement with one clause per line and coloured, and each bind listed beside its `$n`. Pointing at a placeholder or a bind lights up both. Copy SQL and Copy with values write the statement as it ran, as before.
+
+### Features
+
+- **crema:** show each query as a card with its SQL laid out and its binds listed (0bca849)
+- **crema:** light up a placeholder and its value together (7de8e5d)
 
 ## 0.9.1 - 2026-10-08
 

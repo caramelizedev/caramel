@@ -1,5 +1,5 @@
 name: caramel
-version: 0.9.1
+version: 0.10.0
 crystal: ">= 1.21.1"
 license: MIT
 dependencies:
