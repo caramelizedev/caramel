@@ -252,6 +252,23 @@ describe Caramel::Latte::ManagedChild do
 end
 
 describe Caramel::Latte::Postgres do
+  it "names a moved stale pid file so it never replaces an earlier one" do
+    root = postgres_unit_root
+    begin
+      first = Caramel::Latte::Postgres.unused_stale_path(root, 1700000000_i64, 42_i64)
+      first.should eq(File.join(root, "postmaster.pid.stale-1700000000-42"))
+      File.write(first, "earlier")
+      second = Caramel::Latte::Postgres.unused_stale_path(root, 1700000000_i64, 42_i64)
+      second.should eq("#{first}-1")
+      File.write(second, "later")
+      third = Caramel::Latte::Postgres.unused_stale_path(root, 1700000000_i64, 42_i64)
+      third.should eq("#{first}-2")
+      File.read(first).should eq("earlier")
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "derives safe identifiers and private Unix socket URLs from a site id" do
     id = "0123456789abcdef"
     names = Caramel::Latte::Postgres.database_names(id)

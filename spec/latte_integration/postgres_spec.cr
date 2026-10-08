@@ -285,6 +285,50 @@ describe "Latte managed PostgreSQL" do
     end
   end
 
+  it "starts after an unclean shutdown left a postmaster.pid naming a dead process" do
+    service.stop
+    data = paths.postgres_data(Caramel::Latte::Postgres::MAJOR)
+    pid_file = File.join(data, "postmaster.pid")
+    child = Process.new("/usr/bin/true")
+    child.wait
+    dead = child.pid
+    File.write(pid_file, "#{dead}\n#{data}\n#{Time.utc.to_unix}\n")
+    File.chmod(pid_file, 0o600)
+    begin
+      service.start
+      service.ready?.should be_true
+      File.read_lines(pid_file).first.should_not eq(dead.to_s)
+      stale = Dir.glob(File.join(File.dirname(data), "postmaster.pid.stale-*"))
+      stale.size.should eq(1)
+      File.read_lines(stale.first).first.should eq(dead.to_s)
+    ensure
+      stale_glob = File.join(File.dirname(data), "postmaster.pid.stale-*")
+      Dir.glob(stale_glob).each { |path| File.delete(path) }
+    end
+  end
+
+  it "refuses a postmaster.pid naming a live process it cannot verify, naming file and PID" do
+    service.stop
+    data = paths.postgres_data(Caramel::Latte::Postgres::MAJOR)
+    pid_file = File.join(data, "postmaster.pid")
+    live = Process.new("/bin/sleep", ["60"])
+    content = "#{live.pid}\n#{data}\n#{Time.utc.to_unix}\n"
+    File.write(pid_file, content)
+    File.chmod(pid_file, 0o600)
+    begin
+      message = /#{Regex.escape(pid_file)} names PID #{live.pid}, which is running/
+      expect_raises(Caramel::Latte::Postgres::Error, message) { service.start }
+      File.read(pid_file).should eq(content)
+      Dir.glob(File.join(File.dirname(data), "postmaster.pid.stale-*")).should be_empty
+      Process.exists?(live.pid).should be_true
+    ensure
+      live.terminate rescue nil
+      live.wait
+      File.delete(pid_file) if File.exists?(pid_file)
+      service.start
+    end
+  end
+
   it "repairs retained configuration overrides while preserving the running cluster" do
     config = File.join(paths.postgres_data(Caramel::Latte::Postgres::MAJOR), "postgresql.conf")
     original = File.read(config)

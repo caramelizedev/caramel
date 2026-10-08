@@ -582,10 +582,11 @@ module Caramel::Latte
         initialize_cluster!
       end
 
+      move_stale_pid_file!
       existing_pid = File.exists?(File.join(@data_directory, "postmaster.pid"))
       previous_identity = postmaster_identity
       if existing_pid && previous_identity.nil?
-        raise Error.new("managed PostgreSQL has an unverified postmaster PID; data was preserved")
+        raise Error.new(unverified_pid_message)
       end
 
       ensure_configuration!
@@ -629,6 +630,7 @@ module Caramel::Latte
     end
 
     private def stop_locked! : Nil
+      move_stale_pid_file!
       return unless File.exists?(File.join(@data_directory, "postmaster.pid"))
       unless verified_postmaster_pid?
         raise OwnershipError.new("refusing to stop an unverified PostgreSQL PID")
@@ -832,21 +834,7 @@ module Caramel::Latte
 
     # ameba:disable Metrics/CyclomaticComplexity -- verifies each postmaster.pid field first
     private def postmaster_identity : PostmasterIdentity?
-      pid_file = File.join(@data_directory, "postmaster.pid")
-      info = File.info?(pid_file, follow_symlinks: false)
-      return unless info
-      raise OwnershipError.new("managed PostgreSQL PID file is a symlink") if info.symlink?
-      return unless info.file?
-      unless owned?(info)
-        raise OwnershipError.new("managed PostgreSQL PID file has foreign ownership")
-      end
-      raise OwnershipError.new("managed PostgreSQL PID file must be private") if shared?(info)
-      pid_lines = File.read(pid_file).lines.map(&.strip)
-      return if pid_lines.size < 3 || pid_lines[1] != @data_directory
-      pid = pid_lines[0].to_i64?
-      return unless pid && pid > 1
-      postmaster_start = pid_lines[2].to_i64?
-      return unless postmaster_start
+      pid, postmaster_start = postmaster_record || return
       return unless Process.exists?(pid)
       ps = File.exists?("/bin/ps") ? "/bin/ps" : "/usr/bin/ps"
       result = ProcessRunner.run(
@@ -872,6 +860,71 @@ module Caramel::Latte
       raise ex
     rescue
       nil
+    end
+
+    # The PID and start epoch in a well-formed postmaster.pid for this data directory, nil when
+    # the file is missing or malformed. Refuses a file this user does not privately own.
+    # ameba:disable Metrics/CyclomaticComplexity -- verifies each postmaster.pid field first
+    private def postmaster_record : {Int64, Int64}?
+      pid_file = File.join(@data_directory, "postmaster.pid")
+      info = File.info?(pid_file, follow_symlinks: false)
+      return unless info
+      raise OwnershipError.new("managed PostgreSQL PID file is a symlink") if info.symlink?
+      return unless info.file?
+      unless owned?(info)
+        raise OwnershipError.new("managed PostgreSQL PID file has foreign ownership")
+      end
+      raise OwnershipError.new("managed PostgreSQL PID file must be private") if shared?(info)
+      pid_lines = File.read(pid_file).lines.map(&.strip)
+      return if pid_lines.size < 3 || pid_lines[1] != @data_directory
+      pid = pid_lines[0].to_i64?
+      return unless pid && pid > 1
+      postmaster_start = pid_lines[2].to_i64?
+      return unless postmaster_start
+      {pid, postmaster_start}
+    rescue ex : OwnershipError
+      raise ex
+    rescue
+      nil
+    end
+
+    # A crash leaves postmaster.pid naming a process that is gone. Moves that file aside so
+    # PostgreSQL recovers; a malformed file or a live PID stays for the refusal.
+    private def move_stale_pid_file! : Nil
+      pid, _ = postmaster_record || return
+      return if Process.exists?(pid)
+      pid_file = File.join(@data_directory, "postmaster.pid")
+      moved = Postgres.unused_stale_path(File.dirname(@data_directory), Time.utc.to_unix, pid)
+      File.rename(pid_file, moved)
+      STDERR.puts("Latte PostgreSQL: PID #{pid} in #{pid_file} is not running; " \
+                  "moved the file to #{moved} so PostgreSQL recovers")
+    end
+
+    # A path for a moved stale pid file that no earlier one occupies, so evidence
+    # from two crashes in the same second is never overwritten.
+    def self.unused_stale_path(directory : String, epoch : Int64, pid : Int64) : String
+      base = File.join(directory, "postmaster.pid.stale-#{epoch}-#{pid}")
+      candidate = base
+      suffix = 0
+      while File.exists?(candidate) || File.symlink?(candidate)
+        suffix += 1
+        candidate = "#{base}-#{suffix}"
+      end
+      candidate
+    end
+
+    private def unverified_pid_message : String
+      pid_file = File.join(@data_directory, "postmaster.pid")
+      prefix = "managed PostgreSQL has an unverified postmaster PID; data was preserved. "
+      if record = postmaster_record
+        pid = record[0]
+        "#{prefix}#{pid_file} names PID #{pid}, which is running but is not this data " \
+        "directory's postmaster. If it is a PostgreSQL you started on #{@data_directory}, " \
+        "stop it; otherwise move #{pid_file} aside. Then start the services again."
+      else
+        "#{prefix}#{pid_file} does not name a postmaster for #{@data_directory}. If no " \
+        "PostgreSQL runs on that directory, move the file aside, then start the services again."
+      end
     end
 
     private def ensure_admin_material!(for_initialization : Bool) : AdminMaterial
