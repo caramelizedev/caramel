@@ -421,7 +421,7 @@ module Caramel::Latte
         rescue ex
           @error = case ex
                    when PublicError, DeadlineExceeded, Postgres::Error,
-                        Toolchain::Unavailable, Toolchain::VersionMismatch
+                        Toolchain::Unavailable, Toolchain::VersionMismatch, OwnershipError
                      ex.message || "Managed service operation failed"
                    else
                      "Managed service operation failed; check Latte logs"

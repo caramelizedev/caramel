@@ -197,6 +197,9 @@ module Caramel::Latte
   # child only after checking both the PID owner and its command line.
   class ManagedChild
     PROCESS_LISTING_LIMIT = 1024 * 1024
+    INSTALLED_TOOL        = %r{
+      \A(?<toolchains>/.+)/(?<id>[^/]+)/data/installs/(?<provider>[^/]+)/[^/]+/(?<tool>.+)\z
+    }x
 
     struct Identity
       include JSON::Serializable
@@ -264,16 +267,22 @@ module Caramel::Latte
       verify_identity(saved)
     end
 
+    # Makes room for a new child: stops an earlier toolchain's verified process,
+    # drops the record of a dead one, and refuses any other live PID.
+    private def clear_unverified_record(saved : Identity, timeout : Time::Span) : Nil
+      if predecessor?(saved)
+        stop(timeout)
+      elsif Process.exists?(saved.pid)
+        raise OwnershipError.new(mismatch_message(saved))
+      else
+        File.delete(@record_path)
+      end
+    end
+
     def start(timeout : Time::Span = 10.seconds) : Identity
       if saved = identity
-        if verify_identity(saved)
-          return saved
-        elsif Process.exists?(saved.pid)
-          message = "managed process PID is live but does not match its owner record"
-          raise OwnershipError.new(message)
-        else
-          File.delete(@record_path)
-        end
+        return saved if verify_identity(saved)
+        clear_unverified_record(saved, timeout)
       end
 
       prepare_log_file!
@@ -337,7 +346,7 @@ module Caramel::Latte
     def stop(timeout : Time::Span = 10.seconds) : Bool
       saved = identity
       return false unless saved
-      unless verify_identity(saved)
+      unless verified?(saved)
         raise OwnershipError.new("refusing to stop an unverified managed PID")
       end
 
@@ -367,7 +376,7 @@ module Caramel::Latte
 
       # Re-check identity immediately before escalation so a reused PID can
       # never receive a signal from an old record.
-      unless verify_identity(saved)
+      unless verified?(saved)
         raise OwnershipError.new("managed process did not stop before its deadline")
       end
       begin
@@ -428,15 +437,15 @@ module Caramel::Latte
       (info.permissions.value & 0o077) != 0
     end
 
-    private def verify_identity(saved : Identity) : Bool
-      return false unless saved.name == @name && saved.executable == @executable
+    private def verify_identity(saved : Identity, executable : String = @executable) : Bool
+      return false unless saved.name == @name && saved.executable == executable
       return false unless saved.argument_digest == digest_args(@args)
       return false unless Process.exists?(saved.pid)
       snapshot = process_snapshot(saved.pid)
       return false unless snapshot
       uid, start_time, command_line = snapshot
       return false unless uid == LibC.getuid.to_i64 && start_time == saved.start_time
-      command_line == expected_command
+      command_line == expected_command(executable)
     rescue
       false
     end
@@ -593,8 +602,37 @@ module Caramel::Latte
       Digest::SHA256.hexdigest(arguments.join("\0"))
     end
 
-    private def expected_command : String
-      [@executable, *@args].join(" ")
+    private def expected_command(executable : String = @executable) : String
+      [executable, *@args].join(" ")
+    end
+
+    # True when *path* is this tool installed by another toolchain under the
+    # same toolchains directory, as after an upgrade.
+    private def same_tool_elsewhere?(path : String) : Bool
+      return false if path == @executable
+      return false if path.split('/').any? { |part| part == "." || part == ".." }
+      theirs = INSTALLED_TOOL.match(path)
+      ours = INSTALLED_TOOL.match(@executable)
+      return false unless theirs && ours
+      return false if theirs["id"] == ours["id"]
+      %w[toolchains provider tool].all? { |key| theirs[key] == ours[key] }
+    end
+
+    private def predecessor?(saved : Identity) : Bool
+      same_tool_elsewhere?(saved.executable) && verify_identity(saved, saved.executable)
+    end
+
+    private def verified?(saved : Identity) : Bool
+      verify_identity(saved) || predecessor?(saved)
+    end
+
+    private def mismatch_message(saved : Identity) : String
+      if saved.executable == @executable
+        return "managed process PID is live but does not match its owner record"
+      end
+      "#{@name} PID #{saved.pid} runs #{saved.executable}, but this Latte runs #{@executable}, " \
+      "and Latte cannot verify that process as its earlier #{@name}; " \
+      "stop PID #{saved.pid}, then start the services again"
     end
 
     private def ensure_private_parent(path : String) : Nil
