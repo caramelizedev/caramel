@@ -59,6 +59,25 @@ describe Caramel::Frappe::Traces do
     traces.show("nomatch1", markdown: false).should be_false
   end
 
+  it "points a standalone error at a reference frappe trace answers" do
+    store = Caramel::Frappe::EventStore.new
+    store.add(EventFixtures.error("abcdef012345"))
+    output = IO::Memory.new
+    traces = Caramel::Frappe::Traces.new(store, "/proj", output)
+    traces.errors(agent: true)
+    output.to_s.should contain(
+      "FIX: frappe trace abcdef012345 --md shows the error and its backtrace")
+    output.clear
+    traces.show("abcdef", markdown: true).should be_true
+    output.to_s.should contain("# KeyError")
+    output.to_s.should contain("## Backtrace")
+    output.clear
+    traces.show("abcdef", markdown: false).should be_true
+    output.to_s.should contain("error KeyError fingerprint=abcdef012345")
+    output.to_s.should contain("Missing hash key")
+    traces.show("abcde", markdown: false).should be_false
+  end
+
   it "says so when nothing went wrong" do
     output = IO::Memory.new
     traces = Caramel::Frappe::Traces.new(Caramel::Frappe::EventStore.new, "/proj", output)

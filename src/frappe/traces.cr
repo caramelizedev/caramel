@@ -39,10 +39,16 @@ module Caramel::Frappe
       "#{stamp} #{text}"
     end
 
-    # One trace in full, as text or Markdown; false when *ref* matches none. The Markdown
-    # adds what other services did in the same trace, when Latte's collector holds it.
+    # One trace in full, as text or Markdown; when *ref* matches no trace, an error outside
+    # a trace with that fingerprint prefix; false when it matches neither. The Markdown of
+    # a trace adds what other services did in it, when Latte's collector holds it.
     def show(ref : String, markdown : Bool) : Bool
-      event = @store.find(ref) || return false
+      event = @store.find(ref)
+      unless event
+        error = @store.find_error(ref) || return false
+        @output.puts(markdown ? Crema::Render.markdown(error, @root) : Crema::Render.detail(error))
+        return true
+      end
       text = if markdown
                Crema::Render.markdown(event, @root, @collected.call(event.trace_id))
              else
@@ -88,9 +94,17 @@ module Caramel::Frappe
       subject = trace.try(&.name) || error.source || error.error_class
       MRDP.write(@output, code, "#{error.location || "-"} | #{subject}", [
         {"MSG", "#{error.error_class}: #{error.message} (#{times(group)})"},
-        {"FIX", "frappe trace #{error.fingerprint} --md shows the request, " \
-                "its queries and the backtrace"},
+        {"FIX", fix_text(group)},
       ])
+    end
+
+    private def fix_text(group : EventStore::ErrorGroup) : String
+      fingerprint = group.error.fingerprint
+      if group.trace
+        "frappe trace #{fingerprint} --md shows the request, its queries and the backtrace"
+      else
+        "frappe trace #{fingerprint} --md shows the error and its backtrace"
+      end
     end
 
     private def times(group : EventStore::ErrorGroup) : String

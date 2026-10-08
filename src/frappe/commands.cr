@@ -189,7 +189,8 @@ module Caramel::Frappe
         "newest first."),
       Command.new("trace REF [--md]",
         "Show one development trace: its summary, queries, logs and error. " \
-        "REF is last, last-error, or a trace or request id prefix."),
+        "REF is last, last-error, or a prefix of a trace id, a request id or an error " \
+        "fingerprint."),
       Command.new("errors #{MODE}",
         "List development runtime errors and repeated queries, grouped."),
       Command.new("services [status|start|stop]",

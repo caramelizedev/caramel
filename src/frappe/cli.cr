@@ -704,7 +704,7 @@ module Caramel::Frappe
       ref = invocation["REF"]
       return 0 if development_traces.show(ref, invocation.flag?("--md"))
 
-      raise Error.new("No trace matches #{ref} in this project's development history.")
+      raise Error.new("No trace or error matches #{ref} in this project's development history.")
     end
 
     private def errors(invocation : Commands::Invocation) : Int32

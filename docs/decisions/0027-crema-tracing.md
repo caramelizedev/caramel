@@ -94,9 +94,10 @@ secrets in logs and without a diagnostic that costs a production binary anything
     (`CARAMEL_DEV_EVENTS`); the application's dev sink writes each finished trace and
     unattached error there as a JSON line. The newest 500 traces stay in memory and every
     line is appended to the site log's `events.jsonl`, which `frappe traces`,
-    `frappe trace REF [--md]` and `frappe errors` read without a session. `frappe errors`
-    prints MRDP `RUNTIME` and `REPEATED_QUERY`, and leaves out what happened before the
-    newest successful build.
+    `frappe trace REF [--md]` and `frappe errors` read without a session. `frappe trace
+    REF` also resolves the fingerprint of an error that happened outside a trace, and
+    prints that error and its backtrace. `frappe errors` prints MRDP `RUNTIME` and
+    `REPEATED_QUERY`, and leaves out what happened before the newest successful build.
 20. **The inspector** is at `/__caramel/dev/inspector` on the development origin: requests,
     traces with a waterfall, errors by fingerprint and builds. A toolbar on each page
     links its route, time, queries and flags to the trace page's `#timeline`, `#queries`

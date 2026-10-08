@@ -103,6 +103,16 @@ module Caramel::Frappe
       end
     end
 
+    # The newest error outside a trace whose fingerprint starts with *ref* (6+ characters);
+    # errors a trace ended with are found through `find`.
+    def find_error(ref : String) : Crema::ErrorEvent?
+      @lock.synchronize do
+        return if ref.size < 6
+
+        @errors.reverse_each.find(&.fingerprint.starts_with?(ref))
+      end
+    end
+
     def for_request(id : String) : Crema::TraceEvent?
       @lock.synchronize do
         @traces.reverse_each.find { |_, event| event.request_id == id }.try(&.[1])
