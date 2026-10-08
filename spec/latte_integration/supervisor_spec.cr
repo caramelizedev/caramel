@@ -113,4 +113,45 @@ describe Caramel::Latte::Supervisor do
       FileUtils.rm_rf(root)
     end
   end
+
+  it "shows a refused earlier-toolchain service in its status instead of 'check Latte logs'" do
+    root = File.join("/private/tmp", "latte-refused-#{Random::Secure.hex(6)}")
+    registry = Caramel::Latte::Registry.new(root)
+    dns_port, http_port, https_port = supervisor_ports
+    supervisor = Caramel::Latte::Supervisor.new(
+      registry,
+      dns_port: dns_port,
+      http_port: http_port,
+      https_port: https_port,
+    )
+    # A live process the DNS record names, at a path outside any toolchain's installs.
+    stranger = File.join(root, "stranger", "sl-#{Random::Secure.hex(4)}")
+    Dir.mkdir_p(File.dirname(stranger), mode: 0o700)
+    File.copy("/bin/sleep", stranger)
+    File.chmod(stranger, 0o700)
+    Process.run("/usr/bin/codesign", ["--force", "--sign", "-", stranger],
+      output: Process::Redirect::Close, error: Process::Redirect::Close).success?.should be_true
+    stranger = File.realpath(stranger)
+    Dir.mkdir_p(registry.paths.dns_dir, mode: 0o700)
+    record = File.join(registry.paths.dns_dir, "process.json")
+    log = File.join(root, "stranger.log")
+    started = Caramel::Latte::ManagedChild.new("dns", stranger, ["5"], record, log).start
+    begin
+      supervisor.start_services
+      supervisor.await_idle(90.seconds)
+      status = JSON.parse(supervisor.status_json)
+      status["services"]["dns"]["state"].as_s.should eq("failed")
+      message = status["error"].as_s
+      message.should contain("dns PID #{started.pid} runs #{stranger}")
+      message.should contain("but this Latte runs")
+      message.should_not contain("check Latte logs")
+      Process.exists?(started.pid).should be_true
+    ensure
+      Process.signal(Signal::KILL, started.pid) rescue nil
+      supervisor.stop_services
+      supervisor.await_idle(60.seconds)
+      FileUtils.rm_rf(registry.paths.run_dir)
+      FileUtils.rm_rf(root)
+    end
+  end
 end

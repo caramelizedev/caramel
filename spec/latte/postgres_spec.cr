@@ -18,7 +18,11 @@ end
 # macOS kills a copied platform binary, so the copy is re-signed ad hoc, and
 # its name fits in the 15 characters `ps` shows of a command.
 private def private_sleep(root : String) : String
-  path = File.join(root, "sl-#{Random::Secure.hex(4)}")
+  private_sleep_at(File.join(root, "sl-#{Random::Secure.hex(4)}"))
+end
+
+private def private_sleep_at(path : String) : String
+  Dir.mkdir_p(File.dirname(path), mode: 0o700)
   File.copy("/bin/sleep", path)
   File.chmod(path, 0o700)
   signed = Process.run("/usr/bin/codesign", ["--force", "--sign", "-", path],
@@ -27,6 +31,13 @@ private def private_sleep(root : String) : String
   # The temporary directory is under /var, a symlink; adoption compares the
   # resolved command line.
   File.realpath(path)
+end
+
+# The copy at the layout one toolchain installs a tool: <root>/toolchains/<id>/data/installs/...
+private def installed_sleep(root : String, toolchain : String, version : String,
+                            name : String) : String
+  private_sleep_at(File.join(root, "toolchains", toolchain, "data/installs/prov-sleep",
+    version, name))
 end
 
 # Writes an owner-only executable at *relative* under the root's installs.
@@ -246,6 +257,148 @@ describe Caramel::Latte::ManagedChild do
       other.terminate(graceful: false) unless other.terminated?
       other.wait
     rescue
+    end
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "replaces its service that an earlier toolchain's Latte started" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "aaaaaaaaaaaa", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", old, ["5"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    current.running?.should be_false
+    after = current.start
+    after.pid.should_not eq(before.pid)
+    Process.exists?(before.pid).should be_false
+    current.identity.not_nil!.executable.should eq(new)
+    current.stop.should be_true
+  ensure
+    [before, after].each do |started|
+      Process.signal(Signal::KILL, started.pid) rescue nil if started
+    end
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses a live recorded process outside an earlier toolchain's installs, " \
+     "naming both executables" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    stranger = private_sleep_at(File.join(root, "elsewhere", name))
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", stranger, ["5"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    expect_raises(Caramel::Latte::OwnershipError,
+      /runs #{Regex.escape(stranger)}, but this Latte runs #{Regex.escape(new)}/) do
+      current.start
+    end
+    Process.exists?(before.pid).should be_true
+  ensure
+    Process.signal(Signal::KILL, before.pid) rescue nil if before
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses an earlier toolchain's process when this Latte's arguments " \
+     "differ from the recorded ones" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "aaaaaaaaaaaa", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", old, ["6"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    expect_raises(Caramel::Latte::OwnershipError) { current.start }
+    Process.exists?(before.pid).should be_true
+  ensure
+    Process.signal(Signal::KILL, before.pid) rescue nil if before
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses a recorded process under this toolchain's own id and another version" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "bbbbbbbbbbbb", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", old, ["5"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    expect_raises(Caramel::Latte::OwnershipError,
+      /runs #{Regex.escape(old)}, but this Latte runs #{Regex.escape(new)}/) do
+      current.start
+    end
+    Process.exists?(before.pid).should be_true
+  ensure
+    Process.signal(Signal::KILL, before.pid) rescue nil if before
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "refuses an earlier toolchain's process whose live command line differs from its record" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "aaaaaaaaaaaa", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    # The record's digest is that of ["5"] while the live process runs with "6".
+    recorded = Caramel::Latte::ManagedChild.new("sleep", old, ["5"],
+      File.join(root, "five.json"), log).start
+    Process.signal(Signal::KILL, recorded.pid)
+    live = Process.new([old, "6"])
+    adopted = Caramel::Latte::ManagedChild.new("sleep", old, ["6"],
+      File.join(root, "six.json"), log).start
+    adopted.pid.should eq(live.pid)
+    forged = JSON.parse(File.read(File.join(root, "six.json"))).as_h
+    forged["argument_digest"] = JSON::Any.new(recorded.argument_digest)
+    File.write(record, forged.to_json, perm: 0o600)
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    expect_raises(Caramel::Latte::OwnershipError) { current.start }
+    Process.exists?(live.pid).should be_true
+  ensure
+    Process.signal(Signal::KILL, live.pid) rescue nil if live
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "stops an earlier toolchain's service through its record" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "aaaaaaaaaaaa", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", old, ["5"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    current.stop.should be_true
+    Process.exists?(before.pid).should be_false
+    File.exists?(record).should be_false
+  ensure
+    Process.signal(Signal::KILL, before.pid) rescue nil if before
+    FileUtils.rm_rf(root) if root
+  end
+
+  it "restarts over an earlier toolchain's service" do
+    root = postgres_unit_root
+    record = File.join(root, "child.json")
+    log = File.join(root, "child.log")
+    name = "sl-#{Random::Secure.hex(4)}"
+    old = installed_sleep(root, "aaaaaaaaaaaa", "1.0", name)
+    new = installed_sleep(root, "bbbbbbbbbbbb", "2.0", name)
+    before = Caramel::Latte::ManagedChild.new("sleep", old, ["5"], record, log).start
+    current = Caramel::Latte::ManagedChild.new("sleep", new, ["5"], record, log)
+    after = current.restart
+    Process.exists?(before.pid).should be_false
+    after.executable.should eq(new)
+    current.running?.should be_true
+    current.stop.should be_true
+  ensure
+    [before, after].each do |started|
+      Process.signal(Signal::KILL, started.pid) rescue nil if started
     end
     FileUtils.rm_rf(root) if root
   end
