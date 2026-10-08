@@ -104,7 +104,9 @@ secrets in logs and without a diagnostic that costs a production binary anything
     and `#error`, and **Copy for an agent** fetches `/__caramel/dev/trace.md?id=` (a hex
     id; session cookie and `X-Caramel-Dev` required). A query offers **Copy SQL** and
     **Copy with values**, which fills each `$n` from the literals recorded in development
-    detail and leaves what it cannot fill. The toolbar, the inspector and the ops console
+    detail and leaves what it cannot fill. A query is a card: its statement with one clause
+    per line (display only; a copy writes the statement as it ran) and each bind listed
+    beside its `$n`. The toolbar, the inspector and the ops console
     follow the system's light or dark appearance, and a Theme button overrides it. The
     inspector and the console share one palette file; the toolbar keeps its own because
     it lives in a shadow root and never changes the page's `<html>`.
