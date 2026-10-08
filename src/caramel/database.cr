@@ -11,6 +11,10 @@ require "uri"
 module Caramel
   # Creates a bounded PostgreSQL pool with an explicit transport policy.
   class Database
+    # A missing or invalid CARAMEL_ENV or database URL variable
+    class ConfigurationError < Exception
+    end
+
     # These are per-operation limits. Crystal currently applies the DNS portion
     # only on Windows; the connect portion is per resolved address, and the
     # read/write values bound inactivity after a socket is established. They
@@ -238,12 +242,12 @@ module Caramel
     def self.url(migration : Bool = false) : String
       environment = ENV["CARAMEL_ENV"]? || "production"
       unless %w[development test production].includes?(environment)
-        raise "CARAMEL_ENV must be development, test or production"
+        raise ConfigurationError.new("CARAMEL_ENV must be development, test or production")
       end
       prefix = environment == "test" ? "SPEC_" : ""
       role = migration ? "MIGRATION_" : ""
       key = "#{prefix}#{role}DATABASE_URL"
-      ENV[key]? || raise "Missing database configuration: #{key}"
+      ENV[key]? || raise ConfigurationError.new("Missing database configuration: #{key}")
     end
 
     # *application_name* labels the pool's backends in `pg_stat_activity`.
