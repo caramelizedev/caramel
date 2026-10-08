@@ -106,6 +106,19 @@ module Caramel::Crema
       end
     end
 
+    # An error outside a trace as Markdown: its identifiers, the error and its backtrace.
+    def self.markdown(error : ErrorEvent, root : String? = nil) : String
+      String.build do |io|
+        io << "# " << inline(error.error_class) << "\n\n"
+        error.source.try { |source| io << "- source: " << inline(source) << '\n' }
+        error.request_id.try { |id| io << "- request id: " << inline(id) << '\n' }
+        error.trace_id.try { |id| io << "- trace id: " << inline(id) << '\n' }
+        io << "- at: " << inline(error.at) << '\n'
+        error_section(io, error)
+        backtrace_section(io, error, root)
+      end
+    end
+
     # The spans Latte's collector holds for a trace, sorted by start, when any of them
     # came from a service other than *project*; empty when the trace stayed in one service.
     def self.across(spans : Array(CollectedSpan), project : String) : Array(CollectedSpan)
@@ -225,6 +238,14 @@ module Caramel::Crema
         io << "trace " << event.trace_id << '\n'
         event.spans.each { |span| span_text(io, span) }
         event.error.try { |error| error_text(io, error) }
+      end
+    end
+
+    # An error outside a trace as plain text: its line and its error.
+    def self.detail(error : ErrorEvent) : String
+      String.build do |io|
+        io << line(error) << '\n'
+        error_text(io, error)
       end
     end
 

@@ -242,6 +242,23 @@ describe Caramel::Crema::Render do
     text.should contain("````sql\nSELECT '```' FROM books\n````\n")
   end
 
+  it "writes an error outside a trace as Markdown" do
+    error = EventFixtures.error
+    error.backtrace = ["lib/a/b.cr:1:1 in 'A#b'"]
+    text = Caramel::Crema::Render.markdown(error)
+    text.should start_with("# KeyError\n\n")
+    text.should contain("## Error")
+    text.should contain("## Backtrace")
+  end
+
+  it "keeps an error outside a trace from injecting headings" do
+    error = EventFixtures.error
+    error.message = "first\n## Injected"
+    text = Caramel::Crema::Render.markdown(error)
+    text.should contain("- message: first ## Injected\n")
+    text.should_not contain("\n## Injected")
+  end
+
   it "keeps single-line fields on one line" do
     event = EventFixtures.trace("GET /books/:id", failing: true)
     event.error.try(&.message = "first\n## Injected")
