@@ -279,8 +279,7 @@ describe Caramel::Latte::Postgres do
       Dir.mkdir_p(bin, mode: 0o700)
       marker = File.join(tools, "initdb-ran")
       scripts = {
-        "postgres" => "echo 'postgres (PostgreSQL) 18.6'",
-        "initdb"   => "touch '#{marker}'",
+        "initdb" => "touch '#{marker}'",
       }
       scripts.each do |name, body|
         File.write(File.join(bin, name), "#!/bin/sh\n#{body}\n")
@@ -290,7 +289,8 @@ describe Caramel::Latte::Postgres do
       Dir.mkdir_p(previous, mode: 0o700)
       File.write(File.join(previous, "PG_VERSION"), "17\n")
       paths = Caramel::Latte::Paths.new(state)
-      service = Caramel::Latte::Postgres.new(paths, Caramel::Latte::Toolchain.new(tools))
+      toolchain = PinnedVersionToolchain.new(tools)
+      service = Caramel::Latte::Postgres.new(paths, toolchain)
       refusal = "Latte's databases are in PostgreSQL 17, " \
                 "but Caramel #{Caramel::VERSION} uses PostgreSQL 18"
       expect_raises(Caramel::Latte::Postgres::WrongMajor, refusal) { service.start }
@@ -381,5 +381,13 @@ describe Caramel::Latte::Postgres do
     )
     branch.inspect.should_not contain("secret")
     branch.to_s.should contain("caramel_branch_0123456789abcdef_diff")
+  end
+end
+
+# Answers the version check without running postgres, so an example about the
+# cluster layout does not depend on how fast a process starts under load.
+private class PinnedVersionToolchain < Caramel::Latte::Toolchain
+  def verify_postgres_version!(expected : String = POSTGRES_VERSION) : String
+    expected
   end
 end
