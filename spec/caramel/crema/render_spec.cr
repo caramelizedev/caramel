@@ -98,7 +98,7 @@ describe Caramel::Crema::Render do
     html.should contain(%(data-caramel-text="SELECT 1 WHERE &quot;a&quot; = $1"))
     html.should contain("-- Some values could not be filled in; their $n stays.")
     html.should contain(%(data-caramel-text="SELECT 3"))
-    html.scan("Copy with values").size.should eq(2)
+    html.scan(">Copy with values</button>").size.should eq(2)
     html.should_not contain("<pre hidden")
   end
 
@@ -115,8 +115,27 @@ describe Caramel::Crema::Render do
     html = Caramel::Crema::Render.trace_html(event, nil, nil)
     html.should_not contain("hunter2")
     html.should_not contain("Copy with values")
+    html.should_not contain(%(<dl class="binds"))
     html.should contain(">Copy SQL</button>")
     span.to_event(Caramel::Crema::Detail::Development).literals.should eq(["'hunter2'"])
+  end
+
+  it "lists each bind beside its placeholder, coloured by kind" do
+    event = EventFixtures.trace
+    query = EventFixtures.query("SELECT $1, $2, $3", "app/x.cr:1:1")
+    query.binds = ["acme", Caramel::Crema::NULL_BIND, "42"]
+    query.literals = ["'acme'", "NULL", "42"]
+    short = EventFixtures.query("SELECT $1, $2", "app/x.cr:2:1")
+    short.binds = ["acme"]
+    short.literals = ["'acme'"]
+    event.spans = [query, short]
+    html = Caramel::Crema::Render.trace_html(event, nil, nil)
+    html.should contain(
+      %(<dt data-n="1">$1</dt><dd data-n="1"><code class="str">&#39;acme&#39;</code></dd>))
+    html.should contain(%(<code class="null">NULL</code>))
+    html.should contain(%(<code class="num">42</code>))
+    html.should contain(%(<span class="ph" data-n="2">$2</span>))
+    html.scan("Some placeholders have no recorded value").size.should eq(1)
   end
 
   it "links the timeline to the queries, indents what a view contains and colours by kind" do
@@ -133,8 +152,8 @@ describe Caramel::Crema::Render do
     html.should contain(%(<td class="d1"><a href="#q1">SELECT a</a></td>))
     html.should contain(%(<td class="d0"><a href="#q2">SELECT b</a></td>))
     html.should contain(%(class="bar view"))
-    html.should contain(%(<tr id="q2"))
-    html.should contain("Duration</th><th>SQL")
+    html.should contain(%(<li id="q2" class="query">))
+    html.should contain(%(<ol class="queries">))
     html.should_not contain("<h2>")
   end
 
@@ -144,7 +163,7 @@ describe Caramel::Crema::Render do
     event.spans = [EventFixtures.query(sql, "app/v.cr:8:5")]
     event.repeated = [Caramel::Crema::RepeatEvent.new(sql, 6, "app/v.cr:8:5")]
     html = Caramel::Crema::Render.trace_html(event, Caramel::Crema::Editor.from(nil), "/proj")
-    html.should contain(%(<tr id="q1" class="repeated">))
+    html.should contain(%(<li id="q1" class="query repeated">))
     html.should contain("ran 6 times")
     html.should contain("Ran 6 times")
     html.should contain("zed://file/proj/app/v.cr:8:5")
@@ -181,6 +200,18 @@ describe Caramel::Crema::Render do
     long = "'#{"y" * 300}'"
     shown = render.binds_display(["y" * 300], [long]).to_s
     shown.should eq("['#{"y" * 201}…]")
+  end
+
+  it "lists the binds one by one, as the copy writes them" do
+    render = Caramel::Crema::Render
+    nothing = Caramel::Crema::NULL_BIND
+    binds = ["42", "acme", nothing, "NULL", "x"]
+    literals = ["42", "'acme'", "NULL", "'NULL'", ""]
+    render.bind_values(binds, literals).should eq(["42", "'acme'", "NULL", "'NULL'", %("x")])
+    render.bind_values(binds, nil).should eq(["\"42\"", "\"acme\"", "NULL", "\"NULL\"", "\"x\""])
+    render.bind_values(nil, nil).should be_nil
+    long = "'#{"y" * 300}'"
+    render.bind_values(["y" * 300], [long]).should eq(["'#{"y" * 201}…"])
   end
 
   it "keeps the toolbar's links on the page when a trace has no spans, queries or error report" do
