@@ -28,6 +28,18 @@ end
 private TRACE = "0123456789abcdef0123456789abcdef"
 
 describe Caramel::Latte::Collector do
+  it "takes its port from CARAMEL_LATTE_OTLP_PORT, or 4318" do
+    Caramel::Latte::Collector.port(nil).should eq 4318
+    Caramel::Latte::Collector.port("4319").should eq 4319
+    Caramel::Latte::Collector.port("65535").should eq 65535
+    ["0", "65536", "otlp"].each do |value|
+      expect_raises(Caramel::Latte::PublicError,
+        "CARAMEL_LATTE_OTLP_PORT must be a port from 1 to 65535") do
+        Caramel::Latte::Collector.port(value)
+      end
+    end
+  end
+
   it "stores two services under one trace id and lists them together" do
     collector = Caramel::Latte::Collector.new(0)
     collector.ingest(export({"bookshelf", TRACE, "aaaaaaaaaaaaaaaa", nil}))

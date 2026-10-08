@@ -22,16 +22,16 @@ module Caramel::Checks::LatteDaemon
   TRACE_ID = "0123456789abcdef0123456789abcdef"
 
   # Posts one OTLP JSON span to the collector, reads it back over the owner-only control
-  # socket, and shows that version 1 knows nothing of traces. A busy OTLP port is the one
-  # allowed excuse: the daemon must then say so.
-  private def verify_collector(socket : String) : Nil
+  # socket, and shows that version 1 knows nothing of traces. The daemon runs the collector
+  # on *otlp*, a free port the check picked, so a busy 4318 changes nothing.
+  private def verify_collector(socket : String, otlp : Int32) : Nil
     status, _ = Checks::UnixHTTP.request(socket, "GET", "/v1/traces/#{TRACE_ID}")
     raise "Control API 1 answered /traces with #{status}" unless status == 404
 
     collector = request(socket, "GET", "/v2/status")["collector"]
-    return if collector_unavailable?(collector)
-    running = collector["state"] == "running"
-    raise "The collector is not running: #{collector.to_json}" unless running
+    unless collector["state"] == "running" && collector["port"] == otlp
+      raise "The collector is not running on port #{otlp}: #{collector.to_json}"
+    end
 
     post_span("http://127.0.0.1:#{collector["port"]}/v1/traces")
     spans = request(socket, "GET", "/v2/traces/#{TRACE_ID}")["spans"].as_a
@@ -41,17 +41,6 @@ module Caramel::Checks::LatteDaemon
     end
     listed = request(socket, "GET", "/v2/traces")["traces"].as_a
     raise "The trace is not listed: #{listed.to_json}" unless listed.first["trace_id"] == TRACE_ID
-  end
-
-  # Whether *collector* (the status document's) says its port is in use.
-  private def collector_unavailable?(collector : JSON::Any) : Bool
-    return false unless collector["state"].as_s == "unavailable"
-
-    unless collector["error"].as_s == "port #{collector["port"]} is in use"
-      raise "The collector is unavailable without saying why: #{collector.to_json}"
-    end
-    puts "SKIP: the trace collector's port #{collector["port"]} is in use"
-    true
   end
 
   private def post_span(url : String) : Nil
@@ -169,7 +158,11 @@ module Caramel::Checks::LatteDaemon
     Dir.mkdir_p(root, 0o700)
     runtime = Checks.runtime_root(root)
     socket = File.join(runtime, "latte.sock")
-    environment = {"CARAMEL_HOME" => root} of String => String?
+    otlp = Checks.free_tcp_port
+    environment = {
+      "CARAMEL_HOME"            => root,
+      "CARAMEL_LATTE_OTLP_PORT" => otlp.to_s,
+    } of String => String?
     user = {"HOME" => home, "CARAMEL_HOME" => nil} of String => String?
     log = File.open(File.join(root, "daemon.log"), "a", 0o600)
     process : Process? = nil
@@ -183,7 +176,7 @@ module Caramel::Checks::LatteDaemon
       unless release && status["api"].as_a.map(&.as_i) == window
         raise "Latte does not report its release and API window: #{status.to_json}"
       end
-      verify_collector(socket)
+      verify_collector(socket, otlp)
       reported = Checks.run([LATTE, "version"], env: environment)
       unless reported.stdout == "Latte #{Caramel::VERSION} (control API 1, 2)\n"
         raise "latte version printed #{reported.stdout.inspect}"
@@ -276,7 +269,8 @@ module Caramel::Checks::LatteDaemon
       puts "PASS: daemon singleton, crash recovery, service adoption, " \
            "guard release on SIGTERM and on restart after SIGKILL, proxy recovery, " \
            "CA/registry persistence, native menu, explicit stop, " \
-           "on-demand detached start from Frappé and latte stop"
+           "on-demand detached start from Frappé and latte stop, " \
+           "the OTLP collector's write and read-back on a free port"
       0
     rescue ex
       STDERR.puts ex.message
