@@ -323,7 +323,7 @@
         <aside class="c-sidebar" aria-label="Documentation navigation">
           <h3>Start here</h3><button class="cursor-interaction" data-page="releases">Current release</button><button class="cursor-interaction" data-page="learn">Your first application</button><button class="cursor-interaction" data-page="map">Project map</button><button class="cursor-interaction" data-page="practices">Best practices</button>
           <h3>Build something</h3><button class="cursor-interaction" data-page="crud">Create a resource</button><button class="cursor-interaction" data-page="json">Read and write JSON</button><button class="cursor-interaction" data-page="uploads">Upload a file</button><button class="cursor-interaction" data-page="jobs">Run a background job</button>
-          <h3>Go further</h3><button class="cursor-interaction" data-page="i18n">Internationalization</button><button class="cursor-interaction" data-page="tenancy">Multi-tenancy</button><button class="cursor-interaction" data-page="crema">Observability</button><button class="cursor-interaction" data-page="testing">Test rendered HTML</button><button class="cursor-interaction" data-page="webhooks">Receive a webhook</button><button class="cursor-interaction" data-page="agents">Work with an agent</button><button class="cursor-interaction" data-page="deploy">Deployment status</button>
+          <h3>Go further</h3><button class="cursor-interaction" data-page="i18n">Internationalization</button><button class="cursor-interaction" data-page="tenancy">Multi-tenancy</button><button class="cursor-interaction" data-page="crema">Observability</button><button class="cursor-interaction" data-page="testing">Test rendered HTML</button><button class="cursor-interaction" data-page="webhooks">Receive a webhook</button><button class="cursor-interaction" data-page="sessions">Revocable sessions</button><button class="cursor-interaction" data-page="agents">Work with an agent</button><button class="cursor-interaction" data-page="deploy">Deployment status</button>
           <h3>Reference</h3><button class="cursor-interaction" data-page="routing">Routes and contracts</button><button class="cursor-interaction" data-page="actions">Actions and responses</button><button class="cursor-interaction" data-page="views">Views</button><button class="cursor-interaction" data-page="sugarorm">SugarORM</button><button class="cursor-interaction" data-page="coldbrew">Cold Brew</button><button class="cursor-interaction" data-page="corretto">Corretto</button><button class="cursor-interaction" data-page="cremaref">Crema</button><button class="cursor-interaction" data-page="security">Security defaults</button><button class="cursor-interaction" data-page="commands">Commands</button><button class="cursor-interaction" data-page="local">Local environment</button>
         </aside>
         <article class="c-doccontent" id="c-article"></article>
@@ -473,6 +473,286 @@
       '<h2 id="c-hook-tests">Send exact bodies in Corretto</h2><p>Use <code>body:</code> for the signed text or bytes, and <code>headers:</code> for its media type and signature. Unlike <code>json:</code>, this preserves the input’s original whitespace and byte spelling. Choose one body mode per request.</p>'+snippet('Corretto · request excerpt with provider fixture headers','body = %({"event_id":"evt_1",  "amount":1})\nclient.post("/hooks/inbox", body: body, headers: valid_headers)\n  .should have_status(202)\nclient.post("/hooks/inbox", body: body, headers: forged_headers)\n  .should have_status(401)')+
       '<p>Put a test-only <code>WEBHOOK_SECRET</code> in committed <code>.env.test</code>; development <code>.env</code> values do not reach specs. Also cover missing or stale signatures, oversized bodies, duplicate events, and retries that repeat an external call. Inspect the policy with <code>frappe routes hooks</code>.</p>'+
       note('Choose the provider before completing the recipe','Raw bodies and authenticated ingress are implemented. A provider-specific signing fixture, verifier, event store, and duplicate-delivery test are still required before this draft is a complete webhook recipe.')+next('jobs','Track the resulting background work'),
+    sessions: () => heading('Cookbook / Accounts and access','Sign users in with revocable sessions.','The signed cookie carries a random token. PostgreSQL holds its digest, expiry and revocation, and every request rechecks them.')+tags()+
+      `<h2 id="c-session-split">Keep the revocable part in PostgreSQL</h2><p>A cookie that holds <code>user_id</code> cannot be revoked: <code>Caramel::Session</code> is a signed cookie with no server-side expiry (see <button class="c-secondary cursor-interaction" data-page="security">Security</button>), so a copy of it stays valid until the browser drops it. Put a random token in the cookie instead and keep its SHA-256 digest, an expiry and a revocation time in a table. Each request looks the digest up, so ending the row ends the session.</p><p>An <code>App::User</code> has an email, a bcrypt digest and an <code>active</code> flag. <code>App::UserSession</code> is the revocable row. Both are central tables: they declare no <code>tenant</code>.</p>`+
+      snippet('app/models/user.cr',`module App
+  struct User < SugarORM::Schema
+    schema "users" do
+      field id : Int64, primary: true
+      field email : String
+      field password_digest : String
+      field active : Bool = true
+      timestamps
+      index :email, unique: true
+    end
+  end
+end`)+
+      snippet('app/models/user_session.cr',`module App
+  struct UserSession < SugarORM::Schema
+    schema "user_sessions" do
+      field id : Int64, primary: true
+      belongs_to user : User
+      field token_digest : String
+      field expires_at : Time
+      field revoked_at : Time?
+      timestamps
+      index :token_digest, unique: true
+    end
+  end
+end`)+
+      snippet('Terminal',`frappe db diff --name create_user_sessions
+frappe migrate`,'bash')+
+      `<p>The diff writes one migration for every table the schemas declare that the database lacks, so a first run also creates <code>users</code> and the <code>memberships</code> table below. The digest is unique, so one lookup finds one row.</p>`+
+      `<h2 id="c-session-login">Create the session at login, revoke it at logout</h2><p>Login is <code>POST /login</code> with an <code>email</code> and a <code>password</code>. The action verifies the bcrypt digest and refuses an inactive user with the same answer as a wrong password. It then runs <code>session.clear</code>, so nothing from an earlier session survives, and creates the token. Only the token’s digest reaches the database.</p>`+
+      snippet('app/actions/sessions/login.cr',`require "crypto/bcrypt/password"
+require "digest/sha256"
+
+module App::Sessions
+  struct Login < App::ApplicationAction
+    contract do
+      field email : String
+      field password : String
+    end
+
+    def handle(contract : Contract)
+      user = User.query.where(email: contract.email, active: true).first
+      unless user && Crypto::Bcrypt::Password.new(user.password_digest).verify(contract.password)
+        self.status = 422
+        return nil
+      end
+      session.clear
+      token = Random::Secure.urlsafe_base64(32)
+      UserSession.create!(
+        user_id: user.id,
+        token_digest: Digest::SHA256.hexdigest(token),
+        expires_at: Time.utc + 14.days)
+      session["session_token"] = token
+      true
+    end
+
+    def render(result)
+      return page "Sign in", Views::Sessions::New.new(csrf_token, true) unless result
+      redirect_to "/"
+    end
+  end
+end`)+
+      `<p>Logout is <code>POST /logout</code>. It marks the current row revoked before <code>sign_out</code> clears the cookie, so a copy of the old cookie no longer matches an open row.</p>`+
+      snippet('app/actions/sessions/logout.cr',`module App::Sessions
+  struct Logout < App::ApplicationAction
+    contract do
+    end
+
+    def handle(contract : Contract)
+      current_session.try &.update!(revoked_at: Time.utc)
+      sign_out
+      true
+    end
+
+    def render(result)
+      redirect_to "/login"
+    end
+  end
+end`)+
+      `<p>Route them with <code>get "/login"</code>, <code>post "/login"</code> and <code>post "/logout"</code> in the central part of <code>config/routes.cr</code>. <code>Sessions::New</code> renders the form below. Both forms turn boosting off with <code>"hx-boost": "false"</code> and carry the hidden <code>_csrf</code> field. Signing in or out changes the header, which sits outside <code>#content</code>, and a boosted swap would leave it stale; a full page load refreshes it.</p>`+
+      snippet('app/views/sessions/new.cr',`module App::Views::Sessions
+  class New < App::ApplicationView
+    def initialize(@csrf_token : String, @failed : Bool)
+    end
+
+    private def blueprint
+      h1 { "Sign in" }
+      p { "Email or password is wrong." } if @failed
+      form method: "post", action: "/login", "hx-boost": "false" do
+        input type: "hidden", name: "_csrf", value: @csrf_token
+        label { "Email" }
+        input type: "email", name: "email", required: true
+        label { "Password" }
+        input type: "password", name: "password", required: true
+        button(type: "submit") { "Sign in" }
+      end
+    end
+  end
+end`)+
+      snippet('app/views/layouts/application.cr · logout form in the header',`if @signed_in
+  form method: "post", action: "/logout", "hx-boost": "false" do
+    input type: "hidden", name: "_csrf", value: @csrf_token
+    button(type: "submit") { "Sign out" }
+  end
+end`)+
+      `<p>The layout receives the signed-in state from the action: pass <code>signed_in: !current_user.nil?</code> to <code>Layouts::Application.new</code> from <code>layout(page)</code>, store it as <code>@signed_in</code>, and test that, because a view cannot call the action’s helpers.</p>`+
+      `<h2 id="c-session-request">Load the session once per request</h2><p>Put three memoized readers on <code>App::ApplicationAction</code>. Each has an explicit <code>@…_loaded</code> flag, so a nil result is cached too. <code>@current_user ||= …</code> would run the query again on every call of an anonymous request, because nil is falsy.</p>`+
+      snippet('app/actions/application_action.cr',`require "digest/sha256"
+
+module App
+  abstract struct ApplicationAction < Caramel::Action
+    include App::Paths
+
+    @session_loaded = false
+    @current_session : UserSession? = nil
+    @user_loaded = false
+    @current_user : User? = nil
+    @membership_loaded = false
+    @current_membership : Membership? = nil
+
+    def layout(page : Caramel::Page) : String
+      Views::Layouts::Application.new(page, csrf_token, signed_in: !current_user.nil?).to_s
+    end
+
+    def title_for(page : Caramel::Page) : String
+      "#{page.title} · #{App::TITLE}"
+    end
+
+    def current_session : UserSession?
+      unless @session_loaded
+        @session_loaded = true
+        if token = session["session_token"]?
+          @current_session = UserSession.query.where(
+            token_digest: Digest::SHA256.hexdigest(token),
+            revoked_at: nil,
+            expires_at: Time.utc..
+          ).first
+        end
+      end
+      @current_session
+    end
+
+    def current_user : User?
+      unless @user_loaded
+        @user_loaded = true
+        if user_session = current_session
+          @current_user = User.query.where(id: user_session.user_id, active: true).first
+        end
+      end
+      @current_user
+    end
+
+    def current_membership : Membership?
+      unless @membership_loaded
+        @membership_loaded = true
+        if user = current_user
+          @current_membership = Membership.query
+            .where(user_id: user.id, account_id: tenant.id).first
+        end
+      end
+      @current_membership
+    end
+  end
+end`)+
+      `<p><code>current_session</code> matches the digest with <code>revoked_at: nil</code> and <code>expires_at</code> from now on. <code>current_user</code> requires <code>active</code>. <code>current_membership</code> matches the user and the tenant’s id. One action instance serves one request, so the next request queries again: that is why revocation, expiry, deactivation and a removed membership take effect on the next request. The memo lives on the action struct, so pass values, not the action, to helpers and views.</p>`+
+      `<h2 id="c-session-guard">Guard tenant pages with ingress</h2><p>A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair.</p>`+
+      snippet('app/models/membership.cr',`module App
+  struct Membership < SugarORM::Schema
+    schema "memberships" do
+      field id : Int64, primary: true
+      belongs_to user : User
+      belongs_to account : Account
+      timestamps
+      index :user_id, :account_id, unique: true
+    end
+  end
+end`)+
+      snippet('app/actions/accounts/home.cr',`module App::Accounts
+  # The account's home page, at /SLUG.
+  struct Home < App::ApplicationAction
+    ingress authenticate: :member?
+
+    contract do
+    end
+
+    def handle(contract : Contract)
+      page tenant.name, Views::Accounts::Home.new(tenant)
+    end
+
+    private def member? : Bool
+      !current_membership.nil?
+    end
+  end
+end`)+
+      `<p>Ingress is covered in <button class="c-secondary cursor-interaction" data-page="webhooks">the webhook recipe</button>. The tenant’s routes still sit in the <code>tenant</code> block. Once this guard exists, the generated sign-up spec that follows its redirect to the account’s home now gets 401 until the visitor is a member; change it to sign in first or to expect 401.</p>`+
+      `<h2 id="c-session-tests">Test the lifecycle in Corretto</h2><p>Log in through the real route and follow its redirect. <code>client.sign_in(user)</code> writes only <code>user_id</code>, so on its own it gets 401 on a member page. Move <code>expires_at</code> into the past with <code>update!</code> to test expiry. To test a replay, save the cookie before logout and restore it into <code>client.cookies</code> afterwards.</p>`+
+      snippet('spec/requests/sessions_spec.cr',`require "../spec_helper"
+require "crypto/bcrypt/password"
+
+def member(db, account : App::Account, active = true) : App::User
+  digest = Crypto::Bcrypt::Password.create("secret", cost: 4).to_s
+  user = App::User.create!(db, email: "ann@example.com", password_digest: digest, active: active)
+  App::Membership.create!(db, user_id: user.id, account_id: account.id)
+  user
+end
+
+def log_in(client, password = "secret")
+  client.post("/login", params: {"email" => "ann@example.com", "password" => password})
+end
+
+describe "Revocable sessions" do
+  it "signs a member in and out" do
+    Corretto.session do |client, db|
+      acme = account(db, "acme")
+      member(db, acme)
+      log_in(client).should redirect_to("/")
+      client.get("/acme").should have_status(200)
+      client.post("/logout").should redirect_to("/login")
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "refuses a wrong password" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      log_in(client, "wrong").should have_status(422)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "does not accept sign_in alone" do
+    Corretto.session do |client, db|
+      user = member(db, account(db, "acme"))
+      client.sign_in(user)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "refuses an expired session" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      log_in(client)
+      client.get("/acme").should have_status(200)
+      App::UserSession.query.first!.update!(db, expires_at: Time.utc - 1.minute)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "refuses a deactivated user" do
+    Corretto.session do |client, db|
+      user = member(db, account(db, "acme"))
+      log_in(client)
+      user.update!(db, active: false)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "refuses a user whose membership was deleted" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      log_in(client)
+      client.get("/acme").should have_status(200)
+      App::Membership.query.first!.delete(db)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "refuses a replayed cookie after logout" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      log_in(client)
+      cookie = client.cookies[Caramel::Session::COOKIE_NAME]
+      client.post("/logout")
+      client.cookies[Caramel::Session::COOKIE_NAME] = cookie
+      client.get("/acme").should have_status(401)
+    end
+  end
+end`)+
+      note('Corretto’s sign_in stores user_id','<code>client.sign_in(user)</code> writes <code>user_id</code> into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through <code>/login</code>.')+next('testing','Test the HTML your app returns'),
     agents: () => heading('Guides / Working with an agent','Give your agent a map.','The same conventions, release context, and proof commands that make Caramel easier for a person to learn.')+
       '<div class="c-tagrow"><span class="c-tag c-draft">Application guide</span><span class="c-tag">Target: 0.10.0</span></div><h2 id="c-agent-orient">Orient before editing</h2><p>Read the application’s <code>shard.lock</code> for its pinned release. Use the matching documentation, then inspect the command manifest and relevant routes.</p>'+snippet('Terminal','frappe agent-manifest\nfrappe routes books','bash')+
       '<h2 id="c-agent-map">Choose the application file</h2>'+files([['config/routes.cr','Endpoint declarations'],['app/actions/','Contracts and request behavior'],['app/models/ + app/changesets/','Data and write rules'],['app/views/','Typed HTML views'],['app/jobs/','Background work'],['spec/requests/','Request behavior tests']])+
@@ -781,7 +1061,7 @@
       '<h2 id="c-corretto-client">Send requests</h2><p><code>Corretto.session</code> yields a client and the example’s database connection. The client calls the application’s handler in-process, in the example’s fiber, so requests share the example’s transaction. It has <code>get</code>, <code>post</code>, <code>put</code>, <code>patch</code> and <code>delete</code>, and each returns a <code>Caramel::Response</code> with streamed bodies read to the end.</p>'+snippet('Corretto · request bodies','client.get("/books", params: {"page" => "2"})\nclient.post("/books", params: {"title" => "Dune"})\ncover = Corretto.upload("spec/fixtures/cover.png", "image/png")\nclient.post("/books/1/cover",\n  params: {"caption" => "First edition"},\n  files: {"cover" => cover})\nclient.post("/api/books", json: {title: "Dune"})\nclient.post("/hooks/inbox",\n  body: %({"event_id":"evt_1"}),\n  headers: {"Content-Type" => "application/json"})')+
       '<p>A request sends one body: URL-encoded <code>params:</code>, <code>params:</code> with <code>files:</code> as multipart, <code>json:</code> with any value, or raw <code>body:</code> text or bytes typed by your <code>Content-Type</code> header. Mixing them raises <code>Send one body: params: (with files: for multipart), json: or body:</code>. On GET, <code>params:</code> becomes the query, and any other body raises. Paths must be local, such as <code>/books</code>.</p>'+
       '<h2 id="c-corretto-browser">Cookies, CSRF and redirects</h2><p>The client behaves like a browser on your application’s origin. It sends <code>Host</code> on every request and keeps a cookie jar from <code>Set-Cookie</code>. On body methods it adds the exact <code>Origin</code> and an <code>X-CSRF-Token</code> a page would submit. Headers you pass override the automatic ones, which is how you test a forged request. The application rejects it with 403.</p>'+snippet('Corretto · forged requests','sample = {"title" => "Dune"}\nforged = {"X-CSRF-Token" => "forged"}\nforeign = {"Origin" => "https://attacker.example"}\nclient.post("/books", headers: forged, params: sample).should have_status(403)\nclient.post("/books", headers: foreign, params: sample).should have_status(403)')+
-      '<p><code>client.follow_redirect</code> sends a GET to the last response’s <code>HX-Location</code>, or to its <code>Location</code> when the status is 3xx. Otherwise it raises. <code>client.sign_in(user)</code> writes <code>user.id</code> as <code>user_id</code> into the signed session cookie, the way your application signs a user in.</p>'+
+      '<p><code>client.follow_redirect</code> sends a GET to the last response’s <code>HX-Location</code>, or to its <code>Location</code> when the status is 3xx. Otherwise it raises. <code>client.sign_in(user)</code> writes <code>user.id</code> as <code>user_id</code> into the signed session cookie, for an application whose sign-in stores <code>user_id</code>; an application with revocable sessions signs in through its login route instead.</p><p><button class="c-secondary cursor-interaction" data-page="sessions">Revocable sessions →</button></p>'+
       '<h2 id="c-corretto-matchers">Assert on responses and rows</h2><p>Corretto’s matchers work with <code>should</code> and <code>should_not</code>. Response matchers fail with the status, the headers and the first 800 characters of the body.</p>'+files([['have_status(status)','The response status equals status.'],['have_header(name, value = nil)','The header is present; with a value, one of its values equals it.'],['redirect_to(path)','A 3xx Location, or an HX-Location, equal to path.'],['render_page(title)','A full document with a doctype whose title contains title.'],['render_partial(target, swap = nil)','An hx-partial with that hx-target, and that hx-swap when given. A block also checks its content.'],['have_html(within:, count:, strict:) { … }','Blueprint-shaped requirements on the returned HTML.'],['have_row(Schema, **conditions)','On the db handle: a row matching typed where conditions.']])+
       '<p><code>have_row</code> is a macro over <code>Schema.query.where</code>, so an unknown or mistyped field fails compilation. Without conditions, it checks for any row.</p>'+snippet('Corretto · matchers','created.should have_status(303)\ncreated.should redirect_to("/books/1")\nupdated.should have_header("HX-Location", "/books/1")\nshown.should render_page("Book")\ndb.should have_row(App::Book, title: "Dune", author: nil)\ndb.should_not have_row(App::Book, title: "Solaris")')+
       '<p>The Corretto guide covers <code>have_html</code> and the block form of <code>render_partial</code> in depth.</p><button class="c-secondary cursor-interaction" data-page="testing">Test the HTML your app returns →</button>'+
@@ -845,7 +1125,7 @@
       '<p><code>APP_ORIGIN</code> must be an HTTPS origin without a path. <code>APP_SECRET</code> must be at least 32 bytes. A <code>_method</code> override reaches a route only when that route reads its body the same way; otherwise the answer is 405.</p>'+
       '<h2 id="c-security-sessions">Sessions are signed and held by the browser</h2><p><code>session</code> is a <code>Hash(String, String)</code> stored in the <code>__Host-caramel_session</code> cookie. The cookie holds base64url JSON and an HMAC-SHA256 signature. Its key is derived from <code>APP_SECRET</code> for this one purpose, so a CSRF signature cannot stand in for a session signature. A cookie that is malformed or wrongly signed reads as an empty session.</p>'+
       snippet('Inside an action · signing in','def handle(contract : Contract) : Caramel::Response\n  session["user_id"] = contract.user_id\n  redirect_to "/books"\nend')+
-      '<p>A response sets the cookie only when the session changed. <code>sign_out</code> clears the session, and the response deletes the cookie. The cookie has the same <code>Secure</code>, <code>HttpOnly</code>, <code>SameSite=Lax</code> and <code>Path=/</code> attributes. It has no <code>Max-Age</code>, so it ends with the browser session. There is no server-side expiry or revocation list. A session over 4096 bytes raises <code>Caramel::Session::Overflow</code>; keep ids in the session and records in the database.</p>'+
+      '<p>A response sets the cookie only when the session changed. <code>sign_out</code> clears the session, and the response deletes the cookie. The cookie has the same <code>Secure</code>, <code>HttpOnly</code>, <code>SameSite=Lax</code> and <code>Path=/</code> attributes. It has no <code>Max-Age</code>, so it ends with the browser session. There is no server-side expiry or revocation list. <button class="c-secondary cursor-interaction" data-page="sessions">Revocable sessions →</button> A session over 4096 bytes raises <code>Caramel::Session::Overflow</code>; keep ids in the session and records in the database.</p>'+
       '<p>The session is readable, though not editable, by anyone holding the cookie. Store no secrets in it. On a route whose ingress sets <code>csrf: false</code>, the session reads empty and is never saved.</p>'+
       "<h2 id=\"c-security-headers\">Every response carries the same headers</h2><p>Caramel adds three headers to every response, including static files and error pages.</p>"+
       files([['X-Content-Type-Options: nosniff','Browsers keep the declared content type'],['Referrer-Policy: same-origin','Other sites receive no referrer'],["Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"]])+
@@ -924,6 +1204,7 @@
     {page:'uploads',title:'Upload and keep a file',text:'Go from a request-scoped temporary file to a complete persistence recipe.',category:'Files',status:'draft',keywords:'storage image multipart upload'},
     {page:'jobs',title:'Run a background job',text:'Track job status, observe failure hooks, and run workers without HTTP.',category:'Background work',status:'draft',keywords:'queue cold brew worker work status retry hooks scheduler'},
     {page:'webhooks',title:'Receive a signed webhook',text:'Use raw-body ingress and provider authentication before contract binding.',category:'External integrations',status:'draft',keywords:'accept json post api csrf signature ingress raw body authenticate'},
+    {page:'sessions',title:'Sign users in with revocable sessions',text:'Keep a random token in the signed cookie and its digest, expiry and revocation in PostgreSQL.',category:'Accounts & access',status:'draft',keywords:'login logout authentication session token revoke expire membership current_user sign_in corretto'},
     {page:'deploy',title:'Deploy an application',text:'Follow the remaining gates from a local app to a supported production release.',category:'Production',status:'gap',keywords:'ship hosting linux binary release'}
   ];
   const searchIndex = [{page:'learn',title:'Your first application',type:'Learning path',terms:'setup install create macos apple silicon'}, {page:'map',title:'Project map',type:'Guide',terms:'directory files controller action model view frappe latte sugarorm corretto blueprint'}, {page:'agents',title:'Work with an agent',type:'Guide',terms:'AI AGENTS manifest check commands mrdp diagnostics patch expand'}, {page:'i18n',title:'Internationalization',type:'Guide',terms:'i18n translate translations localization locales language French plurals formatting dates number fallback cookie accept language rtl wording make locale catalog reference keys errors pages directives plural rules languages'}, {page:'crema',title:'Observability',type:'Guide',terms:'crema observability logs log request id trace traceparent error report fingerprint slow monitoring debugging on_error'}, {page:'cremaref',title:'Crema',type:'Reference',terms:'crema observability reference ops socket ops status tail errors traces metrics prometheus debug token recorder insights otlp opentelemetry sampler log line fields redaction fingerprint inspector toolbar theme dark light copy sql bind values shortcut dump traceparent jobs db diagnose collector pg_stat_statements access log'}, {page:'tenancy',title:'Multi-tenancy',type:'Guide',terms:'tenant tenancy multi-tenant saas accounts organizations slug scope isolation central make tenancy tenant_session'}, {page:'testing',title:'Test rendered HTML',type:'Guide',terms:'corretto have_html blueprint lexbor render_partial render_page doctype strict count scope assertions'}, {page:'releases',title:'Current release',type:'Guide',terms:'current release i18n internationalization translations locales version 0.10.0 crystal postgres lock shard lexbor only url server unique render_errors requirements limits'}, {page:'practices',title:'Best practices',type:'Guide',terms:'best practices conventions guidelines style lint service nouns contracts changesets preload migrations escaping csrf security jobs idempotent retries testing corretto mocks translations proof checks agents'}, {page:'routing',title:'Routes and contracts',type:'Reference',terms:'routes router draw path parameters 404 405 head method override contract field params validation min max default nilable string int64 time uploadedfile json query duplicate unknown errors 422 resource_paths path helpers frappe routes contract_mismatch ingress'}, {page:'actions',title:'Actions and responses',type:'Reference',terms:'action controller handle render respond status page layout title_for markup htmx partials morph fragment redirect_to redirect_external not_found stream sse server-sent events render_errors contract_failure_page session sign_out csrf_token negotiation accept json'}, {page:'views',title:'Views',type:'Reference',terms:'views blueprint templates html elements escaping attributes plain raw safe markup islands render partials forms csrf _method layout lang'}, {page:'sugarorm',title:'SugarORM',type:'Reference',terms:'sugarorm orm database model schema field belongs_to has_many has_one index scope query where order_by find preload n+1 sql changeset validations validate_presence unique_constraint create update transaction migrations db diff migrate linter dev-override branch'}, {page:'coldbrew',title:'Cold Brew',type:'Reference',terms:'cold brew jobs background queue worker enqueue param perform retry_on backoff run_at priority work concurrency schedules every cron pubsub publish subscribe cache drain_queue'}, {page:'corretto',title:'Corretto',type:'Reference',terms:'corretto testing specs request specs session client get post json body files upload headers csrf forged follow_redirect matchers have_status have_header redirect_to render_page have_row stub_wire wire fixtures mocks drain_queue concurrency env.test'}, {page:'security',title:'Security defaults',type:'Reference',terms:'security csrf token origin session cookie host headers content security policy csp referrer nosniff 421 escaping xss safe ingress authenticate webhook redirect external url outbound static files errors request id'}, {page:'commands',title:'Commands',type:'Reference',terms:'commands cli frappe reference help syntax flags latte binary serve work seed routes schema drift migrate lint translations check format expand db dump restore diff branch logs services sites installations doctor open lsp corretto agent-manifest mrdp'}, {page:'local',title:'Local environment',type:'Reference',terms:'local environment latte services postgres dns caddy https sites origins localhost resolver trust frappe dev logs doctor databases env seed dump restore installations releases editor lsp zed crystalline ameba'}].concat(recipes.map(r=>({page:r.page,title:r.title,type:r.status==='gap'?'Framework gap':'Draft recipe',terms:r.text+' '+r.keywords})));

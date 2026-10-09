@@ -24,6 +24,7 @@ const sections = {
   crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
   uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
   webhooks: 'cookbook/webhooks',
+  sessions: 'cookbook/revocable-sessions',
 };
 const routesFor = edition => ({home: '/', cookbook: `/cookbook/${edition.version}/`,
   ...Object.fromEntries(Object.keys(edition.pages).map(key => {
