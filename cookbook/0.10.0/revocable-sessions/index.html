@@ -49,11 +49,15 @@
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
 <span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> db diff --name create_user_sessions
-<span class="hljs-built_in">frappe</span> migrate</code></pre></div><p>The diff writes one migration for every table the schemas declare that the database lacks, so a first run also creates <code>users</code> and the <code>memberships</code> table below. The digest is unique, so one lookup finds one row.</p><h2 id="c-session-login">Create the session at login, revoke it at logout</h2><p>Login is <code>POST /login</code> with an <code>email</code> and a <code>password</code>. The action verifies the bcrypt digest and refuses an inactive user with the same answer as a wrong password. It then runs <code>session.clear</code>, so nothing from an earlier session survives, and creates the token. Only the token’s digest reaches the database.</p><div class="c-snippet"><header>app/actions/sessions/login.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;crypto/bcrypt/password&quot;</span>
+<span class="hljs-built_in">frappe</span> migrate</code></pre></div><p>The diff writes one migration for every table the schemas declare that the database lacks, so a first run also creates <code>users</code> and the <code>memberships</code> table below. The digest is unique, so one lookup finds one row.</p><h2 id="c-session-login">Create the session at login, revoke it at logout</h2><p>Login is <code>POST /login</code> with an <code>email</code> and a <code>password</code>. An unknown email, an inactive user, a wrong password and an over-long password all get the same 422 page, and every attempt runs exactly one bcrypt comparison: a missing user is checked against a fixed dummy digest. That keeps the answer and the work comparable, so the response does not say which emails exist; it does not make the timing identical.</p><p>Crystal’s bcrypt reads at most 71 bytes of a password and <code>verify</code> raises <code>Crypto::Bcrypt::Error</code> from 72 bytes up. A contract <code>max:</code> counts characters, not bytes, so the action tests <code>bytesize</code> itself; without that test a long password would answer 500 only for an email that exists. On success the action revokes the row behind any token the cookie already holds, because <code>session.clear</code> would otherwise orphan a row that stays valid for anyone who copied the old cookie. It then clears the session and creates the new token. Only the token’s digest reaches the database.</p><div class="c-snippet"><header>app/actions/sessions/login.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;crypto/bcrypt/password&quot;</span>
 <span class="hljs-keyword">require</span> <span class="hljs-string">&quot;digest/sha256&quot;</span>
 
 <span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Sessions</span></span>
   <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Login</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    <span class="hljs-comment"># A valid bcrypt digest that no password matches. An unknown or inactive</span>
+    <span class="hljs-comment"># email is checked against it, so every attempt costs one bcrypt comparison.</span>
+    <span class="hljs-type">DUMMY_DIGEST</span> = <span class="hljs-string">&quot;$2a$11$gAYJo.vJfIwsu1p8HuehU.GEPrMMm4NrGSBZIZiDHdZVg.JHmm5wi&quot;</span>
+
     contract <span class="hljs-keyword">do</span>
       field email : <span class="hljs-type">String</span>
       field password : <span class="hljs-type">String</span>
@@ -61,10 +65,17 @@
 
     <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
       user = <span class="hljs-type">User</span>.query.where(<span class="hljs-attr">email:</span> contract.email, <span class="hljs-attr">active:</span> <span class="hljs-literal">true</span>).first
-      <span class="hljs-keyword">unless</span> user &amp;&amp; <span class="hljs-type">Crypto::Bcrypt::Password</span>.new(user.password_digest).verify(contract.password)
+      <span class="hljs-comment"># bcrypt reads at most 71 bytes: verify raises for 72 or more, which would</span>
+      <span class="hljs-comment"># answer 500 only for an existing email. Treat those as a wrong password.</span>
+      too_long = contract.password.bytesize &gt;= <span class="hljs-number">72</span>
+      digest = user ? user.password_digest : <span class="hljs-type">DUMMY_DIGEST</span>
+      matches = <span class="hljs-type">Crypto::Bcrypt::Password</span>.new(digest).verify(too_long ? <span class="hljs-string">&quot;&quot;</span> : contract.password)
+      <span class="hljs-keyword">unless</span> user &amp;&amp; matches &amp;&amp; !too_long
         <span class="hljs-keyword">self</span>.status = <span class="hljs-number">422</span>
         <span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>
       <span class="hljs-keyword">end</span>
+      <span class="hljs-comment"># A cookie that still holds a session token must not leave its row open.</span>
+      current_session.try &amp;.update!(<span class="hljs-attr">revoked_at:</span> <span class="hljs-type">Time</span>.utc)
       session.clear
       token = <span class="hljs-type">Random::Secure</span>.urlsafe_base64(<span class="hljs-number">32</span>)
       <span class="hljs-type">UserSession</span>.create!(
@@ -174,7 +185,7 @@
       <span class="hljs-variable">@current_membership</span>
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
-<span class="hljs-keyword">end</span></code></pre></div><p><code>current_session</code> matches the digest with <code>revoked_at: nil</code> and <code>expires_at</code> from now on. <code>current_user</code> requires <code>active</code>. <code>current_membership</code> matches the user and the tenant’s id. One action instance serves one request, so the next request queries again: that is why revocation, expiry, deactivation and a removed membership take effect on the next request. The memo lives on the action struct, so pass values, not the action, to helpers and views.</p><h2 id="c-session-guard">Guard tenant pages with ingress</h2><p>A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair.</p><div class="c-snippet"><header>app/models/membership.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App</span></span>
+<span class="hljs-keyword">end</span></code></pre></div><p><code>current_session</code> matches the digest with <code>revoked_at: nil</code> and <code>expires_at</code> from now on. <code>current_user</code> requires <code>active</code>. <code>current_membership</code> matches the user and the tenant’s id. One action instance serves one request, so the next request queries again: that is why revocation, expiry, deactivation and a removed membership take effect on the next request. The memo lives on the action struct, so pass values, not the action, to helpers and views.</p><h2 id="c-session-guard">Guard tenant pages with ingress</h2><p>A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair. Nothing else creates one, so the action that creates an account must make its creator the first member, or the guard locks every new account out.</p><div class="c-snippet"><header>app/models/membership.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App</span></span>
   <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Membership</span> &lt; <span class="hljs-title">SugarORM::Schema</span></span>
     schema <span class="hljs-string">&quot;memberships&quot;</span> <span class="hljs-keyword">do</span>
       field id : <span class="hljs-type">Int64</span>, <span class="hljs-attr">primary:</span> <span class="hljs-literal">true</span>
@@ -200,12 +211,45 @@
       !current_membership.<span class="hljs-literal">nil</span>?
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
-<span class="hljs-keyword">end</span></code></pre></div><p>Ingress is covered in <a class="c-secondary cursor-interaction" data-page="webhooks" href="/cookbook/0.10.0/webhooks/">the webhook recipe</a>. The tenant’s routes still sit in the <code>tenant</code> block. Once this guard exists, the generated sign-up spec that follows its redirect to the account’s home now gets 401 until the visitor is a member; change it to sign in first or to expect 401.</p><h2 id="c-session-tests">Test the lifecycle in Corretto</h2><p>Log in through the real route and follow its redirect. <code>client.sign_in(user)</code> writes only <code>user_id</code>, so on its own it gets 401 on a member page. Move <code>expires_at</code> into the past with <code>update!</code> to test expiry. To test a replay, save the cookie before logout and restore it into <code>client.cookies</code> afterwards.</p><div class="c-snippet"><header>spec/requests/sessions_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>Ingress is covered in <a class="c-secondary cursor-interaction" data-page="webhooks" href="/cookbook/0.10.0/webhooks/">the webhook recipe</a>. The tenant’s routes still sit in the <code>tenant</code> block.</p><p>The generated <code>Accounts::Create</code> redirects to the new account without a membership. Replace it so that only a signed-in user creates an account and becomes its member. The membership is written after the account is saved; a failed account re-renders the form and writes nothing. The signed-in check runs before the contract binds, so an anonymous request answers 401. The generated spec that created an account anonymously no longer applies; the spec below covers sign-up.</p><div class="c-snippet"><header>app/actions/accounts/create.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Accounts</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Create</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    <span class="hljs-keyword">include</span> <span class="hljs-type">Form</span>
+
+    <span class="hljs-comment"># Only a signed-in user creates an account, and becomes its first member.</span>
+    ingress <span class="hljs-attr">authenticate:</span> :signed_in?
+
+    contract <span class="hljs-keyword">do</span>
+      field name : <span class="hljs-type">String</span>
+      field slug : <span class="hljs-type">String</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      user = current_user.not_nil!
+      changes = <span class="hljs-type">App::Account</span>.create(<span class="hljs-attr">name:</span> contract.name, <span class="hljs-attr">slug:</span> contract.slug)
+      <span class="hljs-keyword">return</span> render_form(contract.values, changes.errors, <span class="hljs-number">422</span>) <span class="hljs-keyword">unless</span> changes.saved?
+      <span class="hljs-type">App::Membership</span>.create!(<span class="hljs-attr">user_id:</span> user.id, <span class="hljs-attr">account_id:</span> changes.record.id)
+      <span class="hljs-keyword">self</span>.status = <span class="hljs-number">201</span>
+      {<span class="hljs-attr">record:</span> changes.record}
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">render</span></span>(result)
+      redirect_to(<span class="hljs-string">&quot;/<span class="hljs-subst">#{result[:record].slug}</span>&quot;</span>)
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">signed_in?</span></span> : <span class="hljs-type">Bool</span>
+      !current_user.<span class="hljs-literal">nil</span>?
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><h2 id="c-session-tests">Test the lifecycle in Corretto</h2><p>Log in through the real route and follow its redirect. <code>client.sign_in(user)</code> writes only <code>user_id</code>, so on its own it gets 401 on a member page. Move <code>expires_at</code> into the past with <code>update!</code> to test expiry. To test a replay, save the cookie before logout and restore it into <code>client.cookies</code> afterwards; the same trick proves that a second login revokes the first session. A 72-byte password must get the same page as a wrong one, and creating an account must make its creator a member.</p><div class="c-snippet"><header>spec/requests/sessions_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
 <span class="hljs-keyword">require</span> <span class="hljs-string">&quot;crypto/bcrypt/password&quot;</span>
 
-<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">member</span></span>(db, account : <span class="hljs-type">App::Account</span>, active = <span class="hljs-literal">true</span>) : <span class="hljs-type">App::User</span>
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">user</span></span>(db, active = <span class="hljs-literal">true</span>) : <span class="hljs-type">App::User</span>
   digest = <span class="hljs-type">Crypto::Bcrypt::Password</span>.create(<span class="hljs-string">&quot;secret&quot;</span>, <span class="hljs-attr">cost:</span> <span class="hljs-number">4</span>).to_s
-  user = <span class="hljs-type">App::User</span>.create!(db, <span class="hljs-attr">email:</span> <span class="hljs-string">&quot;ann@example.com&quot;</span>, <span class="hljs-attr">password_digest:</span> digest, <span class="hljs-attr">active:</span> active)
+  <span class="hljs-type">App::User</span>.create!(db, <span class="hljs-attr">email:</span> <span class="hljs-string">&quot;ann@example.com&quot;</span>, <span class="hljs-attr">password_digest:</span> digest, <span class="hljs-attr">active:</span> active)
+<span class="hljs-keyword">end</span>
+
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">member</span></span>(db, account : <span class="hljs-type">App::Account</span>, active = <span class="hljs-literal">true</span>) : <span class="hljs-type">App::User</span>
+  user = user(db, active)
   <span class="hljs-type">App::Membership</span>.create!(db, <span class="hljs-attr">user_id:</span> user.id, <span class="hljs-attr">account_id:</span> account.id)
   user
 <span class="hljs-keyword">end</span>
@@ -230,6 +274,17 @@ describe <span class="hljs-string">&quot;Revocable sessions&quot;</span> <span c
     <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, db|
       member(db, account(db, <span class="hljs-string">&quot;acme&quot;</span>))
       log_in(client, <span class="hljs-string">&quot;wrong&quot;</span>).should have_status(<span class="hljs-number">422</span>)
+      client.get(<span class="hljs-string">&quot;/acme&quot;</span>).should have_status(<span class="hljs-number">401</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;answers a password of 72 bytes or more like a wrong one&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, db|
+      member(db, account(db, <span class="hljs-string">&quot;acme&quot;</span>))
+      wrong = log_in(client, <span class="hljs-string">&quot;wrong&quot;</span>)
+      long = log_in(client, <span class="hljs-string">&quot;a&quot;</span> * <span class="hljs-number">72</span>)
+      long.should have_status(<span class="hljs-number">422</span>)
+      long.body.should eq(wrong.body)
       client.get(<span class="hljs-string">&quot;/acme&quot;</span>).should have_status(<span class="hljs-number">401</span>)
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
@@ -281,7 +336,31 @@ describe <span class="hljs-string">&quot;Revocable sessions&quot;</span> <span c
       client.get(<span class="hljs-string">&quot;/acme&quot;</span>).should have_status(<span class="hljs-number">401</span>)
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
-<span class="hljs-keyword">end</span></code></pre></div><div class="c-note"><strong>Corretto’s sign_in stores user_id</strong><p><code>client.sign_in(user)</code> writes <code>user_id</code> into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through <code>/login</code>.</p></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.10.0/">← All recipes</a><a class="cursor-interaction" data-page="testing" href="/docs/0.10.0/testing-html/">Test the HTML your app returns →</a></div></article>
+
+  it <span class="hljs-string">&quot;revokes the earlier session when a signed-in browser logs in again&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, db|
+      member(db, account(db, <span class="hljs-string">&quot;acme&quot;</span>))
+      log_in(client)
+      first = client.cookies[<span class="hljs-type">Caramel::Session::COOKIE_NAME</span>]
+      log_in(client).should redirect_to(<span class="hljs-string">&quot;/&quot;</span>)
+      client.get(<span class="hljs-string">&quot;/acme&quot;</span>).should have_status(<span class="hljs-number">200</span>)
+      client.cookies[<span class="hljs-type">Caramel::Session::COOKIE_NAME</span>] = first
+      client.get(<span class="hljs-string">&quot;/acme&quot;</span>).should have_status(<span class="hljs-number">401</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;makes the creator of an account its member&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, db|
+      user(db)
+      client.post(<span class="hljs-string">&quot;/accounts&quot;</span>, <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;name&quot;</span> =&gt; <span class="hljs-string">&quot;Acme&quot;</span>, <span class="hljs-string">&quot;slug&quot;</span> =&gt; <span class="hljs-string">&quot;acme&quot;</span>})
+        .should have_status(<span class="hljs-number">401</span>)
+      log_in(client)
+      client.post(<span class="hljs-string">&quot;/accounts&quot;</span>, <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;name&quot;</span> =&gt; <span class="hljs-string">&quot;Acme&quot;</span>, <span class="hljs-string">&quot;slug&quot;</span> =&gt; <span class="hljs-string">&quot;acme&quot;</span>})
+        .should redirect_to(<span class="hljs-string">&quot;/acme&quot;</span>)
+      client.follow_redirect.should render_page(<span class="hljs-string">&quot;Acme&quot;</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-note"><strong>Corretto’s sign_in stores user_id</strong><p><code>client.sign_in(user)</code> writes <code>user_id</code> into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through <code>/login</code>. The specs create their users directly, so the recipe’s own sign-up has no seeded user; add a registration action, or insert users with a script, before real people can sign in.</p></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.10.0/">← All recipes</a><a class="cursor-interaction" data-page="testing" href="/docs/0.10.0/testing-html/">Test the HTML your app returns →</a></div></article>
         <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-session-split">Keep the revocable part in PostgreSQL</a><a href="#c-session-login">Create the session at login, revoke it at logout</a><a href="#c-session-request">Load the session once per request</a><a href="#c-session-guard">Guard tenant pages with ingress</a><a href="#c-session-tests">Test the lifecycle in Corretto</a></aside>
       </div>
     </div>
