@@ -23,6 +23,7 @@ const sections = {
   local: 'docs/local-environment',
   crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
   uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
+  islands: 'cookbook/third-party-components',
   webhooks: 'cookbook/webhooks',
   sessions: 'cookbook/revocable-sessions',
 };

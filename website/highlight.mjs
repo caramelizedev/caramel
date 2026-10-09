@@ -3,6 +3,7 @@ import crystal from './vendor/highlightjs/languages/crystal.cjs';
 import bash from './vendor/highlightjs/languages/bash.cjs';
 import yaml from './vendor/highlightjs/languages/yaml.cjs';
 import markdown from './vendor/highlightjs/languages/markdown.cjs';
+import javascript from './vendor/highlightjs/languages/javascript.cjs';
 
 hljs.registerLanguage('crystal', engine => {
   const grammar = crystal(engine);
@@ -21,6 +22,7 @@ hljs.registerLanguage('bash', engine => {
 });
 hljs.registerLanguage('yaml', yaml);
 hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('javascript', javascript);
 
 export const decodeCode = html => html.replace(/&(amp|lt|gt|quot|#39);/g,
   (_, entity) => ({amp:'&', lt:'<', gt:'>', quot:'"', '#39':"'"}[entity]));
