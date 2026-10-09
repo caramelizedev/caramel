@@ -14,7 +14,9 @@ module Caramel
   # Every request source a contract may bind: route parameters, the URL query
   # and a bounded body: a URL-encoded or multipart form or a JSON object, or,
   # for a route whose ingress is raw, the bytes as sent. Duplicate keys are
-  # errors instead of silently selecting a value based on parser order.
+  # errors instead of silently selecting a value based on parser order. A
+  # repeated form or query key keeps every value, for the contract fields
+  # declared as arrays; a contract reports the rest as duplicates.
   class RequestInput
     class TooLarge < Exception; end
 
@@ -29,6 +31,7 @@ module Caramel
       Number
       Bool
       Null
+      Array
       Nested
     end
 
@@ -50,6 +53,8 @@ module Caramel
     getter? lenient_query : Bool
     @submitted_override : String? = nil
     @json_kinds = {} of String => JsonKind
+    @json_items = {} of String => Array({String?, JsonKind})
+    @repeated = {} of String => Array(String)
 
     # Reads *request* as its route's *ingress* allows: its limit bounds the
     # body text, and uploads share *max_upload_bytes*.
@@ -103,6 +108,26 @@ module Caramel
     def json_mismatch?(name : String, expected : JsonKind) : Bool
       kind = @json_kinds[name]?
       !kind.nil? && !kind.null? && kind != expected
+    end
+
+    # Form and query names sent more than once, in the order they first repeated.
+    def repeated_names : Array(String)
+      @repeated.keys
+    end
+
+    # Every value sent for *name*, in order.
+    def all_values(name : String) : Array(String)
+      @repeated[name]? || ((value = @body[name]? || @query[name]?) ? [value] : [] of String)
+    end
+
+    def json_kind?(name : String) : JsonKind?
+      @json_kinds[name]?
+    end
+
+    # The items of a JSON array member: text for strings, numbers and
+    # booleans, and the JSON type each item arrived as.
+    def json_items(name : String) : Array({String?, JsonKind})
+      @json_items[name]? || [] of {String?, JsonKind}
     end
 
     def source_count(name : String) : Int32
@@ -231,9 +256,35 @@ module Caramel
       when .null?
         parser.read_null
         JsonKind::Null
+      when .begin_array?
+        items = [] of {String?, JsonKind}
+        parser.read_array { items << read_json_item(parser) }
+        @json_items[key] = items
+        JsonKind::Array
       else
         parser.skip
         JsonKind::Nested
+      end
+    end
+
+    private def read_json_item(parser : JSON::PullParser) : {String?, JsonKind}
+      case parser.kind
+      when .string?
+        value = parser.read_string
+        check_text(value)
+        {value, JsonKind::String}
+      when .int?, .float?
+        raw = parser.raw_value
+        parser.read_next
+        {raw, JsonKind::Number}
+      when .bool?
+        {parser.read_bool.to_s, JsonKind::Bool}
+      when .null?
+        parser.read_null
+        {nil, JsonKind::Null}
+      else
+        parser.skip
+        {nil, JsonKind::Nested}
       end
     end
 
@@ -245,7 +296,11 @@ module Caramel
         check_text(key)
         check_text(value)
         unless seen.add?(key)
-          add_error("_base", Wording.duplicate_field(key))
+          if controls && control_name?(key)
+            add_error("_base", Wording.duplicate_field(key))
+          else
+            (@repeated[key] ||= [target[key]]) << value
+          end
           next
         end
         next if control?(key, value, controls)
@@ -262,7 +317,8 @@ module Caramel
       HTTP::FormData.parse(request) do |part|
         name = part.name
         check_text(name)
-        unless seen.add?(name)
+        repeat = !seen.add?(name)
+        if repeat && (part.filename || @files.has_key?(name) || control_name?(name))
           add_error("_base", Wording.duplicate_field(name))
           next
         end
@@ -293,7 +349,11 @@ module Caramel
           raise TooLarge.new("Form exceeds #{max_form_bytes} bytes") if copied > text_budget
           text_budget -= copied
           check_text(value)
-          @body[name] = value unless control?(name, value, true)
+          if repeat
+            (@repeated[name] ||= [@body[name]]) << value
+          else
+            @body[name] = value unless control?(name, value, true)
+          end
         end
       end
     rescue HTTP::FormData::Error | MIME::Multipart::Error
@@ -303,6 +363,10 @@ module Caramel
     private def check_text(text : String) : Nil
       malformed = !text.valid_encoding? || text.includes?('\0')
       raise InvalidEncoding.new("Malformed form encoding") if malformed
+    end
+
+    private def control_name?(key : String) : Bool
+      key == "_csrf" || key == "_method"
     end
 
     # `_csrf` and `_method` are transport controls, never contract fields.

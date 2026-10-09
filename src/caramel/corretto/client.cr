@@ -29,7 +29,8 @@ module Corretto
   #
   # A request's body is one of:
   #
-  # * `params:`, a URL-encoded form (for GET, the query);
+  # * `params:`, a URL-encoded form (for GET, the query); an Array value sends one
+  #   key per item;
   # * `params:` with `files:`, a multipart form;
   # * `json:`, any value, sent as `application/json`;
   # * `body:`, raw text or bytes, typed by a `Content-Type` in `headers:`.
@@ -155,7 +156,13 @@ module Corretto
 
     private def form(params : Hash(String, _)) : String
       URI::Params.build do |builder|
-        params.each { |key, value| builder.add(key, value.to_s) }
+        params.each do |key, value|
+          if value.is_a?(Array)
+            value.each { |item| builder.add(key, item.to_s) }
+          else
+            builder.add(key, value.to_s)
+          end
+        end
       end
     end
 
@@ -164,7 +171,13 @@ module Corretto
                           sent : HTTP::Headers) : Bytes
       io = IO::Memory.new
       builder = HTTP::FormData::Builder.new(io)
-      params.each { |name, value| builder.field(name, value.to_s) }
+      params.each do |name, value|
+        if value.is_a?(Array)
+          value.each { |item| builder.field(name, item.to_s) }
+        else
+          builder.field(name, value.to_s)
+        end
+      end
       files.each { |name, upload| attach(builder, name, upload) }
       builder.finish
       sent["Content-Type"] = builder.content_type

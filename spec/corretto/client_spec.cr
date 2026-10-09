@@ -42,6 +42,16 @@ struct CorrettoSpecCreate < CorrettoSpecAction
   end
 end
 
+struct CorrettoSpecTags < CorrettoSpecAction
+  contract do
+    field ids : Array(Int64), max: 5
+  end
+
+  def handle(contract : Contract)
+    Caramel::Response.new(200, contract.ids.join(","))
+  end
+end
+
 struct CorrettoSpecMove < CorrettoSpecAction
   contract do
     field id : Int64
@@ -110,6 +120,8 @@ module CorrettoSpecApp
     get "/", CorrettoSpecHome
     get "/events", CorrettoSpecEvents
     post "/notes", CorrettoSpecCreate
+    post "/tags", CorrettoSpecTags
+    get "/tags", CorrettoSpecTags
     get "/notes/:id", CorrettoSpecShow
     patch "/notes/:id", CorrettoSpecMove
   end
@@ -223,6 +235,15 @@ describe Corretto::Client do
     binary.body.to_slice.should eq(Bytes[0, 255])
     forged = client.post("/hooks", body: "x", headers: {"X-Signature" => "forged"})
     forged.should have_status(401)
+  end
+
+  it "sends an Array param as one key per item" do
+    client = corretto_spec_client
+    client.post("/tags", params: {"ids" => [1, 2]}).body.should eq("1,2")
+    client.get("/tags", params: {"ids" => [3, 4]}).body.should eq("3,4")
+    upload = Corretto::Upload.new("x", "a.txt", "text/plain")
+    sent = client.post("/tags", params: {"ids" => [5, 6]}, files: {"extra" => upload})
+    sent.should have_status(422)
   end
 
   it "refuses a request with two bodies, or a GET with any body" do

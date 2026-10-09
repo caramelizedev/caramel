@@ -3,7 +3,23 @@ require "./support/harness"
 cases = {
   "compile_unsupported_type" => [
     "unsupported Caramel::RequestContract field type",
+    "field tags : Hash(String, String)",
+  ],
+  "compile_array_without_max" => [
+    "array fields must declare max:, the most items they accept: tags",
     "field tags : Array(String)",
+  ],
+  "compile_array_default" => [
+    "array fields take no default; an absent array is empty: tags",
+    "field tags : Array(String), max: 3, default: [] of String",
+  ],
+  "compile_array_of_files" => [
+    "unsupported Caramel::RequestContract field type",
+    "field tags : Array(Caramel::UploadedFile), max: 3",
+  ],
+  "compile_nested_array" => [
+    "unsupported Caramel::RequestContract field type",
+    "field tags : Array(Array(Int64)), max: 3",
   ],
   "compile_bounds_on_bool" => [
     "min/max apply only to String, Int32, Int64 and Float64 fields",

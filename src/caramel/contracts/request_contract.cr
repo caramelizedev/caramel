@@ -30,6 +30,8 @@ module Caramel
     getter errors = {} of String => Array(String)
     # Submitted text for each declared field, kept to re-render forms.
     getter values = {} of String => String
+    # Submitted text for each declared Array field, kept to re-render forms.
+    getter lists = {} of String => Array(String)
 
     def valid? : Bool
       @errors.empty?
@@ -111,6 +113,12 @@ module Caramel
       {% unsupported = "unsupported Caramel::RequestContract field type: " +
                        "#{decl.type}#{where.id}" %}
       {% type = decl.type.resolve %}
+      {% element_types = ["String", "Int32", "Int64", "Float64", "Bool", "Time"] %}
+      {% if !type.union? && type.name(generic_args: false).stringify == "Array" &&
+              type.type_vars.size == 1 &&
+              element_types.includes?(type.type_vars.first.id.stringify) %}
+        __caramel_array_field({{ decl }}, {{ min }}, {{ max }}, {{ default }}, {{ where }})
+      {% else %}
       {% scalar = type %}
       {% nilable = false %}
       {% if type.union? %}
@@ -217,6 +225,105 @@ module Caramel
           @{{ name }} = value
         {% end %}
       end
+      {% end %}
+    end
+
+    # An `Array(T)` field of a scalar type: bounded by `max:` and optionally
+    # `min:`, each item converted like a field of its type.
+    macro __caramel_array_field(decl, min, max, default, where)
+      {% name = decl.var.id %}
+      {% has_min = !min.is_a?(NilLiteral) %}
+      {% has_max = !max.is_a?(NilLiteral) %}
+      {% element = decl.type.resolve.type_vars.first %}
+      {% full = element.id.stringify %}
+      {% unless has_max %}
+        {% decl.raise "array fields must declare max:, the most items they accept: " +
+                      "#{name}#{where.id}" %}
+      {% end %}
+      {% unless default.is_a?(NilLiteral) %}
+        {% decl.raise "array fields take no default; an absent array is empty: " +
+                      "#{name}#{where.id}" %}
+      {% end %}
+      {% min_value = has_min ? min : 0 %}
+      {% bounds_ok = max.is_a?(NumberLiteral) && !max.kind.stringify.includes?("f") &&
+                     min_value.is_a?(NumberLiteral) &&
+                     !min_value.kind.stringify.includes?("f") &&
+                     max >= 1 && min_value >= 0 && min_value <= max %}
+      {% unless bounds_ok %}
+        {% decl.raise "array bounds must be integer literals with 0 <= min <= max and " +
+                      "max >= 1: #{name}#{where.id}" %}
+      {% end %}
+      {% json = ::Caramel::RequestContract::JSON_TYPES[full] %}
+      {% bounds = has_min ? "min=#{min},max=#{max}" : "max=#{max}" %}
+
+      CARAMEL_FIELD_{{ name.upcase }} = {
+        {{ name.stringify }}, {{ "Array(#{full.id})" }}, false, false,
+        {{ "#{name}:Array(#{full.id})(#{bounds.id})" }},
+      }
+
+      @{{ name }} : Array({{ element }})? = nil
+
+      def {{ name }} : Array({{ element }})
+        @{{ name }}.as(Array({{ element }}))
+      end
+
+      def __caramel_assign_{{ name }}(input : ::Caramel::RequestInput) : Nil
+        if input.source_count({{ name.stringify }}) > 1
+          add_error("_base", ::Caramel::Wording.duplicate_field({{ name.stringify }}))
+          return
+        end
+        items = [] of {String?, ::Caramel::RequestInput::JsonKind?}
+        kind = input.json_kind?({{ name.stringify }})
+        if kind.nil?
+          input.all_values({{ name.stringify }}).each { |text| items << {text, nil} }
+        elsif kind.array?
+          input.json_items({{ name.stringify }}).each { |item| items << {item[0], item[1]} }
+        elsif !kind.null?
+          add_error({{ name.stringify }}, ::Caramel::Wording.json_type("array"))
+          return
+        end
+        @lists[{{ name.stringify }}] = items.map { |item| item[0] || "" }
+        if items.size > {{ max }}
+          add_error({{ name.stringify }}, ::Caramel::Wording.at_most_items({{ max }}))
+          return
+        end
+        {% if min_value > 0 %}
+          if items.size < {{ min_value }}
+            add_error({{ name.stringify }}, ::Caramel::Wording.at_least_items({{ min_value }}))
+            return
+          end
+        {% end %}
+        values = [] of {{ element }}
+        seen = Set({{ element }}).new
+        failed = false
+        items.each_with_index do |(text, item_kind), index|
+          key = "#{{{ name.stringify }}}[#{index}]"
+          expected = ::Caramel::RequestInput::JsonKind::{{ json[0].id }}
+          if item_kind && !item_kind.null? && item_kind != expected
+            add_error(key, ::Caramel::Wording.json_type({{ json[1] }}))
+            failed = true
+            next
+          end
+          if text.nil? || text.strip.empty?
+            add_error(key, ::Caramel::Wording.required)
+            failed = true
+            next
+          end
+          value = ::Caramel::RequestContract.convert(text, {{ element }})
+          if value.nil?
+            add_error(key, ::Caramel::Wording.invalid_value({{ full.split("::").last }}))
+            failed = true
+            next
+          end
+          unless seen.add?(value)
+            add_error(key, ::Caramel::Wording.duplicate_item)
+            failed = true
+            next
+          end
+          values << value
+        end
+        @{{ name }} = values unless failed
+      end
     end
 
     macro inherited
@@ -224,6 +331,10 @@ module Caramel
         contract = new
         input.errors.each do |field, messages|
           messages.each { |message| contract.add_error(field, message) }
+        end
+        input.repeated_names.each do |key|
+          next if __caramel_array_field?(key)
+          contract.add_error("_base", ::Caramel::Wording.duplicate_field(key))
         end
         {% verbatim do %}
           {% for constant in @type.constants %}
@@ -237,6 +348,20 @@ module Caramel
           contract.add_error("_base", ::Caramel::Wording.unknown_field(key))
         end
         contract
+      end
+
+      private def self.__caramel_array_field?(key : String) : Bool
+        {% verbatim do %}
+          {% for constant in @type.constants %}
+            {% if constant.stringify.starts_with?("CARAMEL_FIELD_") %}
+              {% field = @type.constant(constant) %}
+              {% if field[1].starts_with?("Array(") %}
+                return true if key == {{ field[0] }}
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        false
       end
 
       private def self.__caramel_field?(key : String) : Bool

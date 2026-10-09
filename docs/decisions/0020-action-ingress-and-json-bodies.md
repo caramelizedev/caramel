@@ -35,7 +35,7 @@ Reading every request the same way before routing, and checking CSRF on every PO
    - `null` is absent;
    - a duplicate member is an error, and the first value wins;
    - a member must have its field's JSON type (a string for `String` and `Time`, a number for `Int32`, `Int64` and `Float64`, a boolean for `Bool`), or the field reports `must be a JSON number` or similar;
-   - nested arrays and objects bind to no field.
+   - an array binds to an `Array(T)` field, each item with its element's JSON type; other arrays and objects bind to no field.
 
    A body that is not an object answers 422 with `Expected a JSON object`. Malformed JSON, trailing data, NUL and invalid UTF-8 answer 400. `_csrf` and `_method` are ordinary members: JSON clients send `X-CSRF-Token` and use real methods. `+json` media types are not read as JSON, because their conventions for `null` and nesting mean something this binding would silently change; such routes use `body: :raw`.
 5. **CSRF.** Body methods are CSRF-checked unless the matched route declares `csrf: false`, which requires an authenticator. Same-origin `fetch` passes the token in `X-CSRF-Token`, as htmx does.
