@@ -6,6 +6,13 @@ private alias Update = SugarUnit::Team::UpdateChangeset
 private alias Profile = SugarUnit::Team::ProfileChangeset
 
 describe SugarORM::Changeset do
+  it "validates inclusion of a codec field against values of its type" do
+    ok = SugarUnit::Ticket::GradeChangeset.new(grade: SugarUnit::Grade::Premium)
+    ok.errors.should be_empty
+    bad = SugarUnit::Ticket::GradeChangeset.new(grade: SugarUnit::Grade::Basic)
+    bad.errors["grade"].should eq(["is invalid"])
+  end
+
   it "runs validate(cs) on construction" do
     changeset = Update.new(SugarUnit.team, seats: 0, billing_email: "not-an-address")
     changeset.valid?.should be_false

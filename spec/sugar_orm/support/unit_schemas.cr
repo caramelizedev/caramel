@@ -68,6 +68,40 @@ module SugarUnit
     end
   end
 
+  enum Grade
+    Basic
+    Premium
+  end
+
+  module GradeCodec
+    def self.sql_type : String
+      "text"
+    end
+
+    def self.encode(value : Grade) : String
+      value.to_s
+    end
+
+    def self.decode(text : String) : Grade
+      Grade.parse(text)
+    end
+  end
+
+  struct Ticket < SugarORM::Schema
+    schema "unit_tickets" do
+      field id : Int64, primary: true
+      field grade : Grade, codec: GradeCodec
+    end
+  end
+
+  class Ticket::GradeChangeset < SugarORM::Changeset(Ticket)
+    param grade : Grade
+
+    def validate(cs)
+      cs.validate_inclusion(:grade, in: [Grade::Premium])
+    end
+  end
+
   class Team::UpdateChangeset < SugarORM::Changeset(Team)
     param seats : Int32
     param billing_email : String?

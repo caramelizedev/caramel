@@ -16,7 +16,7 @@ An application needs pure schemas, compile-time association safety, explicit cha
 
 1. **Schemas** are immutable structs: `struct Team < SugarORM::Schema; schema "teams" do … end; end`.
    - `field` takes `primary:`, a literal default, `renamed_from:` and `codec:`. The other declarations are `timestamps`, `belongs_to`, `has_many`, `has_one`, `index` and `drop_column`.
-   - A field's type is `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, optionally nilable, or any type with `codec: C`, where `C.sql_type` (`numeric`, `numeric(P,S)`, `jsonb` or `text`), `C.encode(value) : String` and `C.decode(text)` map it to text. Rows read codec columns as text and writes bind the encoded text, so no value passes through a float. A codec field takes no default and matches only a value or nil in `where`. `SugarORM::JSONB(T)` stores a JSON-serializable type.
+   - A field's type is `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, optionally nilable, or any type with `codec: C`, where `C.sql_type` (`numeric`, `numeric(P,S)`, `jsonb` or `text`), `C.encode(value) : String` and `C.decode(text)` map it to text. Rows read codec columns as text and writes bind the encoded text, so no value passes through a float. A codec field takes no default and matches only a value or nil in `where` and in `validate_inclusion`. Adding a required codec field to an existing table halts, as it has no default. `SugarORM::JSONB(T)` stores a JSON-serializable type.
    - Instances have getters only, plus `with(**)` for a changed copy. They hold no connection and have no callbacks, and every instance is a stored row.
    - `scope name(args) { … }` defines sentence scopes.
 2. **Changesets** are `abstract class SugarORM::Changeset(T)` subclasses.

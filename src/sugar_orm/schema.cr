@@ -675,6 +675,25 @@ module SugarORM
         {% end %}
       {% end %}
 
+      # :nodoc:
+      # Encodes a candidate value for a column the way a changeset stores it:
+      # codec columns encode a value of their type, and anything else passes.
+      def self.__sugar_encode_candidate(column : String, value)
+        case column
+        {% for column in columns %}
+        {% if column[:codec] %}
+        when {{ column[:name] }}
+          if value.is_a?(::{{ @type }}::SugarType{{ column[:name].camelcase.id }})
+            {{ column[:codec] }}.encode(value)
+          else
+            value
+          end
+        {% end %}
+        {% end %}
+        else value
+        end
+      end
+
       def __sugar_primary_value : Int64
         @{{ primary_key.id }}
       end

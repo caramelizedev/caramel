@@ -339,10 +339,6 @@ module SugarORM
       end
     end
 
-    private def self.crystal_type(sql_type : String) : String
-      CRYSTAL_TYPES[sql_type]? || sql_type
-    end
-
     private def self.invalid_index(index : String) : Halt
       Halt.new(
         subject: index,
@@ -365,13 +361,19 @@ module SugarORM
     end
 
     private def self.missing_default(table : String, column : Catalog::Column) : Halt
-      field = "field #{column.name} : #{crystal_type(column.sql_type)} = …"
+      crystal = CRYSTAL_TYPES[column.sql_type]?
+      remediation = if crystal
+                      "give the field a default (field #{column.name} : #{crystal} = …) " \
+                      "or make it nilable"
+                    else
+                      "declare the field nilable (a codec field takes no default), " \
+                      "backfill existing rows, then make it required in a later change"
+                    end
       Halt.new(
         subject: "#{table}.#{column.name}",
         message: "NOT NULL column without a default cannot be added to the existing " \
                  "#{table} table: existing rows have no value for it.",
-        remediation: "give the field a default (#{field}) or make it nilable; " \
-                     "in development, --dev-override adds it as declared.",
+        remediation: "#{remediation}; in development, --dev-override adds it as declared.",
       )
     end
 
