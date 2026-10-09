@@ -1,7 +1,7 @@
 # Highlight.js
 
 Build-time files from the `highlight.js@11.12.0` npm package:
-`lib/core.js` and the Crystal, Bash, YAML, and Markdown grammars under
+`lib/core.js` and the Crystal, Bash, YAML, Markdown, and JavaScript grammars under
 `lib/languages/`, renamed to `.cjs` for explicit CommonJS imports.
 Trailing whitespace is removed; the upstream code is otherwise unchanged.
 
