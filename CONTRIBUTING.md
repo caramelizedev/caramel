@@ -21,6 +21,7 @@ What the checks need:
 - Every command uses the pinned managed tools; none falls back to a Crystal or Shards on `PATH`. `scripts/install-toolchain` installs into `~/Library/Application Support/Caramel/toolchains/` and records the location in this checkout's `.caramel-toolchain`, which every command and check reads. `--root <dir>` installs elsewhere, and `CARAMEL_TOOLCHAIN_ROOT` overrides the recorded location. The selection and lockfile live in `tools/toolchain/`.
 - `integration` creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS or certificate trust. No check runs the system integration installer or `latte trust install`; those are separate, explicit operations.
 - The Latte checks (`latte-ipc`, `latte-postgres`, `latte-network`, `latte-daemon`, `native`) also need the pinned CoreDNS artifact (`scripts/install-latte-tools --help`) and the macOS Swift compiler. Run `scripts/build-latte` and `scripts/build-frappe` before the checks that use them.
+- `website` builds the site with Node.js 22 or newer on `PATH`.
 - `latte-daemon` runs the real `bin/latte daemon` on Latte's fixed DNS and HTTP/HTTPS ports, 15353 and 18080/18443, which must be free. Its trace collector listens on a free port the check picks.
 - `browser` drives Safari through `safaridriver` against a generated app on an isolated Latte stack; enable Safari's "Allow Remote Automation" once with `safaridriver --enable`.
 - `scripts/check all --except NAME` skips a check, for example `--except latte-daemon` while your own Latte holds its ports. It runs `frappe-project` once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow.
@@ -113,8 +114,9 @@ A release is a tag `vX.Y.Z` of this repository and its source archive ([ADR 0016
 
 1. Write the upgrade notes a user needs under `## Unreleased` in `CHANGELOG.md` as bullets, with no heading of their own (`scripts/release` adds `### Upgrade notes`), and commit them.
 2. Run `scripts/release --dry-run` to see the next version and its changelog section.
-3. Run `scripts/release`. It refuses a dirty working tree and an edited released framework migration. It sets the version in `shard.yml`, which `Caramel::VERSION` and `Latte.app` read, and writes the changelog. It runs `scripts/check all`, then commits `chore(release): vX.Y.Z` and creates the annotated tag. When a check fails it restores both files and tags nothing.
-4. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`.
+3. Update the release labels in `website/source/site.html` to that version and commit them; `scripts/release` refuses a version the site does not name.
+4. Run `scripts/release`. It refuses a dirty working tree and an edited released framework migration. It sets the version in `shard.yml`, which `Caramel::VERSION` and `Latte.app` read, and writes the changelog. It runs `scripts/check all`, then commits `chore(release): vX.Y.Z` and creates the annotated tag. When a check fails it restores both files and tags nothing.
+5. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`, then publish the guides with `node website/publish.mjs`, which keeps earlier editions and waits until the new one answers.
 
 ## Compatibility contracts
 

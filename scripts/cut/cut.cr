@@ -170,6 +170,11 @@ module Caramel::Cut
       output.puts("Caramel #{version}#{tag ? " (after #{tag})" : " (first release)"}\n\n#{section}")
       return
     end
+    site = File.join(repository, "website/source/site.html")
+    if File.exists?(site) && !File.read(site).includes?("Caramel #{version}")
+      raise Refused.new("website/source/site.html does not name Caramel #{version}; " \
+                        "update its release labels, commit them and run scripts/release again")
+    end
     lines = File.read_lines(manifest).map do |line|
       line.starts_with?("version:") ? "version: #{version}" : line
     end

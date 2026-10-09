@@ -243,4 +243,21 @@ describe Caramel::Cut do
       end
     end
   end
+
+  it "refuses a release the website does not name" do
+    release_repository do |repository|
+      site = File.join(repository, "website/source")
+      Dir.mkdir_p(site)
+      File.write(File.join(site, "site.html"), "<h1>Caramel 0.1.0</h1>")
+      commit(repository, "feat: first light")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "feat: second light")
+      expect_raises(Caramel::Cut::Refused,
+        "website/source/site.html does not name Caramel 0.2.0") do
+        Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: IO::Memory.new)
+      end
+      File.read(File.join(repository, "shard.yml")).should contain("version: 0.1.0\n")
+      git(repository, "tag", "--list").should eq("v0.1.0\n")
+    end
+  end
 end
