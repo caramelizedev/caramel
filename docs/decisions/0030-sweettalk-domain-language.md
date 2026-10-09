@@ -41,7 +41,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      border, is a policy (decision 6). In `projection Name do … end` it updates rows, and
      `key name : Type` names the attribute that picks a row (decision 7).
    - **Renames.** `renamed_from: Old` on a context, aggregate, entity, event or projection
-     keeps every name SweetTalk stores for it: its table, its jobs and its channel.
+     keeps its table and its channel.
 
    Every context, value, aggregate, entity, event and projection carries `means: "…"`, and
    one without it does not compile. `SweetTalk.glossary` lists them with kind and context.
@@ -55,8 +55,8 @@ or a policy, and nothing stops one context from reaching into another's types.
    in `<Context>::Rows`, its table (`<context>_<name>` with an `s` added; an entity's is
    `<context>_<aggregate>_<entity>`), and a changeset with a `param` per column. Every
    write goes through that changeset
-   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)), and code in a module that
-   includes `SweetTalk` does not compile when it names `Rows`. `has` stores:
+   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)), and a context that names
+   `Rows` does not compile. `has` stores:
    - `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` as a column;
    - a value as its raw column, rebuilt and so validated on every load;
    - an aggregate as a foreign key, whose getter returns the aggregate's `Id`;
@@ -81,9 +81,9 @@ or a policy, and nothing stops one context from reaching into another's types.
      ([ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decision 2). `whenever Event, each:
      :lines do |event, line|` enqueues one job per element instead.
    - **Job names.** A job is named after its owner (a context and its border, or a
-     projection) and the event's path, under the oldest names `renamed_from:` keeps. Two
-     `whenever` blocks for one event in one owner do not compile.
-   - **Retries.** Each job declares `retry_on SweetTalk::Refusal, attempts: 1`. Other errors
+     projection) and the event's path as written, so a rename strands queued jobs until
+     Cold Brew can alias them. Two `whenever`s for one event in one owner do not compile.
+   - **Retries.** A refusal or `SweetTalk::Boundary` fails a job at once. Other errors
      follow ADR 0009 decision 2.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
@@ -120,9 +120,9 @@ or a policy, and nothing stops one context from reaching into another's types.
 - SugarORM updates a row by its id with no version column; the row lock orders commands
   on one aggregate so each sees the last one's result. A row lock cannot order the insert
   of a missing row, so projections insert with `ON CONFLICT DO NOTHING` first.
-- Refactoring toward deeper insight renames concepts, but tables and queued jobs keep the
+- Refactoring toward deeper insight renames concepts, but tables and channels keep the
   names they were stored under; `renamed_from:` lets the code move on without them.
-- Writes through `Rows` would skip the invariants and the value checks.
+- Writes through `Rows` would skip invariants and value checks.
 - A notification carries an id, as Cold Brew advises: fields could pass its 8,000-byte
   limit, and the refused publish would roll the command back.
 
@@ -140,5 +140,6 @@ Rejected:
   ([#73](https://github.com/caramelizedev/caramel/issues/73)), value column types
   ([#39](https://github.com/caramelizedev/caramel/issues/39)), a public row lock
   ([#40](https://github.com/caramelizedev/caramel/issues/40)), a typed upsert
-  ([#74](https://github.com/caramelizedev/caramel/issues/74)), tenant scoping, and
+  ([#74](https://github.com/caramelizedev/caramel/issues/74)), job aliases
+  ([#72](https://github.com/caramelizedev/caramel/issues/72)), tenant scoping, and
   compensation for a failed policy.
