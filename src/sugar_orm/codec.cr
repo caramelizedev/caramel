@@ -13,7 +13,8 @@ module SugarORM
   # (`"col"::text`) and writes bind the encoded text, so a value never passes
   # through a float. A codec field takes no default, and `where` accepts a
   # value or nil for it. The changeset number validators do not apply to it,
-  # because its encoded value is a String.
+  # because its encoded value is a String. `validate_inclusion` encodes its
+  # list through the codec, so it takes values of the field's type.
   module Codec
     SQL_TYPE = /\A(?:numeric(?:\(([1-9]\d{0,3}),(\d{1,4})\))?|jsonb|text)\z/
 

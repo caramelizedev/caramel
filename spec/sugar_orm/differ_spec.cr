@@ -193,6 +193,10 @@ describe SugarORM::Differ do
     remediation = "Remediation: give the field a default (field isbn : String = …)"
     plan.halts.first.to_s.should contain(remediation)
 
+    codec_halt = Differ.diff([books([required("price", "numeric(20,8)")])], [books]).halts.first
+    codec_halt.to_s.should contain("declare the field nilable (a codec field takes no default)")
+    codec_halt.to_s.should_not contain("numeric(20,8) =")
+
     overridden = Differ.diff([declared], [books], dev_override: true)
     overridden.halts.should be_empty
     overridden.overridden.map(&.subject).should eq(["books.isbn"])

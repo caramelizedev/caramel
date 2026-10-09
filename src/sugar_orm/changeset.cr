@@ -231,7 +231,10 @@ module SugarORM
       column = T.__sugar_column(field)
       return unless @changes.has_key?(column)
       value = @changes[column]
-      add_error(field, message) unless value.nil? || values.includes?(value)
+      listed = value.nil? || values.any? do |item|
+        T.__sugar_encode_candidate(column, item) == value
+      end
+      add_error(field, message) unless listed
     end
 
     # Maps a unique violation (SQLSTATE 23505) of the index that leads with
