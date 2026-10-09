@@ -456,27 +456,30 @@
       '<h2 id="c-upload-work">What the recipe must demonstrate</h2><ul class="c-status-list"><li>Validate the file and its size <small>Application rule</small></li><li>Persist beyond the request <small>Needs example</small></li><li>Serve with intended access rules <small>Needs example</small></li><li>Clean up failed or replaced uploads <small>Needs example</small></li><li>Prove success and rejection <small>Corretto spec</small></ul>'+
       note('A parser is only one part of file storage','This preview does not claim a supported storage adapter or offer untested persistence code. The complete recipe must establish that path first.')+next('map','Find the application boundaries'),
     islands: () => heading('Cookbook / Views','Mount a third-party component.','Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it.')+tags()+
-      '<h2 id="c-island-assets">Vendor the library and load it once</h2><p>Frappé publishes every file under <code>app/assets/</code> at <code>/assets/</code>. Copy the library’s minified bundle there under a versioned name, so nothing is fetched from a CDN at run time.</p>'+
+      '<h2 id="c-island-assets">Vendor the library and load it once</h2><p>Frappé publishes every file under <code>app/assets/</code> at <code>/assets/</code>. Copy the library’s minified bundle there under a versioned name, so nothing is fetched from a CDN at run time. The view below reads its text through <code>t.</code>, so enable locales first with <code>frappe make locale en</code>.</p>'+
       snippet('Terminal','npm pack a11y-dialog@8.1.5 --ignore-scripts\ntar xzf a11y-dialog-8.1.5.tgz package/dist/a11y-dialog.min.js\ncp package/dist/a11y-dialog.min.js app/assets/vendor/a11y-dialog-8.1.5.min.js\nrm -r package a11y-dialog-8.1.5.tgz','bash')+
       '<p>The bundle is a UMD file that defines <code>window.A11yDialog</code> in a browser, so the adapter below uses that name. Load it in the shared layout, before <code>app.js</code>: deferred scripts run in order, so the global exists when the adapter file runs. Boosted navigation does not run a new page’s <code>&lt;head&gt;</code> again, so a script tag written by one page’s view never loads.</p>'+
       snippet('app/views/layouts/application.cr · the head','          script src: "/assets/htmx-4.0.0.min.js", defer: true\n          script src: "/assets/caramel-islands.js", defer: true\n          script src: "/assets/a11y-dialog-8.1.5.min.js", defer: true\n          script src: "/assets/app.js", defer: true')+
       '<p>The default Content-Security-Policy is <code>default-src \'self\'; script-src \'self\'; style-src \'self\'; img-src \'self\' data:; …</code>, quoted from the security reference. It allows only files served from your own origin: no inline script, no inline style. Keep the dialog’s appearance in <code>app/assets/stylesheets/app.css</code> and toggle classes or the library’s <code>aria-hidden</code> attribute instead of writing <code>style</code> attributes.</p><button class="c-secondary cursor-interaction" data-page="security">Read the security reference →</button>'+
       '<h2 id="c-island-mount">Write the fallback, then the mount point</h2><p>The view writes the navigation as plain links, which work with JavaScript off, then the island. Resolve every localized string in the view and pass it as a prop; the browser code never looks up a catalog.</p>'+
       snippet('app/views/guide/show.cr','module App::Views::Guide\n  class Show < App::ApplicationView\n    def initialize(@links : Array(NamedTuple(label: String, href: String)))\n    end\n\n    private def blueprint\n      h1 { "Guide" }\n      nav class: "fallback", aria_label: t.nav.title do\n        ul do\n          @links.each { |link| li { a(href: link[:href]) { link[:label] } } }\n        end\n      end\n      island "NavigatorDialog", {\n        title:  t.nav.title,\n        open:   t.nav.open,\n        close:  t.nav.close,\n        links:  @links,\n        region: "activity",\n      }\n      section id: "activity", "hx-get": "/activity", "hx-trigger": "activity",\n        "hx-sync": "this:queue last" do\n        render App::Views::Activity::Show.new(Time.utc)\n      end\n    end\n  end\nend')+
-      '<p>The island writes no children of its own, so the adapter hides the fallback once it has mounted. The element gets <code>data-island-state="mounted"</code>, and a sibling rule in <code>app.css</code> does the rest: <code>nav.fallback:has(+ caramel-island[data-island-state="mounted"]) { display: none; }</code>. If the script fails, the state is <code>error</code> and the links stay.</p>'+
+      snippet('config/routes.cr · the central routes','    get "/guide", App::Guide::Show\n    get "/activity", App::Activity::Show\n    get "/activity/stream", App::Activity::Stream')+
+      snippet('app/views/activity/show.cr','module App::Views::Activity\n  class Show < App::ApplicationView\n    def initialize(@at : Time)\n    end\n\n    private def blueprint\n      h2 { t.nav.activity }\n      p { "Updated #{@at.to_s("%H:%M:%S")} UTC" }\n    end\n  end\nend')+
+      '<p>The island writes no children of its own, so the adapter hides the fallback once it has mounted. The element gets <code>data-island-state="mounted"</code>, and the <code>:has</code> rule below hides the fallback links next to a mounted island. If the script fails, the state is <code>error</code> and the links stay. The library toggles <code>aria-hidden</code> on the dialog container and leaves its appearance to you, so the stylesheet must hide a closed dialog. Stylesheet:</p>'+
+      snippet('app/assets/stylesheets/app.css · appended','.dialog-container {\n  position: fixed;\n  inset: 0;\n  z-index: 10;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n.dialog-container[aria-hidden="true"] {\n  display: none;\n}\n.dialog-overlay {\n  position: fixed;\n  inset: 0;\n  background: rgb(0 0 0 / 0.4);\n}\n.dialog-content {\n  position: relative;\n  z-index: 1;\n  padding: 1.5rem;\n  background: #faf8f3;\n  border-radius: 0.5rem;\n}\nnav.fallback:has(+ caramel-island[data-island-state="mounted"]) {\n  display: none;\n}','markdown')+
       '<p>The island contract is set out in the views guide and in <a href="https://github.com/caramelizedev/caramel/blob/main/docs/decisions/0005-island-props-helper.md" target="_blank" rel="noopener noreferrer">ADR 0005 ↗</a>. A mount that returns <code>{update, unmount}</code> gets <code>update(props)</code> when a morph changes the props. A mount that returns a function or nothing is unmounted and mounted again instead. Removing the element calls <code>unmount</code>. A mount that throws sets <code>data-island-state="error"</code> and dispatches a bubbling <code>caramel:island-error</code> event.</p><button class="c-secondary cursor-interaction" data-page="views">Read the views reference →</button>'+
       snippet('app/actions/guide/show.cr','module App::Guide\n  struct Show < App::ApplicationAction\n    contract do\n    end\n\n    def handle(contract : Contract)\n      links = [\n        {label: t.nav.home, href: "/"},\n        {label: t.nav.health, href: "/health"},\n      ]\n      page "Guide", Views::Guide::Show.new(links)\n    end\n  end\nend')+
       snippet('app/locales/en.cr · the keys the view reads','  nav: {\n    title:    "Browse & search",\n    open:     "Open the navigation",\n    close:    "Close",\n    home:     "Home",\n    health:   "Health",\n    activity: "Recent activity",\n  },')+
       '<h2 id="c-island-adapter">Adapt the library to the island lifecycle</h2><p>The adapter builds the dialog’s DOM itself. It never writes a <code>data-a11y-dialog</code> attribute, so the library’s own start-up scan, which instantiates every element that has one, finds nothing to take over; the adapter calls <code>new A11yDialog(container)</code> exactly once. The links are created by script, so it calls <code>htmx.process</code> on them to keep them boosted.</p>'+
-      snippet('app/assets/javascript/app.js','CaramelIslands.define(\'NavigatorDialog\', (element, props) => {\n  const container = document.createElement(\'div\');\n  container.id = \'navigator-dialog\';\n  container.className = \'dialog-container\';\n  container.setAttribute(\'aria-labelledby\', \'navigator-dialog-title\');\n  container.setAttribute(\'aria-hidden\', \'true\');\n\n  const overlay = document.createElement(\'div\');\n  overlay.className = \'dialog-overlay\';\n  overlay.setAttribute(\'data-a11y-dialog-hide\', \'\');\n\n  const content = document.createElement(\'div\');\n  content.className = \'dialog-content\';\n  const title = document.createElement(\'h2\');\n  title.id = \'navigator-dialog-title\';\n  const list = document.createElement(\'ul\');\n  const close = document.createElement(\'button\');\n  close.type = \'button\';\n  close.setAttribute(\'data-a11y-dialog-hide\', \'navigator-dialog\');\n  content.append(title, list, close);\n  container.append(overlay, content);\n\n  const opener = document.createElement(\'button\');\n  opener.type = \'button\';\n  opener.setAttribute(\'data-a11y-dialog-show\', \'navigator-dialog\');\n\n  element.replaceChildren(opener, container);\n  const dialog = new A11yDialog(container);\n\n  function render(next) {\n    opener.textContent = next.open;\n    title.textContent = next.title;\n    close.textContent = next.close;\n    list.replaceChildren(...next.links.map((link) => {\n      const item = document.createElement(\'li\');\n      const anchor = document.createElement(\'a\');\n      anchor.href = link.href;\n      anchor.textContent = link.label;\n      item.append(anchor);\n      return item;\n    }));\n    htmx.process(list);\n  }\n  render(props);\n\n  const onShortcut = (event) => {\n    if (event.altKey && event.code === \'KeyM\') dialog.show();\n  };\n  document.addEventListener(\'keydown\', onShortcut);\n\n  const closeOnSwap = (event) => {\n    const target = event.detail && event.detail.ctx && event.detail.ctx.target;\n    if (target && target.contains(element)) dialog.hide();\n  };\n  document.addEventListener(\'htmx:after:settle\', closeOnSwap);\n\n  const region = document.getElementById(props.region);\n  const source = new EventSource(\'/activity/stream\');\n  let opened = false;\n  source.addEventListener(\'open\', () => {\n    if (opened && region) region.dispatchEvent(new CustomEvent(\'activity\'));\n    opened = true;\n  });\n  source.addEventListener(\'activity\', () => {\n    if (region) region.dispatchEvent(new CustomEvent(\'activity\'));\n  });\n\n  return {\n    update(next) {\n      render(next);\n    },\n    unmount() {\n      source.close();\n      document.removeEventListener(\'htmx:after:settle\', closeOnSwap);\n      document.removeEventListener(\'keydown\', onShortcut);\n      dialog.destroy();\n      element.replaceChildren();\n    },\n  };\n});','javascript')+
+      snippet('app/assets/javascript/app.js','CaramelIslands.define(\'NavigatorDialog\', (element, props) => {\n  const container = document.createElement(\'div\');\n  container.id = \'navigator-dialog\';\n  container.className = \'dialog-container\';\n  container.setAttribute(\'aria-labelledby\', \'navigator-dialog-title\');\n  container.setAttribute(\'aria-hidden\', \'true\');\n\n  const overlay = document.createElement(\'div\');\n  overlay.className = \'dialog-overlay\';\n  overlay.setAttribute(\'data-a11y-dialog-hide\', \'\');\n\n  const content = document.createElement(\'div\');\n  content.className = \'dialog-content\';\n  const title = document.createElement(\'h2\');\n  title.id = \'navigator-dialog-title\';\n  const list = document.createElement(\'ul\');\n  const close = document.createElement(\'button\');\n  close.type = \'button\';\n  close.setAttribute(\'data-a11y-dialog-hide\', \'navigator-dialog\');\n  content.append(title, list, close);\n  container.append(overlay, content);\n\n  const opener = document.createElement(\'button\');\n  opener.type = \'button\';\n  opener.setAttribute(\'data-a11y-dialog-show\', \'navigator-dialog\');\n\n  element.replaceChildren(opener, container);\n  const dialog = new A11yDialog(container);\n\n  function render(next) {\n    opener.textContent = next.open;\n    title.textContent = next.title;\n    close.textContent = next.close;\n    list.replaceChildren(...next.links.map((link) => {\n      const item = document.createElement(\'li\');\n      const anchor = document.createElement(\'a\');\n      anchor.href = link.href;\n      anchor.textContent = link.label;\n      item.append(anchor);\n      return item;\n    }));\n    htmx.process(list);\n  }\n  render(props);\n\n  const onShortcut = (event) => {\n    if (event.altKey && event.code === \'KeyM\') dialog.show();\n  };\n  document.addEventListener(\'keydown\', onShortcut);\n\n  // htmx:after:settle fires on the element that received the swap and bubbles.\n  const closeOnSwap = (event) => {\n    if (event.target.contains(element)) dialog.hide();\n  };\n  document.addEventListener(\'htmx:after:settle\', closeOnSwap);\n\n  const region = document.getElementById(props.region);\n  const refresh = () => {\n    if (region) region.dispatchEvent(new CustomEvent(\'activity\'));\n  };\n  const source = new EventSource(\'/activity/stream\');\n  source.addEventListener(\'open\', refresh);\n  source.addEventListener(\'activity\', refresh);\n\n  return {\n    update(next) {\n      render(next);\n    },\n    unmount() {\n      source.close();\n      document.removeEventListener(\'htmx:after:settle\', closeOnSwap);\n      document.removeEventListener(\'keydown\', onShortcut);\n      dialog.destroy();\n      element.replaceChildren();\n    },\n  };\n});','javascript')+
       '<p>Return <code>{update, unmount}</code>. <code>update</code> relabels the dialog and rebuilds the links, then processes them again, so the server stays the source of the text. <code>unmount</code> has three jobs. <code>destroy()</code> hides the dialog, removes the library’s document-level click listener and replaces the dialog node with a clone. Every other document listener the adapter added, here the keyboard shortcut and the swap handler, must be removed by hand, or each visit leaves another behind. Closing the event stream is the third job.</p>'+
-      '<h2 id="c-island-history">Keep it correct across navigation</h2><p>htmx 4 names its events <code>htmx:phase:action</code>, for example <code>htmx:before:swap</code> and <code>htmx:after:settle</code>, with the element lifecycle in <code>htmx:before:init</code> and <code>htmx:after:init</code> and history in <code>htmx:before:history:restore</code>; see the <a href="https://four.htmx.org/docs/htmx-events-guide" target="_blank" rel="noopener noreferrer">htmx events guide ↗</a>. Their <code>detail.ctx</code> is the request context, whose <code>target</code> is the element that receives the swap.</p><p>Back and Forward restore the page by swapping the body. The island element leaves the document and a new one arrives, so the island’s own lifecycle calls <code>unmount</code> and then <code>mount</code>. You need no htmx listener for cleanup.</p><p>A document-wide handler that closes the dialog on a swap must first check that the swap’s target contains the island. The adapter does it in <code>closeOnSwap</code>: it reads the context’s target and closes only when that element contains the island. A swap into another region, such as the activity region below, leaves an open dialog alone.</p>'+
+      '<h2 id="c-island-history">Keep it correct across navigation</h2><p>htmx 4 names its events <code>htmx:phase:action</code>, for example <code>htmx:before:swap</code> and <code>htmx:after:settle</code>, with the element lifecycle in <code>htmx:before:init</code> and <code>htmx:after:init</code> and history in <code>htmx:before:history:restore</code>; see the <a href="https://four.htmx.org/docs/htmx-events-guide" target="_blank" rel="noopener noreferrer">htmx events guide ↗</a>. The detail differs by event, so read the version you ship: in the vendored htmx 4.0.0, <code>htmx:after:swap</code> carries <code>ctx</code>, but <code>htmx:after:settle</code> carries only <code>task</code>, <code>newContent</code> and <code>settleTasks</code>. What <code>htmx:after:settle</code> does give you is its target: htmx dispatches it on the element that received the swap, and it bubbles to <code>document</code>.</p><p>Back and Forward restore the page by swapping the body. The island element leaves the document and a new one arrives, so the island’s own lifecycle calls <code>unmount</code> and then <code>mount</code>. You need no htmx listener for cleanup.</p><p>A document-wide handler that closes the dialog on a swap must first check that the swap’s target contains the island. The adapter does it in <code>closeOnSwap</code>: it listens for <code>htmx:after:settle</code> on <code>document</code> and closes only when <code>event.target</code>, the swapped element, contains the island. The island itself survives a navigation swap into <code>#content</code>, so this is what closes a dialog after one of its links is followed. A swap into another region, such as the activity region below, leaves an open dialog alone.</p>'+
       '<h2 id="c-island-updates">Refresh a region from a server event</h2><p>A region beside the island, outside its skip-children subtree, can follow a server event. The adapter opens an <code>EventSource</code> to a stream action and closes it in <code>unmount</code>. On each event it dispatches an <code>activity</code> event on the region; the region fetches itself with <code>hx-trigger="activity"</code> and <code>hx-sync="this:queue last"</code>, so a burst of events leaves one request in flight and one queued. A stream action sends events from <code>Caramel::ColdBrew.subscribe</code> through <code>Caramel::SSE.write</code>; see the Cold Brew and actions references, and publish with <code>Caramel::ColdBrew.publish("activity", "changed")</code> from the code that changes the data.</p><button class="c-secondary cursor-interaction" data-page="coldbrew">Read the Cold Brew reference →</button><button class="c-secondary cursor-interaction" data-page="actions">Read the actions reference →</button>'+
-      snippet('app/actions/activity/stream.cr','module App::Activity\n  struct Stream < App::ApplicationAction\n    contract do\n    end\n\n    def handle(contract : Contract)\n      stream "text/event-stream" do |io|\n        Caramel::ColdBrew.subscribe("activity") do |updates|\n          loop { Caramel::SSE.write(io, event: "activity", data: updates.receive) }\n        end\n      end\n    end\n  end\nend')+
+      snippet('app/actions/activity/stream.cr','module App::Activity\n  struct Stream < App::ApplicationAction\n    contract do\n    end\n\n    def handle(contract : Contract)\n      stream "text/event-stream" do |io|\n        Caramel::ColdBrew.subscribe("activity") do |updates|\n          # Subscribed: now send the headers, so the browser\'s open event follows.\n          io << ": open\\n\\n"\n          io.flush\n          loop { Caramel::SSE.write(io, event: "activity", data: updates.receive) }\n        end\n      end\n    end\n  end\nend')+
       snippet('app/actions/activity/show.cr','module App::Activity\n  struct Show < App::ApplicationAction\n    contract do\n    end\n\n    def handle(contract : Contract)\n      morph "#activity", with: Views::Activity::Show.new(Time.utc)\n    end\n  end\nend')+
-      '<p>The server-sent stream drops events while a client is disconnected, and a browser reconnects by itself. The adapter therefore asks the region to fetch on every <code>open</code> after the first: a reconnect must load a fresh snapshot instead of trusting the events it missed.</p>'+
+      '<p>The server-sent stream drops events while a client is disconnected, and a browser reconnects by itself. The stream action therefore subscribes first, then writes and flushes a comment line before it blocks: a response sends its headers with its first write, so without that frame the browser’s <code>open</code> event would wait for the next real event. The adapter asks the region to fetch on every <code>open</code>, the first one included: that covers events published between rendering the page and subscribing, and a reconnect loads a fresh snapshot instead of trusting the events it missed. The cost is one extra request per mount.</p>'+
       '<h2 id="c-island-tests">Test it</h2><p>A Corretto request spec proves what the server owes the browser: the mount point, its escaped props and the fallback links.</p>'+
-      snippet('spec/requests/guide_spec.cr','require "../spec_helper"\n\ndescribe "Guide" do\n  it "writes the island, its escaped props and the fallback links" do\n    Corretto.session do |client|\n      page = client.get("/guide")\n      page.should have_status(200)\n      page.body.should contain(%(<caramel-island component="NavigatorDialog"))\n      page.body.should contain("Browse &amp; search")\n      page.body.should contain(%(<a href="/health">Health</a>))\n      page.body.should contain(%(<a href="/">Home</a>))\n    end\n  end\nend')+
+      snippet('spec/requests/guide_spec.cr','require "../spec_helper"\n\ndescribe "Guide" do\n  it "writes the island, its escaped props and the fallback links" do\n    Corretto.session do |client|\n      page = client.get("/guide")\n      page.should have_status(200)\n      page.body.should contain(%(<caramel-island component="NavigatorDialog"))\n      page.body.should contain("Browse &amp; search")\n      page.body.should contain(%(<a href="/health">Health</a>))\n      page.body.should contain(%(<a href="/">Home</a>))\n    end\n  end\n\n  it "answers the region\'s refresh with a partial for #activity" do\n    Corretto.session do |client|\n      client.get("/activity").body.should contain("Recent activity")\n    end\n  end\nend')+
       '<p>Library behaviour needs a browser. Before you ship, check each of these by hand:</p><ul class="c-status-list"><li>Focus moves into the dialog on open and returns to the opener on close.</li><li>Tab and Shift-Tab wrap inside the dialog.</li><li>Escape closes the dialog.</li><li>If the dialog holds a native <code>&lt;select&gt;</code>, its open picker closes alone on the first Escape and the dialog stays.</li><li>Repeated visits to the page keep exactly one dialog.</li><li>Back and Forward with the dialog open leave one working dialog.</li><li>Removing the island through a morph unmounts it and closes the event stream.</li><li>No <code>caramel:island-error</code> event and no console error appears.</li><li>The fallback links work with JavaScript off.</li></ul>'+
       note('The library owns focus; the island owns its DOM','Let the library manage focus, <code>aria-hidden</code> and the Escape key; do not reimplement them. Everything the adapter creates or listens to, the adapter removes in <code>unmount</code>.')+
       next('views','Read the views reference'),
@@ -528,12 +531,16 @@ end`)+
       snippet('Terminal',`frappe db diff --name create_user_sessions
 frappe migrate`,'bash')+
       `<p>The diff writes one migration for every table the schemas declare that the database lacks, so a first run also creates <code>users</code> and the <code>memberships</code> table below. The digest is unique, so one lookup finds one row.</p>`+
-      `<h2 id="c-session-login">Create the session at login, revoke it at logout</h2><p>Login is <code>POST /login</code> with an <code>email</code> and a <code>password</code>. The action verifies the bcrypt digest and refuses an inactive user with the same answer as a wrong password. It then runs <code>session.clear</code>, so nothing from an earlier session survives, and creates the token. Only the token’s digest reaches the database.</p>`+
+      `<h2 id="c-session-login">Create the session at login, revoke it at logout</h2><p>Login is <code>POST /login</code> with an <code>email</code> and a <code>password</code>. An unknown email, an inactive user, a wrong password and an over-long password all get the same 422 page, and every attempt runs exactly one bcrypt comparison: a missing user is checked against a fixed dummy digest. That keeps the answer and the work comparable, so the response does not say which emails exist; it does not make the timing identical.</p><p>Crystal’s bcrypt reads at most 71 bytes of a password and <code>verify</code> raises <code>Crypto::Bcrypt::Error</code> from 72 bytes up. A contract <code>max:</code> counts characters, not bytes, so the action tests <code>bytesize</code> itself; without that test a long password would answer 500 only for an email that exists. On success the action revokes the row behind any token the cookie already holds, because <code>session.clear</code> would otherwise orphan a row that stays valid for anyone who copied the old cookie. It then clears the session and creates the new token. Only the token’s digest reaches the database.</p>`+
       snippet('app/actions/sessions/login.cr',`require "crypto/bcrypt/password"
 require "digest/sha256"
 
 module App::Sessions
   struct Login < App::ApplicationAction
+    # A valid bcrypt digest that no password matches. An unknown or inactive
+    # email is checked against it, so every attempt costs one bcrypt comparison.
+    DUMMY_DIGEST = "$2a$11$gAYJo.vJfIwsu1p8HuehU.GEPrMMm4NrGSBZIZiDHdZVg.JHmm5wi"
+
     contract do
       field email : String
       field password : String
@@ -541,10 +548,17 @@ module App::Sessions
 
     def handle(contract : Contract)
       user = User.query.where(email: contract.email, active: true).first
-      unless user && Crypto::Bcrypt::Password.new(user.password_digest).verify(contract.password)
+      # bcrypt reads at most 71 bytes: verify raises for 72 or more, which would
+      # answer 500 only for an existing email. Treat those as a wrong password.
+      too_long = contract.password.bytesize >= 72
+      digest = user ? user.password_digest : DUMMY_DIGEST
+      matches = Crypto::Bcrypt::Password.new(digest).verify(too_long ? "" : contract.password)
+      unless user && matches && !too_long
         self.status = 422
         return nil
       end
+      # A cookie that still holds a session token must not leave its row open.
+      current_session.try &.update!(revoked_at: Time.utc)
       session.clear
       token = Random::Secure.urlsafe_base64(32)
       UserSession.create!(
@@ -664,7 +678,7 @@ module App
   end
 end`)+
       `<p><code>current_session</code> matches the digest with <code>revoked_at: nil</code> and <code>expires_at</code> from now on. <code>current_user</code> requires <code>active</code>. <code>current_membership</code> matches the user and the tenant’s id. One action instance serves one request, so the next request queries again: that is why revocation, expiry, deactivation and a removed membership take effect on the next request. The memo lives on the action struct, so pass values, not the action, to helpers and views.</p>`+
-      `<h2 id="c-session-guard">Guard tenant pages with ingress</h2><p>A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair.</p>`+
+      `<h2 id="c-session-guard">Guard tenant pages with ingress</h2><p>A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair. Nothing else creates one, so the action that creates an account must make its creator the first member, or the guard locks every new account out.</p>`+
       snippet('app/models/membership.cr',`module App
   struct Membership < SugarORM::Schema
     schema "memberships" do
@@ -693,14 +707,48 @@ end`)+
     end
   end
 end`)+
-      `<p>Ingress is covered in <button class="c-secondary cursor-interaction" data-page="webhooks">the webhook recipe</button>. The tenant’s routes still sit in the <code>tenant</code> block. Once this guard exists, the generated sign-up spec that follows its redirect to the account’s home now gets 401 until the visitor is a member; change it to sign in first or to expect 401.</p>`+
-      `<h2 id="c-session-tests">Test the lifecycle in Corretto</h2><p>Log in through the real route and follow its redirect. <code>client.sign_in(user)</code> writes only <code>user_id</code>, so on its own it gets 401 on a member page. Move <code>expires_at</code> into the past with <code>update!</code> to test expiry. To test a replay, save the cookie before logout and restore it into <code>client.cookies</code> afterwards.</p>`+
+      `<p>Ingress is covered in <button class="c-secondary cursor-interaction" data-page="webhooks">the webhook recipe</button>. The tenant’s routes still sit in the <code>tenant</code> block.</p><p>The generated <code>Accounts::Create</code> redirects to the new account without a membership. Replace it so that only a signed-in user creates an account and becomes its member. The membership is written after the account is saved; a failed account re-renders the form and writes nothing. The signed-in check runs before the contract binds, so an anonymous request answers 401. The generated spec that created an account anonymously no longer applies; the spec below covers sign-up.</p>`+
+      snippet('app/actions/accounts/create.cr',`module App::Accounts
+  struct Create < App::ApplicationAction
+    include Form
+
+    # Only a signed-in user creates an account, and becomes its first member.
+    ingress authenticate: :signed_in?
+
+    contract do
+      field name : String
+      field slug : String
+    end
+
+    def handle(contract : Contract)
+      user = current_user.not_nil!
+      changes = App::Account.create(name: contract.name, slug: contract.slug)
+      return render_form(contract.values, changes.errors, 422) unless changes.saved?
+      App::Membership.create!(user_id: user.id, account_id: changes.record.id)
+      self.status = 201
+      {record: changes.record}
+    end
+
+    def render(result)
+      redirect_to("/#{result[:record].slug}")
+    end
+
+    private def signed_in? : Bool
+      !current_user.nil?
+    end
+  end
+end`)+
+      `<h2 id="c-session-tests">Test the lifecycle in Corretto</h2><p>Log in through the real route and follow its redirect. <code>client.sign_in(user)</code> writes only <code>user_id</code>, so on its own it gets 401 on a member page. Move <code>expires_at</code> into the past with <code>update!</code> to test expiry. To test a replay, save the cookie before logout and restore it into <code>client.cookies</code> afterwards; the same trick proves that a second login revokes the first session. A 72-byte password must get the same page as a wrong one, and creating an account must make its creator a member.</p>`+
       snippet('spec/requests/sessions_spec.cr',`require "../spec_helper"
 require "crypto/bcrypt/password"
 
-def member(db, account : App::Account, active = true) : App::User
+def user(db, active = true) : App::User
   digest = Crypto::Bcrypt::Password.create("secret", cost: 4).to_s
-  user = App::User.create!(db, email: "ann@example.com", password_digest: digest, active: active)
+  App::User.create!(db, email: "ann@example.com", password_digest: digest, active: active)
+end
+
+def member(db, account : App::Account, active = true) : App::User
+  user = user(db, active)
   App::Membership.create!(db, user_id: user.id, account_id: account.id)
   user
 end
@@ -725,6 +773,17 @@ describe "Revocable sessions" do
     Corretto.session do |client, db|
       member(db, account(db, "acme"))
       log_in(client, "wrong").should have_status(422)
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "answers a password of 72 bytes or more like a wrong one" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      wrong = log_in(client, "wrong")
+      long = log_in(client, "a" * 72)
+      long.should have_status(422)
+      long.body.should eq(wrong.body)
       client.get("/acme").should have_status(401)
     end
   end
@@ -776,8 +835,32 @@ describe "Revocable sessions" do
       client.get("/acme").should have_status(401)
     end
   end
+
+  it "revokes the earlier session when a signed-in browser logs in again" do
+    Corretto.session do |client, db|
+      member(db, account(db, "acme"))
+      log_in(client)
+      first = client.cookies[Caramel::Session::COOKIE_NAME]
+      log_in(client).should redirect_to("/")
+      client.get("/acme").should have_status(200)
+      client.cookies[Caramel::Session::COOKIE_NAME] = first
+      client.get("/acme").should have_status(401)
+    end
+  end
+
+  it "makes the creator of an account its member" do
+    Corretto.session do |client, db|
+      user(db)
+      client.post("/accounts", params: {"name" => "Acme", "slug" => "acme"})
+        .should have_status(401)
+      log_in(client)
+      client.post("/accounts", params: {"name" => "Acme", "slug" => "acme"})
+        .should redirect_to("/acme")
+      client.follow_redirect.should render_page("Acme")
+    end
+  end
 end`)+
-      note('Corretto’s sign_in stores user_id','<code>client.sign_in(user)</code> writes <code>user_id</code> into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through <code>/login</code>.')+next('testing','Test the HTML your app returns'),
+      note('Corretto’s sign_in stores user_id','<code>client.sign_in(user)</code> writes <code>user_id</code> into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through <code>/login</code>. The specs create their users directly, so the recipe’s own sign-up has no seeded user; add a registration action, or insert users with a script, before real people can sign in.')+next('testing','Test the HTML your app returns'),
     agents: () => heading('Guides / Working with an agent','Give your agent a map.','The same conventions, release context, and proof commands that make Caramel easier for a person to learn.')+
       '<div class="c-tagrow"><span class="c-tag c-draft">Application guide</span><span class="c-tag">Target: 0.10.0</span></div><h2 id="c-agent-orient">Orient before editing</h2><p>Read the application’s <code>shard.lock</code> for its pinned release. Use the matching documentation, then inspect the command manifest and relevant routes.</p>'+snippet('Terminal','frappe agent-manifest\nfrappe routes books','bash')+
       '<h2 id="c-agent-map">Choose the application file</h2>'+files([['config/routes.cr','Endpoint declarations'],['app/actions/','Contracts and request behavior'],['app/models/ + app/changesets/','Data and write rules'],['app/views/','Typed HTML views'],['app/jobs/','Background work'],['spec/requests/','Request behavior tests']])+
