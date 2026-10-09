@@ -52,14 +52,16 @@ The publisher refuses to run while `website/` has uncommitted changes, so every
 `gh-pages` commit names a `main` commit that holds its source. It uses a temporary
 Git index, preserves deployment history, and does not switch the working branch or
 alter the working index. It adds the current edition and keeps every earlier
-`/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` from `gh-pages` history; a release tag with no
-edition redirects to the newest edition of its minor. `--dry-run` prints what it
+`/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` from `gh-pages` history. Redirect pages are
+not editions: each run drops them and rewrites one for every release tag with no
+edition, pointing at the newest edition of its minor. `--dry-run` prints what it
 keeps and the tree, and publishes nothing. After pushing without force it waits up
-to 15 minutes until every edition answers 200. Generated output is ignored on
-`main`.
+to 15 minutes until every edition answers 200; republishing a live version answers
+at once. Generated output is ignored on `main`.
 
 `templates/github-pages.workflow.yml` is an optional GitHub Actions workflow for
-automatic builds on main. The current GitHub credential cannot upload workflows.
+automatic builds on main. It deploys only `website/dist`, the current edition, so it
+must not replace `publish.mjs`, which keeps the earlier editions. The current GitHub credential cannot upload workflows.
 To enable it later, authorize the `workflow` scope, move the template to
 `.github/workflows/website.yml`, and switch Pages to GitHub Actions.
 

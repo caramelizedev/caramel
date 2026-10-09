@@ -32,15 +32,27 @@ const compare = (a, b) => {
 };
 const current = fs.readFileSync(path.join(repo, 'shard.yml'), 'utf8').match(/^version:\s*(\S+)/m)[1];
 // The dist tree holds only the current edition; every earlier edition stays as
-// its newest gh-pages commit published it.
+// its newest gh-pages commit published it. Alias pages written by an earlier
+// publish are not editions: they are recomputed from the tags below.
+const redirectOnly = new Map();
+const isRedirectOnly = (section, tree) => {
+  if (!redirectOnly.has(tree)) {
+    const files = run('git', ['ls-tree', '-r', '--name-only', tree]).split('\n').filter(Boolean).sort();
+    const shape = section === 'docs' ? ['agents/index.html', 'index.html'] : ['index.html'];
+    redirectOnly.set(tree, files.join() === shape.join() && files.every(file =>
+      run('git', ['show', `${tree}:${file}`]).includes('<meta http-equiv="refresh"')));
+  }
+  return redirectOnly.get(tree);
+};
 const preserved = new Map();
 if (remoteHead) {
   for (const commit of run('git', ['rev-list', remoteHead]).split('\n').filter(Boolean)) {
-    const listed = run('git', ['ls-tree', '--name-only', commit, 'docs/', 'cookbook/']).split('\n');
-    for (const entry of listed.filter(Boolean)) {
+    const listed = run('git', ['ls-tree', commit, 'docs/', 'cookbook/']).split('\n');
+    for (const line of listed.filter(Boolean)) {
+      const [info, entry] = line.split('\t');
       const [section, version] = entry.split('/');
-      if (!semver.test(version ?? '') || version === current) continue;
-      if (!preserved.has(entry)) preserved.set(entry, {section, version, commit});
+      if (!semver.test(version ?? '') || version === current || preserved.has(entry)) continue;
+      if (!isRedirectOnly(section, info.split(' ')[2])) preserved.set(entry, {section, version, commit});
     }
   }
 }

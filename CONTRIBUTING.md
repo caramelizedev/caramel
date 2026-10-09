@@ -116,7 +116,7 @@ A release is a tag `vX.Y.Z` of this repository and its source archive ([ADR 0016
 2. Run `scripts/release --dry-run` to see the next version and its changelog section.
 3. Update the release labels in `website/source/site.html` to that version and commit them; `scripts/release` refuses a version the site does not name.
 4. Run `scripts/release`. It refuses a dirty working tree and an edited released framework migration. It sets the version in `shard.yml`, which `Caramel::VERSION` and `Latte.app` read, and writes the changelog. It runs `scripts/check all`, then commits `chore(release): vX.Y.Z` and creates the annotated tag. When a check fails it restores both files and tags nothing.
-5. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`, then publish the guides with `node website/publish.mjs`, which keeps earlier editions and waits until the new one answers.
+5. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`, then publish the guides with `node website/publish.mjs`, which keeps earlier editions and waits until a new edition answers.
 
 ## Compatibility contracts
 
