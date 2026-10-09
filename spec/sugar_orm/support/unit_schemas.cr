@@ -40,6 +40,34 @@ module SugarUnit
     end
   end
 
+  record Snapshot, total : Int32 do
+    include JSON::Serializable
+  end
+
+  module PriceCodec
+    def self.sql_type : String
+      "numeric(20,8)"
+    end
+
+    def self.encode(value : String) : String
+      value
+    end
+
+    def self.decode(text : String) : String
+      text
+    end
+  end
+
+  struct Quote < SugarORM::Schema
+    schema "unit_quotes" do
+      field id : Int64, primary: true
+      field price : String, codec: PriceCodec
+      field fee : String?, codec: PriceCodec
+      field snapshot : Snapshot, codec: SugarORM::JSONB(Snapshot)
+      field extra : Snapshot?, codec: SugarORM::JSONB(Snapshot)
+    end
+  end
+
   class Team::UpdateChangeset < SugarORM::Changeset(Team)
     param seats : Int32
     param billing_email : String?

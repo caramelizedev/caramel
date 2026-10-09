@@ -7,10 +7,14 @@ module Caramel::Checks
   # End-to-end branch-and-diff: a generated project evolves a SugarORM schema
   # through frappe db diff and frappe migrate against a disposable Latte.
   class SchemaDiff < LatteFixture
-    COMPILE    = 300.seconds
-    MATCHED    = "The database matches the declared schema."
-    DOWNGRADED = "WARN (--dev-override) LINT not-null-default"
-    NOT_NULL   = /^ERR LINT_NOT_NULL_DEFAULT at db\/migrations\/\d{14}_add_isbn\.cr$/m
+    COMPILE      = 300.seconds
+    MATCHED      = "The database matches the declared schema."
+    DOWNGRADED   = "WARN (--dev-override) LINT not-null-default"
+    CODEC_FIELDS = [
+      "field price : Price?, codec: PriceCodec",
+      "field extra : Extra?, codec: SugarORM::JSONB(Extra)",
+    ]
+    NOT_NULL = /^ERR LINT_NOT_NULL_DEFAULT at db\/migrations\/\d{14}_add_isbn\.cr$/m
 
     def initialize
       toolchain = Checks.toolchain_root
@@ -31,10 +35,31 @@ module Caramel::Checks
       result.stdout.strip
     end
 
-    # Writes the Book model with *body* inside its schema block.
+    # Writes the Book model with *body* and its two codec fields inside its
+    # schema block, after the codecs they name.
     def schema(body : String) : Nil
-      fields = body.lines.map { |line| "    #{line}\n" }.join
+      fields = (body.lines + CODEC_FIELDS).map { |line| "    #{line}\n" }.join
       File.write(File.join(@project, "app/models/book.cr"), <<-CR)
+        record Price, text : String
+
+        module PriceCodec
+          def self.sql_type : String
+            "numeric(20,8)"
+          end
+
+          def self.encode(value : Price) : String
+            value.text
+          end
+
+          def self.decode(text : String) : Price
+            Price.new(text)
+          end
+        end
+
+        record Extra, note : String do
+          include JSON::Serializable
+        end
+
         struct Book < SugarORM::Schema
           schema "books" do
         #{fields}  end
@@ -106,6 +131,8 @@ module Caramel::Checks
                 "title" text NOT NULL,
           SQL
         assert!(created.size == 1 && created[0].includes?(create_table), created.inspect)
+        codecs = [%("price" numeric(20,8)), %("extra" jsonb)]
+        assert!(codecs.all? { |column| created[0].includes?(column) }, created.inspect)
         migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
         # frappe new applied Caramel's three Cold Brew migrations; this applies
         # the application's first.
@@ -119,7 +146,8 @@ module Caramel::Checks
           "ignored table caramel_jobs (owned by Caramel)")
         assert!(branches(id).empty?, "scratch branches remain: #{branches(id)}")
         puts "PASS: frappe db diff wrote a CREATE TABLE migration from the schema, " \
-             "frappe migrate applied it, and a second diff found nothing"
+             "frappe migrate applied it, and a second diff found nothing " \
+             "(codec fields became numeric(20,8) and jsonb columns)"
 
         sql(migration_url, "INSERT INTO books (title) VALUES ('Dune')")
         schema(<<-CRYSTAL)

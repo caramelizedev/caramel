@@ -46,6 +46,35 @@ module SugarSpec
     end
   end
 
+  record Rate, text : String
+
+  module RateCodec
+    def self.sql_type : String
+      "numeric(30,10)"
+    end
+
+    def self.encode(value : Rate) : String
+      value.text
+    end
+
+    def self.decode(text : String) : Rate
+      Rate.new(text)
+    end
+  end
+
+  record Snapshot, label : String, history : Array(Hash(String, String)) do
+    include JSON::Serializable
+  end
+
+  struct Quote < SugarORM::Schema
+    schema "sugar_quotes" do
+      field id : Int64, primary: true
+      field rate : Rate, codec: RateCodec
+      field fee : Rate?, codec: RateCodec
+      field snapshot : Snapshot, codec: SugarORM::JSONB(Snapshot)
+    end
+  end
+
   alias Preloads = NamedTuple(users: Array(User), owner: User?, profile: Profile?)
 
   class Team::UpdateChangeset < SugarORM::Changeset(Team)
@@ -102,13 +131,18 @@ module SugarSpec
                  "bio text NOT NULL, " \
                  "team_id bigint NOT NULL REFERENCES sugar_teams (id))"
       owner.exec(profiles)
-      tables = "sugar_teams, sugar_users, sugar_profiles"
-      sequences = "sugar_teams_id_seq, sugar_users_id_seq, sugar_profiles_id_seq"
+      quotes = "CREATE TABLE sugar_quotes (" \
+               "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
+               "rate numeric(30,10) NOT NULL, fee numeric(30,10), snapshot jsonb NOT NULL)"
+      owner.exec(quotes)
+      tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes"
+      sequences = "sugar_teams_id_seq, sugar_users_id_seq, sugar_profiles_id_seq, " \
+                  "sugar_quotes_id_seq"
       owner.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{tables} TO caramel_model_spec")
       owner.exec("GRANT USAGE, SELECT ON SEQUENCE #{sequences} TO caramel_model_spec")
       yield owner, runtime
     ensure
-      owner.exec("DROP TABLE IF EXISTS sugar_profiles, sugar_users, sugar_teams")
+      owner.exec("DROP TABLE IF EXISTS sugar_quotes, sugar_profiles, sugar_users, sugar_teams")
       runtime.close
       owner.close
     end
@@ -405,6 +439,43 @@ describe "SugarORM with PostgreSQL" do
       expect_raises(SugarORM::ShapeError) do
         SugarORM.sql("SELECT id FROM sugar_teams", as: shape)
       end
+    end
+  end
+
+  it "stores a type through a codec without a float round trip, in numeric and jsonb columns" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      exact = "12345678901234567890.1234567890"
+      history = [{"price" => "98765432109876543210.0123456789"}]
+      snapshot = SugarSpec::Snapshot.new("first", history)
+      quote = SugarSpec::Quote.create!(
+        rate: SugarSpec::Rate.new(exact), snapshot: snapshot
+      )
+      quote.rate.text.should eq(exact)
+      quote.fee.should be_nil
+      quote.snapshot.should eq(snapshot)
+
+      found = SugarSpec::Quote.query.find!(quote.id)
+      found.rate.should eq(SugarSpec::Rate.new(exact))
+      found.fee.should be_nil
+      found.snapshot.history.should eq(history)
+
+      matches = SugarSpec::Quote.query.where(rate: SugarSpec::Rate.new(exact)).to_a
+      matches.map(&.id).should eq([quote.id])
+      SugarSpec::Quote.query.where(fee: nil).to_a.size.should eq(1)
+      SugarSpec::Quote.query.where(fee: SugarSpec::Rate.new("1.0")).to_a.should be_empty
+
+      same = found.update(rate: SugarSpec::Rate.new(exact))
+      same.saved?.should be_true
+      same.changes.should be_empty
+
+      changed = found.update!(fee: SugarSpec::Rate.new("0.0000000001"))
+      changed.fee.should eq(SugarSpec::Rate.new("0.0000000001"))
+      changed.update!(fee: nil).fee.should be_nil
+
+      rows = SugarORM.sql(
+        "SELECT rate::text AS rate FROM sugar_quotes", as: {rate: String}
+      )
+      rows.should eq([{rate: exact}])
     end
   end
 end

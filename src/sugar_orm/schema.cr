@@ -118,34 +118,45 @@ module SugarORM
           {% name = declaration.var.stringify %}
           {% options = {} of Nil => Nil %}
           {% for argument in named %}
-            {% unless %w(primary renamed_from).includes?(argument.name.stringify) %}
+            {% unless %w(primary renamed_from codec).includes?(argument.name.stringify) %}
               {% problem = "Unknown field option '#{argument.name}' " +
                            "on field '#{name.id}'.\n" +
-                           "Remediation: fields accept only `primary: true` " +
-                           "and `renamed_from: :old_name`." %}
+                           "Remediation: fields accept only `primary: true`, " +
+                           "`renamed_from: :old_name` and `codec: Codec`." %}
               {% statement.raise problem + statement_at %}
             {% end %}
             {% options[argument.name.stringify] = argument.value %}
           {% end %}
           {% type = declaration.type %}
+          {% codec = options["codec"] %}
           {% nullable = false %}
           {% scalar = nil %}
+          {% written = nil %}
           {% if type.is_a?(Union) %}
             {% members = type.types.map(&.stringify.gsub(/\A::/, "")) %}
-            {% others = members.reject { |member| member == "Nil" } %}
+            {% others = type.types.reject { |member| member.stringify =~ /\A(::)?Nil\z/ } %}
             {% if members.size == 2 && others.size == 1 %}
               {% nullable = true %}
-              {% scalar = others[0] %}
+              {% written = others[0] %}
+              {% scalar = others[0].stringify.gsub(/\A::/, "") %}
             {% end %}
-          {% elsif type.is_a?(Path) %}
+          {% elsif type.is_a?(Path) || (codec && type.is_a?(Generic)) %}
+            {% written = type %}
             {% scalar = type.stringify.gsub(/\A::/, "") %}
           {% end %}
-          {% unless sql_types[scalar] %}
+          {% unless (codec && scalar) || sql_types[scalar] %}
             {% problem = "Unsupported type `#{type}` for field '#{name.id}'.\n" +
                          "Supported: String, Int32, Int64, Bool, Float64 and Time, " +
                          "each optionally nilable (`String?`).\n" +
                          "Remediation: declare `field #{name.id} : String` " +
-                         "(or another supported type) and convert in your own code." %}
+                         "(or another supported type), or store the type through a codec: " +
+                         "`field #{name.id} : #{type}, codec: SomeCodec`." %}
+            {% declaration.raise problem + declaration_at %}
+          {% end %}
+          {% alias_type = "::#{@type}::SugarType#{name.camelcase.id}" %}
+          {% if codec && !declaration.value.is_a?(Nop) %}
+            {% problem = "Field '#{name.id}' has codec: #{codec}, so it takes no default.\n" +
+                         "Remediation: set the value in a changeset." %}
             {% declaration.raise problem + declaration_at %}
           {% end %}
           {% value = declaration.value %}
@@ -192,7 +203,7 @@ module SugarORM
             {% is_primary = options["primary"] == true %}
           {% end %}
           {% if is_primary %}
-            {% unless scalar == "Int64" && !nullable && value.is_a?(Nop) %}
+            {% unless scalar == "Int64" && !nullable && value.is_a?(Nop) && !codec %}
               {% problem = "The primary key '#{name.id}' must be a non-nilable Int64 " +
                            "without a default (it becomes an identity column).\n" +
                            "Remediation: declare " +
@@ -218,19 +229,22 @@ module SugarORM
             {% end %}
             {% renamed = source.id.stringify %}
           {% end %}
+          {% column_type = codec ? alias_type : "::#{scalar.id}" %}
           {% columns << {
                node:         declaration,
                name:         name,
                declared:     nullable ? "#{scalar.id}?" : scalar,
-               type:         nullable ? "::#{scalar.id} | ::Nil" : "::#{scalar.id}",
+               type:         nullable ? "#{column_type.id} | ::Nil" : column_type,
                scalar:       scalar,
                nullable:     nullable,
-               sql_type:     sql_types[scalar],
+               sql_type:     codec ? nil : sql_types[scalar],
                default:      default,
                literal:      literal,
                primary:      is_primary,
                system:       is_primary,
                renamed_from: renamed,
+               codec:        codec,
+               written:      written,
              } %}
 
         {% elsif kind == "timestamps" %}
@@ -259,6 +273,8 @@ module SugarORM
                  primary:      false,
                  system:       true,
                  renamed_from: nil,
+                 codec:        nil,
+                 written:      nil,
                } %}
           {% end %}
 
@@ -336,6 +352,8 @@ module SugarORM
                  primary:      false,
                  system:       tenant_key,
                  renamed_from: nil,
+                 codec:        nil,
+                 written:      nil,
                } %}
             {% foreign_keys << {
                  name:   "fk_#{table.id}_#{key.id}",
@@ -538,6 +556,9 @@ module SugarORM
       end
 
       {% for column in columns %}
+        {% if column[:codec] %}
+          alias SugarType{{ column[:name].camelcase.id }} = {{ column[:written] }}
+        {% end %}
         getter {{ column[:name].id }} : {{ column[:type].id }}
       {% end %}
 
@@ -560,7 +581,14 @@ module SugarORM
       end
 
       {% readers = columns.map do |column|
-           "#{column[:name].id}: rows.read(#{column[:type].id})"
+           key = column[:name].id
+           if column[:codec] && column[:nullable]
+             "#{key}: rows.read(::String | ::Nil).try { |text| #{column[:codec]}.decode(text) }"
+           elsif column[:codec]
+             "#{key}: #{column[:codec]}.decode(rows.read(::String))"
+           else
+             "#{key}: rows.read(#{column[:type].id})"
+           end
          end %}
       # Reads one row selected with `__sugar_select_list`, in declaration order.
       def self.from_row(rows : ::DB::ResultSet) : self
@@ -588,8 +616,11 @@ module SugarORM
         {{ primary_key }}
       end
 
+      {% selected = columns.map do |column|
+           column[:codec] ? "\"#{column[:name].id}\"::text" : "\"#{column[:name].id}\""
+         end %}
       def self.__sugar_select_list : String
-        {{ columns.map { |column| "\"#{column[:name].id}\"" }.join(", ") }}
+        {{ selected.join(", ") }}
       end
 
       def self.__sugar_timestamps? : Bool
@@ -617,11 +648,32 @@ module SugarORM
       def __sugar_get(column : String) : ::SugarORM::Value
         case column
         {% for column in columns %}
+        {% if column[:codec] %}
+        when {{ column[:name] }}
+          self.class.__sugar_encode_{{ column[:name].id }}(@{{ column[:name].id }})
+        {% else %}
         when {{ column[:name] }} then @{{ column[:name].id }}
+        {% end %}
         {% end %}
         else raise ArgumentError.new("#{self.class} has no column '#{column}'")
         end
       end
+
+      {% for column in columns %}
+        {% if column[:codec] %}
+          # :nodoc:
+          def self.__sugar_encode_{{ column[:name].id }}(
+            value : ::{{ @type }}::SugarType{{ column[:name].camelcase.id }} | ::Nil
+          ) : ::String?
+            value.nil? ? nil : {{ column[:codec] }}.encode(value)
+          end
+        {% else %}
+          # :nodoc:
+          def self.__sugar_encode_{{ column[:name].id }}(value)
+            value
+          end
+        {% end %}
+      {% end %}
 
       def __sugar_primary_value : Int64
         @{{ primary_key.id }}
@@ -634,9 +686,15 @@ module SugarORM
             {% for column in columns %}
               ::SugarORM::Catalog::Column.new(
                 name: {{ column[:name] }},
-                sql_type: {{ column[:sql_type] }},
-                nullable: {{ column[:nullable] }},
-                default: {{ column[:default] }},
+                {% if column[:codec] %}
+                  sql_type: ::SugarORM::Codec.checked_sql_type({{ column[:codec] }}.sql_type),
+                  nullable: {{ column[:nullable] }},
+                  default: nil,
+                {% else %}
+                  sql_type: {{ column[:sql_type] }},
+                  nullable: {{ column[:nullable] }},
+                  default: {{ column[:default] }},
+                {% end %}
                 primary: {{ column[:primary] }},
                 identity: {{ column[:primary] }},
                 renamed_from: {{ column[:renamed_from] }},
@@ -700,6 +758,9 @@ module SugarORM
              ranges = ranged ? [closed, open_end, open_start] : [] of Nil
              nilable = column[:nullable] ? ["::Nil"] : [] of Nil
              accepted = [scalar, "Array(#{scalar.id})"] + ranges + nilable
+             if column[:codec]
+               accepted = ["::#{@type}::SugarType#{column[:name].camelcase.id}"] + nilable
+             end
              unset = "::SugarORM::Unset = ::SugarORM::UNSET"
              "#{column[:name].id} : #{accepted.join(" | ").id} | #{unset.id}"
            end.join(", ") %}
@@ -711,7 +772,9 @@ module SugarORM
           {% for column in columns %}
             unless {{ column[:name].id }}.is_a?(::SugarORM::Unset)
               __sugar_conditions << ::SugarORM::Condition.column(
-                {{ column[:name] }}, {{ column[:name].id }}
+                {{ column[:name] }}, ::{{ @type }}.__sugar_encode_{{ column[:name].id }}(
+                  {{ column[:name].id }}
+                )
               )
             end
           {% end %}
