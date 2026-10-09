@@ -3,7 +3,7 @@ require "../../../src/caramel"
 module Fixture
   struct TeamIndex < Caramel::Action
     contract do
-      field tags : Hash(String, String)
+      field tags : Array(Caramel::UploadedFile), max: 3
     end
 
     def handle(contract : Contract) : Caramel::Response

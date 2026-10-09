@@ -176,11 +176,57 @@ describe Caramel::RequestInput do
     body = "title=a&title=b&_csrf=token"
     path = "/books?_csrf=x&_method=PUT&page=2"
     input = Caramel::RequestInput.read(form_request(body, path: path))
-    input.errors["_base"].should eq(["Duplicate field: title"])
+    input.errors.should be_empty
+    input.repeated_names.should eq(["title"])
     input.body.should eq({"title" => "a"})
     input.query.should eq({"page" => "2"})
     input.csrf_token.should eq("token")
     input.method_override.should be_nil
+
+    twice = Caramel::RequestInput.read(form_request("_csrf=a&_csrf=b"))
+    twice.errors["_base"].should eq(["Duplicate field: _csrf"])
+  end
+
+  it "keeps every value of a repeated form, query or multipart name" do
+    input = Caramel::RequestInput.read(form_request("ids=1&ids=2&one=x", path: "/books?q=a&q=b"))
+    input.errors.should be_empty
+    input.all_values("ids").should eq(%w[1 2])
+    input.all_values("q").should eq(%w[a b])
+    input.all_values("one").should eq(%w[x])
+    input.all_values("none").should be_empty
+    input.repeated_names.should eq(%w[q ids])
+
+    multipart = Caramel::RequestInput.read(multipart_request do |builder|
+      builder.field("ids", "1")
+      builder.field("ids", "2")
+    end)
+    multipart.errors.should be_empty
+    multipart.all_values("ids").should eq(%w[1 2])
+    multipart.cleanup
+
+    mixed = Caramel::RequestInput.read(multipart_request do |builder|
+      builder.field("cover", "text")
+      builder.file("cover", IO::Memory.new("png"),
+        HTTP::FormData::FileMetadata.new(filename: "a.png"))
+    end)
+    mixed.errors["_base"].should eq(["Duplicate field: cover"])
+    mixed.cleanup
+  end
+
+  it "records a JSON array's items and the JSON type of each" do
+    body = %({"ids": [1, "2", 3.5, true, null, [1], {"a": 1}], "tags": []})
+    input = Caramel::RequestInput.read(json_request(body))
+    input.errors.should be_empty
+    input.json_kind?("ids").should eq(JsonKind::Array)
+    input.json_kind?("absent").should be_nil
+    input.body.has_key?("ids").should be_false
+    input.json_items("ids").should eq([
+      {"1", JsonKind::Number}, {"2", JsonKind::String}, {"3.5", JsonKind::Number},
+      {"true", JsonKind::Bool}, {nil, JsonKind::Null}, {nil, JsonKind::Nested},
+      {nil, JsonKind::Nested},
+    ])
+    input.json_items("tags").should be_empty
+    input.json_mismatch?("ids", JsonKind::String).should be_true
   end
 
   it "honors method overrides only on POST" do

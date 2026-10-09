@@ -23,6 +23,11 @@ struct AvatarContract < Caramel::RequestContract
   field caption : String?
 end
 
+struct ArrayContract < Caramel::RequestContract
+  field ids : Array(Int64), min: 1, max: 3
+  field tags : Array(String), max: 2
+end
+
 private def input(body : String,
                   method = "POST",
                   path = "/teams",
@@ -176,6 +181,61 @@ describe Caramel::RequestContract do
     contract = TeamContract.parse(input("id=8&seats=3&name=Owls", route: {"id" => "7"}))
     contract.errors["_base"].should eq(["Duplicate field: id"])
     contract.route_error?(["id"]).should be_false
+  end
+
+  it "binds bounded array fields from repeated keys and JSON arrays" do
+    form = ArrayContract.parse(input("ids=1&ids=2&tags=a"))
+    form.errors.should be_empty
+    form.ids.should eq([1_i64, 2_i64])
+    form.tags.should eq(["a"])
+    form.lists["ids"].should eq(%w[1 2])
+
+    json = ArrayContract.parse(json_input(%({"ids":[1,2],"tags":null})))
+    json.errors.should be_empty
+    json.ids.should eq([1_i64, 2_i64])
+    json.tags.should be_empty
+
+    ArrayContract.parse(input("ids=1")).tags.should be_empty
+  end
+
+  it "reports array bounds, items and sources" do
+    ArrayContract.parse(input("")).errors.should eq({"ids" => ["must have at least 1 item(s)"]})
+    too_many = ArrayContract.parse(input("ids=1&ids=2&ids=3&ids=4"))
+    too_many.errors.should eq({"ids" => ["must have at most 3 item(s)"]})
+    ArrayContract.parse(input("ids=1&tags=a&tags=b&tags=c")).errors.should eq({
+      "tags" => ["must have at most 2 item(s)"],
+    })
+    ArrayContract.parse(input("ids=1&ids=x")).errors.should eq({
+      "ids[1]" => ["must be a valid Int64"],
+    })
+    ArrayContract.parse(input("ids=1&ids=1")).errors.should eq({
+      "ids[1]" => ["repeats an earlier item"],
+    })
+    ArrayContract.parse(input("ids=1&ids=")).errors.should eq({"ids[1]" => ["is required"]})
+    ArrayContract.parse(json_input(%({"ids":["1"]}))).errors.should eq({
+      "ids[0]" => ["must be a JSON number"],
+    })
+    ArrayContract.parse(json_input(%({"ids":[null]}))).errors.should eq({
+      "ids[0]" => ["is required"],
+    })
+    ArrayContract.parse(json_input(%({"ids":5}))).errors.should eq({
+      "ids" => ["must be a JSON array"],
+    })
+    both = input("ids=2", path: "/teams?ids=1")
+    ArrayContract.parse(both).errors.should eq({"_base" => ["Duplicate field: ids"]})
+    ArrayContract.parse(input("ids=1&other=1")).errors.should eq({
+      "_base" => ["Unknown field: other"],
+    })
+    ArrayContract.parse(input("ids=1&_csrf=a&_csrf=b")).errors.should eq({
+      "_base" => ["Duplicate field: _csrf"],
+    })
+    contract = ArrayContract.parse(input("ids=1&ids=x"))
+    contract.lists["ids"].should eq(%w[1 x])
+  end
+
+  it "keeps a repeated scalar name a duplicate" do
+    contract = TeamContract.parse(input("id=8&seats=3&name=Owls&name=Cats"))
+    contract.errors["_base"].should eq(["Duplicate field: name"])
   end
 
   it "binds uploaded files from multipart forms and refuses text in their place" do

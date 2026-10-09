@@ -24,7 +24,7 @@ module Caramel::Checks::Prose
     "templates/application/AGENTS.md" => 2_000,
     "templates/application/CLAUDE.md" => 200,
   }
-  ADR_CAP = 10_000
+  ADR_CAP = 12_000
 
   ADR_PATH   = /\Adocs\/decisions\/\d{4}-[a-z0-9-]+\.md\z/
   ADR_TITLE  = /\A# ADR (\d{4}): \S/

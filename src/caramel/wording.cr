@@ -48,6 +48,18 @@ module Caramel
       "must be at most #{max} characters"
     end
 
+    def at_least_items(min) : String
+      "must have at least #{min} item(s)"
+    end
+
+    def at_most_items(max) : String
+      "must have at most #{max} item(s)"
+    end
+
+    def duplicate_item : String
+      "repeats an earlier item"
+    end
+
     def duplicate_field(name) : String
       "Duplicate field: #{name}"
     end

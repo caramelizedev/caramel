@@ -71,6 +71,9 @@ The reserved `caramel:` section takes only these keys; an omitted key uses the d
 |`errors.at_least_characters`|must be at least %{min} characters|
 |`errors.at_most`|must be at most %{max}|
 |`errors.at_most_characters`|must be at most %{max} characters|
+|`errors.at_least_items`|must have at least %{min} item(s)|
+|`errors.at_most_items`|must have at most %{max} item(s)|
+|`errors.duplicate_item`|repeats an earlier item|
 |`errors.duplicate_field`|Duplicate field: %{name}|
 |`errors.unknown_field`|Unknown field: %{name}|
 |`errors.expected_json_object`|Expected a JSON object|

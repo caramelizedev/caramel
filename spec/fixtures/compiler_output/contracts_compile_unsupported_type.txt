@@ -4,7 +4,7 @@ In spec/fixtures/contracts/compile_unsupported_type.cr:4:10
 
  4 | struct TeamIndex < Caramel::Action
             ^
-Error: unsupported Caramel::RequestContract field type: Array(String)
+Error: unsupported Caramel::RequestContract field type: Hash(String, String)
 
   --> @@ROOT@@/spec/fixtures/contracts/compile_unsupported_type.cr:6:13
-      field tags : Array(String)
+      field tags : Hash(String, String)
