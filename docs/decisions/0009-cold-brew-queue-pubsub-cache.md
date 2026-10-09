@@ -2,7 +2,7 @@
 
 Date: 2026-09-27
 
-Status: accepted. Decisions 3 and 8 are amended by ADR 0019.
+Status: accepted. Decisions 2, 3 and 8 are amended by ADR 0019.
 
 ## Context
 
@@ -25,6 +25,7 @@ Jobs, schedules, notifications and cache run on the PostgreSQL that holds domain
    - `Caramel::ColdBrew::Job.retry_on` adds global rules. The job's own rules are consulted first, then its parents', then the global rules, then the default of 3 exponential attempts from 1 second.
    - `T.enqueue(**params, run_at:, priority:)` writes through `SugarORM::Repo`'s current connection. Inside `Repo.transaction` the job therefore commits or rolls back with the business write.
    - Unknown keywords are compile errors.
+   - A row stores the job's fully qualified class name, and a worker runs the compiled job of that name, or the one that declares it in `renamed_from` ([ADR 0019](0019-cold-brew-status-hooks-and-work.md)).
 3. **Workers** claim with a `FOR UPDATE SKIP LOCKED` query (plus `finished_at IS NULL`) on a connection bound to the fiber, so `locked_by` is the backend that runs the job. They run `perform` and `finished_at = now()` in one transaction. A failure reschedules with backoff or sets `failed_at` and `last_error`.
 4. **Maintenance** runs every 60 s:
    - creates partitions for today through today + 7;

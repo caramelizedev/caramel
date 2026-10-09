@@ -146,6 +146,82 @@ module Caramel::ColdBrew
       getter {{ name }} : {{ declaration.type }}
     end
 
+    # Names the classes this job used to have. A row queued under one of them
+    # runs this job with its stored params, so a rename or a move keeps the
+    # work already queued. List every old name in one call, and keep them
+    # until `Caramel::ColdBrew.unknown_queued_class_names` no longer shows
+    # them. A name that is another job's name or alias fails to compile.
+    #
+    #     struct RestockTea < Caramel::ColdBrew::Job
+    #       renamed_from "App::Restock"
+    #     end
+    macro renamed_from(*names)
+      {% if @type.abstract? %}
+        {% message = "renamed_from is declared on abstract #{@type}, which no row can name.\n" \
+                     "Remediation: declare it on the concrete job that replaced the old class." %}
+        {% if names.empty? %}
+          {% @type.raise message %}
+        {% else %}
+          {% first = names.first %}
+          {% first.raise message + "\n  --> #{first.filename.id}:" \
+                                   "#{first.line_number}:#{first.column_number}" %}
+        {% end %}
+      {% end %}
+      {% if names.empty? %}
+        {% @type.raise "renamed_from expects the old class names.\n" \
+                       "Remediation: write it like `renamed_from \"App::Restock\"`." %}
+      {% end %}
+      {% if @type.has_constant?(:COLD_BREW_RENAMED_FROM) %}
+        {% first = names.first %}
+        {% at = "\n  --> #{first.filename.id}:#{first.line_number}:#{first.column_number}" %}
+        {% message = "#{@type} declares renamed_from twice.\n" \
+                     "Remediation: list every old name in one `renamed_from` line." %}
+        {% first.raise message + at %}
+      {% end %}
+      {% for name in names %}
+        {% at = "\n  --> #{name.filename.id}:#{name.line_number}:#{name.column_number}" %}
+        {% unless name.is_a?(StringLiteral) && name =~ /\A[A-Z]\w*(::[A-Z]\w*)*\z/ %}
+          {% message = "renamed_from expects the old class names as string literals " \
+                       "like \"App::Restock\", without a leading ::.\n" \
+                       "Remediation: write it like `renamed_from \"App::Restock\"`." %}
+          {% name.raise message + at %}
+        {% end %}
+        {% if names.select { |other| other == name }.size > 1 %}
+          {% name.raise "renamed_from lists #{name} twice in #{@type}.\n" \
+                        "Remediation: keep one of them." + at %}
+        {% end %}
+      {% end %}
+      COLD_BREW_RENAMED_FROM = { {{ names.splat }} }
+    end
+
+    # Fails to compile when a name this job claims is its own, another job's
+    # name or another job's alias.
+    macro __cold_brew_check_names
+      {% if @type.has_constant?(:COLD_BREW_RENAMED_FROM) %}
+        {% jobs = ::Caramel::ColdBrew::Job.all_subclasses.reject(&.abstract?) %}
+        {% for claim in @type.constant(:COLD_BREW_RENAMED_FROM) %}
+          {% at = "\n  --> #{claim.filename.id}:#{claim.line_number}:#{claim.column_number}" %}
+          {% if claim == @type.name.stringify %}
+            {% claim.raise "#{@type} lists its own name in renamed_from.\n" \
+                           "Remediation: remove it." + at %}
+          {% end %}
+          {% for other in jobs.reject { |job| job == @type } %}
+            {% if claim == other.name.stringify %}
+              {% claim.raise "#{@type} claims #{claim} in renamed_from, " \
+                             "but #{other} is a job of that name.\n" \
+                             "Remediation: rename or remove one of them." + at %}
+            {% end %}
+            {% if other.has_constant?(:COLD_BREW_RENAMED_FROM) &&
+                    other.constant(:COLD_BREW_RENAMED_FROM).any? { |old| old == claim } %}
+              {% claim.raise "#{@type} and #{other} both claim #{claim} in renamed_from.\n" \
+                             "Remediation: only one job can take over a name; remove it " \
+                             "from the other." + at %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    end
+
     # Retries matching errors; per job in its body, or for every job as
     # `Caramel::ColdBrew::Job.retry_on`. The first matching rule wins.
     macro retry_on(error, attempts = 3, backoff = :exponential, base = 1.second)
@@ -187,6 +263,8 @@ module Caramel::ColdBrew
       # an unknown keyword or a mistyped value fails at the caller's line.
       macro finished
         \{% unless @type.abstract? %}
+          __cold_brew_check_names
+
           \{% names = @type.constants.select(&.starts_with?("COLD_BREW_PARAM_")) %}
           \{% params = names.map { |name| @type.constant(name) } %}
           \{% keywords = params.map do |param|
@@ -232,11 +310,37 @@ module Caramel::ColdBrew
     end
 
     # :nodoc:
-    # The compile-time registry: every concrete job, keyed by its fully
-    # qualified name as stored in `caramel_jobs.class_name`.
-    def self.__cold_brew_perform(class_name : String, payload : String) : Nil
+    # The compile-time registry: every concrete job by the name it is stored
+    # under in `caramel_jobs.class_name`, its current fully qualified name,
+    # and by each name it declares in `renamed_from`. Returns the current
+    # name, or nil when no compiled job has *class_name*.
+    def self.__cold_brew_canonical(class_name : String) : String?
       {% begin %}
         case class_name
+        {% for job in @type.all_subclasses.reject(&.abstract?) %}
+          {% names = [job.name.stringify] %}
+          {% if job.has_constant?(:COLD_BREW_RENAMED_FROM) %}
+            {% for old in job.constant(:COLD_BREW_RENAMED_FROM) %}
+              {% names << old %}
+            {% end %}
+          {% end %}
+          when {{ names.splat }} then {{ job.name.stringify }}
+        {% end %}
+        else
+          nil
+        end
+      {% end %}
+    end
+
+    # :nodoc:
+    def self.__cold_brew_known?(class_name : String) : Bool
+      !__cold_brew_canonical(class_name).nil?
+    end
+
+    # :nodoc:
+    def self.__cold_brew_perform(class_name : String, payload : String) : Nil
+      {% begin %}
+        case __cold_brew_canonical(class_name)
         {% for job in @type.all_subclasses.reject(&.abstract?) %}
           when {{ job.name.stringify }} then {{ job }}.from_json(payload).perform
         {% end %}
@@ -251,7 +355,7 @@ module Caramel::ColdBrew
     # The job's name and its abstract parents below Job, for retry lookup.
     def self.__cold_brew_lineage(class_name : String) : Array(String)
       {% begin %}
-        case class_name
+        case __cold_brew_canonical(class_name)
         {% for job in @type.all_subclasses.reject(&.abstract?) %}
           {% parents = job.ancestors.select { |ancestor| ancestor < @type } %}
           when {{ job.name.stringify }} then {{ ([job] + parents).map(&.name.stringify) }}

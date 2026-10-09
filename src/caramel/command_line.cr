@@ -133,6 +133,7 @@ module Caramel
     def self.work(title : String, url : String, options : WorkOptions,
                   stop : Channel(Nil), output : IO = STDOUT) : Int32
       service = ColdBrew.start(url, options.environment, scheduler: options.scheduler)
+      ColdBrew.warn_unknown_queued(service.database)
       runtime = Crema.start("work", title, database: service.database, cold_brew: service)
       begin
         output.puts "#{title} worker is ready: #{readiness(service, options)}"
@@ -262,6 +263,7 @@ module Caramel
       case command
       when "migrate"
         puts "Applied #{migrator.migrate(dev_override: dev_override)} migrations."
+        warn_unknown_queued(db)
       when "lint"
         SugarORM::Linter.enforce(migrator.lint, dev_override)
         puts "Pending migrations pass the zero-lock linter."
@@ -272,6 +274,13 @@ module Caramel
         command == "seed" ? app.seed(db) : serve(app, db, url, root)
       end
       0
+    end
+
+    # Warns about queued jobs this build cannot run, once `caramel_jobs` exists.
+    private def self.warn_unknown_queued(db : DB::Database) : Nil
+      return unless db.scalar("SELECT to_regclass('caramel_jobs') IS NOT NULL").as(Bool)
+
+      ColdBrew.warn_unknown_queued(db)
     end
 
     private def self.refuse_pending(db : DB::Database,

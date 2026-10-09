@@ -57,6 +57,16 @@ module ColdBrewSpec
     end
   end
 
+  # Renamed from ColdBrewSpec::Restock; rows queued under the old name still run.
+  struct RestockTea < Caramel::ColdBrew::Job
+    renamed_from "ColdBrewSpec::Restock"
+    param tea_id : Int64
+
+    def perform
+      SugarORM.sql_exec("INSERT INTO cold_brew_runs (label) VALUES ($1)", "restocked #{tea_id}")
+    end
+  end
+
   struct Throttle < Caramel::ColdBrew::Job
     queue "fragile"
 
@@ -581,6 +591,87 @@ describe "Caramel::ColdBrew retries" do
     unknown = "Caramel::ColdBrew::UnknownJob: " \
               "No Caramel::ColdBrew::Job named Vanished::Job"
     row[:last_error].not_nil!.should start_with(unknown)
+  end
+end
+
+describe "a renamed job" do
+  it "runs a row queued under its old name with the stored params, and stores its new one" do
+    ColdBrewSpec.reset
+    id = ColdBrewSpec::RestockTea.enqueue(tea_id: 7_i64)
+    stored = "SELECT class_name AS value FROM caramel_jobs WHERE id = $1"
+    ColdBrewSpec.scalar(stored, id, as: String).should eq("ColdBrewSpec::RestockTea")
+
+    # A later deploy renamed the class; the queued row still names the old one.
+    ColdBrewSpec.owner.exec("UPDATE caramel_jobs SET class_name = $1", "ColdBrewSpec::Restock")
+    Brew.drain_queue!(ColdBrewSpec.runtime).should eq(1)
+    ColdBrewSpec.labels.should eq(["restocked 7"])
+    row = ColdBrewSpec.job(id)
+    row[:attempts].should eq(1)
+    row[:finished_at].should_not be_nil
+    row[:failed_at].should be_nil
+  end
+end
+
+describe "Caramel::ColdBrew.unknown_queued_class_names" do
+  it "lists the queued class names this binary compiles neither as a job nor as an alias" do
+    ColdBrewSpec.reset
+    Brew.unknown_queued_class_names(ColdBrewSpec.runtime).should be_empty
+
+    ColdBrewSpec::Record.enqueue(label: "known")
+    ColdBrewSpec::RestockTea.enqueue(tea_id: 1_i64)
+    renamed = "UPDATE caramel_jobs SET class_name = $1 WHERE class_name = $2"
+    ColdBrewSpec.owner.exec(renamed, "ColdBrewSpec::Restock", "ColdBrewSpec::RestockTea")
+    Brew.unknown_queued_class_names(ColdBrewSpec.runtime).should be_empty
+
+    ColdBrewSpec.vanished
+    ColdBrewSpec.vanished("mailers")
+    Brew.unknown_queued_class_names(ColdBrewSpec.runtime).should eq(["Vanished::Job"])
+    SugarORM::Repo.using(ColdBrewSpec.runtime) do
+      Brew.unknown_queued_class_names.should eq(["Vanished::Job"])
+    end
+  end
+
+  it "leaves out rows that already finished or failed" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.vanished
+    Brew.drain_queue(ColdBrewSpec.runtime).should eq(1)
+    ColdBrewSpec.job_count("failed_at IS NOT NULL").should eq(1)
+    Brew.unknown_queued_class_names(ColdBrewSpec.runtime).should be_empty
+  end
+
+  it "does not list a row a worker holds, which is running rather than stranded" do
+    ColdBrewSpec.reset
+    id = ColdBrewSpec.vanished
+    ColdBrewSpec.owner.exec("UPDATE caramel_jobs SET locked_at = now() WHERE id = $1", id)
+    Brew.unknown_queued_class_names(ColdBrewSpec.runtime).should be_empty
+  end
+
+  it "logs and returns nothing when the check itself fails, instead of raising" do
+    # The admin database holds no caramel_jobs table, so the query fails.
+    without_table = Caramel::Database.open(COLD_BREW_ADMIN_URL, 1)
+    begin
+      expect_raises(PQ::PQError) { Brew.unknown_queued_class_names(without_table) }
+      Log.capture("cold_brew") do |logs|
+        Brew.warn_unknown_queued(without_table).should be_empty
+        logs.check(:warn, /could not check queued class names error_type=PQ::PQError/)
+      end
+    ensure
+      without_table.close
+    end
+  end
+
+  it "warns, naming each class, only when something is stranded" do
+    ColdBrewSpec.reset
+    Log.capture("cold_brew") do |logs|
+      Brew.warn_unknown_queued(ColdBrewSpec.runtime).should be_empty
+      logs.empty
+    end
+
+    ColdBrewSpec.vanished
+    Log.capture("cold_brew") do |logs|
+      Brew.warn_unknown_queued(ColdBrewSpec.runtime).should eq(["Vanished::Job"])
+      logs.check(:warn, /queued jobs name classes this binary does not compile: Vanished::Job;/)
+    end
   end
 end
 
@@ -1128,5 +1219,23 @@ describe "the work command" do
     ColdBrewSpec.job(running)[:finished_at].should_not be_nil
     ColdBrewSpec.labels.should eq(["worked"])
     ColdBrewSpec.schedule_count.should eq(0)
+  end
+
+  it "warns at start-up about queued jobs it cannot run, and leaves them queued" do
+    ColdBrewSpec.reset
+    stranded = ColdBrewSpec.vanished
+    options = Caramel::CommandLine::WorkOptions.new("gated", "1", false)
+    stop = Channel(Nil).new
+    output = IO::Memory.new
+    result = Channel(Int32).new(1)
+    Log.capture("cold_brew") do |logs|
+      url = ColdBrewSpec.runtime_url
+      spawn { result.send(Caramel::CommandLine.work("Brew", url, options, stop, output)) }
+      ColdBrewSpec.eventually { output.to_s.includes?("ready") }
+      logs.check(:warn, /classes this binary does not compile: Vanished::Job;/)
+    end
+    stop.close
+    result.receive.should eq(0)
+    ColdBrewSpec.job(stranded)[:attempts].should eq(0)
   end
 end
