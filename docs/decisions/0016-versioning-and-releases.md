@@ -37,6 +37,7 @@ Caramel needs releases that applications can pin, upgrade and install side by si
 6. **Releases are cut by `scripts/release`, written in Crystal.**
    - It derives the next version from the Conventional Commits since the last tag. A fix is a patch and a feature is a minor; a breaking change is a minor during 0.x.
    - It writes `CHANGELOG.md` from those commits plus hand-written upgrade notes (`CHANGELOG.md` holds the Unreleased notes), sets the version in `shard.yml`, and creates an annotated tag only after the full check suite passes.
+   - It refuses a version that `website/source/site.html` does not name; the check suite it runs includes `scripts/check website`, which builds and checks that edition with Node.js 22 or newer.
    - Pushing the tag and publishing the GitHub release stay manual.
 7. **Releases are source-only until signing.** A release is a tag and its source archive; users build with `scripts/install-toolchain` and the build scripts, or with `frappe installations install`. Prebuilt, notarized binaries wait for an Apple Developer ID, before 1.0. They also need three things:
    - OpenSSL shipped beside the binaries with an `@executable_path`-relative rpath, or linked statically;
@@ -56,4 +57,4 @@ Caramel needs releases that applications can pin, upgrade and install side by si
 - Postgres.app keeps a data directory per PostgreSQL major version, and `pg_upgrade` needs the old and new binaries at once.
 - A database is never lost across an upgrade, and the CA is never replaced silently.
 - Rails and Django warn for at least one release before removing a feature.
-- Native release tooling needs no Node or Python layer.
+- The release tool itself is native; only the website check runs Node, which the website's build already needs.

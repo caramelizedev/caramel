@@ -8,9 +8,10 @@ with sticky desktop navigation, a section outline, and a collapsible mobile menu
 Recipes retain their draft and framework-gap labels; publishing the site does
 not mean the framework examples have been tested.
 
-The site documents the current framework state only. Its routes and metadata
-follow `shard.yml`; update the release labels and guides in `source/site.html`
-when the framework ships. `/docs/` and `/cookbook/` lead to the current edition.
+`source/site.html` documents the current release. Its routes and metadata follow
+`shard.yml`; update its release labels and guides before `scripts/release`, which
+refuses a version the site does not name. `/docs/` and `/cookbook/` lead to the
+current edition.
 The internationalization guide covers opt-in catalogs, typed messages, locale
 selection, formatting, framework wording, explicit locale scopes for jobs, and the
 catalog's reserved keys. Best practices and the Reference pages (routes and
@@ -38,6 +39,8 @@ node website/check.mjs
 python3 -m http.server 8768 --directory website/dist
 ```
 
+`scripts/check website` runs the build and the checks.
+
 Source lives on `main`; compiled HTML is published from the `gh-pages` branch.
 To build, validate, and publish the current website with existing Git credentials:
 
@@ -48,7 +51,11 @@ node website/publish.mjs
 The publisher refuses to run while `website/` has uncommitted changes, so every
 `gh-pages` commit names a `main` commit that holds its source. It uses a temporary
 Git index, preserves deployment history, and does not switch the working branch or
-alter the working index. It pushes without force. Generated output is ignored on
+alter the working index. It adds the current edition and keeps every earlier
+`/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` from `gh-pages` history; a release tag with no
+edition redirects to the newest edition of its minor. `--dry-run` prints what it
+keeps and the tree, and publishes nothing. After pushing without force it waits up
+to 15 minutes until every edition answers 200. Generated output is ignored on
 `main`.
 
 `templates/github-pages.workflow.yml` is an optional GitHub Actions workflow for

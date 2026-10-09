@@ -13,7 +13,9 @@ half of the repository's markdown and most of what a repository-wide grep return
 ## Decision
 
 1. Application authors' contract is the website (`website/source/site.html`), published
-   per release; API detail is in doc comments at the code.
+   per release (each release's edition stays at `/docs/X.Y.Z/` and `/cookbook/X.Y.Z/`:
+   publishing adds the current edition and keeps every earlier one, and a release tag
+   without an edition redirects to the newest edition of its minor); API detail is in doc comments at the code.
 2. Contributors' contract is `CONTRIBUTING.md`. `AGENTS.md` (which `CLAUDE.md` imports)
    holds only what an agent needs beyond it.
 3. Decisions are ADRs with three sections: Context (optional, the problem), Decision (the
