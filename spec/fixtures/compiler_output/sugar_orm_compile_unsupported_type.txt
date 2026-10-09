@@ -7,5 +7,5 @@ In spec/fixtures/sugar_orm/compile_unsupported_type.cr:3:8
 Error: Unsupported type `Array(String)` for field 'tags'.
 
 Supported: String, Int32, Int64, Bool, Float64 and Time, each optionally nilable (`String?`).
-Remediation: declare `field tags : String` (or another supported type) and convert in your own code.
+Remediation: declare `field tags : String` (or another supported type), or store the type through a codec: `field tags : Array(String), codec: SomeCodec`.
   --> @@ROOT@@/spec/fixtures/sugar_orm/compile_unsupported_type.cr:6:11

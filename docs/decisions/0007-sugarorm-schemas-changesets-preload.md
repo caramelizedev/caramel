@@ -15,7 +15,8 @@ An application needs pure schemas, compile-time association safety, explicit cha
 ## Decision
 
 1. **Schemas** are immutable structs: `struct Team < SugarORM::Schema; schema "teams" do … end; end`.
-   - `field` takes `primary:`, a literal default and `renamed_from:`. The other declarations are `timestamps`, `belongs_to`, `has_many`, `has_one`, `index` and `drop_column`.
+   - `field` takes `primary:`, a literal default, `renamed_from:` and `codec:`. The other declarations are `timestamps`, `belongs_to`, `has_many`, `has_one`, `index` and `drop_column`.
+   - A field's type is `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, optionally nilable, or any type with `codec: C`, where `C.sql_type` (`numeric`, `numeric(P,S)`, `jsonb` or `text`), `C.encode(value) : String` and `C.decode(text)` map it to text. Rows read codec columns as text and writes bind the encoded text, so no value passes through a float. A codec field takes no default and matches only a value or nil in `where`. `SugarORM::JSONB(T)` stores a JSON-serializable type.
    - Instances have getters only, plus `with(**)` for a changed copy. They hold no connection and have no callbacks, and every instance is a stored row.
    - `scope name(args) { … }` defines sentence scopes.
 2. **Changesets** are `abstract class SugarORM::Changeset(T)` subclasses.
@@ -42,4 +43,5 @@ An application needs pure schemas, compile-time association safety, explicit cha
 - Changesets as classes keep the `def validate(cs)` cadence while leaving schemas purely immutable.
 - Explicit handle overloads and fiber binding let tests and jobs share one transaction without global state leaking between fibers.
 - Failed validation performs no write, and constraint violations stay explicit.
+- Codecs keep exact decimals and structured values out of the type map, so an application that never uses BigDecimal never links GMP, and each application picks its own decimal type.
 - Remediation travels with the error, in the sentinel's type name.

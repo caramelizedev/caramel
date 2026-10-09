@@ -64,7 +64,18 @@ cases = {
   "compile_unsupported_type" => [
     "compile_unsupported_type.cr:6:11",
     "Unsupported type `Array(String)` for field 'tags'",
-    "Remediation: declare `field tags : String`",
+    "Remediation: declare `field tags : String` (or another supported type), " \
+    "or store the type through a codec: `field tags : Array(String), codec: SomeCodec`.",
+  ],
+  "compile_codec_default" => [
+    "compile_codec_default.cr:20:11",
+    "Field 'price' has codec: PlainCodec, so it takes no default.",
+    "Remediation: set the value in a changeset.",
+  ],
+  "compile_codec_where_range" => [
+    "compile_codec_where_range.cr:24:15",
+    "no overload matches 'Priced::QueryOf(NamedTuple()).where', price: Range(Int32, Int32)",
+    "price : ::Priced::SugarTypePrice | ::SugarORM::Unset",
   ],
   "compile_non_literal_default" => [
     "compile_non_literal_default.cr:6:11",

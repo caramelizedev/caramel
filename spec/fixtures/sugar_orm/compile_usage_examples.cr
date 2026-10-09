@@ -21,6 +21,32 @@ struct Team < SugarORM::Schema
   scope larger_than(seats : Int32) { where("seats > ?", seats) }
 end
 
+record Snapshot, total : Int32 do
+  include JSON::Serializable
+end
+
+module RateCodec
+  def self.sql_type : String
+    "numeric(20,8)"
+  end
+
+  def self.encode(value : Float64) : String
+    value.to_s
+  end
+
+  def self.decode(text : String) : Float64
+    text.to_f
+  end
+end
+
+struct Ledger < SugarORM::Schema
+  schema "ledgers" do
+    field id : Int64, primary: true
+    field snapshot : Snapshot, codec: SugarORM::JSONB(Snapshot)
+    field rate : Float64?, codec: RateCodec
+  end
+end
+
 struct User < SugarORM::Schema
   schema "users" do
     field id : Int64, primary: true
@@ -77,4 +103,6 @@ if ARGV.includes?("--never")
   usage_facade(Team.query.find!(1_i64))
   usage_sql
   Team.query.larger_than(3).to_a
+  Ledger.query.where(snapshot: Snapshot.new(1), rate: nil).to_a
+  Ledger.query.where(rate: 1.5).to_a
 end

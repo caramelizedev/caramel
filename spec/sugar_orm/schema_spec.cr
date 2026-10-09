@@ -31,6 +31,39 @@ describe SugarORM::Schema do
     table.drops.should eq(["legacy_code"])
   end
 
+  it "types codec columns by the codec's SQL type and gives them no default" do
+    SugarUnit::Quote.__sugar_table.columns.should eq([
+      Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+      Catalog::Column.new("price", "numeric(20,8)", false, nil),
+      Catalog::Column.new("fee", "numeric(20,8)", true, nil),
+      Catalog::Column.new("snapshot", "jsonb", false, nil),
+      Catalog::Column.new("extra", "jsonb", true, nil),
+    ])
+  end
+
+  it "reads codec columns as text and encodes values through the codec" do
+    SugarUnit::Quote.__sugar_select_list.should eq(
+      %("id", "price"::text, "fee"::text, "snapshot"::text, "extra"::text)
+    )
+    quote = SugarUnit::Quote.new(
+      id: 1_i64, price: "1.50", snapshot: SugarUnit::Snapshot.new(3)
+    )
+    quote.__sugar_get("price").should eq("1.50")
+    quote.__sugar_get("fee").should be_nil
+    quote.__sugar_get("snapshot").should eq(%({"total":3}))
+  end
+
+  it "accepts only numeric, numeric(P,S), jsonb and text codec column types" do
+    ["numeric", "numeric(20,8)", "numeric(5,5)", "jsonb", "text"].each do |type|
+      SugarORM::Codec.checked_sql_type(type).should eq(type)
+    end
+    ["decimal", "numeric(3,4)", "json", "numeric(1001,2)"].each do |type|
+      expect_raises(ArgumentError, "must be numeric, numeric(P,S), jsonb or text") do
+        SugarORM::Codec.checked_sql_type(type)
+      end
+    end
+  end
+
   it "makes a NOT NULL belongs_to column, foreign key and index" do
     column = Catalog::Column.new("team_id", "bigint", false, nil)
     foreign_key = Catalog::ForeignKey.new("fk_unit_members_team_id", ["team_id"], "unit_teams")

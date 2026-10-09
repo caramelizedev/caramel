@@ -133,7 +133,9 @@ module SugarORM
           @original = record
           \{% for param in params %}
             \{% name = param[0].id %}
-            __sugar_put(\{{param[0]}}, \{{name}}) unless \{{name}}.is_a?(::SugarORM::Unset)
+            unless \{{name}}.is_a?(::SugarORM::Unset)
+              __sugar_put(\{{param[0]}}, ::\{{schema}}.__sugar_encode_\{{name}}(\{{name}}))
+            end
           \{% end %}
           __sugar_prepare
         end
@@ -141,7 +143,9 @@ module SugarORM
         def initialize\{% unless params.empty? %}(*, \{{keywords.id}})\{% end %}
           \{% for param in params %}
             \{% name = param[0].id %}
-            __sugar_put(\{{param[0]}}, \{{name}}) unless \{{name}}.is_a?(::SugarORM::Unset)
+            unless \{{name}}.is_a?(::SugarORM::Unset)
+              __sugar_put(\{{param[0]}}, ::\{{schema}}.__sugar_encode_\{{name}}(\{{name}}))
+            end
           \{% end %}
           __sugar_prepare
         end
