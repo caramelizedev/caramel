@@ -185,6 +185,20 @@ describe Caramel::RequestInput do
 
     twice = Caramel::RequestInput.read(form_request("_csrf=a&_csrf=b"))
     twice.errors["_base"].should eq(["Duplicate field: _csrf"])
+
+    query = Caramel::RequestInput.read(form_request("", path: "/books?_csrf=a&_csrf=b"))
+    query.errors["_base"].should eq(["Duplicate field: _csrf"])
+    query.csrf_token.should be_nil
+
+    override = Caramel::RequestInput.read(form_request("", path: "/books?_method=a&_method=b"))
+    override.errors["_base"].should eq(["Duplicate field: _method"])
+
+    multipart = Caramel::RequestInput.read(multipart_request do |builder|
+      builder.field("_csrf", "a")
+      builder.field("_csrf", "b")
+    end)
+    multipart.errors["_base"].should eq(["Duplicate field: _csrf"])
+    multipart.cleanup
   end
 
   it "keeps every value of a repeated form, query or multipart name" do

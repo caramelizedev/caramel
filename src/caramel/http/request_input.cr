@@ -296,7 +296,7 @@ module Caramel
         check_text(key)
         check_text(value)
         unless seen.add?(key)
-          if controls && control_name?(key)
+          if control_name?(key)
             add_error("_base", Wording.duplicate_field(key))
           else
             (@repeated[key] ||= [target[key]]) << value
