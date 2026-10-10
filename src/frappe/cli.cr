@@ -16,6 +16,7 @@ require "./site_log"
 require "./schema_diff"
 require "./editor_tools"
 require "./traces"
+require "./expand_fallback"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -339,6 +340,8 @@ module Caramel::Frappe
     # given as sources, not the top level of required files. FILE and every
     # file required after it are therefore passed as sources, in the order the
     # main target requires them, so macros that depend on FILE still follow it.
+    # Where nothing expands at the position, the call whose block encloses it is
+    # tried, innermost first (ExpandFallback).
     private def expand(location : String) : Int32
       match = location.match(/\A(.+):([1-9][0-9]*):([1-9][0-9]*)\z/)
       unless match
@@ -367,8 +370,44 @@ module Caramel::Frappe
         "tool", "expand", *Check::DEFINES, "-c", position, project.entrypoint, *following,
       ]
       status, expansion = tools.capture(compiler, arguments, project.root)
-      @output.print(expansion)
-      status.success? && !expansion.starts_with?("no expansion found") ? 0 : 1
+      if !status.success? || ExpandFallback.found?(expansion)
+        @output.print(expansion)
+        return status.success? ? 0 : 1
+      end
+      enclosing_expansion(tools, compiler, project, arguments, path, match, expansion)
+    end
+
+    # Retries `crystal tool expand` at each call whose block encloses the
+    # position (ARGUMENTS ends in its `-c` position), innermost first, and prints
+    # the first expansion that consumes the requested call.
+    private def enclosing_expansion(tools : Tools, compiler : String, project : Project,
+                                    arguments : Array(String), path : String,
+                                    match : Regex::MatchData, expansion : String) : Int32
+      file = match[1]
+      line, column = match[2].to_i, match[3].to_i
+      call = ExpandFallback.unexpanded_call(expansion)
+      tried = ExpandFallback.enclosing(File.read(path), line, column)
+      tried.each do |enclosing|
+        again = arguments.dup
+        again[again.index!("-c") + 1] = "#{path}:#{enclosing.line}:#{enclosing.column}"
+        outcome, outer = tools.capture(compiler, again, project.root)
+        next unless outcome.success? && ExpandFallback.found?(outer)
+        trimmed = ExpandFallback.trim(outer, call)
+        next unless trimmed
+        @output.puts("#{file}:#{line}:#{column} expands no macro itself; showing " \
+                     "`#{enclosing.name}` at #{file}:#{enclosing.line}:#{enclosing.column}, " \
+                     "the call whose block encloses it")
+        @output.print(trimmed)
+        return 0
+      end
+      if call && !tried.empty?
+        positions = tried.map { |entry| "#{entry.name} at #{file}:#{entry.line}:#{entry.column}" }
+        @output.puts("no expansion found: #{call} is not a macro call, and no call enclosing " \
+                     "it expands it (tried #{positions.join(", ")})")
+      else
+        @output.print(expansion)
+      end
+      1
     end
 
     # Lints and applies pending migrations, then reports schema drift through
