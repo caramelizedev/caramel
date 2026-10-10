@@ -299,6 +299,15 @@ module Caramel::Checks
              "VALIDATE CONSTRAINT, and a check that existing rows break " \
              "stops the diff naming check_books_copies"
 
+        schema(checked + "\nfield lock_version : Int32, version: true")
+        versioned = diff("lock_version")
+        add_version = %(ADD COLUMN "lock_version" integer NOT NULL DEFAULT 0)
+        assert!(versioned.size == 1 && versioned[0].includes?(add_version), versioned.inspect)
+        migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
+        assert_includes!(migrated, "Applied 1 migrations.", MATCHED)
+        puts "PASS: a version: true field derives ADD COLUMN … integer NOT NULL DEFAULT 0 " \
+             "and migrates"
+
         sql(migration_url, "ALTER TABLE books ADD COLUMN sneaky text")
         drift = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE)
         assert!(drift.stdout.includes?("Applied 0 migrations."), drift.stdout)

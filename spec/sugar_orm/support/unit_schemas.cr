@@ -40,6 +40,14 @@ module SugarUnit
     end
   end
 
+  struct Counter < SugarORM::Schema
+    schema "unit_counters" do
+      field id : Int64, primary: true
+      field label : String
+      field lock_version : Int32, version: true
+    end
+  end
+
   record Snapshot, total : Int32 do
     include JSON::Serializable
   end
@@ -110,6 +118,11 @@ module SugarUnit
     def validate(cs)
       cs.validate_inclusion(:grade, in: [Grade::Premium])
     end
+  end
+
+  class Counter::Count < SugarORM::Changeset(Counter)
+    param label : String
+    param lock_version : Int32
   end
 
   class Team::UpdateChangeset < SugarORM::Changeset(Team)

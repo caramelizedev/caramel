@@ -1,6 +1,7 @@
 require "spec"
 require "../../src/sugar_orm/differ"
 require "../../src/sugar_orm/linter"
+require "./support/unit_schemas"
 
 private alias Catalog = SugarORM::Catalog
 private alias Differ = SugarORM::Differ
@@ -369,6 +370,18 @@ describe SugarORM::Differ do
     plan.online.should be_empty
     plan.transactional.size.should eq(1)
     sql(plan.transactional).first.should contain(%(CONSTRAINT "check_books_stock" CHECK ))
+  end
+
+  it "adds a version field as an integer NOT NULL DEFAULT 0 column" do
+    declared = SugarUnit::Counter.__sugar_table
+    columns = declared.columns.reject { |column| column.name == "lock_version" }
+    live = Catalog::Table.new(declared.name, columns)
+    plan = Differ.diff([declared], [live])
+    plan.halts.should be_empty
+    plan.transactional.map(&.class).should eq([Differ::AddColumn])
+    sql(plan.transactional).should eq([
+      %(ALTER TABLE "unit_counters" ADD COLUMN "lock_version" integer NOT NULL DEFAULT 0),
+    ])
   end
 
   it "adds a check to an existing table NOT VALID, last, and validates it online" do

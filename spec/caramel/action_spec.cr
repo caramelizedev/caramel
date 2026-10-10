@@ -104,10 +104,43 @@ struct ActionSpecRejected < ActionSpecAction
   end
 end
 
+# A versioned record: its JSON answer carries the version as an ETag.
+struct ActionSpecVersioned < ActionSpecAction
+  contract do
+    field id : Int64, min: 1
+  end
+
+  def handle(contract : Contract)
+    self.etag = 3
+    {id: contract.id}
+  end
+
+  def render(result)
+    page "Versioned", "<p>version 3 of #{result[:id]}</p>"
+  end
+end
+
+# An update that proceeds only when `If-Match` names version 3.
+struct ActionSpecConditional < ActionSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    return render_errors({"_base" => ["stale"]}, 412) unless if_match?(3)
+    {ok: true}
+  end
+
+  def render(result)
+    page "Conditional", "<p>updated</p>"
+  end
+end
+
 module ActionSpecApp
   Caramel::Router.draw do
     get "/rejected", ActionSpecRejected
     get "/items/:id", ActionSpecShow
+    get "/versioned/:id", ActionSpecVersioned
+    get "/conditional", ActionSpecConditional
     get "/pass", ActionSpecPass
     post "/items", ActionSpecCreate
     get "/parts", ActionSpecParts
@@ -194,6 +227,31 @@ describe Caramel::Action do
     get("/items/5", prefers_json).headers["Content-Type"].should eq("application/json")
     prefers_html = HTTP::Headers{"Accept" => "text/html, application/json;q=0.5"}
     get("/items/5", prefers_html).should render_page("Item")
+  end
+
+  it "sends the version as an ETag with JSON answers only" do
+    json = get("/versioned/1", HTTP::Headers{"Accept" => "application/json"})
+    json.headers["ETag"].should eq(%("3"))
+    get("/versioned/1").headers.has_key?("ETag").should be_false
+    get("/items/1", HTTP::Headers{"Accept" => "application/json"})
+      .headers.has_key?("ETag").should be_false
+  end
+
+  it "treats a missing If-Match, `*` or a matching strong tag as a pass" do
+    accept = {"Accept" => "application/json"}
+    [nil, %("3"), %("2", "3"), "*"].each do |match|
+      headers = HTTP::Headers.new
+      accept.each { |name, value| headers[name] = value }
+      headers["If-Match"] = match if match
+      get("/conditional", headers).status.should eq(200)
+    end
+  end
+
+  it "answers 412 for an If-Match that names another version, a weak tag or a bare number" do
+    [%("2"), %(W/"3"), "3"].each do |match|
+      headers = HTTP::Headers{"Accept" => "application/json", "If-Match" => match}
+      get("/conditional", headers).status.should eq(412)
+    end
   end
 
   it "passes a Response from handle through unchanged" do

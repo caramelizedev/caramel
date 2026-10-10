@@ -13,6 +13,13 @@ describe SugarORM::Changeset do
     bad.errors["grade"].should eq(["is invalid"])
   end
 
+  it "refuses to insert a changeset that names a version" do
+    changeset = SugarUnit::Counter::Count.new(label: "tea", lock_version: 1)
+    expect_raises(ArgumentError, /only an update checks/) do
+      SugarORM::Repo.insert(changeset)
+    end
+  end
+
   it "runs validate(cs) on construction" do
     changeset = Update.new(SugarUnit.team, seats: 0, billing_email: "not-an-address")
     changeset.valid?.should be_false

@@ -77,7 +77,7 @@ end
 # §2.2
 def usage_preload(team_id : Int64)
   team = Team.query.preload(:users).find!(team_id)
-  team.users.each do |user|   # Array(User)
+  team.users.each do |user| # Array(User)
     puts user.email
   end
 end
@@ -90,7 +90,7 @@ def usage_facade(team : Team)
 
   # 2. What the Facade Does Under the Hood:
   changeset = Team::UpdateChangeset.new(team, seats: 10, billing_email: "billing@acme.com")
-  SugarORM::Repo.update(changeset)   # => the same changeset: saved?, record, errors
+  SugarORM::Repo.update(changeset) # => the same changeset: saved?, record, errors
 end
 
 # §3
@@ -101,6 +101,40 @@ def usage_sql
     SQL
 end
 
+# A versioned schema with a unique index, an upsert and a row lock. Kept apart from Team so
+# the field lists above stay as they are.
+struct Sale < SugarORM::Schema
+  schema "sales" do
+    field id : Int64, primary: true
+    field tea_id : Int64
+    field sold : Int32 = 0
+    field lock_version : Int32, version: true
+    timestamps
+    index :tea_id, unique: true
+  end
+end
+
+class Sale::Record < SugarORM::Changeset(Sale)
+  param tea_id : Int64
+  param sold : Int32
+  upsert on: :tea_id, update: [:sold]
+end
+
+class Sale::Count < SugarORM::Changeset(Sale)
+  param sold : Int32
+  param lock_version : Int32
+end
+
+def usage_concurrency(sale : Sale)
+  SugarORM::Repo.transaction do
+    Team.query.lock.find!(1_i64)
+    Team.query.order_by(:id).lock.to_a
+  end
+  SugarORM::Repo.insert(Sale::Record.new(tea_id: 7_i64, sold: 3)).record
+  changes = SugarORM::Repo.update(Sale::Count.new(sale, sold: 4, lock_version: 0))
+  changes.stale?
+end
+
 # Type-check every snippet; never run (no database is configured).
 if ARGV.includes?("--never")
   usage_preload(1_i64)
@@ -109,4 +143,5 @@ if ARGV.includes?("--never")
   Team.query.larger_than(3).to_a
   Ledger.query.where(snapshot: Snapshot.new(1), rate: nil).to_a
   Ledger.query.where(rate: 1.5).to_a
+  usage_concurrency(Sale.query.find!(1_i64))
 end

@@ -18,6 +18,12 @@ private def foreign_book(account : TenancySpec::Account) : Book
   Tenancy.without { Book.query.where(account_id: account.id).first! }
 end
 
+# Upserts a book of *author*'s in the bound tenant.
+private def upsert_book(isbn : String, title : String, author : Author)
+  SugarORM::Repo.insert(
+    TenancySpec::BookUpsert.new(isbn: isbn, title: title, author_id: author.id))
+end
+
 describe "A tenanted schema" do
   it "queries only the bound tenant's rows" do
     acme, _ = two_tenants
@@ -134,6 +140,40 @@ describe "A unique index of a tenanted schema" do
       Book.create(title: "Copy", isbn: "111", author_id: author.id)
     end
     duplicate.errors.should eq({"isbn" => [SugarORM::Wording.taken]})
+  end
+end
+
+describe "An upsert of a tenanted schema" do
+  it "keeps one row per tenant and key, and retitles only the caller's own" do
+    acme, globex = two_tenants
+    ann = TenancySpec.author(acme)
+    gus = TenancySpec.author(globex)
+    mine = Tenancy.with(acme) { upsert_book("1", "Acme One", ann) }
+    theirs = Tenancy.with(globex) { upsert_book("1", "Globex One", gus) }
+    mine.record.id.should_not eq(theirs.record.id)
+    Tenancy.without { Book.query.where(isbn: "1").count }.should eq(2)
+
+    again = Tenancy.with(acme) { upsert_book("1", "Acme Two", ann) }
+    again.record.id.should eq(mine.record.id)
+    again.record.title.should eq("Acme Two")
+    Tenancy.without { Book.query.find!(theirs.record.id).title }.should eq("Globex One")
+    Tenancy.without { Book.query.where(isbn: "1").count }.should eq(2)
+  end
+end
+
+describe "A locking query of a tenanted schema" do
+  it "cannot lock another tenant's row" do
+    acme, globex = two_tenants
+    other = foreign_book(globex)
+    Tenancy.with(acme) { Book.query.lock.find(other.id) }.should be_nil
+    Tenancy.with(globex) { Book.query.lock.find(other.id) }.should_not be_nil
+  end
+
+  it "puts the tenant predicate before FOR UPDATE" do
+    acme, _ = two_tenants
+    sql = Tenancy.with(acme) { Book.query.lock.to_sql }
+    sql.should contain(%("account_id" = $1))
+    sql.index!(%("account_id")).should be < sql.index!("FOR UPDATE")
   end
 end
 

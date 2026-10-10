@@ -133,6 +133,53 @@ cases = {
     "is longer than PostgreSQL's 63-byte limit.",
     "Remediation: shorten the check's name or the table name.",
   ],
+  "compile_version_type" => [
+    "compile_version_type.cr:6:",
+    "The version field 'lock_version' must be a non-nilable Int32 or Int64 " \
+    "without a default; it starts at 0.",
+    "Remediation: declare `field lock_version : Int32, version: true`.",
+  ],
+  "compile_version_default" => [
+    "compile_version_default.cr:6:",
+    "The version field 'lock_version' must be a non-nilable Int32 or Int64 " \
+    "without a default; it starts at 0.",
+  ],
+  "compile_version_twice" => [
+    "compile_version_twice.cr:7:",
+    "Counter already has the version field 'lock_version'.",
+    "Remediation: keep a single `version: true` field.",
+  ],
+  "compile_upsert_shape" => [
+    "compile_upsert_shape.cr:5:",
+    "upsert expects `upsert on: :column`, or `upsert on: [:a, :b]` " \
+    "for a multi-column unique index, optionally with `update: [:field, …]`.",
+  ],
+  "compile_upsert_unknown_index" => [
+    "compile_upsert_unknown_index.cr:5:",
+    "Team has no unique index on seats.",
+    "Unique indexes: name",
+    "Remediation: add `index :seats, unique: true` to Team's schema block",
+  ],
+  "compile_upsert_update_target" => [
+    "compile_upsert_update_target.cr:5:",
+    "upsert cannot update 'name', which its conflict target matches.",
+    "Remediation: remove :name from update:.",
+  ],
+  "compile_upsert_update_version" => [
+    "compile_upsert_update_version.cr:15:",
+    "upsert cannot update 'lock_version', Sale's version field; an upsert increments it.",
+    "Remediation: remove :lock_version from update:.",
+  ],
+  "compile_upsert_not_param" => [
+    "compile_upsert_not_param.cr:5:",
+    "upsert names 'seats', which is not a param of Team::Upsert.",
+    "Remediation: add `param seats : Int32` to Team::Upsert.",
+  ],
+  "compile_upsert_twice" => [
+    "compile_upsert_twice.cr:6:",
+    "Team::Upsert declares upsert twice.",
+    "Remediation: keep one `upsert`.",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)
