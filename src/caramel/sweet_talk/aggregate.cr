@@ -24,7 +24,8 @@ module SweetTalk
         SWEETTALK_MEANS  = {{ means }}
         SWEETTALK_ROW    = {{ "#{@type.constant("SWEETTALK_ROW").id}::#{name}" }}
         SWEETTALK_PARENT = {{ parent }}
-        ::SweetTalk.__sweettalk_table({{ table }})
+        ::SweetTalk.__sweettalk_table({{ table }},
+          {{ "entity #{@type.name.split("::").last.id}::#{name}" }})
 
         {{ block ? block.body : nil }}
 

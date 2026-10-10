@@ -73,10 +73,11 @@ module SweetTalk
     # `has stock : Tins` is an attribute, and `has held : Tins = Tins.zero` one with a
     # default. What it is stored as depends on its type: a column, a value's raw column,
     # one column per part of a composite value, a reference to another aggregate or to an
-    # application's schema, or a child table of entities. `SWEETTALK_HAS_<NAME>` records
-    # {name, line, kind, declared type, column, schema lines, raw column type, parts,
-    # default} for the storage macros; a composite's parts are {part, column, raw type,
-    # part type, part kind}.
+    # application's schema, or a child table of entities. A value's bounds and length are
+    # also `check` lines on its column, or on each part's column. `SWEETTALK_HAS_<NAME>`
+    # records {name, line, kind, declared type, column, schema lines, raw column type,
+    # parts, default} for the storage macros; a composite's parts are {part, column, raw
+    # type, part type, part kind, check}.
     macro has(decl)
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
@@ -125,7 +126,7 @@ module SweetTalk
           {% declared = composite.constants.select(&.starts_with?("SWEETTALK_PART_"))
                .map { |constant| composite.constant(constant) }.sort_by { |part| part[1] } %}
           {% for part in declared %}
-            {% parts << {part[0], "#{name}_#{part[0].id}", part[3], part[2], part[4]} %}
+            {% parts << {part[0], "#{name}_#{part[0].id}", part[3], part[2], part[4], part[5]} %}
           {% end %}
           {% lines = parts.map { |part| "field #{part[1].id} : #{part[2].id}" }.join("\n") %}
         {% elsif single && members[0] < ::SweetTalk::Aggregate %}
@@ -147,6 +148,33 @@ module SweetTalk
                         "Time, a value, an aggregate, an application's schema or an Array of " +
                         "this aggregate's entity" %}
         {% end %}
+      {% end %}
+      {% checks = [] of Nil %}
+      {% if kind == "value" && members[0].constant("SWEETTALK_CHECK") %}
+        {% checks << {column, members[0].constant("SWEETTALK_CHECK"),
+                      members[0].name.split("::").last} %}
+      {% elsif kind == "composite" %}
+        {% for part in parts %}
+          {% checks << {part[1], part[5], part[3].split("::").last} if part[5] %}
+        {% end %}
+      {% end %}
+      {% for entry in checks %}
+        {% check = entry[1] %}
+        {% if check[0] == "range" %}
+          {% suffix = entry[0] %}
+          {% line = "check #{entry[0].id}: #{check[1].id}" %}
+        {% else %}
+          {% suffix = "#{entry[0].id}_#{check[1].id}" %}
+          {% sql = "char_length(\"#{entry[0].id}\") #{check[2].id}" %}
+          {% line = "check :#{suffix.id}, #{sql.stringify.id}" %}
+        {% end %}
+        {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{suffix.id}" %}
+        {% if constraint.size > 63 %}
+          {% decl.raise "has #{decl} would check #{entry[0].id} as #{constraint.id}, longer " +
+                        "than PostgreSQL's 63 bytes: shorten the attribute, or give " +
+                        "#{entry[2].id} database_check: false" %}
+        {% end %}
+        {% lines = "#{lines.id}\n#{line.id}" %}
       {% end %}
       {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
       {% key = @type.has_constant?("SWEETTALK_KEY") && @type.constant("SWEETTALK_KEY") %}

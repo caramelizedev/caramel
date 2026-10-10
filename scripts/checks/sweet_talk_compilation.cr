@@ -71,6 +71,24 @@ PROBLEMS = [
   {"event_union_field",
    "an event field may be nilable, as in reason : String?, but not a union of other types"},
   {"cycle_without_boot", "the context map runs in a circle of dependencies through"},
+  {"bound_not_literal",
+   "value Tins checks its bounds in the database too, so each is an integer literal, as in " \
+   "at_least: 0 or length: 3..254, not LEAST: write the number, or add database_check: false"},
+  {"length_not_literal",
+   "value Code checks its bounds in the database too, so each is an integer literal, as in " \
+   "at_least: 0 or length: 3..254, not SHORT: write the number, or add database_check: false"},
+  {"database_check_true",
+   "value Tins takes database_check: false, which keeps its bounds in Crystal only, not " \
+   "database_check: true"},
+  {"composite_database_check",
+   "value Size has parts, so database_check: false belongs on the values its parts wrap"},
+  {"check_name_long",
+   "has maximum_temperature_reading : Celsius would check maximum_temperature_reading as " \
+   "check_warehousing_refrigerated_shipping_containers_maximum_temperature_reading, longer " \
+   "than PostgreSQL's 63 bytes: shorten the attribute, or give Celsius database_check: false"},
+  {"table_taken",
+   "aggregate TeaTin would store its rows in store_tea_tins, already the table of entity " \
+   "Tea::Tin: rename one of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

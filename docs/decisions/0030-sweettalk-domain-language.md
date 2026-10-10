@@ -122,7 +122,7 @@ or a policy, and nothing stops one context from reaching into another's types.
   of a missing row, so projections insert with `ON CONFLICT DO NOTHING` first.
 - Refactoring toward deeper insight renames concepts, but tables, channels and queued jobs
   keep the names they were stored under; `renamed_from:` lets the code move on.
-- Writes through `Rows` would skip invariants and value checks.
+- Writes through `Rows` would skip invariants and the value checks made in Crystal.
 - A notification carries an id, as Cold Brew advises: fields could pass its 8,000-byte
   limit, and the refused publish would roll the command back.
 
@@ -136,7 +136,6 @@ Rejected:
 - **`Hash` attributes.** An entity holds that data in rows.
 - **A separate repository.** SweetTalk expands into macro contracts that
   [ADR 0016](0016-versioning-and-releases.md) does not cover.
-- **Deferred:** `CHECK` constraints for value bounds
-  ([#73](https://github.com/caramelizedev/caramel/issues/73)), a public row lock
-  ([#40](https://github.com/caramelizedev/caramel/issues/40)), a typed upsert
-  ([#74](https://github.com/caramelizedev/caramel/issues/74)), and tenant scoping.
+- **Deferred:** a public row lock ([#40](https://github.com/caramelizedev/caramel/issues/40)),
+  a typed upsert ([#74](https://github.com/caramelizedev/caramel/issues/74)), and tenant
+  scoping.

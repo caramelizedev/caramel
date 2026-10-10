@@ -73,6 +73,17 @@ aggregates over days and undo their work when a step is refused.
 10. **Units of work and checks.** A handler's projection and process rows live in a unit
     of work on its fiber and are saved when it returns. The whole-program checks run at the
     first `find?`, dispatch or job as well as at `SweetTalk.boot`.
+11. **Database checks** (amends decision 2). An integer value's bounds and a string
+    value's `length:` are also SugarORM `check` constraints on every column that stores
+    the value, a composite's part columns included: `check_<table>_<column>` for bounds,
+    and `check_<table>_<column>_length_<lo>_<hi>` for a length (`length_from_<lo>` or
+    `length_to_<hi>` when one end is open), so a changed length is a new constraint.
+    Such bounds are integer literals. `database_check: false` keeps a value's bounds in
+    Crystal only, where they may name a constant. A pattern is checked in Crystal only.
+    SweetTalk's changesets do not map these constraints: SweetTalk refuses first, so a
+    violation from its own write raises `SugarORM::CheckViolation`. Any other bound, a
+    constraint name over PostgreSQL's 63 bytes, and two declarations whose names give one
+    table do not compile.
 
 ## Reasons
 
@@ -83,8 +94,13 @@ aggregates over days and undo their work when a step is refused.
   job that finds a newer arming does nothing.
 - SugarORM's codecs store a value only as numeric, `jsonb` or text, so integer values keep
   integer columns and string values text columns.
-- One column per part keeps each part queryable, and ready for a `CHECK` constraint
-  ([#73](https://github.com/caramelizedev/caramel/issues/73)).
+- One column per part keeps each part queryable, with its own `CHECK` constraint.
+- A `CHECK` holds for every writer. `Rows`, SQL backfills and other services skip
+  SweetTalk's constructors; without it, their bad row fails at its next load, far from the
+  write and as a refusal. A tightened bound stops the migration that validates it
+  ([ADR 0008](0008-branch-and-diff-migrations.md)) instead of a later read. A range or a
+  length is evaluated on the written row alone, with no reads, and `database_check:
+  false` serves a table whose writes cannot spare it.
 - Removing by a timestamp keeps every reference valid: an order line still names its tea,
   and a projection still keys its rows by it.
 - `acting` keeps call sites unchanged: no command takes an actor argument, yet every event
@@ -99,6 +115,8 @@ Rejected:
 - **An explicit `by:` argument on every command.** Every caller would pass it, and a
   policy would have to pass it on.
 - **Deleting rows.** References to the aggregate would dangle.
-- **Deferred:** correlation and causation ids linking a command to its events and jobs, and
-  `CHECK` constraints for string and composite values
-  ([#73](https://github.com/caramelizedev/caramel/issues/73)).
+- **Patterns as `CHECK` constraints.** PostgreSQL reads regular expressions differently
+  from Crystal: it refuses `\z`, which `Email` uses.
+- **Leaving a non-literal bound out of the database unannounced.** A reader of the value
+  could not tell which bounds the database holds.
+- **Deferred:** correlation and causation ids linking a command to its events and jobs.

@@ -1,10 +1,13 @@
 # A small shelf for SweetTalk's rules: one aggregate per command, per handler and per
-# service, unit-safe multiplication, a branching lifecycle, and a factory whose
-# event's policy runs as the actor who made the aggregate.
+# service, unit-safe multiplication, a branching lifecycle, a factory whose event's
+# policy runs as the actor who made the aggregate, and values whose bounds and lengths
+# PostgreSQL checks too, except one that opts out.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
   include SweetTalk
+
+  TALLEST = 3
 
   context Shelf, means: "a shelf for trying the rules" do
     value Count, Int32, at_least: 0, means: "how many things are in a box"
@@ -60,6 +63,21 @@ module Rules
       to sign(maker : String) do
         @maker = maker
       end
+    end
+
+    value Stack, Int32, at_most: TALLEST, database_check: false,
+      means: "how many bins stand on one another"
+    value Code, String, length: 2..4, means: "the code painted on a bin"
+
+    value Size, means: "the width and depth of a bin, in boxes" do
+      part width : Count
+      part depth : Count
+    end
+
+    aggregate Bin, means: "a bin whose values PostgreSQL checks too" do
+      has stack : Stack
+      has size : Size
+      has code : Code
     end
 
     whenever Box::Shared do |shared|

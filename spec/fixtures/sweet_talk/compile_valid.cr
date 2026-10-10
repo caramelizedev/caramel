@@ -3,10 +3,14 @@ require "../../../src/caramel/sweet_talk"
 module Shop
   include SweetTalk
 
+  MOST_PARCELS = 5
+
   context Ordering, means: "choosing teas and checking out" do
     value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"
     value Email, String, matches: /\A[^@\s]+@[^@\s]+\z/, length: 3..254,
       means: "an address we can write to"
+    value Parcels, Int32, at_least: 1, at_most: MOST_PARCELS, database_check: false,
+      means: "how many parcels an order ships in"
 
     value Address, means: "where a parcel goes" do
       part street : String
@@ -18,6 +22,7 @@ module Shop
       has receipt_to : Email
       has deliver_to : Address
       has lines : Array(Line)
+      has parcels : Parcels = Parcels.new(1)
       moves open >> placed, open >> cancelled, placed >> cancelled
 
       entity Line, means: "one tea in an order and how many tins" do
