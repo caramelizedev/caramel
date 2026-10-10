@@ -139,7 +139,9 @@ module Caramel::Frappe
         "List routes with their contracts; FILTER keeps routes whose method, " \
         "path or action contains it (any case)."),
       Command.new("expand FILE:LINE:COL",
-        "Print the plain Crystal that the macro call at FILE:LINE:COL expands to."),
+        "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
+        "where none expands, the call whose block encloses it, such as " \
+        "`contract` for a `field`, and say which."),
       Command.new("make resource NAME FIELD:TYPE... " \
                   "[--plural=NAME] [--only=ACTIONS] [--central]",
         "Generate a SugarORM schema, migration, actions, views, routes and specs; " \

@@ -466,12 +466,25 @@ module Caramel::Checks
       nothing = attempt([@frappe, "expand", "app/actions/shelves/show.cr:6:1"], chdir: @project)
       unexpanded = nothing.stdout.starts_with?("no expansion found")
       assert!(nothing.status.exit_code == 1 && unexpanded, nothing.stdout + nothing.stderr)
+      lines = File.read_lines(action)
+      row = lines.index(&.includes?("field id")) || raise "no field line in #{lines.inspect}"
+      field = "app/actions/shelves/show.cr:#{row + 1}:#{lines[row].index!("field") + 1}"
+      inner = command([@frappe, "expand", field], chdir: @project, echo: false).stdout
+      naming = "#{field} expands no macro itself; showing `contract` at " \
+               "app/actions/shelves/show.cr:3:5, the call whose block encloses it\n"
+      assert!(inner.starts_with?(naming) && inner.includes?("CARAMEL_FIELD_ID"), inner)
+      call_row = lines.index!(&.includes?("page \"Shelf\"")) + 1
+      plain = attempt([@frappe, "expand", "app/actions/shelves/show.cr:#{call_row}:7"],
+        chdir: @project)
+      assert!(plain.status.exit_code == 1 && plain.stdout.starts_with?("no expansion found"),
+        plain.stdout + plain.stderr)
       File.delete(model)
       File.delete(action)
       Dir.delete(File.dirname(action))
       File.write(routes, original_routes)
       puts "PASS: frappe expand prints the Crystal that Caramel::Router.draw " \
-           "and an action's contract block expand to, " \
+           "and an action's contract block expand to, a field inside the contract " \
+           "expands through the contract that encloses it, " \
            "and exits 1 where no macro is called"
 
       id = site("bookshelf")["id"].as_s
