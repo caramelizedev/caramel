@@ -26,6 +26,8 @@ PROBLEMS = [
                     "Fixture::Account. Fields: slug"},
   {"central_parameter_route", "Route '/:name' starts with a parameter, " \
                               "which would take every tenant's address"},
+  {"duplicate_table", "Fixture::Volume declares the table \"books\", " \
+                      "which Fixture::Book already declares."},
   {"shared_first_segment", "Route '/books/shelves' in the tenant block starts with " \
                            "'books', as a central route does"},
 ]
