@@ -52,5 +52,9 @@ module SugarORM
     def record_gone : String
       "Record no longer exists"
     end
+
+    def record_stale : String
+      "Record changed since you loaded it"
+    end
   end
 end

@@ -21,8 +21,27 @@ module Caramel
 
     getter context : RequestContext
     property status : Int32 = 200
+    @etag : Int64? = nil
 
     def initialize(@context : RequestContext)
+    end
+
+    # Sends `ETag: "<version>"` with this action's successful JSON answers; set it from a
+    # versioned record in `handle`.
+    def etag=(version : Int) : Nil
+      @etag = version.to_i64
+    end
+
+    # True when the request has no `If-Match` header or the header names `version` (`"3"`) or
+    # `*`. Answer 412 when it is false. Weak tags (`W/"3"`) never match: `If-Match` compares
+    # strongly (RFC 9110).
+    def if_match?(version : Int) : Bool
+      header = request.headers["If-Match"]? || return true
+      strong = %("#{version}")
+      header.split(',').any? do |entry|
+        tag = entry.strip
+        tag == "*" || tag == strong
+      end
     end
 
     # CARAMEL_CONTRACT_LOCATION records where `contract do` was written, so the
@@ -269,7 +288,11 @@ module Caramel
     end
 
     def json(value, status : Int32 = @status) : Response
-      Egress.json(status, value.to_json)
+      response = Egress.json(status, value.to_json)
+      if (etag = @etag) && status < 300
+        response.headers["ETag"] = %("#{etag}")
+      end
+      response
     end
 
     def redirect_to(path : String) : Response

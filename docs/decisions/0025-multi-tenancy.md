@@ -41,10 +41,10 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
      its indexes. A unique explicit index gains `account_id` and keeps its name, so it is
      unique per tenant. A `belongs_to` whose target is tenanted is the composite key
      `(author_id, account_id) → (id, account_id)`.
-   - With a tenant bound, queries, `BelongsTo` and child preloads, updates and deletes
-     add `"account_id" = $n`, and inserts stamp it. With none bound, a tenanted
-     statement raises `SugarORM::Tenancy::Missing`, unless it runs inside `without`; an
-     insert raises even there. Raw `SugarORM.sql` is not scoped.
+   - With a tenant bound, queries (locking ones included), `BelongsTo` and child preloads,
+     updates and deletes add `"account_id" = $n`, and inserts and upserts stamp it. With
+     none bound, a tenanted statement raises `SugarORM::Tenancy::Missing`, unless it runs
+     inside `without`; an insert raises even there. Raw `SugarORM.sql` is not scoped.
    - Compile errors refuse a `tenant` without the require, a second `tenant`, a target
      that is not a schema or is tenanted, and a target other than the routes' model.
 5. **Foreign keys span several columns.** `SugarORM::Catalog::ForeignKey` holds `columns`

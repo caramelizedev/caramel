@@ -47,7 +47,8 @@ module SugarORM
     conditions : Array(Condition) = [] of Condition,
     orders : Array(String) = [] of String,
     limit : Int32? = nil,
-    offset : Int32? = nil
+    offset : Int32? = nil,
+    lock : Bool = false
 
   # An immutable query over schema `T`; `P` is the NamedTuple of preload
   # loaders. Every clause returns a new query. Each schema generates
@@ -91,6 +92,13 @@ module SugarORM
       self.class.new(@clauses.copy_with(offset: count), @preloads)
     end
 
+    # Locks the rows this query returns (`FOR UPDATE`) until the transaction ends. Order the
+    # query (`order_by(:id)`) so competing transactions lock several rows in one order; a
+    # lock does not replace a permission check. Preloaded associations are not locked.
+    def lock : self
+      self.class.new(@clauses.copy_with(lock: true), @preloads)
+    end
+
     protected def __sugar_where(conditions : Array(::SugarORM::Condition)) : self
       clauses = @clauses.copy_with(conditions: @clauses.conditions + conditions)
       self.class.new(clauses, @preloads)
@@ -101,6 +109,7 @@ module SugarORM
       String.build do |io|
         io << "SELECT " << T.__sugar_select_list << " FROM " << T.__sugar_quoted_table
         write_filters(io, order: true)
+        io << " FOR UPDATE" if @clauses.lock
       end
     end
 
@@ -112,6 +121,7 @@ module SugarORM
     # All matching records: `Array(T)`, or `Array(Loaded(T, L))` once preloaded.
     # Each preloaded association costs exactly one extra query.
     def to_a
+      refuse_lock_outside_transaction
       records = ::SugarORM::Repo.query_all(to_sql, binds) { |rows| T.from_row(rows) }
       {% if P.keys.empty? %}
         records
@@ -155,6 +165,7 @@ module SugarORM
     end
 
     def count : Int64
+      refuse_lock("count")
       table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
               "SELECT count(*) FROM (SELECT 1 FROM #{table}#{filters}) AS sugar_count"
@@ -165,12 +176,14 @@ module SugarORM
     end
 
     def exists? : Bool
+      refuse_lock("exists?")
       sql = "SELECT EXISTS (SELECT 1 FROM #{T.__sugar_quoted_table}#{filters})"
       ::SugarORM::Repo.query_one?(sql, binds, &.read(Bool)) || false
     end
 
     # Deletes every matching row and returns how many were deleted.
     def delete_all : Int64
+      refuse_lock("delete_all")
       table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
               primary_key = %("#{T.__sugar_primary_key}")
@@ -221,6 +234,10 @@ module SugarORM
       new.offset(count)
     end
 
+    def self.lock
+      new.lock
+    end
+
     {% for name in %w[to_a first first! count exists? delete_all] %}
       def self.{{ name.id }}
         new.{{ name.id }}
@@ -269,6 +286,21 @@ module SugarORM
           "order_by direction must be :asc or :desc, not #{direction.inspect}"
         )
       end
+    end
+
+    private def refuse_lock(terminal : String) : Nil
+      return unless @clauses.lock
+      raise ArgumentError.new("#{terminal} does not lock rows; remove .lock from this query")
+    end
+
+    private def refuse_lock_outside_transaction : Nil
+      return unless @clauses.lock
+      return if ::SugarORM::Repo.in_transaction?
+      raise ::SugarORM::Error.new(
+        "#{T} query locks its rows (FOR UPDATE), but no transaction is open, " \
+        "so the lock would end with the statement.\n" \
+        "Remediation: run it inside SugarORM::Repo.transaction { … }."
+      )
     end
 
     private def filters(order : Bool = true) : String

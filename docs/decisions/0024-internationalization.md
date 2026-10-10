@@ -87,6 +87,7 @@ The reserved `caramel:` section takes only these keys; an omitted key uses the d
 |`errors.invalid`|is invalid|
 |`errors.taken`|has already been taken|
 |`errors.record_gone`|Record no longer exists|
+|`errors.record_stale`|Record changed since you loaded it|
 |`pages.check_request`|Check your request|
 |`pages.not_found`|Not found|
 |`pages.expired_form`|This form has expired or came from another site. Reload the page and try again.|

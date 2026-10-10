@@ -75,6 +75,33 @@ describe SugarORM::Query do
       team: SugarORM::BelongsTo(SugarUnit::Member, SugarUnit::Team, SugarUnit::Team))))
   end
 
+  it "adds FOR UPDATE last when locked, and leaves an unlocked query alone" do
+    teams = SugarUnit::Team.query.where(seats: 3).limit(1)
+    teams.to_sql.should eq(%(#{SELECT} WHERE "seats" = $1 LIMIT 1))
+    teams.lock.to_sql.should eq(%(#{SELECT} WHERE "seats" = $1 LIMIT 1 FOR UPDATE))
+    ordered = SugarUnit::Team.query.lock.order_by(:id).where(seats: 3)
+    ordered.to_sql.should end_with(%(WHERE "seats" = $1 ORDER BY "id" ASC FOR UPDATE))
+    SugarUnit::Team.query.lock.to_sql.should eq("#{SELECT} FOR UPDATE")
+  end
+
+  it "refuses to count, test or delete through a lock" do
+    locked = SugarUnit::Team.query.lock
+    expect_raises(ArgumentError, "count does not lock rows; remove .lock from this query") do
+      locked.count
+    end
+    expect_raises(ArgumentError, "exists? does not lock rows") { locked.exists? }
+    expect_raises(ArgumentError, "delete_all does not lock rows") { locked.delete_all }
+  end
+
+  it "refuses a lock outside a transaction before it runs any SQL" do
+    expect_raises(SugarORM::Error, /no transaction is open/) do
+      SugarUnit::Team.query.lock.to_a
+    end
+    expect_raises(SugarORM::Error, /no transaction is open/) do
+      SugarUnit::Team.query.lock.find!(1_i64)
+    end
+  end
+
   it "rejects negative limits and offsets and unknown directions" do
     expect_raises(ArgumentError) { SugarUnit::Team.query.limit(-1) }
     expect_raises(ArgumentError) { SugarUnit::Team.query.offset(-1) }

@@ -31,6 +31,22 @@ describe SugarORM::Schema do
     table.drops.should eq(["legacy_code"])
   end
 
+  it "describes a version field as a NOT NULL integer that starts at 0" do
+    SugarUnit::Counter.__sugar_table.columns.should eq([
+      Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+      Catalog::Column.new("label", "text", false, nil),
+      Catalog::Column.new("lock_version", "integer", false, "0"),
+    ])
+    SugarUnit::Counter.__sugar_version_column.should eq("lock_version")
+    SugarUnit::Team.__sugar_version_column.should be_nil
+    SugarUnit::Counter.new(id: 1_i64, label: "tea").lock_version.should eq(0)
+  end
+
+  it "lists the unique indexes an upsert may target" do
+    SugarUnit::Team::SUGAR_UNIQUE_INDEXES.should eq({"name" => ["name"]})
+    SugarUnit::Counter::SUGAR_UNIQUE_INDEXES.should be_empty
+  end
+
   it "types codec columns by the codec's SQL type and gives them no default" do
     SugarUnit::Quote.__sugar_table.columns.should eq([
       Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),

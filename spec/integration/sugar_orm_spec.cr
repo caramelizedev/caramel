@@ -85,6 +85,34 @@ module SugarSpec
     end
   end
 
+  struct Sale < SugarORM::Schema
+    schema "sugar_sales" do
+      field id : Int64, primary: true
+      field tea_id : Int64
+      field sold : Int32 = 0
+      field lock_version : Int32, version: true
+      timestamps
+      index :tea_id, unique: true
+    end
+  end
+
+  class Sale::Count < SugarORM::Changeset(Sale)
+    param sold : Int32
+    param lock_version : Int32
+  end
+
+  class Sale::Record < SugarORM::Changeset(Sale)
+    param tea_id : Int64
+    param sold : Int32
+    upsert on: :tea_id, update: [:sold]
+  end
+
+  class Sale::Seed < SugarORM::Changeset(Sale)
+    param tea_id : Int64
+    param sold : Int32
+    upsert on: :tea_id
+  end
+
   alias Preloads = NamedTuple(users: Array(User), owner: User?, profile: Profile?)
 
   class Team::UpdateChangeset < SugarORM::Changeset(Team)
@@ -156,15 +184,21 @@ module SugarSpec
                "rate numeric(30,10) NOT NULL, fee numeric(30,10), snapshot jsonb NOT NULL)"
       owner.exec(quotes)
       owner.exec(SugarORM::DDL.create_table(SugarSpec::Shelf.__sugar_table))
-      tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes, sugar_shelves"
+      owner.exec(SugarORM::DDL.create_table(SugarSpec::Sale.__sugar_table))
+      SugarSpec::Sale.__sugar_table.indexes.each do |index|
+        add = SugarORM::Differ::AddIndex.new("sugar_sales", index, concurrently: false)
+        owner.exec(SugarORM::DDL.render(add))
+      end
+      tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes, sugar_shelves, " \
+               "sugar_sales"
       sequences = "sugar_teams_id_seq, sugar_users_id_seq, sugar_profiles_id_seq, " \
-                  "sugar_quotes_id_seq, sugar_shelves_id_seq"
+                  "sugar_quotes_id_seq, sugar_shelves_id_seq, sugar_sales_id_seq"
       owner.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{tables} TO caramel_model_spec")
       owner.exec("GRANT USAGE, SELECT ON SEQUENCE #{sequences} TO caramel_model_spec")
       yield owner, runtime
     ensure
-      owner.exec("DROP TABLE IF EXISTS sugar_shelves, sugar_quotes, sugar_profiles, " \
-                 "sugar_users, sugar_teams")
+      owner.exec("DROP TABLE IF EXISTS sugar_sales, sugar_shelves, sugar_quotes, " \
+                 "sugar_profiles, sugar_users, sugar_teams")
       runtime.close
       owner.close
     end
@@ -175,11 +209,88 @@ module SugarSpec
     yield
     SugarORM::Repo.statements_executed - before
   end
+
+  # Blocks until some backend waits for a lock, or raises after five seconds.
+  def self.await_lock_wait(owner : DB::Database) : Nil
+    deadline = Time.instant + 5.seconds
+    until owner.scalar("SELECT count(*) FROM pg_locks WHERE NOT granted").as(Int64) >= 1
+      raise "no backend waited for a lock within 5 seconds" if Time.instant > deadline
+      sleep 10.milliseconds
+    end
+  end
+
+  # Runs *first* in a transaction on one pool connection, then *second* in a transaction on
+  # another, once *first* holds what *second* will wait for. *second* is released only after
+  # the database shows a waiter; then *first* ends, by committing or, with *rollback*, by
+  # rolling back. Both connections are proven distinct by their backend pids.
+  def self.contend(owner : DB::Database,
+                   first : Proc,
+                   second : Proc,
+                   rollback : Bool = false) : Nil
+    pids = Channel(Int32).new(2)
+    ready = Channel(Nil).new
+    release = Channel(Nil).new(1)
+    first_done = Channel(Exception?).new
+    second_done = Channel(Exception?).new
+    spawn do
+      signalled = false
+      error = nil
+      begin
+        SugarORM::Repo.transaction do
+          pids.send(backend_pid)
+          first.call
+          signalled = true
+          ready.send(nil)
+          release.receive
+          SugarORM::Repo.rollback if rollback
+        end
+      rescue ex
+        error = ex
+        ready.send(nil) unless signalled
+      end
+      first_done.send(error)
+    end
+    ready.receive
+    spawn do
+      error = nil
+      begin
+        SugarORM::Repo.transaction do
+          pids.send(backend_pid)
+          second.call
+        end
+      rescue ex
+        error = ex
+      end
+      second_done.send(error)
+    end
+    begin
+      await_lock_wait(owner)
+    ensure
+      release.send(nil)
+    end
+    errors = [first_done.receive, second_done.receive].compact
+    raise errors.first unless errors.empty?
+    [pids.receive, pids.receive].uniq.size.should eq(2)
+  end
+
+  def self.backend_pid : Int32
+    SugarORM.sql("SELECT pg_backend_pid() AS pid", as: {pid: Int32}).first[:pid]
+  end
 end
 
 # The names of the teams `query` returns, in its order.
 private def names(query) : Array(String)
   query.to_a.map(&.name)
+end
+
+# A DO NOTHING upsert of tea 9 selling *sold*.
+private def upsert_seed(sold : Int32) : SugarSpec::Sale::Seed
+  SugarSpec::Sale::Seed.new(tea_id: 9_i64, sold: sold)
+end
+
+# A DO UPDATE upsert of tea 9 selling *sold*.
+private def upsert_record(sold : Int32) : SugarSpec::Sale::Record
+  SugarSpec::Sale::Record.new(tea_id: 9_i64, sold: sold)
 end
 
 describe "SugarORM with PostgreSQL" do
@@ -533,6 +644,177 @@ describe "SugarORM with PostgreSQL" do
       raw = "INSERT INTO sugar_shelves (stock, reserved) VALUES (-1, -1)"
       error = expect_raises(SugarORM::CheckViolation) { SugarORM.sql_exec(raw) }
       error.constraint.should eq("check_sugar_shelves_stock")
+    end
+  end
+
+  it "locks a row with one FOR UPDATE statement inside a transaction" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      team = SugarSpec::Team.create!(name: "Acme")
+      SugarORM::Repo.transaction do
+        found = [] of SugarSpec::Team
+        delta = SugarSpec.statements { found << SugarSpec::Team.query.lock.find!(team.id) }
+        delta.should eq(1)
+        found.first.name.should eq("Acme")
+        SugarSpec::Team.query.where(id: team.id).lock.first!.id.should eq(team.id)
+        SugarSpec::Team.query.order_by(:id).lock.to_a.map(&.id).should eq([team.id])
+      end
+    end
+  end
+
+  it "refuses to lock outside a transaction and to count through a lock" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      team = SugarSpec::Team.create!(name: "Acme")
+      statements = SugarSpec.statements do
+        expect_raises(SugarORM::Error, /no transaction is open/) do
+          SugarSpec::Team.query.lock.find!(team.id)
+        end
+      end
+      statements.should eq(0)
+      expect_raises(ArgumentError, /count does not lock rows/) do
+        SugarSpec::Team.query.lock.count
+      end
+    end
+  end
+
+  it "makes a competing lock wait, then reads what the first transaction committed" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      team = SugarSpec::Team.create!(name: "Acme")
+      seen = [] of Int32
+      first = -> { SugarSpec::Team.query.lock.find!(team.id).update!(seats: 9) }
+      second = -> { seen << SugarSpec::Team.query.lock.find!(team.id).seats }
+      SugarSpec.contend(owner, first, second)
+      seen.should eq([9])
+    end
+  end
+
+  it "makes a competing lock wait, then reads the original row after a rollback" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      team = SugarSpec::Team.create!(name: "Acme")
+      seen = [] of Int32
+      first = -> { SugarSpec::Team.query.lock.find!(team.id).update!(seats: 9) }
+      second = -> { seen << SugarSpec::Team.query.lock.find!(team.id).seats }
+      SugarSpec.contend(owner, first, second, rollback: true)
+      seen.should eq([5])
+    end
+  end
+
+  it "rejects an update of a record that changed since it was loaded" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      stored = SugarSpec::Sale.create!(tea_id: 1_i64, sold: 1)
+      stored.lock_version.should eq(0)
+      first = SugarSpec::Sale::Count.new(stored, sold: 2)
+      second = SugarSpec::Sale::Count.new(stored, sold: 3)
+      SugarORM::Repo.update(first)
+      first.saved?.should be_true
+      first.record.lock_version.should eq(1)
+
+      SugarORM::Repo.update(second)
+      second.saved?.should be_false
+      second.stale?.should be_true
+      second.errors.should eq({"_base" => ["Record changed since you loaded it"]})
+      SugarSpec::Sale.query.find!(stored.id).sold.should eq(2)
+    end
+  end
+
+  it "checks the version a changeset is given, without a statement when it is old" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      stored = SugarSpec::Sale.create!(tea_id: 1_i64, sold: 1)
+      current = SugarORM::Repo.update(SugarSpec::Sale::Count.new(stored, sold: 2)).record
+      current.lock_version.should eq(1)
+
+      old = SugarSpec::Sale::Count.new(current, sold: 9, lock_version: 0)
+      delta = SugarSpec.statements { SugarORM::Repo.update(old) }
+      delta.should eq(0)
+      old.stale?.should be_true
+      old.errors.should eq({"_base" => ["Record changed since you loaded it"]})
+
+      fresh = SugarSpec::Sale::Count.new(current, sold: 9, lock_version: 1)
+      SugarORM::Repo.update(fresh).saved?.should be_true
+      fresh.record.lock_version.should eq(2)
+      SugarSpec::Sale.query.find!(stored.id).sold.should eq(9)
+    end
+  end
+
+  it "reports a deleted record as gone, not stale, and bumps updated_at on success" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      stored = SugarSpec::Sale.create!(tea_id: 1_i64, sold: 1)
+      owner.exec("UPDATE sugar_sales SET updated_at = '2000-01-01' WHERE id = $1", stored.id)
+      bumped = SugarORM::Repo.update(SugarSpec::Sale::Count.new(stored, sold: 2))
+      bumped.record.updated_at.should be > Time.utc(2001, 1, 1)
+
+      owner.exec("DELETE FROM sugar_sales WHERE id = $1", stored.id)
+      gone = SugarORM::Repo.update(SugarSpec::Sale::Count.new(bumped.record, sold: 3))
+      gone.saved?.should be_false
+      gone.stale?.should be_false
+      gone.errors.should eq({"_base" => ["Record no longer exists"]})
+    end
+  end
+
+  it "upserts one row per key: the second call updates what update: names" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      first = SugarORM::Repo.insert(SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 1))
+      second = SugarORM::Repo.insert(SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 4))
+      first.saved?.should be_true
+      second.saved?.should be_true
+      second.record.id.should eq(first.record.id)
+      second.record.sold.should eq(4)
+      second.record.lock_version.should eq(1)
+      SugarSpec::Sale.query.where(tea_id: 7_i64).count.should eq(1)
+    end
+  end
+
+  it "returns the existing row when an upsert names no update fields" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      first = SugarORM::Repo.insert(SugarSpec::Sale::Seed.new(tea_id: 7_i64, sold: 1))
+      second = nil
+      delta = SugarSpec.statements do
+        second = SugarORM::Repo.insert(SugarSpec::Sale::Seed.new(tea_id: 7_i64, sold: 8))
+      end
+      delta.should eq(2)
+      stored = second.not_nil!
+      stored.saved?.should be_true
+      stored.record.id.should eq(first.record.id)
+      stored.record.sold.should eq(1)
+      stored.record.lock_version.should eq(0)
+      SugarSpec::Sale.query.count.should eq(1)
+    end
+  end
+
+  it "requires an upsert's key once, and writes nothing without it" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      keyless = SugarSpec::Sale::Seed.new(sold: 1)
+      keyless.errors.should eq({"tea_id" => ["is required"]})
+      delta = SugarSpec.statements { SugarORM::Repo.insert(keyless).saved?.should be_false }
+      delta.should eq(0)
+      SugarSpec::Sale.query.count.should eq(0)
+    end
+  end
+
+  it "leaves one row when two transactions upsert one key and DO NOTHING" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      results = [] of SugarSpec::Sale::Seed
+      first = -> { results << SugarORM::Repo.insert(upsert_seed(1)) }
+      second = -> { results << SugarORM::Repo.insert(upsert_seed(2)) }
+      SugarSpec.contend(owner, first, second)
+      results.map(&.saved?).should eq([true, true])
+      results.map(&.record.id).uniq!.size.should eq(1)
+      results.map(&.record.sold).should eq([1, 1])
+      SugarSpec::Sale.query.where(tea_id: 9_i64).count.should eq(1)
+    end
+  end
+
+  it "leaves one row when two transactions upsert one key and DO UPDATE" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      results = [] of SugarSpec::Sale::Record
+      first = -> { results << SugarORM::Repo.insert(upsert_record(1)) }
+      second = -> { results << SugarORM::Repo.insert(upsert_record(2)) }
+      SugarSpec.contend(owner, first, second)
+      results.map(&.saved?).should eq([true, true])
+      results.map(&.record.id).uniq!.size.should eq(1)
+      results.last.record.sold.should eq(2)
+      results.last.record.lock_version.should eq(1)
+      SugarSpec::Sale.query.where(tea_id: 9_i64).count.should eq(1)
+      SugarSpec::Sale.query.find!(results.first.record.id).sold.should eq(2)
     end
   end
 end

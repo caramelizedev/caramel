@@ -105,6 +105,7 @@ module SugarORM
       {% foreign_keys = [] of Nil %}
       {% drops = [] of Nil %}
       {% primary = [] of Nil %}
+      {% versions = [] of Nil %}
       {% timestamps = [] of Nil %}
       {% tenants = [] of Nil %}
 
@@ -132,11 +133,11 @@ module SugarORM
           {% name = declaration.var.stringify %}
           {% options = {} of Nil => Nil %}
           {% for argument in named %}
-            {% unless %w(primary renamed_from codec).includes?(argument.name.stringify) %}
+            {% unless %w(primary renamed_from codec version).includes?(argument.name.stringify) %}
               {% problem = "Unknown field option '#{argument.name}' " +
                            "on field '#{name.id}'.\n" +
                            "Remediation: fields accept only `primary: true`, " +
-                           "`renamed_from: :old_name` and `codec: Codec`." %}
+                           "`renamed_from: :old_name`, `codec: Codec` and `version: true`." %}
               {% statement.raise problem + statement_at %}
             {% end %}
             {% options[argument.name.stringify] = argument.value %}
@@ -230,6 +231,31 @@ module SugarORM
               {% declaration.raise problem + declaration_at %}
             {% end %}
             {% primary << name %}
+          {% end %}
+          {% if options.keys.includes?("version") %}
+            {% unless options["version"].is_a?(BoolLiteral) %}
+              {% problem = "version: takes `true` or `false`.\n" +
+                           "Remediation: write " +
+                           "`field #{name.id} : Int32, version: true`." %}
+              {% statement.raise problem + statement_at %}
+            {% end %}
+            {% if options["version"] == true %}
+              {% unless integer_type && !nullable && !codec && !is_primary && value.is_a?(Nop) %}
+                {% problem = "The version field '#{name.id}' must be a non-nilable " +
+                             "Int32 or Int64 without a default; it starts at 0.\n" +
+                             "Remediation: declare " +
+                             "`field #{name.id} : Int32, version: true`." %}
+                {% declaration.raise problem + declaration_at %}
+              {% end %}
+              {% unless versions.empty? %}
+                {% problem = "#{@type} already has the version field '#{versions[0].id}'.\n" +
+                             "Remediation: keep a single `version: true` field." %}
+                {% declaration.raise problem + declaration_at %}
+              {% end %}
+              {% default = "0" %}
+              {% literal = scalar == "Int64" ? 0_i64 : 0 %}
+              {% versions << name %}
+            {% end %}
           {% end %}
           {% renamed = nil %}
           {% if options.keys.includes?("renamed_from") %}
@@ -524,6 +550,7 @@ module SugarORM
         {% end %}
         {% names << name %}
       {% end %}
+      {% unique_targets = [] of Nil %}
       {% for index in explicit_indexes %}
         {% node = index[:node] %}
         {% for column in index[:columns] %}
@@ -544,6 +571,9 @@ module SugarORM
         {% end %}
         {% entry = {name: index_name, columns: indexed, unique: index[:unique], tenant: false} %}
         {% indexes = replaced + [entry] %}
+        {% if index[:unique] %}
+          {% unique_targets << {key: index[:columns].join("_and_"), columns: indexed} %}
+        {% end %}
       {% end %}
       {% checks = [] of Nil %}
       {% for check in check_declarations %}
@@ -650,6 +680,31 @@ module SugarORM
           },
         {% end %}
       }
+
+      # The unique indexes a changeset `upsert` may target, by declared columns.
+      {% if unique_targets.empty? %}
+        SUGAR_UNIQUE_INDEXES = {} of String => Array(String)
+      {% else %}
+        SUGAR_UNIQUE_INDEXES = {
+          {% for target in unique_targets %}
+            {{ target[:key] }} => {{ target[:columns] }},
+          {% end %}
+        } of String => Array(String)
+      {% end %}
+
+      {% unless versions.empty? %}
+        # The column that counts a record's updates.
+        SUGAR_VERSION = {{ versions[0] }}
+      {% end %}
+
+      # The version column's name, or nil when the schema has none.
+      def self.__sugar_version_column : String?
+        {% if versions.empty? %}
+          nil
+        {% else %}
+          {{ versions[0] }}
+        {% end %}
+      end
 
       {% if tenant %}
         # The column that names each row's tenant.

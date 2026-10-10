@@ -83,6 +83,14 @@ module TenancySpec
     end
   end
 
+  # Writes a book once per tenant and ISBN; a second write retitles it.
+  class BookUpsert < SugarORM::Changeset(Book)
+    param isbn : String
+    param title : String
+    param author_id : Int64
+    upsert on: :isbn, update: [:title]
+  end
+
   # Records the tenant it runs in.
   struct Record < Caramel::ColdBrew::Job
     def perform
