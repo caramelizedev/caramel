@@ -1,6 +1,7 @@
 # The SugarORM schema and changeset of each stored kind.
 module SweetTalk
-  # The SugarORM schema and changeset for one aggregate, entity or projection.
+  # The SugarORM schema and changeset for one aggregate, entity, projection or process,
+  # and for a projection or a process `Start`, the upsert that inserts a row by its key.
   macro __sweettalk_schema(owner)
     {% type = owner.resolve %}
     {% row = type.constant("SWEETTALK_ROW").id %}
@@ -54,5 +55,18 @@ module SweetTalk
         param removed_at : Time?
       {% end %}
     end
+
+    {% if key %}
+      class {{ row }}::Start < ::SugarORM::Changeset({{ row }})
+        {% if key[2] == "composite" %}
+          {% for part in key[7] %}
+            param {{ part[1].id }} : {{ part[2].id }}
+          {% end %}
+        {% else %}
+          param {{ key[4].id }} : {{ key[6].id }}
+        {% end %}
+        upsert on: [{{ indexed.map { |column| ":#{column.id}" }.join(", ").id }}]
+      end
+    {% end %}
   end
 end

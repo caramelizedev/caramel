@@ -441,10 +441,10 @@ module SweetTalk
         {% end %}
       end
 
-      # A command: lock the row, reload, run the body, check the invariants, save, then
-      # enqueue the events' jobs and notifications, all in one transaction on this
-      # aggregate alone. A refusal rolls it back and reloads what is stored.
-      {% lock = "SELECT id FROM \"#{table.id}\" WHERE id = $1 AND removed_at IS NULL FOR UPDATE" %}
+      # A command: load the aggregate with its row locked, run the body, check the
+      # invariants, save, then enqueue the events' jobs and notifications, all in one
+      # transaction on this aggregate alone. A refusal rolls it back and reloads what is
+      # stored.
       private def __sweettalk_command(&) : Nil
         if ::SweetTalk.__sweettalk_enter(self)
           yield
@@ -454,9 +454,8 @@ module SweetTalk
         fiber.__sweettalk_command = self
         begin
           ::SugarORM::Repo.transaction do
-            locked = ::SugarORM.sql({{ lock }}, __sweettalk_raw_id, as: {id: Int64})
-            raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}.") if locked.empty?
-            loaded = self.class.__sweettalk_find?(__sweettalk_raw_id)
+            locked = {{ row }}.query.where(removed_at: nil).where(id: __sweettalk_raw_id).lock
+            loaded = self.class.__sweettalk_rows(locked).first?
             __sweettalk_copy(loaded || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}."))
             yield
             __sweettalk_check

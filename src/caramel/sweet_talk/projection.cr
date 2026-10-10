@@ -74,16 +74,8 @@ module SweetTalk
     {% columns << "state: @state.to_s.downcase" if moves %}
     {% arguments = (["@__sweettalk_row"] + columns).join(", ") %}
     {% outside = "#{short.id}[…] is for whenever blocks; read with #{short.id}.all" %}
-    {% quoted = key_columns.map { |column| "\"#{column.id}\"" }.join(", ") %}
-    {% binds = key_columns.map_with_index { |_, index| "$#{index + 1}" }.join(", ") %}
-    {% matches = key_columns.map_with_index do |column, index|
-         "\"#{column.id}\" = $#{index + 1}"
-       end %}
     {% locals = key_values.map_with_index { |_, index| "key_#{index}" }.join(", ") %}
     {% wheres = key_columns.map_with_index { |column, index| "#{column.id}: key_#{index}" } %}
-    {% insert = "INSERT INTO \"#{table.id}\" (#{quoted.id}) VALUES (#{binds.id}) " +
-                "ON CONFLICT (#{quoted.id}) DO NOTHING" %}
-    {% lock = "SELECT id FROM \"#{table.id}\" WHERE #{matches.join(" AND ").id} FOR UPDATE" %}
     @__sweettalk_row : {{ row }}
 
     def initialize(*, stored row : {{ row }})
@@ -94,8 +86,9 @@ module SweetTalk
       {% end %}
     end
 
-    # The row for *{{ key[0].id }}*, inserted with its defaults when absent and locked
-    # for the rest of the handler. Only a handler may ask for one.
+    # The row for *{{ key[0].id }}*, locked for the rest of the handler; when absent it is
+    # inserted with its defaults through `Start`, an upsert that leaves one row when two
+    # handlers insert one key. Only a handler may ask for one.
     def self.[]({{ key[0].id }} : {{ key_type }}) : self
       unit = ::Fiber.current.__sweettalk_unit || raise ArgumentError.new({{ outside }})
       {% for value, index in key_values %}
@@ -103,9 +96,14 @@ module SweetTalk
       {% end %}
       text = "{{ type }}:" + [{{ locals.id }}].join(":")
       (unit.rows[text] ||= begin
-        ::SugarORM.sql_exec({{ insert }}, {{ locals.id }})
-        ::SugarORM.sql({{ lock }}, {{ locals.id }}, as: {id: Int64})
-        new(stored: {{ row }}.query.where({{ wheres.join(", ").id }}).first!)
+        query = {{ row }}.query.where({{ wheres.join(", ").id }}).lock
+        stored = query.first || begin
+          start = {{ row }}::Start.new({{ wheres.join(", ").id }})
+          ::SugarORM::Repo.insert(start)
+          raise ::SweetTalk::Refusal.new(start.error_messages.join("; ")) unless start.saved?
+          query.first!
+        end
+        new(stored: stored)
       end).as(self)
     end
 

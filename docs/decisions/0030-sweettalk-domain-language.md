@@ -65,8 +65,8 @@ or a policy, and nothing stops one context from reaching into another's types.
    aggregate that stores it. A projection's table has a unique index on its key's column.
    `frappe db diff` derives the migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
 5. **A command is one transaction on one aggregate.** `to` runs in
-   `SugarORM::Repo.transaction`: it locks the root's row with `SELECT … FOR UPDATE`,
-   reloads the aggregate, runs the body, checks every `never` and `always`, saves the root
+   `SugarORM::Repo.transaction`: it loads the aggregate with its root's row locked
+   (SugarORM's `lock`), runs the body, checks every `never` and `always`, saves the root
    and then its entities, and dispatches the events. A `SweetTalk::Refusal` rolls the
    transaction back, and the aggregate reloads what is stored. A command or `create` on
    another aggregate while a command runs raises `SweetTalk::Boundary`, and so does a
@@ -88,10 +88,10 @@ or a policy, and nothing stops one context from reaching into another's types.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
      63 characters does not compile.
-7. **A projection keeps one row per key.** In a `whenever` block, `Projection[key]` runs
-   `INSERT … ON CONFLICT DO NOTHING` on the key's column, then `SELECT … FOR UPDATE`, then
-   loads the row. The rows a handler touched are saved through their changeset when it
-   returns.
+7. **A projection keeps one row per key.** In a `whenever` block, `Projection[key]` reads
+   the key's row locked; when it is absent, a SugarORM upsert that does nothing on a
+   conflict inserts it with its defaults, and the row is read locked again. The rows a
+   handler touched are saved through their changeset when it returns.
 8. **Checks.** SweetTalk's specs run against real PostgreSQL in `scripts/check
    integration`. Every refusal that decisions 2 to 6 promise has a fixture in a
    `sweet-talk-compilation` check that must fail to compile with its message.
@@ -117,9 +117,10 @@ or a policy, and nothing stops one context from reaching into another's types.
 - Reacting to an event depends on its fields, not on the publisher's model. Counting only
   dependency edges lets contexts react to each other while their types point one way.
 - Tins plus cents is a bug the compiler can catch.
-- SugarORM updates a row by its id with no version column; the row lock orders commands
-  on one aggregate so each sees the last one's result. A row lock cannot order the insert
-  of a missing row, so projections insert with `ON CONFLICT DO NOTHING` first.
+- The row lock orders commands on one aggregate so each sees the last one's result,
+  where a version column would fail the later one. A row lock cannot order the insert of
+  a missing row, so a projection inserts it through an upsert that does nothing on a
+  conflict.
 - Refactoring toward deeper insight renames concepts, but tables, channels and queued jobs
   keep the names they were stored under; `renamed_from:` lets the code move on.
 - Writes through `Rows` would skip invariants and the value checks made in Crystal.
@@ -136,6 +137,4 @@ Rejected:
 - **`Hash` attributes.** An entity holds that data in rows.
 - **A separate repository.** SweetTalk expands into macro contracts that
   [ADR 0016](0016-versioning-and-releases.md) does not cover.
-- **Deferred:** a public row lock ([#40](https://github.com/caramelizedev/caramel/issues/40)),
-  a typed upsert ([#74](https://github.com/caramelizedev/caramel/issues/74)), and tenant
-  scoping.
+- **Deferred:** tenant scoping.
