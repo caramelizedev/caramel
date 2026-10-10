@@ -39,6 +39,13 @@ Lint/NotNil:
     - "spec/**/*.cr"
     - "scripts/**/*.cr"
 
+# SweetTalk's `whenever` and `compensate` blocks are macro arguments: their
+# parameters name the event, its element and the refusal in the handler the
+# macro writes, which need not read each one (ADR 0030).
+Lint/UnusedArgument:
+  Excluded:
+    - "spec/sweet_talk/support/**"
+
 # Ameba's defaults, plus the support files each product keeps under
 # spec/<product>/support, which specs require rather than run.
 Lint/SpecFilename:

@@ -2,8 +2,7 @@
 
 Date: 2026-10-09
 
-Status: proposed. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and
-6; accepted with it, in the commit that adds `src/caramel/sweet_talk/`.
+Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and 6.
 
 ## Context
 

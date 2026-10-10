@@ -2,10 +2,8 @@
 
 Date: 2026-10-08
 
-Status: proposed. [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md)
-amends decisions 2, 4 and 6; both are accepted in the commit that adds
-`src/caramel/sweet_talk/` with their specs and their line in
-[ADR 0014](0014-repository-layout.md); until then none of it is in force.
+Status: accepted. Decisions 2, 4 and 6 are amended by
+[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md).
 
 ## Context
 
