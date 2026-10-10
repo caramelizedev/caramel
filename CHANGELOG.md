@@ -4,6 +4,12 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Upgrade Caramel and Frappé together: the schema document `frappe db diff` reads is now version 3, because it carries CHECK constraints.
+- SugarORM owns the CHECK constraints named `check_…`. `frappe db diff` drops a `check_…` constraint that no schema declares; any other CHECK constraint stays and is noted. Declare a hand-written `check_…` constraint, or rename it, before you diff.
+- Two schemas that name one table no longer compile. Remove the duplicate or give one a different table.
+- Run `shards update` so your application takes crystal-db 0.15.0 and crystal-pg 0.31.0.
+- After a job is renamed or moved, name its old class with `renamed_from "Old::Name"` in the job. `work` and `migrate` now log a warning naming queued class names that no job claims.
+
 ## 0.10.0 - 2026-10-08
 
 ### Upgrade notes
