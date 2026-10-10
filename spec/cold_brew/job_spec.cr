@@ -34,6 +34,16 @@ module ColdBrewUnit
     def perform
     end
   end
+
+  # Renamed from ColdBrewUnit::Greet and, before that, Old::Greet.
+  struct Hello < MailJob
+    renamed_from "ColdBrewUnit::Greet", "Old::Greet"
+    param name : String
+
+    def perform
+      ColdBrewUnit.performed << "hello #{name}"
+    end
+  end
 end
 
 private def rule(backoff : Caramel::ColdBrew::Backoff,
@@ -93,6 +103,29 @@ describe Caramel::ColdBrew::Job do
     bare = %({"label":"bare","copies":1})
     Caramel::ColdBrew::Job.__cold_brew_perform("ColdBrewUnit::Echo", bare)
     ColdBrewUnit.performed.should eq(["hellox2 (draft)", "barex1"])
+  end
+
+  it "performs a job under any name its renamed_from declares, with its stored params" do
+    ColdBrewUnit.performed.clear
+    payload = %({"name":"Ana"})
+    {"ColdBrewUnit::Hello", "ColdBrewUnit::Greet", "Old::Greet"}.each do |stored|
+      Caramel::ColdBrew::Job.__cold_brew_perform(stored, payload)
+    end
+    ColdBrewUnit.performed.should eq(["hello Ana"] * 3)
+  end
+
+  it "looks up a renamed job's retry rules by its current lineage" do
+    lineage = Caramel::ColdBrew::Job.__cold_brew_lineage("Old::Greet")
+    lineage.should eq(["ColdBrewUnit::Hello", "ColdBrewUnit::MailJob"])
+    error = ColdBrewUnit::Bounce.new
+    policy(Caramel::ColdBrew::Retry.rule_for(lineage, error)).first.should eq(7)
+  end
+
+  it "knows the names it can run and no others" do
+    known = Caramel::ColdBrew::Job.__cold_brew_known?("ColdBrewUnit::Greet")
+    known.should be_true
+    Caramel::ColdBrew::Job.__cold_brew_known?("ColdBrewUnit::Echo").should be_true
+    Caramel::ColdBrew::Job.__cold_brew_known?("Gone::Job").should be_false
   end
 
   it "refuses a class name that no compiled job has" do

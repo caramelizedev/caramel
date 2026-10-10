@@ -38,6 +38,17 @@ SugarORM::Repo.transaction do
   SendInvitation.enqueue(invite_id: invite.id)   # same transaction: no dual write
 end
 
+# A renamed job keeps the rows queued under its old names.
+struct RestockTea < Caramel::ColdBrew::Job
+  renamed_from "Restock", "App::Restock"
+  param tea_id : Int64
+
+  def perform
+  end
+end
+
+Caramel::ColdBrew.unknown_queued_class_names(SugarORM::Repo.database)
+
 # --- schedules ---
 Caramel::ColdBrew.every(1.hour, "nightly-cleanup") { CleanupJob.enqueue }
 
