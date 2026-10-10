@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mount a third-party component. · Caramel 0.11.0</title><meta name="description" content="Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it."><link rel="canonical" href="https://caramelize.dev/cookbook/0.11.0/third-party-components/"><meta property="og:title" content="Mount a third-party component. · Caramel 0.11.0"><meta property="og:description" content="Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it."><meta property="og:url" content="https://caramelize.dev/cookbook/0.11.0/third-party-components/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script><link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script></head><body data-page="islands"><div id="caramel-site" class="c-awards c-zed c-scroll c-documentation" role="region" aria-label="Caramel documentation">
+  <header class="c-header">
+    <a class="c-brand cursor-interaction" data-page="home" aria-label="Caramel home" href="/"><span class="c-mark" aria-hidden="true"><svg viewBox="51 51 410 410"><defs><linearGradient id="c-mark-crema" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b07440"/><stop offset=".5" stop-color="#83492a"/><stop offset="1" stop-color="#5c301a"/></linearGradient><radialGradient id="c-mark-foam" cx=".42" cy=".36" r=".72"><stop offset="0" stop-color="#fff8ea"/><stop offset=".6" stop-color="#f7e8cd"/><stop offset="1" stop-color="#e6cfa6"/></radialGradient><linearGradient id="c-mark-syrup" gradientUnits="userSpaceOnUse" x1="127" y1="0" x2="396" y2="0"><stop offset="0" stop-color="#975024"/><stop offset=".4" stop-color="#e7b564"/><stop offset=".65" stop-color="#c78638"/><stop offset="1" stop-color="#8a411e"/></linearGradient><filter id="c-mark-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter><path id="c-mark-drizzle" d="M127.3 271.8 L127.5 262.8 L128.3 253.8 L129.6 244.9 L131.4 236.0 L133.7 227.2 L136.6 218.6 L140.1 210.1 L144.1 201.8 L148.7 193.8 L153.8 186.0 L159.5 178.6 L165.8 171.5 L172.5 164.9 L179.8 158.7 L187.5 153.1 L195.7 148.1 L204.2 143.6 L213.1 139.9 L222.3 136.8 L231.8 134.4 L241.4 132.9 L251.1 132.1 L260.9 132.1 L270.6 132.8 L280.3 134.1 L289.8 136.2 L299.2 138.8 L308.4 142.2 L317.3 146.1 L325.9 150.7 L334.1 155.9 L342.0 161.6 L349.5 167.9 L356.5 174.7 L363.1 181.9 L369.1 189.6 L374.5 197.7 L379.4 206.1 L383.7 214.9 L387.3 224.0 L390.3 233.2 L392.7 242.7 L394.4 252.3 L395.4 262.0 L395.8 271.8 L395.5 279.3 L394.7 286.8 L393.4 294.3 L391.6 301.6 L389.2 308.8 L386.4 315.8 L383.1 322.6 L379.3 329.1 L375.1 335.4 L370.4 341.3 L365.3 346.9 L359.9 352.1 L354.1 357.0 L348.0 361.4 L341.5 365.4 L334.9 368.9 L328.0 371.9 L320.9 374.4 L313.6 376.4 L306.2 378.0 L298.8 378.9 L291.3 379.4 L283.7 379.3 L276.3 378.7 L268.8 377.6 L261.5 376.0 L254.3 373.8 L247.3 371.2 L240.5 368.1 L234.0 364.5 L227.7 360.5 L221.7 356.0 L216.0 351.1 L210.7 345.9 L205.8 340.3 L201.3 334.4 L197.2 328.1 L193.6 321.7 L190.5 315.0 L187.8 308.0 L185.6 301.0 L183.9 293.8 L182.7 286.5 L182.1 279.1 L181.9 271.8 L182.2 266.6 L182.8 261.5 L183.7 256.4 L185.1 251.4 L186.7 246.5 L188.7 241.8 L191.0 237.2 L193.7 232.8 L196.6 228.6 L199.8 224.6 L203.3 220.8 L207.0 217.3 L211.0 214.1 L215.1 211.2 L219.5 208.5 L224.0 206.2 L228.7 204.2 L233.5 202.5 L238.4 201.2 L243.4 200.2 L248.4 199.6 L253.5 199.3 L258.5 199.3 L263.6 199.7 L268.6 200.5 L273.5 201.6 L278.3 203.1 L283.0 204.9 L287.6 207.0 L292.0 209.4 L296.2 212.1 L300.3 215.1 L304.1 218.4 L307.6 221.9 L311.0 225.6 L314.0 229.6 L316.7 233.8 L319.2 238.1 L321.3 242.7 L323.2 247.3 L324.7 252.1 L325.8 256.9 L326.6 261.8 L327.1 266.8 L327.2 271.8 L327.1 274.5 L326.8 277.3 L326.3 280.0 L325.6 282.7 L324.8 285.3 L323.7 287.9 L322.5 290.3 L321.1 292.7 L319.5 295.0 L317.8 297.2 L316.0 299.2 L314.0 301.1 L311.8 302.9 L309.6 304.5 L307.2 305.9 L304.8 307.2 L302.3 308.3 L299.7 309.3 L297.0 310.0 L294.3 310.6 L291.6 310.9 L288.9 311.1 L286.1 311.1 L283.4 310.9 L280.7 310.5 L278.0 309.9 L275.3 309.2 L272.8 308.2 L270.3 307.1 L267.8 305.8 L265.5 304.3 L263.3 302.7 L261.2 301.0 L259.2 299.0 L257.4 297.0 L255.7 294.8 L254.2 292.6 L252.8 290.2 L251.6 287.7 L250.6 285.2 L249.8 282.6 L249.1 279.9 L248.6 277.2 L248.3 274.5 L248.2 271.8 A9.77 9.77 0 0 1 267.8 271.8 L267.8 273.1 L268.0 274.5 L268.2 275.9 L268.5 277.2 L269.0 278.5 L269.5 279.8 L270.1 281.0 L270.8 282.2 L271.6 283.3 L272.4 284.4 L273.3 285.4 L274.3 286.4 L275.4 287.3 L276.5 288.1 L277.7 288.8 L278.9 289.4 L280.1 290.0 L281.4 290.4 L282.7 290.8 L284.1 291.1 L285.4 291.3 L286.8 291.3 L288.2 291.3 L289.5 291.2 L290.9 291.0 L292.2 290.7 L293.5 290.3 L294.8 289.9 L296.1 289.3 L297.3 288.6 L298.4 287.9 L299.5 287.1 L300.5 286.2 L301.5 285.3 L302.4 284.2 L303.2 283.2 L304.0 282.0 L304.6 280.8 L305.2 279.6 L305.7 278.4 L306.1 277.1 L306.4 275.8 L306.6 274.4 L306.7 273.1 L306.8 271.8 L306.6 268.2 L306.2 264.7 L305.5 261.2 L304.6 257.8 L303.5 254.5 L302.1 251.2 L300.5 248.1 L298.7 245.1 L296.7 242.2 L294.5 239.4 L292.1 236.9 L289.6 234.5 L286.8 232.3 L284.0 230.3 L281.0 228.5 L277.9 226.9 L274.7 225.5 L271.4 224.4 L268.0 223.5 L264.6 222.8 L261.2 222.4 L257.7 222.2 L254.3 222.3 L250.8 222.6 L247.4 223.2 L244.1 223.9 L240.8 225.0 L237.6 226.2 L234.5 227.7 L231.5 229.3 L228.6 231.2 L225.9 233.3 L223.4 235.5 L221.0 237.9 L218.7 240.5 L216.7 243.2 L214.9 246.1 L213.2 249.0 L211.8 252.1 L210.6 255.2 L209.7 258.5 L208.9 261.7 L208.4 265.1 L208.1 268.4 L208.1 271.8 L208.4 277.3 L209.1 282.8 L210.1 288.2 L211.6 293.5 L213.4 298.7 L215.5 303.8 L218.0 308.7 L220.9 313.4 L224.0 317.9 L227.5 322.1 L231.2 326.1 L235.2 329.8 L239.4 333.3 L243.9 336.4 L248.5 339.2 L253.4 341.7 L258.4 343.8 L263.5 345.6 L268.7 347.0 L274.0 348.1 L279.4 348.7 L284.8 349.1 L290.2 349.0 L295.6 348.5 L300.9 347.7 L306.2 346.6 L311.3 345.0 L316.3 343.1 L321.2 340.9 L326.0 338.4 L330.5 335.5 L334.8 332.3 L338.9 328.8 L342.7 325.1 L346.3 321.1 L349.6 316.9 L352.6 312.4 L355.3 307.8 L357.6 303.0 L359.6 298.0 L361.3 292.9 L362.6 287.7 L363.5 282.4 L364.1 277.1 L364.2 271.8 L364.0 264.2 L363.2 256.7 L361.9 249.2 L360.1 241.9 L357.7 234.7 L354.9 227.7 L351.6 220.9 L347.8 214.4 L343.6 208.1 L338.9 202.2 L333.9 196.6 L328.4 191.3 L322.6 186.4 L316.5 182.0 L310.1 178.0 L303.5 174.5 L296.6 171.4 L289.5 168.8 L282.2 166.7 L274.8 165.1 L267.3 164.1 L259.8 163.6 L252.2 163.6 L244.7 164.0 L237.1 164.8 L229.7 166.1 L222.2 167.8 L214.9 169.9 L207.6 172.5 L200.5 175.6 L193.5 179.2 L186.8 183.2 L180.3 187.7 L174.1 192.7 L168.2 198.1 L162.7 204.0 L157.6 210.3 L153.0 217.0 L148.8 224.0 L145.2 231.4 L142.2 239.1 L139.9 247.1 L138.1 255.2 L137.1 263.4 L136.7 271.8 A4.72 4.72 0 0 1 127.3 271.8 Z"/></defs><circle cx="256" cy="256" r="205" fill="url(#c-mark-crema)"/><circle cx="256" cy="256" r="185" fill="url(#c-mark-foam)" stroke="#a8784c" stroke-opacity=".45" stroke-width="2"/><use href="#c-mark-drizzle" fill="#5a2a12" fill-opacity=".3" transform="translate(0 7)" filter="url(#c-mark-soft)"/><use href="#c-mark-drizzle" fill="url(#c-mark-syrup)"/><g fill="none" stroke="#f8d595" stroke-linecap="round" stroke-opacity=".8"><path d="M147.9 204.2 L152.6 196.6 L157.8 189.4 L163.6 182.5 L169.8 176.0 L176.5 170.0 L183.6 164.5 L191.1 159.4 L199.0 154.9 L207.2 151.0 L215.7 147.7 L224.4 145.0 L233.3 142.9" stroke-width="4.5"/><path d="M195.2 244.7 L197.3 240.5 L199.6 236.5 L202.2 232.7 L205.1 229.0 L208.2 225.6 L211.6 222.4 L215.2 219.5 L218.9 216.8 L222.9 214.3 L227.0 212.2 L231.2 210.4 L235.5 208.8 L240.0 207.6" stroke-width="3.5"/></g></svg></span>caramel</a>
+    <nav class="c-nav" aria-label="Main navigation">
+      
+      <a class="cursor-interaction" data-page="map" href="/docs/0.11.0/project-map/">Docs</a>
+      <a class="cursor-interaction" data-page="cookbook" aria-current="true" href="/cookbook/0.11.0/">Cookbook</a>
+      <a class="cursor-interaction" data-page="agents" href="/docs/0.11.0/agents/">For agents</a>
+    </nav>
+    <button class="c-search-open cursor-interaction" aria-expanded="false" aria-controls="c-search-area"> Search <kbd>⌘ K</kbd></button>
+    <a class="c-github" href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer" aria-label="Caramel on GitHub" title="Caramel on GitHub"><svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg></a>
+  </header>
+  <section class="c-search-area" id="c-search-area" aria-label="Search documentation" hidden>
+    <div class="c-search-line"><input id="c-search-input" type="search" aria-label="Search Caramel 0.11.0 documentation" placeholder="Try controller, JSON, upload, or deploy…"><button class="cursor-interaction" id="c-search-close">Close</button></div>
+    <div class="c-results" id="c-results" aria-live="polite"></div>
+  </section>
+  <a class="c-skip" href="#c-article">Skip to content</a><main id="c-main">
+    <div id="c-doc">
+      
+      <div class="c-docgrid">
+        <details class="c-docnav" open><summary>Browse documentation <span aria-hidden="true">+</span></summary><nav class="c-sidebar" aria-label="Documentation navigation">
+          <div class="c-sidebar-edition"><strong>Documentation</strong><span>0.11.0</span></div><h3>Start here</h3><a class="cursor-interaction" data-page="releases" href="/docs/0.11.0/releases/">Current release</a><a class="cursor-interaction" data-page="learn" href="/docs/0.11.0/getting-started/">Your first application</a><a class="cursor-interaction" data-page="map" href="/docs/0.11.0/project-map/">Project map</a><a class="cursor-interaction" data-page="practices" href="/docs/0.11.0/best-practices/">Best practices</a>
+          <h3>Build something</h3><a data-page="cookbook" href="/cookbook/0.11.0/">All recipes</a><a class="cursor-interaction" data-page="crud" href="/cookbook/0.11.0/create-a-resource/">Create a resource</a><a class="cursor-interaction" data-page="json" href="/cookbook/0.11.0/return-json/">Read and write JSON</a><a class="cursor-interaction" data-page="uploads" href="/cookbook/0.11.0/uploads/">Upload a file</a><a class="cursor-interaction" data-page="jobs" href="/cookbook/0.11.0/background-jobs/">Run a background job</a><a class="cursor-interaction" data-page="islands" aria-current="page" href="/cookbook/0.11.0/third-party-components/">Mount a component</a>
+          <h3>Go further</h3><a class="cursor-interaction" data-page="i18n" href="/docs/0.11.0/internationalization/">Internationalization</a><a class="cursor-interaction" data-page="tenancy" href="/docs/0.11.0/multi-tenancy/">Multi-tenancy</a><a class="cursor-interaction" data-page="crema" href="/docs/0.11.0/observability/">Observability</a><a class="cursor-interaction" data-page="testing" href="/docs/0.11.0/testing-html/">Test rendered HTML</a><a class="cursor-interaction" data-page="webhooks" href="/cookbook/0.11.0/webhooks/">Receive a webhook</a><a class="cursor-interaction" data-page="sessions" href="/cookbook/0.11.0/revocable-sessions/">Revocable sessions</a><a class="cursor-interaction" data-page="agents" href="/docs/0.11.0/agents/">Work with an agent</a><a class="cursor-interaction" data-page="deploy" href="/docs/0.11.0/deployment/">Deployment status</a>
+          <h3>Reference</h3><a class="cursor-interaction" data-page="routing" href="/docs/0.11.0/routes-and-contracts/">Routes and contracts</a><a class="cursor-interaction" data-page="actions" href="/docs/0.11.0/actions-and-responses/">Actions and responses</a><a class="cursor-interaction" data-page="views" href="/docs/0.11.0/views/">Views</a><a class="cursor-interaction" data-page="sugarorm" href="/docs/0.11.0/sugarorm/">SugarORM</a><a class="cursor-interaction" data-page="coldbrew" href="/docs/0.11.0/cold-brew/">Cold Brew</a><a class="cursor-interaction" data-page="corretto" href="/docs/0.11.0/corretto/">Corretto</a><a class="cursor-interaction" data-page="cremaref" href="/docs/0.11.0/crema/">Crema</a><a class="cursor-interaction" data-page="security" href="/docs/0.11.0/security/">Security defaults</a><a class="cursor-interaction" data-page="commands" href="/docs/0.11.0/commands/">Commands</a><a class="cursor-interaction" data-page="local" href="/docs/0.11.0/local-environment/">Local environment</a>
+        </nav></details>
+        <article class="c-doccontent" id="c-article" tabindex="-1"><div class="c-eyebrow">Cookbook / Views</div><h1>Mount a third-party component.</h1><p class="c-lede">Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it.</p><div class="c-tagrow"><span class="c-tag c-draft">Draft recipe</span><span class="c-tag">Target: 0.11.0</span><span class="c-tag">Not yet recipe-tested</span></div><h2 id="c-island-assets">Vendor the library and load it once</h2><p>Frappé publishes every file under <code>app/assets/</code> at <code>/assets/</code>. Copy the library’s minified bundle there under a versioned name, so nothing is fetched from a CDN at run time. The view below reads its text through <code>t.</code>, so enable locales first with <code>frappe make locale en</code>.</p><div class="c-snippet"><header>Terminal</header><pre><code class="hljs language-bash"><span class="hljs-built_in">npm</span> pack a11y-dialog@8.1.5 --ignore-scripts
+<span class="hljs-built_in">tar</span> xzf a11y-dialog-8.1.5.tgz package/dist/a11y-dialog.min.js
+<span class="hljs-built_in">cp</span> package/dist/a11y-dialog.min.js app/assets/vendor/a11y-dialog-8.1.5.min.js
+<span class="hljs-built_in">rm</span> -r package a11y-dialog-8.1.5.tgz</code></pre></div><p>The bundle is a UMD file that defines <code>window.A11yDialog</code> in a browser, so the adapter below uses that name. Load it in the shared layout, before <code>app.js</code>: deferred scripts run in order, so the global exists when the adapter file runs. Boosted navigation does not run a new page’s <code>&lt;head&gt;</code> again, so a script tag written by one page’s view never loads.</p><div class="c-snippet"><header>app/views/layouts/application.cr · the head</header><pre><code class="hljs language-crystal">          script <span class="hljs-attr">src:</span> <span class="hljs-string">&quot;/assets/htmx-4.0.0.min.js&quot;</span>, <span class="hljs-attr">defer:</span> <span class="hljs-literal">true</span>
+          script <span class="hljs-attr">src:</span> <span class="hljs-string">&quot;/assets/caramel-islands.js&quot;</span>, <span class="hljs-attr">defer:</span> <span class="hljs-literal">true</span>
+          script <span class="hljs-attr">src:</span> <span class="hljs-string">&quot;/assets/a11y-dialog-8.1.5.min.js&quot;</span>, <span class="hljs-attr">defer:</span> <span class="hljs-literal">true</span>
+          script <span class="hljs-attr">src:</span> <span class="hljs-string">&quot;/assets/app.js&quot;</span>, <span class="hljs-attr">defer:</span> <span class="hljs-literal">true</span></code></pre></div><p>The default Content-Security-Policy is <code>default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; …</code>, quoted from the security reference. It allows only files served from your own origin: no inline script, no inline style. Keep the dialog’s appearance in <code>app/assets/stylesheets/app.css</code> and toggle classes or the library’s <code>aria-hidden</code> attribute instead of writing <code>style</code> attributes.</p><a class="c-secondary cursor-interaction" data-page="security" href="/docs/0.11.0/security/">Read the security reference →</a><h2 id="c-island-mount">Write the fallback, then the mount point</h2><p>The view writes the navigation as plain links, which work with JavaScript off, then the island. Resolve every localized string in the view and pass it as a prop; the browser code never looks up a catalog.</p><div class="c-snippet"><header>app/views/guide/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Views::Guide</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationView</span></span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">initialize</span></span>(<span class="hljs-variable">@links</span> : <span class="hljs-type">Array</span>(<span class="hljs-type">NamedTuple</span>(<span class="hljs-attr">label:</span> <span class="hljs-type">String</span>, <span class="hljs-attr">href:</span> <span class="hljs-type">String</span>)))
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">blueprint</span></span>
+      h1 { <span class="hljs-string">&quot;Guide&quot;</span> }
+      nav <span class="hljs-attr">class:</span> <span class="hljs-string">&quot;fallback&quot;</span>, <span class="hljs-attr">aria_label:</span> t.nav.title <span class="hljs-keyword">do</span>
+        ul <span class="hljs-keyword">do</span>
+          <span class="hljs-variable">@links</span>.each { |link| li { a(<span class="hljs-attr">href:</span> link[:href]) { link[:label] } } }
+        <span class="hljs-keyword">end</span>
+      <span class="hljs-keyword">end</span>
+      island <span class="hljs-string">&quot;NavigatorDialog&quot;</span>, {
+        <span class="hljs-attr">title:</span>  t.nav.title,
+        <span class="hljs-attr">open:</span>   t.nav.open,
+        <span class="hljs-attr">close:</span>  t.nav.close,
+        <span class="hljs-attr">links:</span>  <span class="hljs-variable">@links</span>,
+        <span class="hljs-attr">region:</span> <span class="hljs-string">&quot;activity&quot;</span>,
+      }
+      section <span class="hljs-attr">id:</span> <span class="hljs-string">&quot;activity&quot;</span>, <span class="hljs-string">&quot;hx-get&quot;</span>: <span class="hljs-string">&quot;/activity&quot;</span>, <span class="hljs-string">&quot;hx-trigger&quot;</span>: <span class="hljs-string">&quot;activity&quot;</span>,
+        <span class="hljs-string">&quot;hx-sync&quot;</span>: <span class="hljs-string">&quot;this:queue last&quot;</span> <span class="hljs-keyword">do</span>
+        render <span class="hljs-type">App::Views::Activity::Show</span>.new(<span class="hljs-type">Time</span>.utc)
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>config/routes.cr · the central routes</header><pre><code class="hljs language-crystal">    get <span class="hljs-string">&quot;/guide&quot;</span>, <span class="hljs-type">App::Guide::Show</span>
+    get <span class="hljs-string">&quot;/activity&quot;</span>, <span class="hljs-type">App::Activity::Show</span>
+    get <span class="hljs-string">&quot;/activity/stream&quot;</span>, <span class="hljs-type">App::Activity::Stream</span></code></pre></div><div class="c-snippet"><header>app/views/activity/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Views::Activity</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationView</span></span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">initialize</span></span>(<span class="hljs-variable">@at</span> : <span class="hljs-type">Time</span>)
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">blueprint</span></span>
+      h2 { t.nav.activity }
+      p { <span class="hljs-string">&quot;Updated <span class="hljs-subst">#{<span class="hljs-variable">@at</span>.to_s(<span class="hljs-string">&quot;%H:%M:%S&quot;</span>)}</span> UTC&quot;</span> }
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>The island writes no children of its own, so the adapter hides the fallback once it has mounted. The element gets <code>data-island-state="mounted"</code>, and the <code>:has</code> rule below hides the fallback links next to a mounted island. If the script fails, the state is <code>error</code> and the links stay. The library toggles <code>aria-hidden</code> on the dialog container and leaves its appearance to you, so the stylesheet must hide a closed dialog. Stylesheet:</p><div class="c-snippet"><header>app/assets/stylesheets/app.css · appended</header><pre><code class="hljs language-markdown">.dialog-container {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dialog-container[aria-hidden=&quot;true&quot;] {
+  display: none;
+}
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.4);
+}
+.dialog-content {
+  position: relative;
+  z-index: 1;
+  padding: 1.5rem;
+  background: #faf8f3;
+  border-radius: 0.5rem;
+}
+nav.fallback:has(+ caramel-island[data-island-state=&quot;mounted&quot;]) {
+  display: none;
+}</code></pre></div><p>The island contract is set out in the views guide and in <a href="https://github.com/caramelizedev/caramel/blob/main/docs/decisions/0005-island-props-helper.md" target="_blank" rel="noopener noreferrer">ADR 0005 ↗</a>. A mount that returns <code>{update, unmount}</code> gets <code>update(props)</code> when a morph changes the props. A mount that returns a function or nothing is unmounted and mounted again instead. Removing the element calls <code>unmount</code>. A mount that throws sets <code>data-island-state="error"</code> and dispatches a bubbling <code>caramel:island-error</code> event.</p><a class="c-secondary cursor-interaction" data-page="views" href="/docs/0.11.0/views/">Read the views reference →</a><div class="c-snippet"><header>app/actions/guide/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Guide</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      links = [
+        {<span class="hljs-attr">label:</span> t.nav.home, <span class="hljs-attr">href:</span> <span class="hljs-string">&quot;/&quot;</span>},
+        {<span class="hljs-attr">label:</span> t.nav.health, <span class="hljs-attr">href:</span> <span class="hljs-string">&quot;/health&quot;</span>},
+      ]
+      page <span class="hljs-string">&quot;Guide&quot;</span>, <span class="hljs-type">Views::Guide::Show</span>.new(links)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/locales/en.cr · the keys the view reads</header><pre><code class="hljs language-crystal">  <span class="hljs-attr">nav:</span> {
+    <span class="hljs-attr">title:</span>    <span class="hljs-string">&quot;Browse &amp; search&quot;</span>,
+    <span class="hljs-attr">open:</span>     <span class="hljs-string">&quot;Open the navigation&quot;</span>,
+    <span class="hljs-attr">close:</span>    <span class="hljs-string">&quot;Close&quot;</span>,
+    <span class="hljs-attr">home:</span>     <span class="hljs-string">&quot;Home&quot;</span>,
+    <span class="hljs-attr">health:</span>   <span class="hljs-string">&quot;Health&quot;</span>,
+    <span class="hljs-attr">activity:</span> <span class="hljs-string">&quot;Recent activity&quot;</span>,
+  },</code></pre></div><h2 id="c-island-adapter">Adapt the library to the island lifecycle</h2><p>The adapter builds the dialog’s DOM itself. It never writes a <code>data-a11y-dialog</code> attribute, so the library’s own start-up scan, which instantiates every element that has one, finds nothing to take over; the adapter calls <code>new A11yDialog(container)</code> exactly once. The links are created by script, so it calls <code>htmx.process</code> on them to keep them boosted.</p><div class="c-snippet"><header>app/assets/javascript/app.js</header><pre><code class="hljs language-javascript"><span class="hljs-title class_">CaramelIslands</span>.<span class="hljs-title function_">define</span>(<span class="hljs-string">&#x27;NavigatorDialog&#x27;</span>, <span class="hljs-function">(<span class="hljs-params">element, props</span>) =&gt;</span> {
+  <span class="hljs-keyword">const</span> container = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;div&#x27;</span>);
+  container.<span class="hljs-property">id</span> = <span class="hljs-string">&#x27;navigator-dialog&#x27;</span>;
+  container.<span class="hljs-property">className</span> = <span class="hljs-string">&#x27;dialog-container&#x27;</span>;
+  container.<span class="hljs-title function_">setAttribute</span>(<span class="hljs-string">&#x27;aria-labelledby&#x27;</span>, <span class="hljs-string">&#x27;navigator-dialog-title&#x27;</span>);
+  container.<span class="hljs-title function_">setAttribute</span>(<span class="hljs-string">&#x27;aria-hidden&#x27;</span>, <span class="hljs-string">&#x27;true&#x27;</span>);
+
+  <span class="hljs-keyword">const</span> overlay = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;div&#x27;</span>);
+  overlay.<span class="hljs-property">className</span> = <span class="hljs-string">&#x27;dialog-overlay&#x27;</span>;
+  overlay.<span class="hljs-title function_">setAttribute</span>(<span class="hljs-string">&#x27;data-a11y-dialog-hide&#x27;</span>, <span class="hljs-string">&#x27;&#x27;</span>);
+
+  <span class="hljs-keyword">const</span> content = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;div&#x27;</span>);
+  content.<span class="hljs-property">className</span> = <span class="hljs-string">&#x27;dialog-content&#x27;</span>;
+  <span class="hljs-keyword">const</span> title = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;h2&#x27;</span>);
+  title.<span class="hljs-property">id</span> = <span class="hljs-string">&#x27;navigator-dialog-title&#x27;</span>;
+  <span class="hljs-keyword">const</span> list = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;ul&#x27;</span>);
+  <span class="hljs-keyword">const</span> close = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;button&#x27;</span>);
+  close.<span class="hljs-property">type</span> = <span class="hljs-string">&#x27;button&#x27;</span>;
+  close.<span class="hljs-title function_">setAttribute</span>(<span class="hljs-string">&#x27;data-a11y-dialog-hide&#x27;</span>, <span class="hljs-string">&#x27;navigator-dialog&#x27;</span>);
+  content.<span class="hljs-title function_">append</span>(title, list, close);
+  container.<span class="hljs-title function_">append</span>(overlay, content);
+
+  <span class="hljs-keyword">const</span> opener = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;button&#x27;</span>);
+  opener.<span class="hljs-property">type</span> = <span class="hljs-string">&#x27;button&#x27;</span>;
+  opener.<span class="hljs-title function_">setAttribute</span>(<span class="hljs-string">&#x27;data-a11y-dialog-show&#x27;</span>, <span class="hljs-string">&#x27;navigator-dialog&#x27;</span>);
+
+  element.<span class="hljs-title function_">replaceChildren</span>(opener, container);
+  <span class="hljs-keyword">const</span> dialog = <span class="hljs-keyword">new</span> <span class="hljs-title function_">A11yDialog</span>(container);
+
+  <span class="hljs-keyword">function</span> <span class="hljs-title function_">render</span>(<span class="hljs-params">next</span>) {
+    opener.<span class="hljs-property">textContent</span> = next.<span class="hljs-property">open</span>;
+    title.<span class="hljs-property">textContent</span> = next.<span class="hljs-property">title</span>;
+    close.<span class="hljs-property">textContent</span> = next.<span class="hljs-property">close</span>;
+    list.<span class="hljs-title function_">replaceChildren</span>(...next.<span class="hljs-property">links</span>.<span class="hljs-title function_">map</span>(<span class="hljs-function">(<span class="hljs-params">link</span>) =&gt;</span> {
+      <span class="hljs-keyword">const</span> item = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;li&#x27;</span>);
+      <span class="hljs-keyword">const</span> anchor = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">createElement</span>(<span class="hljs-string">&#x27;a&#x27;</span>);
+      anchor.<span class="hljs-property">href</span> = link.<span class="hljs-property">href</span>;
+      anchor.<span class="hljs-property">textContent</span> = link.<span class="hljs-property">label</span>;
+      item.<span class="hljs-title function_">append</span>(anchor);
+      <span class="hljs-keyword">return</span> item;
+    }));
+    htmx.<span class="hljs-title function_">process</span>(list);
+  }
+  <span class="hljs-title function_">render</span>(props);
+
+  <span class="hljs-keyword">const</span> <span class="hljs-title function_">onShortcut</span> = (<span class="hljs-params">event</span>) =&gt; {
+    <span class="hljs-keyword">if</span> (event.<span class="hljs-property">altKey</span> &amp;&amp; event.<span class="hljs-property">code</span> === <span class="hljs-string">&#x27;KeyM&#x27;</span>) dialog.<span class="hljs-title function_">show</span>();
+  };
+  <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">addEventListener</span>(<span class="hljs-string">&#x27;keydown&#x27;</span>, onShortcut);
+
+  <span class="hljs-comment">// htmx:after:settle fires on the element that received the swap and bubbles.</span>
+  <span class="hljs-keyword">const</span> <span class="hljs-title function_">closeOnSwap</span> = (<span class="hljs-params">event</span>) =&gt; {
+    <span class="hljs-keyword">if</span> (event.<span class="hljs-property">target</span>.<span class="hljs-title function_">contains</span>(element)) dialog.<span class="hljs-title function_">hide</span>();
+  };
+  <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">addEventListener</span>(<span class="hljs-string">&#x27;htmx:after:settle&#x27;</span>, closeOnSwap);
+
+  <span class="hljs-keyword">const</span> region = <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">getElementById</span>(props.<span class="hljs-property">region</span>);
+  <span class="hljs-keyword">const</span> <span class="hljs-title function_">refresh</span> = (<span class="hljs-params"></span>) =&gt; {
+    <span class="hljs-keyword">if</span> (region) region.<span class="hljs-title function_">dispatchEvent</span>(<span class="hljs-keyword">new</span> <span class="hljs-title class_">CustomEvent</span>(<span class="hljs-string">&#x27;activity&#x27;</span>));
+  };
+  <span class="hljs-keyword">const</span> source = <span class="hljs-keyword">new</span> <span class="hljs-title class_">EventSource</span>(<span class="hljs-string">&#x27;/activity/stream&#x27;</span>);
+  source.<span class="hljs-title function_">addEventListener</span>(<span class="hljs-string">&#x27;open&#x27;</span>, refresh);
+  source.<span class="hljs-title function_">addEventListener</span>(<span class="hljs-string">&#x27;activity&#x27;</span>, refresh);
+
+  <span class="hljs-keyword">return</span> {
+    <span class="hljs-title function_">update</span>(<span class="hljs-params">next</span>) {
+      <span class="hljs-title function_">render</span>(next);
+    },
+    <span class="hljs-title function_">unmount</span>(<span class="hljs-params"></span>) {
+      source.<span class="hljs-title function_">close</span>();
+      <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">removeEventListener</span>(<span class="hljs-string">&#x27;htmx:after:settle&#x27;</span>, closeOnSwap);
+      <span class="hljs-variable language_">document</span>.<span class="hljs-title function_">removeEventListener</span>(<span class="hljs-string">&#x27;keydown&#x27;</span>, onShortcut);
+      dialog.<span class="hljs-title function_">destroy</span>();
+      element.<span class="hljs-title function_">replaceChildren</span>();
+    },
+  };
+});</code></pre></div><p>Return <code>{update, unmount}</code>. <code>update</code> relabels the dialog and rebuilds the links, then processes them again, so the server stays the source of the text. <code>unmount</code> has three jobs. <code>destroy()</code> hides the dialog, removes the library’s document-level click listener and replaces the dialog node with a clone. Every other document listener the adapter added, here the keyboard shortcut and the swap handler, must be removed by hand, or each visit leaves another behind. Closing the event stream is the third job.</p><h2 id="c-island-history">Keep it correct across navigation</h2><p>htmx 4 names its events <code>htmx:phase:action</code>, for example <code>htmx:before:swap</code> and <code>htmx:after:settle</code>, with the element lifecycle in <code>htmx:before:init</code> and <code>htmx:after:init</code> and history in <code>htmx:before:history:restore</code>; see the <a href="https://four.htmx.org/docs/htmx-events-guide" target="_blank" rel="noopener noreferrer">htmx events guide ↗</a>. The detail differs by event, so read the version you ship: in the vendored htmx 4.0.0, <code>htmx:after:swap</code> carries <code>ctx</code>, but <code>htmx:after:settle</code> carries only <code>task</code>, <code>newContent</code> and <code>settleTasks</code>. What <code>htmx:after:settle</code> does give you is its target: htmx dispatches it on the element that received the swap, and it bubbles to <code>document</code>.</p><p>Back and Forward restore the page by swapping the body. The island element leaves the document and a new one arrives, so the island’s own lifecycle calls <code>unmount</code> and then <code>mount</code>. You need no htmx listener for cleanup.</p><p>A document-wide handler that closes the dialog on a swap must first check that the swap’s target contains the island. The adapter does it in <code>closeOnSwap</code>: it listens for <code>htmx:after:settle</code> on <code>document</code> and closes only when <code>event.target</code>, the swapped element, contains the island. The island itself survives a navigation swap into <code>#content</code>, so this is what closes a dialog after one of its links is followed. A swap into another region, such as the activity region below, leaves an open dialog alone.</p><h2 id="c-island-updates">Refresh a region from a server event</h2><p>A region beside the island, outside its skip-children subtree, can follow a server event. The adapter opens an <code>EventSource</code> to a stream action and closes it in <code>unmount</code>. On each event it dispatches an <code>activity</code> event on the region; the region fetches itself with <code>hx-trigger="activity"</code> and <code>hx-sync="this:queue last"</code>, so a burst of events leaves one request in flight and one queued. A stream action sends events from <code>Caramel::ColdBrew.subscribe</code> through <code>Caramel::SSE.write</code>; see the Cold Brew and actions references, and publish with <code>Caramel::ColdBrew.publish("activity", "changed")</code> from the code that changes the data.</p><a class="c-secondary cursor-interaction" data-page="coldbrew" href="/docs/0.11.0/cold-brew/">Read the Cold Brew reference →</a><a class="c-secondary cursor-interaction" data-page="actions" href="/docs/0.11.0/actions-and-responses/">Read the actions reference →</a><div class="c-snippet"><header>app/actions/activity/stream.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Activity</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Stream</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      stream <span class="hljs-string">&quot;text/event-stream&quot;</span> <span class="hljs-keyword">do</span> |io|
+        <span class="hljs-type">Caramel::ColdBrew</span>.subscribe(<span class="hljs-string">&quot;activity&quot;</span>) <span class="hljs-keyword">do</span> |updates|
+          <span class="hljs-comment"># Subscribed: now send the headers, so the browser&#x27;s open event follows.</span>
+          io &lt;&lt; <span class="hljs-string">&quot;: open\n\n&quot;</span>
+          io.flush
+          loop { <span class="hljs-type">Caramel::SSE</span>.write(io, <span class="hljs-attr">event:</span> <span class="hljs-string">&quot;activity&quot;</span>, <span class="hljs-attr">data:</span> updates.receive) }
+        <span class="hljs-keyword">end</span>
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/actions/activity/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Activity</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      morph <span class="hljs-string">&quot;#activity&quot;</span>, <span class="hljs-attr">with:</span> <span class="hljs-type">Views::Activity::Show</span>.new(<span class="hljs-type">Time</span>.utc)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>The server-sent stream drops events while a client is disconnected, and a browser reconnects by itself. The stream action therefore subscribes first, then writes and flushes a comment line before it blocks: a response sends its headers with its first write, so without that frame the browser’s <code>open</code> event would wait for the next real event. The adapter asks the region to fetch on every <code>open</code>, the first one included: that covers events published between rendering the page and subscribing, and a reconnect loads a fresh snapshot instead of trusting the events it missed. The cost is one extra request per mount.</p><h2 id="c-island-tests">Test it</h2><p>A Corretto request spec proves what the server owes the browser: the mount point, its escaped props and the fallback links.</p><div class="c-snippet"><header>spec/requests/guide_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+
+describe <span class="hljs-string">&quot;Guide&quot;</span> <span class="hljs-keyword">do</span>
+  it <span class="hljs-string">&quot;writes the island, its escaped props and the fallback links&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client|
+      page = client.get(<span class="hljs-string">&quot;/guide&quot;</span>)
+      page.should have_status(<span class="hljs-number">200</span>)
+      page.body.should contain(<span class="hljs-string">%(&lt;caramel-island component=&quot;NavigatorDialog&quot;)</span>)
+      page.body.should contain(<span class="hljs-string">&quot;Browse &amp;amp; search&quot;</span>)
+      page.body.should contain(<span class="hljs-string">%(&lt;a href=&quot;/health&quot;&gt;Health&lt;/a&gt;)</span>)
+      page.body.should contain(<span class="hljs-string">%(&lt;a href=&quot;/&quot;&gt;Home&lt;/a&gt;)</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;answers the region&#x27;s refresh with a partial for #activity&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client|
+      client.get(<span class="hljs-string">&quot;/activity&quot;</span>).body.should contain(<span class="hljs-string">&quot;Recent activity&quot;</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>Library behaviour needs a browser. Before you ship, check each of these by hand:</p><ul class="c-status-list"><li>Focus moves into the dialog on open and returns to the opener on close.</li><li>Tab and Shift-Tab wrap inside the dialog.</li><li>Escape closes the dialog.</li><li>If the dialog holds a native <code>&lt;select&gt;</code>, its open picker closes alone on the first Escape and the dialog stays.</li><li>Repeated visits to the page keep exactly one dialog.</li><li>Back and Forward with the dialog open leave one working dialog.</li><li>Removing the island through a morph unmounts it and closes the event stream.</li><li>No <code>caramel:island-error</code> event and no console error appears.</li><li>The fallback links work with JavaScript off.</li></ul><div class="c-note"><strong>The library owns focus; the island owns its DOM</strong><p>Let the library manage focus, <code>aria-hidden</code> and the Escape key; do not reimplement them. Everything the adapter creates or listens to, the adapter removes in <code>unmount</code>.</p></div><div class="c-next"><a class="cursor-interaction" data-page="cookbook" href="/cookbook/0.11.0/">← All recipes</a><a class="cursor-interaction" data-page="views" href="/docs/0.11.0/views/">Read the views reference →</a></div></article>
+        <aside class="c-toc" aria-label="On this page" id="c-toc"><p>ON THIS PAGE</p><a href="#c-island-assets">Vendor the library and load it once</a><a href="#c-island-mount">Write the fallback, then the mount point</a><a href="#c-island-adapter">Adapt the library to the island lifecycle</a><a href="#c-island-history">Keep it correct across navigation</a><a href="#c-island-updates">Refresh a region from a server event</a><a href="#c-island-tests">Test it</a></aside>
+      </div>
+    </div>
+  </main>
+  <footer class="c-footer"><span>0.11.0 · Documentation preview</span><span>Production support in progress</span><a href="https://github.com/caramelizedev/caramel" target="_blank" rel="noopener noreferrer">GitHub ↗</a></footer>
+</div>
+</body></html>
