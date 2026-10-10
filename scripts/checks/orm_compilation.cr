@@ -93,6 +93,46 @@ cases = {
     "Blend declares the table \"teas\", which Tea already declares.",
     "Remediation: give one of them another table name",
   ],
+  "compile_check_shape" => [
+    "compile_check_shape.cr:7:",
+    "check expects column ranges or one named SQL expression, " \
+    "like `check stock: 0..`, `check quantity: 1..10` " \
+    "or `check :dates, \"starts_at < ends_at\"`.",
+  ],
+  "compile_check_range" => [
+    "compile_check_range.cr:7:",
+    "check seats: takes an inclusive range of integer literals, like `0..`, `..10` or `1..10`.",
+  ],
+  "compile_check_empty" => [
+    "compile_check_empty.cr:7:",
+    "check seats: 10..1 is empty.",
+    "Remediation: put the lower bound first.",
+  ],
+  "compile_check_field_type" => [
+    "compile_check_field_type.cr:7:",
+    "check name: needs an Int32 or Int64 field, but 'name' is String.",
+    "Remediation: use a named SQL expression, like `check :name_rule, \"…\"`.",
+  ],
+  "compile_check_unknown_column" => [
+    "compile_check_unknown_column.cr:7:",
+    "check references 'beds', which is not a column of Room.",
+    "Columns: id, seats",
+  ],
+  "compile_check_duplicate" => [
+    "compile_check_duplicate.cr:8:",
+    "Room declares the check check_rooms_seats twice.",
+    "Remediation: give each check its own name; a range check is named after its column.",
+  ],
+  "compile_check_semicolon" => [
+    "compile_check_semicolon.cr:7:",
+    "check :limit: takes one SQL expression without ';'.",
+  ],
+  "compile_check_name_too_long" => [
+    "compile_check_name_too_long.cr:7:",
+    "The check name check_conference_room_reservations_maximum_attendees_allowed_per_window " \
+    "is longer than PostgreSQL's 63-byte limit.",
+    "Remediation: shorten the check's name or the table name.",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)

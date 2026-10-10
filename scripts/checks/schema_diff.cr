@@ -269,6 +269,36 @@ module Caramel::Checks
         puts "PASS: an undeclared column halts the diff; " \
              "drop_column derives an annotated DROP COLUMN that passes the linter"
 
+        sql(migration_url, "INSERT INTO books (name, isbn) VALUES ('Emma', '978')")
+        checked = <<-CRYSTAL
+          field id : Int64, primary: true
+          field name : String, renamed_from: :title
+          field isbn : String
+          field copies : Int32 = 1
+          timestamps
+          drop_column :pages
+          check copies: 1..
+          CRYSTAL
+        schema(checked)
+        added = diff("check_copies")
+        assert!(added.size == 2, added.inspect)
+        add_copies = %(ADD COLUMN "copies" integer NOT NULL DEFAULT 1)
+        add_check = %(ADD CONSTRAINT "check_books_copies" CHECK ("copies" >= 1) NOT VALID)
+        validate_check = %(VALIDATE CONSTRAINT "check_books_copies")
+        assert_includes!(added[0], add_copies, add_check)
+        assert!(added[1].includes?(validate_check) && !added[1].includes?("ADD"), added[1])
+        migrated = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE).stdout
+        assert_includes!(migrated, "Applied 2 migrations.", MATCHED)
+        schema(checked.sub("check copies: 1..", "check copies: 2.."))
+        refused(%w[db diff --name raise_copies --human], [
+          "check_books_copies",
+          "Migrating the scratch branch failed",
+        ])
+        schema(checked)
+        puts "PASS: a check derives ADD CONSTRAINT … NOT VALID and a separate " \
+             "VALIDATE CONSTRAINT, and a check that existing rows break " \
+             "stops the diff naming check_books_copies"
+
         sql(migration_url, "ALTER TABLE books ADD COLUMN sneaky text")
         drift = command([@frappe, "migrate"], chdir: @project, timeout: COMPILE)
         assert!(drift.stdout.includes?("Applied 0 migrations."), drift.stdout)

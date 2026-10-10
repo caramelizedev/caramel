@@ -18,13 +18,16 @@ module SugarORM
     record AddIndex, table : String, index : Catalog::Index, concurrently : Bool
     record DropIndex, table : String, name : String
     record AddForeignKey, table : String, foreign_key : Catalog::ForeignKey, not_valid : Bool
-    record ValidateForeignKey, table : String, name : String
+    record ValidateConstraint, table : String, name : String
     record DropForeignKey, table : String, name : String
+    record AddCheck, table : String, check : Catalog::Check, not_valid : Bool
+    record DropCheck, table : String, name : String
 
     alias Operation = CreateTable | AddColumn | RenameColumn | DropColumn |
                       AlterNull | AlterDefault | AlterType |
                       AddIndex | DropIndex |
-                      AddForeignKey | ValidateForeignKey | DropForeignKey
+                      AddForeignKey | ValidateConstraint | DropForeignKey |
+                      AddCheck | DropCheck
 
     # Unique indexes a plan builds CONCURRENTLY, by table and sorted columns.
     alias OnlineIndexes = Hash({String, Array(String)}, Catalog::Index)
@@ -60,7 +63,7 @@ module SugarORM
     class Plan
       # Statements for one transactional migration.
       getter transactional = [] of Operation
-      # CONCURRENTLY index changes and foreign key validation on existing
+      # CONCURRENTLY index changes and constraint validation on existing
       # tables, for a separate migration that runs in autocommit.
       getter online = [] of Operation
       getter halts = [] of Halt
@@ -107,13 +110,13 @@ module SugarORM
         end
       end
       create(declared.reject { |table| existing.has_key?(table.name) }, plan)
-      key_drops = [] of Operation
+      constraint_drops = [] of Operation
       declared.each do |table|
         existing[table.name]?.try do |current|
-          alter(table, current, plan, dev_override, key_drops)
+          alter(table, current, plan, dev_override, constraint_drops)
         end
       end
-      plan.transactional[0, 0] = key_drops
+      plan.transactional[0, 0] = constraint_drops
       halt_keys_awaiting_online_indexes(plan)
       plan
     end
@@ -152,16 +155,17 @@ module SugarORM
       plan.transactional.concat(deferred)
     end
 
-    # Foreign key drops go to *key_drops*: the differ runs them before every
-    # other statement, since a composite key depends on the unique index of
-    # the table it references. An undeclared key is dropped even when its own
-    # column is, as another table's column drop may wait on it.
+    # Foreign key and check drops go to *constraint_drops*: the differ runs
+    # them before every other statement, since a composite key depends on the
+    # unique index of the table it references and a column drop cascades the
+    # checks on it. An undeclared key is dropped even when its own column is,
+    # as another table's column drop may wait on it.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
     private def self.alter(declared : Catalog::Table,
                            current : Catalog::Table,
                            plan : Plan,
                            dev_override : Bool,
-                           key_drops : Array(Operation)) : Nil
+                           constraint_drops : Array(Operation)) : Nil
       table = declared.name
       columns = current.columns.index_by(&.name)
       names = declared.columns.map(&.name).to_set
@@ -171,6 +175,7 @@ module SugarORM
       changes = [] of Operation
       drops = [] of Operation
       key_adds = [] of Operation
+      check_adds = [] of Operation
 
       declared.columns.each do |column|
         actual = columns[column.name]?
@@ -234,17 +239,46 @@ module SugarORM
       declared.foreign_keys.each do |key|
         found = keys[key.name]?
         next if found == key
-        key_drops << DropForeignKey.new(table, key.name) if found
+        constraint_drops << DropForeignKey.new(table, key.name) if found
         key_adds << AddForeignKey.new(table, key, not_valid: true)
-        plan.online << ValidateForeignKey.new(table, key.name)
+        plan.online << ValidateConstraint.new(table, key.name)
       end
       current.foreign_keys.each do |key|
         next if declared.foreign_keys.any? { |wanted| wanted.name == key.name }
-        key_drops << DropForeignKey.new(table, key.name)
+        constraint_drops << DropForeignKey.new(table, key.name)
       end
 
-      steps = [renames, changes, drops, key_adds]
+      compare_checks(declared, current, plan, constraint_drops, check_adds)
+
+      steps = [renames, changes, drops, key_adds, check_adds]
       steps.each { |operations| plan.transactional.concat(operations) }
+    end
+
+    # Checks are added `NOT VALID` and validated online. An expression check is
+    # compared by name only, since PostgreSQL rewrites its text. Only checks
+    # named `check_…` are SugarORM's: an undeclared one is dropped and any other
+    # is left in place with a note.
+    private def self.compare_checks(declared : Catalog::Table,
+                                    current : Catalog::Table,
+                                    plan : Plan,
+                                    constraint_drops : Array(Operation),
+                                    check_adds : Array(Operation)) : Nil
+      table = declared.name
+      declared.checks.each do |check|
+        found = current.checks.find { |live| live.name == check.name }
+        next if found && (check.expression || found == check)
+        constraint_drops << DropCheck.new(table, check.name) if found
+        check_adds << AddCheck.new(table, check, not_valid: true)
+        plan.online << ValidateConstraint.new(table, check.name)
+      end
+      current.checks.each do |live|
+        next if declared.checks.any? { |wanted| wanted.name == live.name }
+        if live.name.starts_with?("check_")
+          constraint_drops << DropCheck.new(table, live.name)
+        else
+          plan.notes << "ignored check #{live.name} on #{table} (no schema declares it)"
+        end
+      end
     end
 
     private def self.composite_self_reference?(table : Catalog::Table,

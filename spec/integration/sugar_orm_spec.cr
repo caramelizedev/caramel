@@ -75,6 +75,16 @@ module SugarSpec
     end
   end
 
+  struct Shelf < SugarORM::Schema
+    schema "sugar_shelves" do
+      field id : Int64, primary: true
+      field stock : Int32 = 0
+      field reserved : Int32 = 0
+      check stock: 0..10
+      check :reserved_within_stock, "reserved <= stock"
+    end
+  end
+
   alias Preloads = NamedTuple(users: Array(User), owner: User?, profile: Profile?)
 
   class Team::UpdateChangeset < SugarORM::Changeset(Team)
@@ -94,6 +104,16 @@ module SugarSpec
     def validate(cs)
       cs.validate_format(:email, /@/)
       cs.unique_constraint(:email, "is already registered")
+    end
+  end
+
+  class Shelf::CreateChangeset < SugarORM::Changeset(Shelf)
+    param stock : Int32
+    param reserved : Int32
+
+    def validate(cs)
+      cs.check_constraint(:stock)
+      cs.check_constraint(:reserved_within_stock, on: :reserved, message: "exceeds stock")
     end
   end
 
@@ -135,14 +155,16 @@ module SugarSpec
                "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
                "rate numeric(30,10) NOT NULL, fee numeric(30,10), snapshot jsonb NOT NULL)"
       owner.exec(quotes)
-      tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes"
+      owner.exec(SugarORM::DDL.create_table(SugarSpec::Shelf.__sugar_table))
+      tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes, sugar_shelves"
       sequences = "sugar_teams_id_seq, sugar_users_id_seq, sugar_profiles_id_seq, " \
-                  "sugar_quotes_id_seq"
+                  "sugar_quotes_id_seq, sugar_shelves_id_seq"
       owner.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{tables} TO caramel_model_spec")
       owner.exec("GRANT USAGE, SELECT ON SEQUENCE #{sequences} TO caramel_model_spec")
       yield owner, runtime
     ensure
-      owner.exec("DROP TABLE IF EXISTS sugar_quotes, sugar_profiles, sugar_users, sugar_teams")
+      owner.exec("DROP TABLE IF EXISTS sugar_shelves, sugar_quotes, sugar_profiles, " \
+                 "sugar_users, sugar_teams")
       runtime.close
       owner.close
     end
@@ -476,6 +498,41 @@ describe "SugarORM with PostgreSQL" do
         "SELECT rate::text AS rate FROM sugar_quotes", as: {rate: String}
       )
       rows.should eq([{rate: exact}])
+    end
+  end
+
+  it "maps a range check's violation to its field, and an expression check's to on:" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      # reserved: -1 keeps `reserved <= stock`, so only the range check fails.
+      below = SugarSpec::Shelf.create(stock: -1, reserved: -1)
+      below.saved?.should be_false
+      below.errors.should eq({"stock" => ["must be at least 0"]})
+      SugarSpec::Shelf.create(stock: 11).errors.should eq({"stock" => ["must be at most 10"]})
+      over = SugarSpec::Shelf.create(stock: 2, reserved: 5)
+      over.errors.should eq({"reserved" => ["exceeds stock"]})
+      SugarSpec::Shelf.query.count.should eq(0)
+
+      SugarORM::Repo.transaction do
+        SugarSpec::Shelf.create(stock: -1, reserved: -1).saved?.should be_false
+        SugarSpec::Shelf.create!(stock: 3, reserved: 1).stock.should eq(3)
+      end
+      SugarSpec::Shelf.query.count.should eq(1)
+    end
+  end
+
+  it "raises CheckViolation for a check no changeset maps, naming its constraint" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      below = SugarSpec::Shelf::DefaultChangeset.new(stock: -1, reserved: -1)
+      SugarORM::Repo.insert(below).errors.should eq({"stock" => ["must be at least 0"]})
+
+      unmapped = SugarSpec::Shelf::DefaultChangeset.new(stock: 1, reserved: 2)
+      error = expect_raises(SugarORM::CheckViolation) { SugarORM::Repo.insert(unmapped) }
+      error.constraint.should eq("check_sugar_shelves_reserved_within_stock")
+      error.table.should eq("sugar_shelves")
+
+      raw = "INSERT INTO sugar_shelves (stock, reserved) VALUES (-1, -1)"
+      error = expect_raises(SugarORM::CheckViolation) { SugarORM.sql_exec(raw) }
+      error.constraint.should eq("check_sugar_shelves_stock")
     end
   end
 end

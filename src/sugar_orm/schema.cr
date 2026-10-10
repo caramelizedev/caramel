@@ -29,7 +29,8 @@ module SugarORM
       end
     end
 
-    {% for name in %w(field timestamps belongs_to has_many has_one index drop_column tenant) %}
+    {% for name in %w(field timestamps belongs_to has_many has_one index drop_column
+                     check tenant) %}
       # :nodoc:
       macro {{ name.id }}(*arguments, **options)
         \{% raise "`{{ name.id }}` belongs inside the schema block.\n" +
@@ -93,13 +94,14 @@ module SugarORM
          ) %}
       {% holds_only = "Remediation: a schema block holds only " +
                       "field, timestamps, belongs_to, has_many, has_one, " +
-                      "index, drop_column and tenant declarations." %}
+                      "index, drop_column, check and tenant declarations." %}
       {% owner = @type.name(generic_args: false).stringify.split("::").last %}
       {% owner_key = owner.underscore + "_id" %}
       {% columns = [] of Nil %}
       {% associations = [] of Nil %}
       {% indexes = [] of Nil %}
       {% explicit_indexes = [] of Nil %}
+      {% check_declarations = [] of Nil %}
       {% foreign_keys = [] of Nil %}
       {% drops = [] of Nil %}
       {% primary = [] of Nil %}
@@ -431,6 +433,36 @@ module SugarORM
           {% end %}
           {% drops << {node: statement, name: statement.args[0].id.stringify} %}
 
+        {% elsif kind == "check" %}
+          {% suffixed = statement.args.size == 2 && named.empty? %}
+          {% suffixed = suffixed && (statement.args[0].is_a?(SymbolLiteral) ||
+                                     statement.args[0].is_a?(StringLiteral)) %}
+          {% suffixed = suffixed && statement.args[1].is_a?(StringLiteral) %}
+          {% suffixed = suffixed && statement.args[0].id.stringify =~ /\A[a-z][a-z0-9_]*\z/ %}
+          {% if statement.args.empty? && !named.empty? %}
+            {% for argument in named %}
+              {% check_declarations << {
+                   node:       statement,
+                   suffix:     argument.name.stringify,
+                   column:     argument.name.stringify,
+                   range:      argument.value,
+                   expression: nil,
+                 } %}
+            {% end %}
+          {% elsif suffixed %}
+            {% check_declarations << {
+                 node:       statement,
+                 suffix:     statement.args[0].id.stringify,
+                 column:     nil,
+                 range:      nil,
+                 expression: statement.args[1],
+               } %}
+          {% else %}
+            {% problem = "check expects column ranges or one named SQL expression, " +
+                         "like `check stock: 0..`, `check quantity: 1..10` " +
+                         "or `check :dates, \"starts_at < ends_at\"`." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
         {% else %}
           {% problem = "Unknown schema declaration '#{kind.id}'.\n" + holds_only %}
           {% statement.raise problem + statement_at %}
@@ -512,6 +544,84 @@ module SugarORM
         {% end %}
         {% entry = {name: index_name, columns: indexed, unique: index[:unique], tenant: false} %}
         {% indexes = replaced + [entry] %}
+      {% end %}
+      {% checks = [] of Nil %}
+      {% for check in check_declarations %}
+        {% node = check[:node] %}
+        {% node_at = "\n  --> #{node.filename.id}:" +
+                     "#{node.line_number}:#{node.column_number}" %}
+        {% constraint = "check_#{table.id}_#{check[:suffix].id}" %}
+        {% entry = {name: constraint, column: nil, min: nil, max: nil, expression: nil} %}
+        {% if check[:expression] %}
+          {% if check[:expression] =~ /;/ %}
+            {% problem = "check :#{check[:suffix].id}: takes one SQL expression without ';'." %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% entry = {
+               name:       constraint,
+               column:     nil,
+               min:        nil,
+               max:        nil,
+               expression: check[:expression],
+             } %}
+        {% else %}
+          {% column = check[:column] %}
+          {% found = columns.find { |candidate| candidate[:name] == column } %}
+          {% unless found %}
+            {% problem = "check references '#{column.id}', " +
+                         "which is not a column of #{@type}.\n" +
+                         "Columns: #{columns.map(&.[:name]).join(", ").id}" %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% integer = found[:scalar] == "Int32" || found[:scalar] == "Int64" %}
+          {% unless integer && !found[:codec] %}
+            {% problem = "check #{column.id}: needs an Int32 or Int64 field, " +
+                         "but '#{column.id}' is #{found[:declared].id}.\n" +
+                         "Remediation: use a named SQL expression, " +
+                         "like `check :#{column.id}_rule, \"…\"`." %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% range = check[:range] %}
+          {% bounded = false %}
+          {% if range.is_a?(RangeLiteral) && !range.excludes_end? %}
+            {% ends = [range.begin, range.end] %}
+            {% literals = ends.reject(&.is_a?(Nop)) %}
+            {% whole = literals.all? { |bound| bound.is_a?(NumberLiteral) } %}
+            {% whole = whole && literals.all? { |bound| bound.kind.stringify =~ /\A:[iu]/ } %}
+            {% bounded = whole && !literals.empty? %}
+          {% end %}
+          {% unless bounded %}
+            {% problem = "check #{column.id}: takes an inclusive range of integer " +
+                         "literals, like `0..`, `..10` or `1..10`." %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% lo, hi = nil, nil %}
+          {% unless range.begin.is_a?(Nop) %}
+            {% lo = range.begin.stringify.gsub(/_?[iu](8|16|32|64|128)\z/, "").gsub(/_/, "") %}
+          {% end %}
+          {% unless range.end.is_a?(Nop) %}
+            {% hi = range.end.stringify.gsub(/_?[iu](8|16|32|64|128)\z/, "").gsub(/_/, "") %}
+          {% end %}
+          {% if lo && hi && range.begin > range.end %}
+            {% problem = "check #{column.id}: #{lo.id}..#{hi.id} is empty.\n" +
+                         "Remediation: put the lower bound first." %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% entry = {name: constraint, column: column, min: lo, max: hi, expression: nil} %}
+        {% end %}
+        {% if checks.any? { |existing| existing[:name] == constraint } %}
+          {% problem = "#{@type} declares the check #{constraint.id} twice.\n" +
+                       "Remediation: give each check its own name; " +
+                       "a range check is named after its column." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% if constraint.size > 63 %}
+          {% problem = "The check name #{constraint.id} is longer than " +
+                       "PostgreSQL's 63-byte limit.\n" +
+                       "Remediation: shorten the check's name or the table name." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% checks << entry %}
       {% end %}
       {% for drop in drops %}
         {% if columns.any? { |column| column[:name] == drop[:name] } %}
@@ -743,7 +853,23 @@ module SugarORM
           ] of ::SugarORM::Catalog::Index,
           foreign_keys: __sugar_foreign_keys,
           drops: {{ drops.map(&.[:name]) }} of String,
+          checks: __sugar_checks,
         )
+      end
+
+      # The CHECK constraints this schema declares, in declaration order.
+      def self.__sugar_checks : Array(::SugarORM::Catalog::Check)
+        [
+          {% for check in checks %}
+            ::SugarORM::Catalog::Check.new(
+              name: {{ check[:name] }},
+              column: {{ check[:column] }},
+              min: {{ check[:min] ? "#{check[:min].id}_i64".id : nil }},
+              max: {{ check[:max] ? "#{check[:max].id}_i64".id : nil }},
+              expression: {{ check[:expression] }},
+            ),
+          {% end %}
+        ] of ::SugarORM::Catalog::Check
       end
 
       {% for association in associations %}
@@ -868,6 +994,11 @@ module SugarORM
           {% for index in indexes %}
             {% if index[:unique] && !index[:tenant] %}
               cs.unique_constraint(:{{ index[:columns][0].id }})
+            {% end %}
+          {% end %}
+          {% for check in checks %}
+            {% if check[:column] %}
+              cs.check_constraint(:{{ check[:column].id }})
             {% end %}
           {% end %}
         end

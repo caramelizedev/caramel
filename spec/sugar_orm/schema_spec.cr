@@ -74,6 +74,15 @@ describe SugarORM::Schema do
     table.indexes.should eq([index])
   end
 
+  it "turns range and expression checks into named catalog checks" do
+    SugarUnit::Shelf.__sugar_table.checks.should eq([
+      Catalog::Check.new("check_unit_shelves_stock", column: "stock", min: 0_i64, max: 10_i64),
+      Catalog::Check.new("check_unit_shelves_reserved", column: "reserved", max: 100_i64),
+      Catalog::Check.new("check_unit_shelves_reserved_within_stock",
+        expression: "reserved <= stock"),
+    ])
+  end
+
   it "declares every concrete schema in the program, sorted by table name" do
     names = Catalog.declared.map(&.name)
     names.should eq(names.sort)

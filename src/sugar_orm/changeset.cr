@@ -51,6 +51,8 @@ module SugarORM
     @saved = false
     @changes = {} of String => Value
     @unique_constraints = [] of {String, String}
+    # The constraint name, the column that takes the error and an explicit message.
+    @check_constraints = [] of {String, String, String?}
 
     # Declares a permitted param; it must name a non-system field of `T` with a
     # compatible type.
@@ -244,6 +246,26 @@ module SugarORM
       @unique_constraints << {T.__sugar_column(field), message}
     end
 
+    # Maps a violation (SQLSTATE 23514) of the range check `check`, named by its
+    # column, to an error on that column, instead of raising, when this changeset
+    # saves. Without a *message* the error says how far the value is out of range.
+    def check_constraint(check : Symbol, message : String? = nil) : Nil
+      declared = declared_check(check)
+      column = declared.column
+      unless column
+        raise ArgumentError.new("check_constraint(:#{check}) names an expression check, " \
+                                "which bounds no field; pass on: :field")
+      end
+      @check_constraints << {declared.name, column, message}
+    end
+
+    # Maps a violation of any declared check, such as a named SQL expression, to
+    # an error on *field*.
+    def check_constraint(check : Symbol, *, on field : T::Field,
+                         message : String = Wording.invalid) : Nil
+      @check_constraints << {declared_check(check).name, T.__sugar_column(field), message}
+    end
+
     # :nodoc:
     def __sugar_insert : Nil
       unless insert?
@@ -328,11 +350,12 @@ module SugarORM
       validate(self)
     end
 
-    # Runs the write; inside a transaction a changeset with unique constraints
-    # writes under a savepoint so a mapped violation leaves the transaction usable.
+    # Runs the write; inside a transaction a changeset with unique or check
+    # constraints writes under a savepoint so a mapped violation leaves the
+    # transaction usable.
     # The block is captured so its query is compiled once, not once per path.
     private def write(&query : -> T?) : Nil
-      stored = if @unique_constraints.empty?
+      stored = if @unique_constraints.empty? && @check_constraints.empty?
                  query.call
                else
                  begin
@@ -342,6 +365,11 @@ module SugarORM
                    raise ex unless constraint
                    add_error(constraint[0], constraint[1])
                    return
+                 rescue ex : CheckViolation
+                   entry = check_for(ex)
+                   raise ex unless entry
+                   add_error(entry[1], entry[2] || range_message(entry[0]))
+                   return
                  end
                end
       if stored
@@ -349,6 +377,39 @@ module SugarORM
         @saved = true
       else
         add_error("_base", Wording.record_gone)
+      end
+    end
+
+    # The declared check constraint the violation names.
+    private def check_for(violation : CheckViolation) : {String, String, String?}?
+      return unless violation.table.nil? || violation.table == T.__sugar_table_name
+      @check_constraints.find { |(name, _, _)| name == violation.constraint }
+    end
+
+    # The check `check` of `T`, or an ArgumentError listing the checks it declares.
+    private def declared_check(check : Symbol) : Catalog::Check
+      name = "check_#{T.__sugar_table_name}_#{check}"
+      T.__sugar_checks.find { |declared| declared.name == name } || begin
+        prefix = "check_#{T.__sugar_table_name}_"
+        suffixes = T.__sugar_checks.map(&.name.lchop(prefix))
+        raise ArgumentError.new(
+          "#{T} declares no check named #{check}; its checks: #{suffixes.join(", ")}")
+      end
+    end
+
+    # Says how the column's value breaks the range check named *name*.
+    private def range_message(name : String) : String
+      check = T.__sugar_checks.find! { |declared| declared.name == name }
+      column = check.column || return Wording.invalid
+      value = @changes.has_key?(column) ? @changes[column] : @original.try(&.__sugar_get(column))
+      return Wording.invalid unless value.is_a?(Int32 | Int64)
+      min, max = check.min, check.max
+      if min && value < min
+        Wording.at_least(min)
+      elsif max && value > max
+        Wording.at_most(max)
+      else
+        Wording.invalid
       end
     end
 

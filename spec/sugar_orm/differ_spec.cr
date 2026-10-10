@@ -27,9 +27,10 @@ end
 private def books(columns = [] of Catalog::Column,
                   indexes = [] of Catalog::Index,
                   keys = [] of Catalog::ForeignKey,
-                  drops = [] of String) : Catalog::Table
+                  drops = [] of String,
+                  checks = [] of Catalog::Check) : Catalog::Table
   all_columns = [id_column, required("title")] + columns
-  Catalog::Table.new("books", all_columns, indexes, keys, drops)
+  Catalog::Table.new("books", all_columns, indexes, keys, drops, checks)
 end
 
 private def sql(operations : Array(Differ::Operation)) : Array(String)
@@ -361,6 +362,57 @@ describe SugarORM::Differ do
     online.transactional?.should be_false
   end
 
+  it "carries the checks of a new table inline, with nothing to validate" do
+    stock = Catalog::Check.new("check_books_stock", column: "stock", min: 0_i64)
+    plan = Differ.diff([books([required("stock", "integer")], checks: [stock])],
+      [] of Catalog::Table)
+    plan.online.should be_empty
+    plan.transactional.size.should eq(1)
+    sql(plan.transactional).first.should contain(%(CONSTRAINT "check_books_stock" CHECK ))
+  end
+
+  it "adds a check to an existing table NOT VALID, last, and validates it online" do
+    stock = Catalog::Check.new("check_books_stock", column: "stock", min: 0_i64)
+    declared = books([required("stock", "integer", "0")], checks: [stock])
+    plan = Differ.diff([declared], [books])
+    add = %(ALTER TABLE "books" ADD CONSTRAINT "check_books_stock" ) \
+          %(CHECK ("stock" >= 0) NOT VALID)
+    sql(plan.transactional).should eq([
+      %(ALTER TABLE "books" ADD COLUMN "stock" integer NOT NULL DEFAULT 0),
+      add,
+    ])
+    sql(plan.online).should eq([%(ALTER TABLE "books" VALIDATE CONSTRAINT "check_books_stock")])
+  end
+
+  it "replaces a range check whose bounds changed, dropping the old one first" do
+    old = Catalog::Check.new("check_books_pages", column: "pages", min: 0_i64)
+    wider = Catalog::Check.new("check_books_pages", column: "pages", min: 1_i64, max: 9_i64)
+    columns = [nullable("pages", "integer")]
+    plan = Differ.diff([books(columns, checks: [wider])], [books(columns, checks: [old])])
+    sql(plan.transactional).should eq([
+      %(ALTER TABLE "books" DROP CONSTRAINT "check_books_pages"),
+      %(ALTER TABLE "books" ADD CONSTRAINT "check_books_pages" ) \
+      %(CHECK ("pages" >= 1 AND "pages" <= 9) NOT VALID),
+    ])
+    sql(plan.online).should eq([%(ALTER TABLE "books" VALIDATE CONSTRAINT "check_books_pages")])
+  end
+
+  it "compares an expression check by name only, since PostgreSQL rewrites its text" do
+    declared = Catalog::Check.new("check_books_dates", expression: "starts_at<ends_at")
+    live = Catalog::Check.new("check_books_dates", expression: "((starts_at < ends_at))")
+    plan = Differ.diff([books(checks: [declared])], [books(checks: [live])])
+    plan.empty?.should be_true
+  end
+
+  it "drops an undeclared check_ constraint and only notes any other check" do
+    old = Catalog::Check.new("check_books_old", expression: "true")
+    positive = Catalog::Check.new("positive_price", expression: "((price > 0))")
+    plan = Differ.diff([books], [books(checks: [old, positive])])
+    sql(plan.transactional).should eq([%(ALTER TABLE "books" DROP CONSTRAINT "check_books_old")])
+    plan.online.should be_empty
+    plan.notes.should eq(["ignored check positive_price on books (no schema declares it)"])
+  end
+
   it "halts on an INVALID index left by a failed concurrent build" do
     skipped = "skipped index lower_title on books " \
               "(expression, partial or constraint index)"
@@ -390,14 +442,16 @@ describe SugarORM::Catalog do
       references_columns: ["address", "account_id"],
       on_delete: "SET NULL",
     )
-    tables = [books([email], [index], [key], ["legacy"])]
+    check = Catalog::Check.new("check_books_pages", column: "pages", min: 0_i64, max: 9_i64)
+    dates = Catalog::Check.new("check_books_dates", expression: "starts_at < ends_at")
+    tables = [books([email], [index], [key], ["legacy"], [check, dates])]
     Catalog.from_json(Catalog.to_json(tables)).should eq(tables)
-    unnamed = %({"version":2,"tables":[{"name":"x"}]})
+    unnamed = %({"version":3,"tables":[{"name":"x"}]})
     expect_raises(ArgumentError, "invalid schema document") { Catalog.from_json(unnamed) }
   end
 
   it "refuses a schema document of an earlier version" do
-    earlier = %({"version":1,"tables":[]})
+    earlier = %({"version":2,"tables":[]})
     expect_raises(ArgumentError, "unsupported schema document version") do
       Catalog.from_json(earlier)
     end
@@ -419,5 +473,21 @@ describe SugarORM::Introspection do
     normalize.call("'5'::text", "integer").should eq("'5'::text")
     normalize.call(sequence, "bigint").should eq(sequence)
     normalize.call(nil, "text").should be_nil
+  end
+
+  it "reads a CHECK as PostgreSQL prints it: a range on one integer column, else its text" do
+    check = ->(definition : String) { SugarORM::Introspection.check("check_books_x", definition) }
+    check.call("CHECK ((stock >= 0))").should eq(
+      Catalog::Check.new("check_books_x", column: "stock", min: 0_i64))
+    check.call("CHECK (((quantity >= 1) AND (quantity <= 10)))").should eq(
+      Catalog::Check.new("check_books_x", column: "quantity", min: 1_i64, max: 10_i64))
+    check.call("CHECK ((balance >= '-5'::integer))").should eq(
+      Catalog::Check.new("check_books_x", column: "balance", min: -5_i64))
+    check.call("CHECK ((big <= '3000000000'::bigint))").should eq(
+      Catalog::Check.new("check_books_x", column: "big", max: 3_000_000_000_i64))
+    check.call(%(CHECK (("limit" <= 10)) NOT VALID)).should eq(
+      Catalog::Check.new("check_books_x", column: "limit", max: 10_i64))
+    check.call("CHECK ((starts_at < ends_at))").should eq(
+      Catalog::Check.new("check_books_x", expression: "((starts_at < ends_at))"))
   end
 end

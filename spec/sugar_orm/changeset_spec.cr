@@ -103,4 +103,19 @@ describe SugarORM::Changeset do
     SugarORM::Repo.insert(changeset).saved?.should be_false
     SugarORM::Repo.statements_executed.should eq(before)
   end
+
+  it "refuses check_constraint for a check the schema does not declare" do
+    changeset = SugarUnit::Shelf::DefaultChangeset.new(stock: 1)
+    expect_raises(ArgumentError, /declares no check named missing/) do
+      changeset.check_constraint(:missing)
+    end
+  end
+
+  it "refuses check_constraint without on: for an expression check" do
+    changeset = SugarUnit::Shelf::DefaultChangeset.new(stock: 1)
+    expect_raises(ArgumentError, /names an expression check/) do
+      changeset.check_constraint(:reserved_within_stock)
+    end
+    changeset.check_constraint(:reserved_within_stock, on: :reserved)
+  end
 end

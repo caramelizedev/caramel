@@ -13,6 +13,14 @@ module SugarORM
       "can't be blank"
     end
 
+    def at_least(min) : String
+      "must be at least #{min}"
+    end
+
+    def at_most(max) : String
+      "must be at most #{max}"
+    end
+
     def greater_than(than) : String
       "must be greater than #{than}"
     end

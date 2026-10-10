@@ -140,7 +140,7 @@ module Caramel::Frappe
     end
 
     # One transactional migration, plus a separate autocommit migration for
-    # CONCURRENTLY index changes and foreign key validation.
+    # CONCURRENTLY index changes and constraint validation.
     private def migrations(name : String,
                            plan : SugarORM::Differ::Plan) : Array(SugarORM::Migration)
       latest = latest_version

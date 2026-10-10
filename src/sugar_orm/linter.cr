@@ -25,7 +25,7 @@ module SugarORM
     DROP_INDEX    = /\ADROP\s+INDEX\s+CONCURRENTLY\s/i
     REINDEX       = /\AREINDEX\s.*\bCONCURRENTLY\b/i
     ALTER_TABLE   = /\AALTER\s+TABLE\s+#{IF_EXISTS}#{ONLY}#{NAME}\s+(.+)\z/im
-    VALIDATE      = /\AVALIDATE\s+CONSTRAINT\s+#{IDENTIFIER}\s*;?\z/i
+    VALIDATE      = /\AVALIDATE\s+CONSTRAINT\s+(#{IDENTIFIER})\s*;?\z/i
     ADD_COLUMN    = /\AADD\s+#{NOT_CONSTRAINT}#{COLUMN}#{IF_NOT_EXISTS}(#{IDENTIFIER})\s/i
     DROP_COLUMN   = /\ADROP\s+(?!CONSTRAINT\b)#{COLUMN}#{IF_EXISTS}(#{IDENTIFIER})/i
     RENAME_COLUMN = /\ARENAME\s+(?!(?:TO|CONSTRAINT)\b)#{COLUMN}(#{IDENTIFIER})\s+TO\s/i
@@ -190,12 +190,22 @@ module SugarORM
     end
 
     # Online statements may run in autocommit: CONCURRENTLY statements and
-    # foreign key validation, which must not share the transaction that added
+    # constraint validation, which must not share the transaction that added
     # the NOT VALID constraint, or its lock is held for the whole scan.
     def self.online?(statement : String) : Bool
       return true if concurrent?(statement)
       match = code(statement).match(ALTER_TABLE)
       !!match && actions(match[2]).all?(&.matches?(VALIDATE))
+    end
+
+    # The `{table, constraint}` a statement validates, when it is a lone
+    # `ALTER TABLE … VALIDATE CONSTRAINT …`.
+    def self.validated_constraint(statement : String) : {String, String}?
+      match = code(statement).match(ALTER_TABLE) || return
+      actions = actions(match[2])
+      return unless actions.size == 1
+      validate = actions.first.match(VALIDATE) || return
+      {identifier(match[1]), identifier(validate[1])}
     end
 
     # The index a CREATE INDEX CONCURRENTLY statement builds, when it names one.

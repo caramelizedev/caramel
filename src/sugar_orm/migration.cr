@@ -35,7 +35,7 @@ module SugarORM
     end
 
     # A migration made only of online statements (CONCURRENTLY index builds
-    # and drops, foreign key validation) runs outside a transaction.
+    # and drops, constraint validation) runs outside a transaction.
     def transactional? : Bool
       !@statements.all? { |statement| Linter.online?(statement) }
     end
@@ -66,6 +66,27 @@ module SugarORM
           TEXT
       end
     end
+
+    # A VALIDATE CONSTRAINT that existing rows fail. The constraint stays
+    # NOT VALID: it refuses new rows that break it.
+    class ValidationFailed < Exception
+      getter constraint : String
+
+      def initialize(migration : Migration,
+                     table : String,
+                     @constraint : String,
+                     cause : PQ::PQError)
+        super(<<-TEXT, cause)
+          #{migration} failed while validating #{@constraint} on #{table}: #{cause.message}
+          #{@constraint} stays NOT VALID: it refuses new rows that break it, \
+          but rows written before it still do.
+            Remediation: fix or delete those rows, then migrate again.
+          TEXT
+      end
+    end
+
+    # What `frappe migrate` reports and exits 1 for.
+    alias Failure = Drift | ConcurrentIndexFailed | ValidationFailed
 
     LOCK_ID = 0x434152414D454C_i64
     @migrations : Array(Migration)
@@ -141,6 +162,9 @@ module SugarORM
         rescue ex : PQ::PQError
           if index && invalid_index?(connection, index)
             raise ConcurrentIndexFailed.new(migration, index, ex)
+          end
+          Linter.validated_constraint(sql).try do |table, constraint|
+            raise ValidationFailed.new(migration, table, constraint, ex)
           end
           raise ex
         end

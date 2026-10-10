@@ -30,6 +30,7 @@ module SugarORM
         lines << "PRIMARY KEY (#{keys})"
       end
       table.foreign_keys.each { |key| lines << constraint(key) }
+      table.checks.each { |check| lines << check_constraint(check) }
       body = lines.join(",\n") { |line| "  #{line}" }
       "CREATE TABLE #{quote(table.name)} (\n#{body}\n)"
     end
@@ -109,12 +110,26 @@ module SugarORM
       operation.not_valid ? "#{sql} NOT VALID" : sql
     end
 
-    def self.render(operation : Differ::ValidateForeignKey) : String
+    def self.render(operation : Differ::ValidateConstraint) : String
       "ALTER TABLE #{quote(operation.table)} VALIDATE CONSTRAINT #{quote(operation.name)}"
+    end
+
+    def self.render(operation : Differ::AddCheck) : String
+      sql = "ALTER TABLE #{quote(operation.table)} ADD #{check_constraint(operation.check)}"
+      operation.not_valid ? "#{sql} NOT VALID" : sql
+    end
+
+    def self.render(operation : Differ::DropCheck) : String
+      "ALTER TABLE #{quote(operation.table)} DROP CONSTRAINT #{quote(operation.name)}"
     end
 
     def self.render(operation : Differ::DropForeignKey) : String
       "ALTER TABLE #{quote(operation.table)} DROP CONSTRAINT #{quote(operation.name)}"
+    end
+
+    # `CONSTRAINT "name" CHECK (…)`: the declared SQL, or the bounds of a range.
+    def self.check_constraint(check : Catalog::Check) : String
+      "CONSTRAINT #{quote(check.name)} CHECK (#{check_expression(check)})"
     end
 
     # The start of a statement that changes `column` of `table`.
@@ -124,6 +139,21 @@ module SugarORM
 
     private def self.constraint(key : Catalog::ForeignKey) : String
       "CONSTRAINT #{quote(key.name)} #{references(key)}"
+    end
+
+    private def self.check_expression(check : Catalog::Check) : String
+      check.expression || range_expression(check)
+    end
+
+    private def self.range_expression(check : Catalog::Check) : String
+      column = check.column
+      unless column
+        raise ArgumentError.new("check #{check.name} has neither a column nor an expression")
+      end
+      bounds = [] of String
+      check.min.try { |min| bounds << "#{quote(column)} >= #{min}" }
+      check.max.try { |max| bounds << "#{quote(column)} <= #{max}" }
+      bounds.join(" AND ")
     end
 
     private def self.references(key : Catalog::ForeignKey) : String
