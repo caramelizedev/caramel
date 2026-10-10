@@ -8,7 +8,7 @@ module SugarORM
     def self.to_json(tables : Array(Table)) : String
       JSON.build do |json|
         json.object do
-          json.field "version", 2
+          json.field "version", 3
           json.field "tables" do
             json.array do
               tables.each do |table|
@@ -54,6 +54,19 @@ module SugarORM
                     end
                   end
                   json.field "drops", table.drops
+                  json.field "checks" do
+                    json.array do
+                      table.checks.each do |check|
+                        json.object do
+                          json.field "name", check.name
+                          json.field "column", check.column
+                          json.field "min", check.min
+                          json.field "max", check.max
+                          json.field "expression", check.expression
+                        end
+                      end
+                    end
+                  end
                 end
               end
             end
@@ -65,7 +78,7 @@ module SugarORM
     def self.from_json(text : String) : Array(Table)
       document = JSON.parse(text)
       version = document["version"].as_i
-      raise ArgumentError.new("unsupported schema document version") unless version == 2
+      raise ArgumentError.new("unsupported schema document version") unless version == 3
       document["tables"].as_a.map do |table|
         columns = table["columns"].as_a.map do |column|
           Column.new(
@@ -94,12 +107,22 @@ module SugarORM
             on_delete: key["on_delete"].as_s,
           )
         end
+        checks = table["checks"].as_a.map do |check|
+          Check.new(
+            name: check["name"].as_s,
+            column: check["column"].as_s?,
+            min: check["min"].as_i64?,
+            max: check["max"].as_i64?,
+            expression: check["expression"].as_s?,
+          )
+        end
         Table.new(
           name: table["name"].as_s,
           columns: columns,
           indexes: indexes,
           foreign_keys: foreign_keys,
           drops: table["drops"].as_a.map(&.as_s),
+          checks: checks,
         )
       end
     rescue ex : JSON::ParseException | KeyError | TypeCastError
@@ -127,6 +150,9 @@ module SugarORM
 
     # A plain or scientific decimal number, as a numeric default is spelled.
     NUMBER_LITERAL = /\A-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\z/i
+
+    # `column >= min`, `column <= max` or both, once parentheses and casts are gone.
+    RANGE_CHECK = /\A([a-z][a-z0-9_]*) (>=|<=) (-?\d+)(?: AND \1 <= (-?\d+))?\z/
 
     TABLES = <<-SQL
       SELECT c.relname::text
@@ -188,21 +214,33 @@ module SugarORM
       ORDER BY 1, 2
       SQL
 
+    CHECKS = <<-SQL
+      SELECT t.relname::text, con.conname::text, pg_get_constraintdef(con.oid)
+      FROM pg_constraint con
+      JOIN pg_class t ON t.oid = con.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE con.contype = 'c' AND n.nspname = current_schema() AND t.relkind IN ('r', 'p')
+      ORDER BY 1, 2
+      SQL
+
     COLUMN_ROW      = {String, String, String, Bool, String?, Bool, Bool}
     INDEX_ROW       = {String, String, Bool, Bool, Bool, Array(String)}
     FOREIGN_KEY_ROW = {String, String, Array(String), String, Array(String), String}
+    CHECK_ROW       = {String, String, String}
 
     def self.read(db : DB::Database | DB::Connection) : Snapshot
       invalid, skipped = [] of String, [] of String
       columns = read_columns(db)
       indexes = read_indexes(db, invalid, skipped)
       keys = read_foreign_keys(db)
+      checks = read_checks(db)
       tables = db.query_all(TABLES, as: String).map do |table|
         Catalog::Table.new(
           name: table,
           columns: columns.fetch(table) { [] of Catalog::Column },
           indexes: indexes.fetch(table) { [] of Catalog::Index },
           foreign_keys: keys.fetch(table) { [] of Catalog::ForeignKey },
+          checks: checks.fetch(table) { [] of Catalog::Check },
         )
       end
       Snapshot.new(tables, invalid, skipped)
@@ -225,6 +263,25 @@ module SugarORM
       expression
     end
 
+    # A live CHECK as the catalog holds it: `stock >= 0` and bounds on one
+    # integer column become a range, anything else keeps PostgreSQL's text.
+    # pg_get_constraintdef spells it `CHECK ((stock >= 0))`, with `'-5'::integer`
+    # for a negative bound and `NOT VALID` after an unvalidated one.
+    def self.check(name : String, definition : String) : Catalog::Check
+      body = definition.lchop("CHECK ").rchop(" NOT VALID")
+      plain = body.gsub(/::(?:integer|bigint)\b/, "").delete("()'\"")
+      match = plain.match(RANGE_CHECK)
+      return Catalog::Check.new(name, expression: body) unless match
+      column, bound, first, second = match[1], match[2], match[3], match[4]?
+      if bound == ">="
+        Catalog::Check.new(name, column: column, min: first.to_i64, max: second.try(&.to_i64))
+      elsif second
+        Catalog::Check.new(name, expression: body)
+      else
+        Catalog::Check.new(name, column: column, max: first.to_i64)
+      end
+    end
+
     # The columns of each table, in attribute order.
     private def self.read_columns(db : DB::Database | DB::Connection)
       columns = by_table(Catalog::Column)
@@ -240,6 +297,14 @@ module SugarORM
         )
       end
       columns
+    end
+
+    # Checks by table, each as `Introspection.check` reads it.
+    private def self.read_checks(db : DB::Database | DB::Connection)
+      checks = by_table(Catalog::Check)
+      rows = db.query_all(CHECKS, as: CHECK_ROW)
+      rows.each { |table, name, definition| checks[table] << check(name, definition) }
+      checks
     end
 
     # Valid plain indexes by table; an invalid index, or one the differ cannot

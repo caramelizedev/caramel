@@ -15,15 +15,17 @@ An application needs pure schemas, compile-time association safety, explicit cha
 ## Decision
 
 1. **Schemas** are immutable structs: `struct Team < SugarORM::Schema; schema "teams" do … end; end`.
-   - `field` takes `primary:`, a literal default, `renamed_from:` and `codec:`. The other declarations are `timestamps`, `belongs_to`, `has_many`, `has_one`, `index` and `drop_column`.
+   - `field` takes `primary:`, a literal default, `renamed_from:` and `codec:`. The other declarations are `timestamps`, `belongs_to`, `has_many`, `has_one`, `index`, `drop_column` and `check`.
    - Each table belongs to one schema: a second concrete schema that names the same table fails to compile, naming both.
    - A field's type is `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, optionally nilable, or any type with `codec: C`, where `C.sql_type` (`numeric`, `numeric(P,S)`, `jsonb` or `text`), `C.encode(value) : String` and `C.decode(text)` map it to text. Rows read codec columns as text and writes bind the encoded text, so no value passes through a float. A codec field takes no default and matches only a value or nil in `where` and in `validate_inclusion`. Adding a required codec field to an existing table halts, as it has no default. `SugarORM::JSONB(T)` stores a JSON-serializable type.
+   - `check stock: 0.., quantity: 1..10` bounds `Int32` or `Int64` fields with inclusive integer ranges, and `check :dates, "starts_at < ends_at"` adds a named SQL expression. Each becomes the CHECK constraint `check_<table>_<name>`, where a range check's name is its column. Range checks are compared by their bounds; expression checks by name only, because PostgreSQL rewrites their SQL, so changing one needs a new name.
    - Instances have getters only, plus `with(**)` for a changed copy. They hold no connection and have no callbacks, and every instance is a stored row.
    - `scope name(args) { … }` defines sentence scopes.
 2. **Changesets** are `abstract class SugarORM::Changeset(T)` subclasses.
    - They declare `param` fields, which are checked against the schema at compile time.
    - `validate(cs)` is written as a method taking the changeset, and there are validators for required, presence, comparison, length, format and inclusion.
    - `unique_constraint` maps SQLSTATE 23505 to a field error.
+   - `check_constraint(:name)` maps SQLSTATE 23514 of a declared range check to `must be at least N` or `must be at most N` on its field; an expression check needs `on: :field`. The default changeset maps every unique index and range check.
    - `SugarORM::Repo.insert` and `SugarORM::Repo.update` return the same changeset, reporting `saved?`, `record` and `errors`.
    - A changeset accumulates errors and outcome. That is the mutable boundary, so it is a class. Schemas stay pure values.
 3. **Facade.** `Team.create(**)` and `team.update(**)` build `Team::CreateChangeset`/`UpdateChangeset` when the program defines them, and otherwise a generated `Team::DefaultChangeset`. Both run through the Repo and return the changeset. The bang forms return the record or raise `SugarORM::Invalid`. Every facade method and query terminal also accepts an explicit `db` handle first (`User.create!(db, …)`, `.first!(db)`).

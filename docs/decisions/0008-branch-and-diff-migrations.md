@@ -25,7 +25,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
    5. The branch is always dropped, and on any failure the written files are removed.
 
    `frappe make resource` derives its `CREATE TABLE` migration through the same DDL renderer, offline, because the table is new.
-3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. Foreign keys to existing tables are added `NOT VALID` and validated in the online migration.
+3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`.
 4. **Lints.** The linter runs over every pending migration before any statement executes:
    - **Rule 1:** a blocking `CREATE INDEX` on an existing table.
    - **Rule 2:** `ADD COLUMN … NOT NULL` without `DEFAULT`.
@@ -38,6 +38,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
    - A drop comes from the schema directive `drop_column :name`.
    - Derived SQL carries the annotations `-- caramel:allow-rename table.column` and `-- caramel:allow-drop table.column`, which the linter accepts. Hand-written SQL must state them to pass.
    - Otherwise the differ halts, with a `Remediation:` line instead of emitting destructive DDL.
+   - SugarORM owns CHECK constraints named `check_…`: an undeclared one is dropped, and any other CHECK is left in place with a note.
 6. **Environments.** `--dev-override` turns violations and overridable halts into warnings only when `CARAMEL_ENV=development`. The test and production environments, which include staging, always enforce. After migrating, `frappe migrate` reports schema drift read-only.
 
 ## Reasons

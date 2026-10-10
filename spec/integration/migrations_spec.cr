@@ -149,6 +149,77 @@ describe SugarORM::Migrator do
     end
   end
 
+  it "reads back range and expression checks, so the re-diff of a created table is empty" do
+    id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+    integer = ->(name : String) { Catalog::Column.new(name, "integer", false, nil) }
+    moment = ->(name : String) do
+      Catalog::Column.new(name, "timestamp with time zone", false, nil)
+    end
+    checks = [
+      Catalog::Check.new("check_shelves_balance", column: "balance", min: -5_i64),
+      Catalog::Check.new("check_shelves_big", column: "big", max: 3_000_000_000_i64),
+      Catalog::Check.new("check_shelves_dates", expression: "starts_at < ends_at"),
+      Catalog::Check.new("check_shelves_limit", column: "limit", max: 10_i64),
+      Catalog::Check.new("check_shelves_quantity", column: "quantity", min: 1_i64, max: 10_i64),
+      Catalog::Check.new("check_shelves_stock", column: "stock", min: 0_i64),
+    ]
+    shelves = Catalog::Table.new("shelves", [
+      id,
+      integer.call("stock"),
+      integer.call("quantity"),
+      integer.call("balance"),
+      Catalog::Column.new("big", "bigint", false, nil),
+      integer.call("limit"),
+      moment.call("starts_at"),
+      moment.call("ends_at"),
+    ], checks: checks)
+    with_scratch_database do |db|
+      creation = SugarORM::Differ.diff([shelves], [] of Catalog::Table)
+      creation.online.should be_empty
+      statements = SugarORM::DDL.statements(creation.transactional)
+      create = SugarORM::Migration.new(1_i64, "create", statements)
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      snapshot = SugarORM::Introspection.read(db)
+      live = snapshot.tables.find! { |table| table.name == "shelves" }
+      live.checks.reject(&.expression).should eq(checks.reject(&.expression))
+      SugarORM::Differ.diff([shelves], snapshot).clean?.should be_true
+    end
+  end
+
+  it "stops at a check that existing rows break, names it and leaves it NOT VALID" do
+    id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+    copies = Catalog::Column.new("copies", "integer", false, nil)
+    check = Catalog::Check.new("check_books_copies", column: "copies", min: 1_i64)
+    books = Catalog::Table.new("books", [id, copies])
+    declared = [books.copy_with(checks: [check])]
+    create = migration(1, "Create books",
+      "CREATE TABLE books (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
+      "copies integer NOT NULL)",
+      "INSERT INTO books (copies) VALUES (0)")
+    with_scratch_database do |db|
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
+      add = SugarORM::Migration.new(2_i64, "check", SugarORM::DDL.statements(plan.transactional))
+      validate = SugarORM::Migration.new(
+        3_i64, "check_concurrently", SugarORM::DDL.statements(plan.online))
+      migrations = [create, add, validate]
+
+      error = expect_raises(SugarORM::Migrator::ValidationFailed, "check_books_copies") do
+        SugarORM::Migrator.new(db, migrations).migrate
+      end
+      error.constraint.should eq("check_books_copies")
+      error.message.to_s.should contain("Remediation: fix or delete those rows")
+      journal(db).should eq([1_i64, 2_i64])
+      refused = "INSERT INTO books (copies) VALUES (0)"
+      expect_raises(PQ::PQError, /check_books_copies/) { db.exec(refused) }
+
+      db.exec("UPDATE books SET copies = 1")
+      SugarORM::Migrator.new(db, migrations).migrate.should eq(1)
+      journal(db).should eq([1_i64, 2_i64, 3_i64])
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db)).clean?.should be_true
+    end
+  end
+
   it "applies transactional migrations once, rolls back a failed batch " \
      "and detects checksum drift" do
     with_scratch_database do |db|

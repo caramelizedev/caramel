@@ -18,12 +18,23 @@ module SugarORM::Catalog
     references_columns : Array(String) = ["id"],
     on_delete : String = "NO ACTION"
 
+  # A CHECK constraint. A range check bounds *column* by *min* and *max*
+  # (either may be open); an expression check holds its SQL in *expression*,
+  # as declared or as PostgreSQL prints it, and is compared by name only.
+  record Check,
+    name : String,
+    column : String? = nil,
+    min : Int64? = nil,
+    max : Int64? = nil,
+    expression : String? = nil
+
   record Table,
     name : String,
     columns : Array(Column),
     indexes : Array(Index) = [] of Index,
     foreign_keys : Array(ForeignKey) = [] of ForeignKey,
-    drops : Array(String) = [] of String
+    drops : Array(String) = [] of String,
+    checks : Array(Check) = [] of Check
 
   # All concrete schemas in the program, sorted by table name; each is `T.__sugar_table`.
   # The body is expanded only when called, so requiring this file alone (as

@@ -101,7 +101,7 @@ describe SugarORM::DDL do
       on_delete: "SET NULL",
     )
     add = Differ::AddForeignKey.new("users", key, not_valid: true)
-    validate = Differ::ValidateForeignKey.new("users", "fk_users_team_id")
+    validate = Differ::ValidateConstraint.new("users", "fk_users_team_id")
     drop = Differ::DropForeignKey.new("users", "fk_users_team_id")
     added = %(ALTER TABLE "users" ADD CONSTRAINT "fk_users_team_id" ) \
             %(FOREIGN KEY ("team_id") REFERENCES "teams" ("id") ) \
@@ -133,5 +133,41 @@ describe SugarORM::DDL do
     key = Catalog::ForeignKey.new("fk", ["team_id"], "teams", on_delete: injection)
     add = Differ::AddForeignKey.new("users", key, not_valid: true)
     expect_raises(ArgumentError, "unsupported ON DELETE") { DDL.render(add) }
+  end
+
+  it "adds a check without validating it, and renders a range or its SQL verbatim" do
+    range = Catalog::Check.new("check_books_copies", column: "copies", min: 0_i64, max: 10_i64)
+    sql = "starts_at < ends_at"
+    dates = Catalog::Check.new("check_books_dates", expression: sql)
+    added = %(ALTER TABLE "books" ADD CONSTRAINT "check_books_copies" ) \
+            %(CHECK ("copies" >= 0 AND "copies" <= 10) NOT VALID)
+    verbatim = %(ALTER TABLE "books" ADD CONSTRAINT "check_books_dates" ) \
+               %(CHECK (starts_at < ends_at))
+    dropped = %(ALTER TABLE "books" DROP CONSTRAINT "check_books_copies")
+    DDL.render(Differ::AddCheck.new("books", range, not_valid: true)).should eq(added)
+    DDL.render(Differ::AddCheck.new("books", dates, not_valid: false)).should eq(verbatim)
+    DDL.render(Differ::DropCheck.new("books", "check_books_copies")).should eq(dropped)
+  end
+
+  it "renders an open-ended range with its one bound and refuses an empty check" do
+    lower = Catalog::Check.new("check_books_copies", column: "copies", min: 1_i64)
+    upper = Catalog::Check.new("check_books_limit", column: "limit", max: 5_i64)
+    DDL.check_constraint(lower).should eq(%(CONSTRAINT "check_books_copies" CHECK ("copies" >= 1)))
+    DDL.check_constraint(upper).should eq(%(CONSTRAINT "check_books_limit" CHECK ("limit" <= 5)))
+    expect_raises(ArgumentError, "check check_books_none has neither a column nor an expression") do
+      DDL.check_constraint(Catalog::Check.new("check_books_none"))
+    end
+  end
+
+  it "creates a table with its checks inline" do
+    table = Catalog::Table.new("books", [
+      Catalog::Column.new("copies", "integer", false, nil),
+    ], checks: [Catalog::Check.new("check_books_copies", column: "copies", min: 1_i64)])
+    DDL.create_table(table).should eq(<<-SQL)
+      CREATE TABLE "books" (
+        "copies" integer NOT NULL,
+        CONSTRAINT "check_books_copies" CHECK ("copies" >= 1)
+      )
+      SQL
   end
 end

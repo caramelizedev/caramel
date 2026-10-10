@@ -9,6 +9,7 @@ struct Team < SugarORM::Schema
     field id : Int64, primary: true
     field name : String
     field seats : Int32 = 5
+    field budget : Int64 = 0
     field billing_email : String?
     timestamps
 
@@ -16,6 +17,8 @@ struct Team < SugarORM::Schema
     has_many users : User
     belongs_to owner : User?
     index :name, unique: true
+    check seats: 0..
+    check budget: -3_000_000_000..3_000_000_000
   end
 
   scope larger_than(seats : Int32) { where("seats > ?", seats) }
@@ -62,6 +65,7 @@ class Team::UpdateChangeset < SugarORM::Changeset(Team)
 
   def validate(cs)
     cs.validate_greater_than(:seats, 0)
+    cs.check_constraint(:seats)
     cs.validate_format(:billing_email, /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/)
   end
 end

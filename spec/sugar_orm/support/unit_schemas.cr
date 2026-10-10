@@ -94,6 +94,16 @@ module SugarUnit
     end
   end
 
+  struct Shelf < SugarORM::Schema
+    schema "unit_shelves" do
+      field id : Int64, primary: true
+      field stock : Int32 = 0
+      field reserved : Int32 = 0
+      check stock: 0..10, reserved: ..100
+      check :reserved_within_stock, "reserved <= stock"
+    end
+  end
+
   class Ticket::GradeChangeset < SugarORM::Changeset(Ticket)
     param grade : Grade
 

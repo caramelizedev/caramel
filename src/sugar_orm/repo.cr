@@ -59,6 +59,25 @@ module SugarORM
     end
   end
 
+  # PostgreSQL SQLSTATE 23514 raised by any Repo statement.
+  class CheckViolation < Error
+    getter table : String?
+    getter constraint : String?
+
+    def initialize(message : String?,
+                   @table : String?,
+                   @constraint : String?,
+                   cause : Exception? = nil)
+      super(message, cause)
+    end
+
+    def self.from(error : PQ::PQError) : self
+      table = error.field_message(:table_name)
+      constraint = error.field_message(:constraint_name)
+      new(error.message, table, constraint, error)
+    end
+  end
+
   # Unset keyword arguments in generated signatures.
   struct Unset
   end
@@ -229,7 +248,11 @@ module SugarORM
       @@statements_executed += 1
       yield
     rescue error : PQ::PQError
-      raise error.field_message(:code) == "23505" ? UniqueViolation.from(error) : error
+      case error.field_message(:code)
+      when "23505" then raise UniqueViolation.from(error)
+      when "23514" then raise CheckViolation.from(error)
+      else              raise error
+      end
     end
 
     private def self.within(connection : ::DB::Connection,

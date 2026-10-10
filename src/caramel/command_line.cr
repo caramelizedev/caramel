@@ -226,7 +226,7 @@ module Caramel
         # frappe migrate sets CARAMEL_DIAGNOSTICS=mrdp for coding agents.
         STDERR.print(ENV["CARAMEL_DIAGNOSTICS"]? == "mrdp" ? ex.to_mrdp : "#{ex.message}\n")
         1
-      rescue ex : SugarORM::Migrator::Drift | SugarORM::Migrator::ConcurrentIndexFailed
+      rescue ex : SugarORM::Migrator::Failure
         STDERR.puts(ex.message)
         1
       rescue ex : ColdBrew::ConfigurationError

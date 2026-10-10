@@ -157,6 +157,13 @@ describe SugarORM::Migration do
     migration("named", named).transactional?.should be_true
   end
 
+  it "names the table and constraint of a lone VALIDATE CONSTRAINT" do
+    validate = %(ALTER TABLE "books" VALIDATE CONSTRAINT "check_books_copies")
+    add = %(ALTER TABLE "books" ADD CONSTRAINT "check_books_copies" CHECK ("copies" >= 0))
+    SugarORM::Linter.validated_constraint(validate).should eq({"books", "check_books_copies"})
+    SugarORM::Linter.validated_constraint(add).should be_nil
+  end
+
   it "keeps the checksum format of journals written by the previous migrator" do
     create = "CREATE TABLE books " \
              "(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text NOT NULL)"
