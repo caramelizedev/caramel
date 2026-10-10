@@ -4,11 +4,32 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.11.0 - 2026-10-10
+
+### Upgrade notes
+
 - Upgrade Caramel and Frappé together: the schema document `frappe db diff` reads is now version 3, because it carries CHECK constraints.
 - SugarORM owns the CHECK constraints named `check_…`. `frappe db diff` drops a `check_…` constraint that no schema declares; any other CHECK constraint stays and is noted. Declare a hand-written `check_…` constraint, or rename it, before you diff.
 - Two schemas that name one table no longer compile. Remove the duplicate or give one a different table.
 - Run `shards update` so your application takes crystal-db 0.15.0 and crystal-pg 0.31.0.
 - After a job is renamed or moved, name its old class with `renamed_from "Old::Name"` in the job. `work` and `migrate` now log a warning naming queued class names that no job claims.
+
+### Features
+
+- **core:** accept bounded array fields in request contracts (aed2c41)
+- **sugar_orm:** store any field type through a codec (88e2540)
+- **frappe:** make expand fall back to the enclosing macro call (204c9bc)
+- **cold_brew:** keep queued jobs across a rename and report stranded class names (a3e0db1)
+- **sugar_orm:** declare CHECK constraints in schemas (16bc348)
+- **sugar_orm:** lock rows, upsert and version records (405885e)
+
+### Fixes
+
+- **website:** keep every release's guides and refuse a release the site does not name (db2a220)
+- **website:** regenerate redirect aliases on every publish (d9fced6)
+- **core:** report a repeated control key in the query as a duplicate field (100ee13)
+- **sugar_orm:** make codec fields honest about inclusion validation and missing defaults (99089ab)
+- **sugar_orm:** refuse two schemas that name one table (a4e194b)
 
 ## 0.10.0 - 2026-10-08
 
