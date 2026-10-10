@@ -66,7 +66,7 @@ describe Caramel::Frappe::NewProject do
         YAML
       File.read(File.join(target, "shard.lock")).should contain(locked)
       lock = YAML.parse(File.read(File.join(target, "shard.lock")))["shards"]
-      lock["pg"]["version"].as_s.should eq("0.30.0")
+      lock["pg"]["version"].as_s.should eq("0.31.0")
       lock["ameba"]?.should be_nil
       Caramel::Frappe::Project.pin(target).should eq(Caramel::VERSION)
       File.read(File.join(target, ".gitignore")).should contain(".env\n")

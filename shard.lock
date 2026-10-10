@@ -10,7 +10,7 @@ shards:
 
   db:
     git: https://github.com/crystal-lang/crystal-db.git
-    version: 0.14.0
+    version: 0.15.0
 
   lexbor:
     git: https://github.com/kostya/lexbor.git
@@ -18,5 +18,5 @@ shards:
 
   pg:
     git: https://github.com/will/crystal-pg.git
-    version: 0.30.0
+    version: 0.31.0
 
