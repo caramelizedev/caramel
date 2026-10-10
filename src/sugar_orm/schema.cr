@@ -52,6 +52,18 @@ module SugarORM
                      "`schema \"#{table.id}\" do ... end` block." %}
         {% table.raise problem + table_at %}
       {% end %}
+      {% unless @type.abstract? %}
+        {% for other in ::SugarORM::Schema.all_subclasses %}
+          {% if other != @type && !other.abstract? && other.has_constant?(:SUGAR_TABLE) &&
+                  other.constant(:SUGAR_TABLE) == table %}
+            {% problem = "#{@type} declares the table \"#{table.id}\", " +
+                         "which #{other} already declares.\n" +
+                         "Remediation: give one of them another table name, " +
+                         "or keep a single schema for \"#{table.id}\"." %}
+            {% table.raise problem + table_at %}
+          {% end %}
+        {% end %}
+      {% end %}
       {% unless block %}
         {% problem = "schema needs a block.\n" +
                      "Remediation: write `schema #{table} do\n" +

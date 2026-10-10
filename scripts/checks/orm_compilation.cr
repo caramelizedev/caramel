@@ -88,6 +88,11 @@ cases = {
     "Keyless has no primary key",
     "Remediation: add `field id : Int64, primary: true`",
   ],
+  "compile_duplicate_table" => [
+    "compile_duplicate_table.cr:10:10",
+    "Blend declares the table \"teas\", which Tea already declares.",
+    "Remediation: give one of them another table name",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)
