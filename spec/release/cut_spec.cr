@@ -26,7 +26,7 @@ private def release_repository(&)
     version: 0.1.0
     dependencies:
       pg:
-        version: 0.30.0
+        version: 0.31.0
 
     YAML
   yield repository

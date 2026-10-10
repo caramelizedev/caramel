@@ -57,7 +57,7 @@ describe Caramel::Frappe::Project do
         shards:
           db:
             git: https://github.com/crystal-lang/crystal-db.git
-            version: 0.14.0\n
+            version: 0.15.0\n
         YAML
       expect_load_error(root, "shard.lock does not pin caramel")
       File.write(lock, original)
