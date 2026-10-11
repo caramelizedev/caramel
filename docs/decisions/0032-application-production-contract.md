@@ -35,7 +35,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - A new process is ready when its own socket answers `GET /health`, with `Host` set to the authority of `APP_ORIGIN`, with 200 and body `ok`. This is the generated route; it touches no database.
    - A deploy sends traffic to a process only after that.
    - Two processes cannot share one socket path, and `serve` refuses an occupied one. So each new process binds its own path and the proxy moves to it, as `frappe dev` does.
-7. **Unknown jobs.** `APP jobs unknown` prints `unknown_queued_class_names`, one per line, and exits 1 when any exist.
+7. **Unknown jobs.** `APP jobs unknown` prints `unknown_queued_class_names`, one per line, and exits 1 when any exist. With no `caramel_jobs` table yet, it prints nothing and exits 0.
 8. **Database.**
    - Connections use TCP with `sslmode=verify-full` (plus `sslrootcert` for a private CA), or a Unix socket in a directory owned by the application's user.
    - They are direct or session-mode, never transaction-pooled.

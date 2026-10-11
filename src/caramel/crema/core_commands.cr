@@ -7,21 +7,31 @@ module Caramel::Crema
   # What `jobs …` does: Cold Brew's queues, read from and repaired in PostgreSQL.
   module JobsCommand
     USAGE = "Usage: jobs [stats] | jobs failed [--limit=N] | jobs show ID | " \
-            "jobs retry ID|--class=NAME"
+            "jobs retry ID|--class=NAME | jobs unknown"
 
     def self.run(arguments : Array(String)) : Int32
       if ENV["CARAMEL_ENV"]? == "test"
         abort("The jobs commands read a real queue; run them in development or production")
       end
-      CommandLine.with_database(false) { |_, _| dispatch(arguments) }
+      CommandLine.with_database(false) { |db, _| dispatch(arguments, db) }
     end
 
-    private def self.dispatch(arguments : Array(String)) : Int32
+    # :nodoc:
+    # Prints the queued class names this binary cannot run, one per line; 1 when any exist.
+    def self.unknown(db : DB::Database, io : IO = STDOUT) : Int32
+      return 0 unless db.scalar("SELECT to_regclass('caramel_jobs') IS NOT NULL").as(Bool)
+      names = ColdBrew.unknown_queued_class_names(db)
+      names.each { |name| io.puts(name) }
+      names.empty? ? 0 : 1
+    end
+
+    private def self.dispatch(arguments : Array(String), db : DB::Database) : Int32
       case arguments.first?
       when nil, "stats" then print_table(Jobs.stats)
       when "failed"     then print_table(Jobs.failed(limit(arguments)))
       when "show"       then show(arguments[1]?)
       when "retry"      then retry(arguments[1]?)
+      when "unknown"    then unknown(db)
       else                   usage
       end
     end
@@ -75,7 +85,7 @@ module Caramel::Crema
     OpsClient.new(arguments).run
   end
 
-  command("jobs", "jobs [stats|failed|show ID|retry ID|--class=NAME]") do |arguments|
+  command("jobs", "jobs [stats|failed|show ID|retry ID|--class=NAME|unknown]") do |arguments|
     JobsCommand.run(arguments)
   end
 

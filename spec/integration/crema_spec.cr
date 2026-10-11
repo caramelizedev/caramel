@@ -300,6 +300,37 @@ describe "Crema job commands" do
   end
 end
 
+describe "Crema jobs unknown" do
+  it "prints nothing and returns 0 when every queued class is known" do
+    CremaSpec.reset
+    CremaSpec::Notify.enqueue
+    io = IO::Memory.new
+    Caramel::Crema::JobsCommand.unknown(CremaSpec.runtime, io).should eq(0)
+    io.to_s.should be_empty
+  end
+
+  it "prints each queued class this binary lacks and returns 1" do
+    CremaSpec.reset
+    CremaSpec.owner.exec("INSERT INTO caramel_jobs (queue, class_name, payload) " \
+                         "VALUES ('ghost', 'Ghost::Job', '{}')")
+    io = IO::Memory.new
+    Caramel::Crema::JobsCommand.unknown(CremaSpec.runtime, io).should eq(1)
+    io.to_s.should eq("Ghost::Job\n")
+  end
+
+  it "prints nothing and returns 0 before caramel_jobs exists" do
+    # The admin database holds no caramel_jobs table, as on a first deploy.
+    without_table = Caramel::Database.open(CREMA_ADMIN_URL, 1)
+    begin
+      io = IO::Memory.new
+      Caramel::Crema::JobsCommand.unknown(without_table, io).should eq(0)
+      io.to_s.should be_empty
+    ensure
+      without_table.close
+    end
+  end
+end
+
 describe "Crema db diagnose" do
   it "prints every section under its header and the pg_stat_statements hint" do
     CremaSpec.reset
