@@ -364,6 +364,21 @@ module Caramel
         false
       end
 
+      # :nodoc:
+      # Whether a field takes a file, so the route stores multipart file parts.
+      def self.__caramel_uploads? : Bool
+        {% verbatim do %}
+          {% for constant in @type.constants %}
+            {% if constant.stringify.starts_with?("CARAMEL_FIELD_") %}
+              {% if @type.constant(constant)[1] == "UploadedFile" %}
+                return true
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        false
+      end
+
       private def self.__caramel_field?(key : String) : Bool
         {% verbatim do %}
           {% for constant in @type.constants %}

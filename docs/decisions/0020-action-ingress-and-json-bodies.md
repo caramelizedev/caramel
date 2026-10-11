@@ -28,7 +28,9 @@ Reading every request the same way before routing, and checking CSRF on every PO
    - The same match drives dispatch, so the trie is walked once unless the request overrides its method. Matching still allocates nothing.
 3. **Reading.** `RequestInput.read(request, ingress)` reads under the policy.
    - **Raw.** The bytes are read up to the limit, with no transport controls, and the contract binds only the route and the query.
-   - **Form.** URL-encoded text and multipart text are bounded by the limit; uploads stream to request-scoped tempfiles within a 64 MiB total budget. `application/json` bodies are also read (rule 4).
+   - **Form.** URL-encoded text and multipart text are bounded by the limit. `application/json` bodies are also read (rule 4).
+   - **Uploads.** File parts are stored only for a route whose contract has an `UploadedFile` field, or for a POST whose `_method` may reach such a route at the same path. They stream to request-scoped tempfiles within a 64 MiB total budget. Any other route stores no file, and the part's name is an unknown field.
+   - **Counts.** A request sends at most 4,096 values (every query and form pair, JSON member, JSON array item and multipart part is one) and at most 128 file parts. A multipart body, with its boundaries and part headers, is at most its text limit plus its upload budget plus 1 MiB. More of any answers 413.
    - Other media types still answer 415.
 4. **JSON.** A JSON body must be an object. Its scalar members bind like form fields:
    - numbers keep their source text, so contracts convert them with the existing grammar;
@@ -49,4 +51,5 @@ Reading every request the same way before routing, and checking CSRF on every PO
 - The policy that guards a route belongs next to the code that verifies its credential, where a compile error can insist that turning CSRF off names a verifier.
 - The body must be read differently per route (raw bytes, a limit), so the route has to be known before the body is read. Matching on the real method, and falling back to the default policy, keeps every unmatched request as guarded as before.
 - JSON members bind through the same contract grammar as form text, so a JSON client and a form share one contract and one set of error messages. Checking each member's JSON type keeps `"5"` from passing as a number.
+- The body is read before the CSRF check and the authenticator, so what an anonymous request can make the server hold is bounded by count as well as by bytes, and a route that takes no file writes none to disk.
 - An empty session on CSRF-off routes turns the one authenticator that would reopen CSRF, a session cookie, into one that fails closed.

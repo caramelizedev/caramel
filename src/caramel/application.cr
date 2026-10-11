@@ -96,7 +96,7 @@ module Caramel
       # The route decides how its body is read and whether CSRF guards it;
       # a request that matches none reads and is checked as a form.
       match = @router.match(request)
-      input = RequestInput.read(request, match.ingress)
+      input = RequestInput.read(request, match.ingress, uploads: match.uploads)
       context = RequestContext.new(request, @csrf, @sessions, input, match.ingress)
       if RequestInput::BODY_METHODS.includes?(request.method) && match.ingress.csrf?
         token = input.csrf_token || request.headers["X-CSRF-Token"]?

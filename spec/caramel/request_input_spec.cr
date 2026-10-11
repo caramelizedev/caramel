@@ -302,4 +302,75 @@ describe Caramel::RequestInput do
     broken = HTTP::Request.new("POST", "/uploads", multipart, "--x\r\n")
     expect_raises(Caramel::RequestInput::InvalidEncoding) { Caramel::RequestInput.read(broken) }
   end
+
+  it "accepts exactly the most fields a request may send and refuses one more" do
+    most = Caramel::RequestInput::MAX_FIELDS
+    pairs = ->(count : Int32) { Array.new(count) { |index| "f#{index}=" }.join('&') }
+    Caramel::RequestInput.read(form_request(pairs.call(most))).body.size.should eq(most)
+    expect_raises(Caramel::RequestInput::TooLarge) do
+      Caramel::RequestInput.read(form_request(pairs.call(most + 1)))
+    end
+  end
+
+  it "counts repeated names, the query, JSON members and JSON array items as fields" do
+    over = Caramel::RequestInput::MAX_FIELDS + 1
+    repeated = Array.new(over) { "tag=" }.join('&')
+    query = "/books?" + Array.new(over - 1) { |index| "q#{index}=" }.join('&')
+    members = Array.new(over) { |index| %("m#{index}":1) }.join(',')
+    items = Array.new(over) { "1" }.join(',')
+    requests = [
+      form_request(repeated),
+      form_request("title=Dune", path: query),
+      json_request("{#{members}}"),
+      json_request(%({"ids":[#{items}]})),
+    ]
+    requests.each do |request|
+      expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request) }
+    end
+  end
+
+  it "refuses a multipart body with more parts than a request may send" do
+    request = multipart_request do |form|
+      (Caramel::RequestInput::MAX_FIELDS + 1).times { |index| form.field("f#{index}", "") }
+    end
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request) }
+  end
+
+  it "refuses more file parts than a request may send and deletes those it stored" do
+    before = Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size
+    metadata = HTTP::FormData::FileMetadata.new(filename: "empty.bin")
+    request = multipart_request do |form|
+      (Caramel::RequestInput::MAX_FILES + 1).times do |index|
+        form.file("file#{index}", IO::Memory.new, metadata)
+      end
+    end
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(request) }
+    Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size.should eq(before)
+  end
+
+  it "bounds a multipart body's boundaries and part headers, not only its values" do
+    framing = Caramel::RequestInput::MULTIPART_FRAMING_BYTES
+    request = multipart_request(&.field("n" * (framing + 64), ""))
+    expect_raises(Caramel::RequestInput::TooLarge) do
+      Caramel::RequestInput.read(request, Caramel::Ingress.new(limit: 32), uploads: false)
+    end
+
+    declared = multipart_request(&.field("note", "x"))
+    declared.headers["Content-Length"] = (framing + 64 * 1024 * 1024 + 2 * 1024 * 1024 + 1).to_s
+    expect_raises(Caramel::RequestInput::TooLarge) { Caramel::RequestInput.read(declared) }
+  end
+
+  it "stores no file for a route that takes none and reports the part as an unknown key" do
+    before = Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size
+    metadata = HTTP::FormData::FileMetadata.new(filename: "cover.png")
+    request = multipart_request do |form|
+      form.field("title", "Cover")
+      form.file("cover", IO::Memory.new("image bytes"), metadata)
+    end
+    input = Caramel::RequestInput.read(request, uploads: false)
+    input.file?("cover").should be_nil
+    input.body.should eq({"title" => "Cover"})
+    input.strict_keys.should eq(%w[title cover])
+    Dir.glob(File.join(Dir.tempdir, "caramel-upload-*")).size.should eq(before)
+  end
 end
