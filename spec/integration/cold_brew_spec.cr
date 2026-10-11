@@ -1238,4 +1238,18 @@ describe "the work command" do
     result.receive.should eq(0)
     ColdBrewSpec.job(stranded)[:attempts].should eq(0)
   end
+
+  it "starts the broker and maintenance without workers or schedules" do
+    ColdBrewSpec.reset
+    url = ColdBrewSpec.runtime_url
+    env = {"CARAMEL_WORKER_QUEUES" => "not a queue!"}
+    service = Caramel::ColdBrew.start(url, env, workers: false)
+    begin
+      service.workers.should be_empty
+      service.scheduler_on?.should be_false
+      Caramel::ColdBrew.broker.should be(service.broker)
+    ensure
+      service.stop
+    end
+  end
 end

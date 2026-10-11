@@ -8,7 +8,7 @@ const row = (command, description) => `<div class="c-file"><code>${escapeHTML(co
 
 // What each application binary command does; CommandLine::USAGE lists them.
 const APPLICATION = {
-  serve: 'Serve HTTP on the private socket frappe dev names, with Cold Brew’s workers, maintenance and schedules. Refuses to start with pending migrations. CARAMEL_ROOT, when set, names the directory whose public/ it serves.',
+  serve: 'Serve HTTP on the private socket CARAMEL_SOCKET names, with Cold Brew’s workers, maintenance and schedules; --no-workers keeps the PubSub broker and maintenance but runs no workers or schedules, for a deployment that runs work separately. CARAMEL_ROOT, when set, names the directory whose public/ it serves. Refuses to start with pending migrations.',
   work: 'Run Cold Brew’s workers, maintenance and schedules without HTTP. --queues and --concurrency replace CARAMEL_WORKER_QUEUES and CARAMEL_WORKER_CONCURRENCY; --no-scheduler leaves schedules to other processes.',
   seed: 'Load db/seeds.cr into the database.',
   routes: 'Print every route with its action, contract and ingress.',

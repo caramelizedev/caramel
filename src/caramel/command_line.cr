@@ -30,7 +30,7 @@ module Caramel
 
   module CommandLine
     USAGE = [
-      "serve",
+      "serve [--no-workers]",
       "work [--queues=NAMES] [--concurrency=N] [--no-scheduler]",
       "seed", "routes", "schema", "drift", "translations",
       "migrate [--dev-override]",
@@ -96,7 +96,8 @@ module Caramel
         return run_workers(app, options)
       end
       dev_override = flags == ["--dev-override"] && {"migrate", "lint"}.includes?(command)
-      return refuse_usage unless flags.empty? || dev_override
+      no_workers = command == "serve" && flags == ["--no-workers"]
+      return refuse_usage unless flags.empty? || dev_override || no_workers
 
       case command
       when "routes", "schema", "translations"
@@ -104,7 +105,7 @@ module Caramel
       when "serve", "seed", "migrate", "lint", "drift"
         name = command == "serve" ? "caramel-web" : "caramel"
         with_database(command == "migrate", name) do |db, url|
-          database_command(app, command, db, url, dev_override, root)
+          database_command(app, command, db, url, dev_override, root, !no_workers)
         end
       else
         puts usage
@@ -258,7 +259,8 @@ module Caramel
                                       db : DB::Database,
                                       url : String,
                                       dev_override : Bool,
-                                      root : String) : Int32 forall T
+                                      root : String,
+                                      workers : Bool) : Int32 forall T
       migrator = SugarORM::Migrator.new(db, T::MIGRATIONS)
       case command
       when "migrate"
@@ -271,7 +273,7 @@ module Caramel
         return drift(db)
       else
         refuse_pending(db, T::MIGRATIONS)
-        command == "seed" ? app.seed(db) : serve(app, db, url, root)
+        command == "seed" ? app.seed(db) : serve(app, db, url, root, workers)
       end
       0
     end
@@ -305,11 +307,14 @@ module Caramel
 
     # Serves on the private socket `frappe dev` names, with Cold Brew's
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
-    # `CARAMEL_ROOT` replaces *root* as the directory whose `public/` it serves.
+    # Without *workers* it keeps PubSub and maintenance but runs no jobs or
+    # schedules. `CARAMEL_ROOT` replaces *root* as the directory whose
+    # `public/` it serves.
     private def self.serve(app : T.class,
                            db : DB::Database,
                            url : String,
-                           root : String) : Nil forall T
+                           root : String,
+                           workers : Bool) : Nil forall T
       if configured = ENV["CARAMEL_ROOT"]?.presence
         abort("CARAMEL_ROOT must be an absolute path") unless configured.starts_with?('/')
         public_directory = File.join(configured, "public")
@@ -337,7 +342,7 @@ module Caramel
         bound = true
         File.chmod(socket_path, 0o600)
         # Invalid worker settings raise here; the ensure still frees the socket.
-        cold_brew = ColdBrew.start(url) unless ENV["CARAMEL_ENV"]? == "test"
+        cold_brew = ColdBrew.start(url, workers: workers) unless ENV["CARAMEL_ENV"]? == "test"
         runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
           application: application)
         Process.on_terminate { server.close }

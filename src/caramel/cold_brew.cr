@@ -142,18 +142,22 @@ module Caramel::ColdBrew
   # default `default`) with CARAMEL_WORKER_CONCURRENCY fibers each
   # (default 4), the maintenance fiber, the scheduler for every `every`
   # declaration unless `scheduler` is false, and the PubSub broker. Invalid
-  # settings raise ConfigurationError before anything connects.
-  def self.start(database_url : String, env = ENV, *, scheduler : Bool = true) : Service
-    queues = worker_queues(env)
-    concurrency = worker_concurrency(env, queues.size)
-    pool_size = queues.size * concurrency + 1
+  # settings raise ConfigurationError before anything connects. Without
+  # *workers* it starts only the broker and maintenance, and reads neither
+  # setting.
+  def self.start(database_url : String, env = ENV, *,
+                 scheduler : Bool = true, workers : Bool = true) : Service
+    queues = workers ? worker_queues(env) : [] of String
+    concurrency = workers ? worker_concurrency(env, queues.size) : 0
+    pool_size = workers ? queues.size * concurrency + 1 : 1
     db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew")
     broker = Broker.new(database_url)
     self.broker = broker
-    workers = queues.map { |queue| Worker.new(queue, concurrency, db).start }
+    running = queues.map { |queue| Worker.new(queue, concurrency, db).start }
     maintenance = Maintenance.new(db).start
-    ticks = Scheduler.new(scheduler ? schedules : [] of Schedule, db).start
-    Service.new(db, workers, maintenance, ticks, broker, scheduler)
+    scheduled = scheduler && workers
+    ticks = Scheduler.new(scheduled ? schedules : [] of Schedule, db).start
+    Service.new(db, running, maintenance, ticks, broker, scheduled)
   end
 
   # The distinct queue names CARAMEL_WORKER_QUEUES lists, default `default`.
