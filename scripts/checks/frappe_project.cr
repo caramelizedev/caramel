@@ -227,11 +227,13 @@ module Caramel::Checks
     end
 
     # Runs the binary as a server would: on a socket of its own, serving public
-    # files from CARAMEL_ROOT rather than the project it was built from.
+    # files from CARAMEL_ROOT rather than the project it was built from, and
+    # leaving jobs and schedules to a separate `work` process.
     private def production_serve(values : Hash(String, String)) : Nil
       directory = File.join(@root, "production")
       Dir.mkdir(directory, 0o700)
       socket = File.join(directory, "app.sock")
+      ops_socket = File.join(directory, "app.ops.sock")
       release = File.join(@root, "production-root")
       Dir.mkdir(release, 0o700)
       copy = ["/bin/cp", "-R", File.join(@project, "public"), File.join(release, "public")]
@@ -242,21 +244,28 @@ module Caramel::Checks
         "CARAMEL_SOCKET" => socket,
         "CARAMEL_ROOT"   => release,
       }
-      process = Process.new(File.join(@project, ".caramel/application"), ["serve"],
+      binary = File.join(@project, ".caramel/application")
+      process = Process.new(binary, ["serve", "--no-workers"],
         chdir: @root, env: environment(values.merge(settings)),
         output: @app_log, error: @app_log)
       begin
         started = Checks.wait_until(10.seconds, 50.milliseconds) do
-          File.exists?(socket) || process.terminated?
+          (File.exists?(socket) && File.exists?(ops_socket)) || process.terminated?
         end
-        assert!(started && File.exists?(socket), "serve did not open its production socket")
+        assert!(started && File.exists?(ops_socket), "serve did not open its production sockets")
         status, body = unix_get(socket, "/marker.txt", "bookshelf.caramel")
         assert!(status == 200 && body == "production root\n", "#{status}: #{body}")
+        status, body = unix_get(ops_socket, "/v1/status", "ops")
+        document = JSON.parse(body)
+        idle = status == 200 && document["workers"].as_a.empty? &&
+               document["scheduler"].as_s == "off"
+        assert!(idle, "#{status}: #{body}")
       ensure
         Checks.stop(process, 30.seconds)
       end
       assert!(!File.exists?(socket), "serve left #{socket} behind")
       puts "PASS: serve reads public files from CARAMEL_ROOT"
+      puts "PASS: serve --no-workers runs no workers or schedules"
     end
 
     private def unix_get(socket : String, path : String, host : String) : {Int32, String}
