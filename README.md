@@ -8,6 +8,7 @@ environment.
 - Releases and upgrade notes: [CHANGELOG.md](CHANGELOG.md) and
   https://github.com/caramelizedev/caramel/releases.
 - Contribute: [CONTRIBUTING.md](CONTRIBUTING.md), with decisions in [docs/decisions](docs/decisions).
+- Report a vulnerability: [SECURITY.md](SECURITY.md).
 - History, research and status notes: https://github.com/caramelizedev/caramel-notes.
 
 Caramel is released under the [MIT License](LICENSE). Bundled software is listed in

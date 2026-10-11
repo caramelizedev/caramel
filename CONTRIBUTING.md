@@ -82,6 +82,7 @@ Every piece of writing has one home, chosen by what it is ([ADR 0026](docs/decis
 - What application authors need: the website (`website/source/site.html`). API detail
   goes in doc comments at the code.
 - What contributors must do: this file.
+- How to report a vulnerability: `SECURITY.md`.
 - A decision: an ADR in `docs/decisions` with Context (optional, the problem), Decision
   (the rules in force, present tense) and Reasons (why, and what was rejected). When a
   change alters a decision, edit its ADR in the same commit.
