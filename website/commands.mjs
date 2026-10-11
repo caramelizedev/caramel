@@ -18,7 +18,7 @@ const APPLICATION = {
   migrate: 'Lint and apply pending migrations; --dev-override relaxes the linter in development.',
   lint: 'Lint pending migrations without applying them; --dev-override relaxes the linter in development.',
   ops: 'Ask a running application, through its owner-only ops socket, for its status, in-flight work, Prometheus text, a live tail, errors and traces; issue a debug token; print the console’s ssh line. Details are in the Crema reference.',
-  jobs: 'Count each queue’s jobs, list failures, show one job with its stored error, or retry failed jobs. Needs the database, not a running application.',
+  jobs: 'Count each queue’s jobs, list failures, show one job with its stored error, or retry failed jobs. Needs the database, not a running application. unknown prints queued job classes this binary does not compile, one per line, and exits 1 when any exist.',
   db: 'Report database health: connections, locks, cache hits, unused indexes and the slowest statements. Needs the database, not a running application.',
   insights: 'Show the recorder’s per-minute latency history for routes, jobs, schedules, SQL or outbound hosts. Needs require "caramel/crema/recorder".',
 };
