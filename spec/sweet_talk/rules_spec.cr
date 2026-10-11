@@ -100,11 +100,12 @@ describe "SweetTalk's rules" do
       box = RulesSpec.box("tallied")
       box.tally 1
       Caramel::ColdBrew.drain_queue!(SweetTalkSpec.runtime).should eq(1)
-      box.tally 2, pause: 200
-      box.tally 4
+      box.tally 2, pause: 300
       worker = Caramel::ColdBrew::Worker.new("default", 2, SweetTalkSpec.runtime)
       begin
         worker.start
+        sleep 100.milliseconds # the first step now holds the row in its pause
+        box.tally 4
         SweetTalkSpec.eventually("three tally steps finished") do
           SugarORM.sql(RulesSpec::TALLIED, as: {value: Int64}).first[:value] == 3
         end
