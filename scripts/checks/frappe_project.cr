@@ -197,6 +197,7 @@ module Caramel::Checks
           Benchmark.new(self, edit_only: edit_only).check
         end
 
+        production_serve(values)
         serve(@project, "bookshelf", values)
         port = @ports[2]
         curl = ["/usr/bin/curl", "--fail", "--silent", "--show-error",
@@ -223,6 +224,50 @@ module Caramel::Checks
       ensure
         finish(failed)
       end
+    end
+
+    # Runs the binary as a server would: on a socket of its own, serving public
+    # files from CARAMEL_ROOT rather than the project it was built from.
+    private def production_serve(values : Hash(String, String)) : Nil
+      directory = File.join(@root, "production")
+      Dir.mkdir(directory, 0o700)
+      socket = File.join(directory, "app.sock")
+      release = File.join(@root, "production-root")
+      Dir.mkdir(release, 0o700)
+      copy = ["/bin/cp", "-R", File.join(@project, "public"), File.join(release, "public")]
+      command(copy, echo: false)
+      File.write(File.join(release, "public/marker.txt"), "production root\n")
+      settings = {
+        "CARAMEL_ENV"    => "development",
+        "CARAMEL_SOCKET" => socket,
+        "CARAMEL_ROOT"   => release,
+      }
+      process = Process.new(File.join(@project, ".caramel/application"), ["serve"],
+        chdir: @root, env: environment(values.merge(settings)),
+        output: @app_log, error: @app_log)
+      begin
+        started = Checks.wait_until(10.seconds, 50.milliseconds) do
+          File.exists?(socket) || process.terminated?
+        end
+        assert!(started && File.exists?(socket), "serve did not open its production socket")
+        status, body = unix_get(socket, "/marker.txt", "bookshelf.caramel")
+        assert!(status == 200 && body == "production root\n", "#{status}: #{body}")
+      ensure
+        Checks.stop(process, 30.seconds)
+      end
+      assert!(!File.exists?(socket), "serve left #{socket} behind")
+      puts "PASS: serve reads public files from CARAMEL_ROOT"
+    end
+
+    private def unix_get(socket : String, path : String, host : String) : {Int32, String}
+      connection = Socket.unix
+      connection.connect(Socket::UNIXAddress.new(socket), timeout: 5.seconds)
+      client = HTTP::Client.new(connection, host)
+      headers = HTTP::Headers{"Host" => host, "Connection" => "close"}
+      response = client.get(path, headers)
+      {response.status_code, response.body}
+    ensure
+      client.try &.close
     end
 
     # ADR 0016: a generated application depends on a tagged Caramel release by
