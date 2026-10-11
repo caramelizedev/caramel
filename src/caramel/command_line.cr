@@ -305,10 +305,19 @@ module Caramel
 
     # Serves on the private socket `frappe dev` names, with Cold Brew's
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
+    # `CARAMEL_ROOT` replaces *root* as the directory whose `public/` it serves.
     private def self.serve(app : T.class,
                            db : DB::Database,
                            url : String,
                            root : String) : Nil forall T
+      if configured = ENV["CARAMEL_ROOT"]?.presence
+        abort("CARAMEL_ROOT must be an absolute path") unless configured.starts_with?('/')
+        public_directory = File.join(configured, "public")
+        unless Dir.exists?(public_directory)
+          abort("CARAMEL_ROOT has no public directory: #{public_directory}")
+        end
+        root = configured
+      end
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
