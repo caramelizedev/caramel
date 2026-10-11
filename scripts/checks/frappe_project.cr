@@ -197,6 +197,7 @@ module Caramel::Checks
           Benchmark.new(self, edit_only: edit_only).check
         end
 
+        release_build
         production_serve(values)
         serve(@project, "bookshelf", values)
         port = @ports[2]
@@ -224,6 +225,48 @@ module Caramel::Checks
       ensure
         finish(failed)
       end
+    end
+
+    # ADR 0032: frappe build refuses uncommitted changes, then compiles the
+    # committed tree in a container into an artifact whose binary runs on a
+    # stock Ubuntu.
+    private def release_build : Nil
+      docker = Process.find_executable("docker") || "/usr/local/bin/docker"
+      engine = File.executable?(docker) && attempt([docker, "info"], timeout: 60.seconds).success?
+      unless engine
+        puts "SKIP: frappe build needs a running container engine"
+        return
+      end
+      git = ["/usr/bin/git", "-C", @project, "-c", "user.name=Caramel",
+             "-c", "user.email=checks@caramel.invalid", "-c", "commit.gpgsign=false"]
+      command(git + ["init", "-q"], echo: false)
+      command(git + ["add", "-A"], echo: false)
+      command(git + ["commit", "-qm", "build"], echo: false)
+      dirty = File.join(@project, "dirty.txt")
+      File.write(dirty, "uncommitted\n")
+      refused = attempt([@frappe, "build"], chdir: @project, timeout: 60.seconds)
+      reported = refused.status.exit_code == 1 && refused.stderr.includes?("uncommitted changes")
+      assert!(reported, refused.stdout + refused.stderr)
+      File.delete(dirty)
+      built = attempt([@frappe, "build"], chdir: @project, timeout: 1200.seconds)
+      assert!(built.success?, built.stdout + built.stderr)
+      artifact = built.stdout.chomp
+      name = /\Abookshelf-\d{8}T\d{6}Z-[0-9a-f]{7}-linux-amd64\.tar\.gz\z/
+      named = !artifact.includes?('\n') && artifact.starts_with?('/') &&
+              File.file?(artifact) && File.basename(artifact).matches?(name)
+      assert!(named, built.stdout)
+      listing = command(["/usr/bin/tar", "-tzf", artifact], echo: false).stdout.lines
+      packed = listing.includes?("bin/bookshelf") && listing.any?(&.starts_with?("public/"))
+      assert!(packed, listing.join('\n'))
+      unpacked = File.join(@root, "release")
+      Dir.mkdir(unpacked, 0o755)
+      command(["/usr/bin/tar", "-xzf", artifact, "-C", unpacked], echo: false)
+      ubuntu = [docker, "run", "--rm", "--platform", "linux/amd64", "-v", "#{unpacked}:/r:ro",
+                "ubuntu:24.04", "/r/bin/bookshelf", "routes"]
+      routes = attempt(ubuntu, timeout: 600.seconds)
+      health = routes.success? && routes.stdout.lines.any?(&.matches?(/^GET\s+\/health\s/))
+      assert!(health, routes.stdout + routes.stderr)
+      puts "PASS: frappe build writes a static linux/amd64 artifact that runs on Ubuntu"
     end
 
     # Runs the binary as a server would: on a socket of its own, serving public

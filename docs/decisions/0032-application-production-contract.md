@@ -2,7 +2,7 @@
 
 Date: 2026-10-10
 
-Status: proposed.
+Status: accepted.
 
 ## Context
 
@@ -22,7 +22,8 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - refuses a dirty tree;
    - publishes `app/assets` into `public/` and refuses if that leaves tracked changes;
    - compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.21.1-alpine@sha256:bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
-   - writes `.caramel/build/<shard>-<YYYYmmddTHHMMSSZ>-<sha7>-linux-amd64.tar.gz`, which holds `bin/<shard>` and `public/`. The time is the UTC build time; the sha is the commit's.
+   - writes `.caramel/build/<shard>-<YYYYmmddTHHMMSSZ>-<sha7>-linux-amd64.tar.gz`, which holds `bin/<shard>` and `public/`. The time is the UTC build time; the sha is the commit's;
+   - prints the artifact's absolute path as its only line on standard output; progress goes to standard error.
 
    A container engine is needed only for this build. Principle 3 governs development, not release builds.
 3. **Root.** `serve` reads `public/` from `CARAMEL_ROOT` when that is set, and from the compile-time root otherwise.
