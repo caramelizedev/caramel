@@ -12,11 +12,24 @@ if (process.argv.slice(2).some(arg => arg !== '--dry-run')) {
   console.error('usage: node website/publish.mjs [--dry-run]');
   process.exit(1);
 }
-// gh-pages names the main commit it was built from, so that commit must hold
-// the website's whole source.
-const pending = run('git', ['status', '--porcelain', '--', 'website']);
+// gh-pages names the main commit it was built from: only origin's main publishes,
+// with every file build.mjs reads committed.
+const inputs = ['website', 'shard.yml', 'templates/application/AGENTS.md'];
+const pending = run('git', ['status', '--porcelain', '--', ...inputs]);
 if (pending) {
-  console.error(`website/ has uncommitted changes; commit them before publishing:\n${pending}`);
+  console.error(`The website's sources have uncommitted changes; commit them before publishing:\n${pending}`);
+  process.exit(1);
+}
+const head = run('git', ['rev-parse', 'HEAD']);
+const main = run('git', ['ls-remote', 'origin', 'refs/heads/main']).split(/\s/)[0];
+if (head !== main) {
+  let found = 'a detached HEAD';
+  try {
+    found = `branch ${run('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {stdio:['ignore','pipe','ignore']})}`;
+  } catch {}
+  console.error(`publish.mjs publishes only the commit on origin's main, so gh-pages always names a main commit.\n` +
+    `Found ${found} at ${head.slice(0, 7)}; origin's main is ${main ? main.slice(0, 7) : 'missing'}.\n` +
+    `Check out main, pull, and run it again.`);
   process.exit(1);
 }
 run(process.execPath, [path.join(website, 'build.mjs')], {stdio:'inherit'});
