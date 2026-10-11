@@ -89,11 +89,14 @@ PROBLEMS = [
   {"table_taken",
    "aggregate TeaTin would store its rows in store_tea_tins, already the table of entity " \
    "Tea::Tin: rename one of them"},
+  {"with_tenancy",
+   "caramel/sweet_talk does not support caramel/tenancy yet: every tenant would share its " \
+   "tables, projection and process keys, and channels"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
-  compile_rows_named]
+  compile_rows_named compile_with_tenancy]
 
 cases = {"compile_valid" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

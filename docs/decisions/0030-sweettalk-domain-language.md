@@ -16,6 +16,7 @@ or a policy, and nothing stops one context from reaching into another's types.
 1. **`require "caramel/sweet_talk"` is the only way in, and `include SweetTalk` scopes the
    words.** The code lives in `src/caramel/sweet_talk/`. A module that includes `SweetTalk`
    may use `context`, and a context's body the other words. No word is a top-level macro.
+   A program that also requires `caramel/tenancy` does not compile.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
      a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
@@ -126,6 +127,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 - Writes through `Rows` would skip invariants and the value checks made in Crystal.
 - A notification carries an id, as Cold Brew advises: fields could pass its 8,000-byte
   limit, and the refused publish would roll the command back.
+- SweetTalk scopes no table, key or channel by tenant, so beside `caramel/tenancy` every
+  tenant would share its domain; refusing the pair is safer than a silent leak.
 
 Rejected:
 
@@ -137,4 +140,4 @@ Rejected:
 - **`Hash` attributes.** An entity holds that data in rows.
 - **A separate repository.** SweetTalk expands into macro contracts that
   [ADR 0016](0016-versioning-and-releases.md) does not cover.
-- **Deferred:** tenant scoping.
+- **Deferred:** tenant scoping ([ADR 0025](0025-multi-tenancy.md)).
