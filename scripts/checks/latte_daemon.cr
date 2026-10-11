@@ -135,14 +135,14 @@ module Caramel::Checks::LatteDaemon
 
   # Leaves *database* the way a guard interrupted before its release would.
   private def strand_guard(root : String, runtime : String, database : String) : Nil
-    name = Caramel::Latte::Postgres.quote_identifier(database)
+    name = Caramel::DatabaseRoles.quote_identifier(database)
     admin(root, runtime, "ALTER DATABASE #{name} WITH ALLOW_CONNECTIONS false;")
     allowed = connections_allowed(root, runtime, database)
     raise "Could not disable connections to #{database}" unless allowed == "f"
   end
 
   private def connections_allowed(root : String, runtime : String, database : String) : String
-    name = Caramel::Latte::Postgres.quote_literal(database)
+    name = Caramel::DatabaseRoles.quote_literal(database)
     admin(root, runtime, "SELECT datallowconn FROM pg_database WHERE datname = #{name};")
   end
 

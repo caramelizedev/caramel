@@ -41,7 +41,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - They are direct or session-mode, never transaction-pooled.
    - One database is owned by a migration role. A runtime role gets DML through default privileges.
    - The application needs no superuser and no extensions.
-   - `APP db roles DATABASE MIGRATION_ROLE RUNTIME_ROLE` prints, without passwords, the statements Latte runs for those names. The SQL moves out of `src/latte/postgres.cr` so both share it.
+   - `APP db roles DATABASE MIGRATION_ROLE RUNTIME_ROLE` prints, without passwords, a psql script that creates those roles and that database with the grants Latte gives them; Latte builds its statements from the same code. The script grants both roles to the role that runs it, so a managed server's administrator that is not a superuser can run it.
 9. **Deploy rules.**
    - (a) The new binary runs `migrate` while the old one serves. The zero-lock linter keeps migrations from blocking writes ([ADR 0008](0008-branch-and-diff-migrations.md)); keeping them compatible with the binary still serving is the migration author's job.
    - (b) The new binary's `jobs unknown` passes before cutover.

@@ -3,6 +3,7 @@ require "json"
 require "random/secure"
 require "uri"
 require "../caramel/version"
+require "../caramel/database_roles"
 require "./paths"
 require "./site"
 require "./process"
@@ -18,9 +19,9 @@ module Caramel::Latte
     # The schema of `pg_stat_statements` in the development database (ADR 0029).
     STATISTICS_SCHEMA          = "caramel_stats"
     PRELOADED_LIBRARIES        = "pg_stat_statements,auto_explain"
-    RUNTIME_CONNECTION_LIMIT   = 24
-    MIGRATION_CONNECTION_LIMIT =  1
-    MAX_TEST_WORKERS           =  8 # Corretto workers; each may hold one spec migration connection
+    RUNTIME_CONNECTION_LIMIT   = DatabaseRoles::RUNTIME_CONNECTION_LIMIT
+    MIGRATION_CONNECTION_LIMIT = DatabaseRoles::MIGRATION_CONNECTION_LIMIT
+    MAX_TEST_WORKERS           = 8 # Corretto workers; each may hold one spec migration connection
     ADMIN_USER                 = "caramel_admin"
     BRANCH_NAME                = /\A[a-z][a-z0-9_]{0,30}\z/
     RELEASE_GUARDS_SQL         = <<-SQL
@@ -446,7 +447,7 @@ module Caramel::Latte
 
     def list_branches(site : Site) : Array(String)
       prefix = self.class.branch_database(site.id, "a").rchop("a")
-      literal = self.class.quote_literal(prefix)
+      literal = DatabaseRoles.quote_literal(prefix)
       sql = "SELECT datname FROM pg_database WHERE starts_with(datname, #{literal}) ORDER BY 1;"
       output = @lock.synchronize { run_admin_psql(sql) }
       output.lines.map(&.strip).reject(&.empty?).map(&.lchop(prefix))
@@ -510,28 +511,29 @@ module Caramel::Latte
 
     def self.branch_guard_sql(database : String) : String
       <<-SQL
-        ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS false;
+        ALTER DATABASE #{DatabaseRoles.quote_identifier(database)} WITH ALLOW_CONNECTIONS false;
         SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity \
-          WHERE datname = #{quote_literal(database)} AND pid <> pg_backend_pid();
+          WHERE datname = #{DatabaseRoles.quote_literal(database)} AND pid <> pg_backend_pid();
         SQL
     end
 
     def self.branch_release_sql(database : String) : String
-      "ALTER DATABASE #{quote_identifier(database)} WITH ALLOW_CONNECTIONS true;"
+      "ALTER DATABASE #{DatabaseRoles.quote_identifier(database)} WITH ALLOW_CONNECTIONS true;"
     end
 
     def self.branch_clone_sql(source : String, branch : String, owner : String) : String
-      template = quote_identifier(source)
-      "CREATE DATABASE #{quote_identifier(branch)} WITH TEMPLATE #{template} " \
-      "OWNER #{quote_identifier(owner)} STRATEGY FILE_COPY;"
+      template = DatabaseRoles.quote_identifier(source)
+      "CREATE DATABASE #{DatabaseRoles.quote_identifier(branch)} WITH TEMPLATE #{template} " \
+      "OWNER #{DatabaseRoles.quote_identifier(owner)} STRATEGY FILE_COPY;"
     end
 
     # Database-level settings and grants are not copied from a template.
     def self.branch_access_sql(branch : String,
                                migration_role : String,
                                runtime_role : String) : String
-      name = quote_identifier(branch)
-      roles = "#{quote_identifier(migration_role)}, #{quote_identifier(runtime_role)}"
+      name = DatabaseRoles.quote_identifier(branch)
+      migration = DatabaseRoles.quote_identifier(migration_role)
+      roles = "#{migration}, #{DatabaseRoles.quote_identifier(runtime_role)}"
       <<-SQL
         ALTER DATABASE #{name} SET timezone TO 'UTC';
         REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{name} FROM PUBLIC;
@@ -540,15 +542,7 @@ module Caramel::Latte
     end
 
     def self.branch_drop_sql(branch : String) : String
-      "DROP DATABASE IF EXISTS #{quote_identifier(branch)} WITH (FORCE);"
-    end
-
-    def self.quote_identifier(identifier : String) : String
-      %("#{identifier.gsub("\"", "\"\"")}")
-    end
-
-    def self.quote_literal(value : String) : String
-      "'#{value.gsub("'", "''")}'"
+      "DROP DATABASE IF EXISTS #{DatabaseRoles.quote_identifier(branch)} WITH (FORCE);"
     end
 
     private def config_literal(value : String) : String
@@ -659,7 +653,7 @@ module Caramel::Latte
     end
 
     private def managed_configuration_ok? : Bool
-      socket = self.class.quote_literal(@socket_directory)
+      socket = DatabaseRoles.quote_literal(@socket_directory)
       sql = <<-SQL
         SELECT current_setting('listen_addresses') = ''
           AND current_setting('unix_socket_directories') = #{socket}
@@ -1146,34 +1140,16 @@ module Caramel::Latte
     end
 
     private def ensure_role(role : String, password : String, connection_limit : Int32) : Nil
-      literal = self.class.quote_literal(role)
-      name = self.class.quote_identifier(role)
-      secret = self.class.quote_literal(password)
-      attributes = "LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS " \
-                   "CONNECTION LIMIT #{connection_limit} PASSWORD #{secret}"
-      sql = <<-SQL
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = #{literal}) THEN
-            CREATE ROLE #{name} #{attributes};
-          END IF;
-        END
-        $$;
-        ALTER ROLE #{name} #{attributes};
-        SQL
-      run_admin_psql(sql)
+      run_admin_psql(DatabaseRoles.role(role, connection_limit, password))
     end
 
     private def ensure_database(database : String, owner : String) : Nil
       return if database_exists?(database)
-      name = self.class.quote_identifier(database)
-      owner_name = self.class.quote_identifier(owner)
-      sql = "CREATE DATABASE #{name} OWNER #{owner_name} ENCODING 'UTF8' TEMPLATE template0;"
-      run_admin_psql(sql)
+      run_admin_psql(DatabaseRoles.create_database(database, owner))
     end
 
     private def database_exists?(database : String) : Bool
-      literal = self.class.quote_literal(database)
+      literal = DatabaseRoles.quote_literal(database)
       output = run_admin_psql("SELECT 1 FROM pg_database WHERE datname = #{literal};")
       output.strip == "1"
     end
@@ -1203,50 +1179,27 @@ module Caramel::Latte
       end
     end
 
+    # The shared role script's grants, plus two of Latte's own: it takes back the
+    # `pg_read_all_stats` that older Latte versions granted, and adds the
+    # statistics schema to development databases.
     private def configure_database(database : String,
                                    migration_role : String,
                                    runtime_role : String,
                                    statistics : Bool) : Nil
-      name = self.class.quote_identifier(database)
-      migration = self.class.quote_identifier(migration_role)
-      runtime = self.class.quote_identifier(runtime_role)
-      sql = <<-SQL
-        ALTER DATABASE #{name} OWNER TO #{migration};
-        ALTER DATABASE #{name} SET timezone TO 'UTC';
-        REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE #{name} FROM PUBLIC;
-        GRANT CONNECT ON DATABASE #{name} TO #{migration}, #{runtime};
-        REVOKE pg_read_all_stats FROM #{runtime};
-        SQL
-      run_admin_psql(sql)
+      migration = DatabaseRoles.quote_identifier(migration_role)
+      runtime = DatabaseRoles.quote_identifier(runtime_role)
+      access = DatabaseRoles.database_access(database, migration_role, runtime_role)
+      run_admin_psql("#{access}\nREVOKE pg_read_all_stats FROM #{runtime};")
 
-      defaults = "ALTER DEFAULT PRIVILEGES FOR ROLE #{migration} IN SCHEMA public"
-      database_sql = <<-SQL
-        REVOKE ALL ON SCHEMA public FROM PUBLIC;
-        ALTER SCHEMA public OWNER TO #{migration};
-        REVOKE ALL ON SCHEMA public FROM #{runtime};
-        GRANT USAGE ON SCHEMA public TO #{runtime};
-        #{defaults} REVOKE ALL ON TABLES FROM PUBLIC;
-        #{defaults} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO #{runtime};
-        #{defaults} REVOKE ALL ON SEQUENCES FROM PUBLIC;
-        #{defaults} GRANT USAGE, SELECT ON SEQUENCES TO #{runtime};
-        CREATE TABLE IF NOT EXISTS caramel_migrations (
-          version bigint PRIMARY KEY,
-          name text NOT NULL,
-          checksum text NOT NULL,
-          applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        ALTER TABLE caramel_migrations OWNER TO #{migration};
-        REVOKE ALL ON TABLE caramel_migrations FROM #{runtime};
-        GRANT SELECT ON TABLE caramel_migrations TO #{runtime};
-        SQL
-      database_sql += statistics_sql(migration, runtime) if statistics
+      database_sql = DatabaseRoles.schema_access(migration_role, runtime_role)
+      database_sql += "\n" + statistics_sql(migration, runtime) if statistics
       run_psql(database_sql, database, ADMIN_USER, admin_material.password)
     end
 
     # `pg_stat_statements` in a schema of its own, so its views stay out of `public`, which
     # SugarORM's introspection and Corretto's catalog fingerprint read.
     private def statistics_sql(migration : String, runtime : String) : String
-      schema = self.class.quote_identifier(STATISTICS_SCHEMA)
+      schema = DatabaseRoles.quote_identifier(STATISTICS_SCHEMA)
       <<-SQL
         CREATE SCHEMA IF NOT EXISTS #{schema};
         CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA #{schema};

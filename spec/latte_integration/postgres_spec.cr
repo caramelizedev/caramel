@@ -365,7 +365,7 @@ describe "Latte managed PostgreSQL" do
     File.chmod(passfile, 0o600)
     sentinel = "latte-secret-#{Random::Secure.hex(16)}"
     missing_role = "caramel_log_probe_#{Random::Secure.hex(8)}"
-    role = Caramel::Latte::Postgres.quote_identifier(missing_role)
+    role = Caramel::DatabaseRoles.quote_identifier(missing_role)
     begin
       result = Caramel::Latte::ProcessRunner.run(
         [toolchain.psql, "-X", "-v", "ON_ERROR_STOP=1", "-A", "-t", "-h", paths.postgres_socket_dir,
@@ -531,7 +531,7 @@ describe "Latte managed PostgreSQL" do
       db.close
     end
 
-    locked = "ALTER DATABASE #{Caramel::Latte::Postgres.quote_identifier(source)} " \
+    locked = "ALTER DATABASE #{Caramel::DatabaseRoles.quote_identifier(source)} " \
              "WITH ALLOW_CONNECTIONS false;"
     admin.call(locked)
     service.release_guards

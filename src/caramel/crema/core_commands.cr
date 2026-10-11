@@ -1,3 +1,4 @@
+require "../database_roles"
 require "./commands"
 require "./diagnose"
 require "./jobs"
@@ -80,6 +81,33 @@ module Caramel::Crema
     end
   end
 
+  # What `db …` does: report database health, or print the script that creates an
+  # application's roles and database.
+  module DbCommand
+    USAGE = "Usage: db diagnose | db roles DATABASE MIGRATION_ROLE RUNTIME_ROLE"
+
+    def self.run(arguments : Array(String)) : Int32
+      if arguments == ["diagnose"]
+        CommandLine.with_database(false) { |_, _| Diagnose.run(STDOUT) ? 0 : 1 }
+      elsif arguments.size == 4 && arguments.first == "roles"
+        roles(arguments[1], arguments[2], arguments[3])
+      else
+        STDERR.puts(USAGE)
+        2
+      end
+    end
+
+    # Prints the role script without opening a database.
+    private def self.roles(database : String, migration : String, runtime : String) : Int32
+      unless {database, migration, runtime}.all?(&.matches?(DatabaseRoles::NAME))
+        STDERR.puts("db roles: names must match [a-z_][a-z0-9_]*, up to 63 characters")
+        return 2
+      end
+      print DatabaseRoles.script(database, migration, runtime)
+      0
+    end
+  end
+
   command("ops", "ops status|requests|fibers|metrics|tail|errors|error|traces|trace|" \
                  "debug-token|console [--socket=PATH]") do |arguments|
     OpsClient.new(arguments).run
@@ -89,10 +117,8 @@ module Caramel::Crema
     JobsCommand.run(arguments)
   end
 
-  command("db", "db diagnose") do |_|
-    CommandLine.with_database(false) do |_, _|
-      Diagnose.run(STDOUT) ? 0 : 1
-    end
+  command("db", "db diagnose|roles DATABASE MIGRATION_ROLE RUNTIME_ROLE") do |arguments|
+    DbCommand.run(arguments)
   end
 
   command("insights", "insights") do |_|
