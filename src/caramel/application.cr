@@ -28,6 +28,8 @@ module Caramel
     getter sessions : Session
     @authority : String
     @public_root : String?
+    @in_flight = Atomic(Int32).new(0)
+    @draining = Atomic(Bool).new(false)
 
     def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
       @authority = URI.parse(@csrf.origin).authority ||
@@ -49,23 +51,43 @@ module Caramel
     end
 
     def call(context : HTTP::Server::Context) : Nil
-      response = handle(context.request)
-      context.response.status_code = response.status
-      response.headers.each { |name, values| context.response.headers[name] = values }
-      if streamer = response.streamer
-        streaming(response) do
-          streamer.call(context.response)
-        rescue IO::Error | HTTP::Server::ClientError
-          # The client disconnected; the server wraps socket errors in ClientError.
-        rescue error
-          # The status line has already been sent; the request id joins this report to
-          # the request's canonical line.
-          request_id = response.headers["X-Request-ID"]?
-          Crema.report(error, handled: false, source: "stream", request_id: request_id)
+      @in_flight.add(1)
+      begin
+        response = handle(context.request)
+        context.response.status_code = response.status
+        response.headers.each { |name, values| context.response.headers[name] = values }
+        context.response.headers["Connection"] = "close" if @draining.get
+        if streamer = response.streamer
+          streaming(response) do
+            streamer.call(context.response)
+          rescue IO::Error | HTTP::Server::ClientError
+            # The client disconnected; the server wraps socket errors in ClientError.
+          rescue error
+            # The status line has already been sent; the request id joins this report to
+            # the request's canonical line.
+            request_id = response.headers["X-Request-ID"]?
+            Crema.report(error, handled: false, source: "stream", request_id: request_id)
+          end
+        else
+          context.response.print(response.body)
         end
-      else
-        context.response.print(response.body)
+      ensure
+        @in_flight.sub(1)
       end
+    end
+
+    # Starts shutdown: every response written from now on closes its connection.
+    def drain : Nil
+      @draining.set(true)
+    end
+
+    # Waits until no request is in flight or *timeout* passes, and returns how many remain.
+    def wait_idle(timeout : Time::Span) : Int32
+      deadline = Time.instant + timeout
+      while @in_flight.get > 0 && Time.instant < deadline
+        sleep 25.milliseconds
+      end
+      @in_flight.get
     end
 
     # Reads, checks and dispatches one request. Every failure becomes a

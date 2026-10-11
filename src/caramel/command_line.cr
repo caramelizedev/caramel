@@ -37,6 +37,9 @@ module Caramel
       "lint [--dev-override]",
     ].join('|')
 
+    # How long `serve` waits for in-flight requests after SIGTERM.
+    DRAIN_TIMEOUT = 25.seconds
+
     # `work`'s flags: `--queues` and `--concurrency` stand in for
     # CARAMEL_WORKER_QUEUES and CARAMEL_WORKER_CONCURRENCY, which
     # `ColdBrew.start` validates, and `--no-scheduler` leaves `every`
@@ -305,24 +308,29 @@ module Caramel
       1
     end
 
+    # The directory whose `public/` `serve` serves: `CARAMEL_ROOT` when set,
+    # otherwise *root*, the compile-time root.
+    private def self.served_root(root : String) : String
+      configured = ENV["CARAMEL_ROOT"]?.presence || return root
+      abort("CARAMEL_ROOT must be an absolute path") unless configured.starts_with?('/')
+      public_directory = File.join(configured, "public")
+      unless Dir.exists?(public_directory)
+        abort("CARAMEL_ROOT has no public directory: #{public_directory}")
+      end
+      configured
+    end
+
     # Serves on the private socket `frappe dev` names, with Cold Brew's
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
     # Without *workers* it keeps PubSub and maintenance but runs no jobs or
-    # schedules. `CARAMEL_ROOT` replaces *root* as the directory whose
-    # `public/` it serves.
+    # schedules. On SIGTERM it finishes in-flight requests for up to
+    # DRAIN_TIMEOUT.
     private def self.serve(app : T.class,
                            db : DB::Database,
                            url : String,
                            root : String,
                            workers : Bool) : Nil forall T
-      if configured = ENV["CARAMEL_ROOT"]?.presence
-        abort("CARAMEL_ROOT must be an absolute path") unless configured.starts_with?('/')
-        public_directory = File.join(configured, "public")
-        unless Dir.exists?(public_directory)
-          abort("CARAMEL_ROOT has no public directory: #{public_directory}")
-        end
-        root = configured
-      end
+      root = served_root(root)
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
@@ -345,9 +353,17 @@ module Caramel
         cold_brew = ColdBrew.start(url, workers: workers) unless ENV["CARAMEL_ENV"]? == "test"
         runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
           application: application)
-        Process.on_terminate { server.close }
+        # The listener stops; responses still in flight close their connections.
+        Process.on_terminate do
+          application.drain
+          server.close unless server.closed?
+        end
         puts "#{T::TITLE} is ready at #{origin}"
         server.listen
+        remaining = application.wait_idle(DRAIN_TIMEOUT)
+        if remaining > 0
+          Log.for("caramel").warn { "stopped with #{remaining} requests in flight after 25 s" }
+        end
       ensure
         server.close unless server.closed?
         File.delete?(socket_path) if bound

@@ -442,6 +442,8 @@ module Caramel::Checks
     end
 
     # SIGTERM while a job runs: serve stops fetching, lets the job finish and exits.
+    # The page's open EventSource is a request in flight, so serve also waits out
+    # its 25 s drain before it exits.
     private def check_graceful_stop : Nil
       group("Cold Brew graceful stop on SIGTERM", "#pubsub") do
         previous = js("return document.getElementById('pubsub-delivery').textContent").as_s
@@ -458,7 +460,7 @@ module Caramel::Checks
         app = @fixture.app || raise "The fixture app is not running"
         stopping = Time.instant
         app.signal(Signal::TERM)
-        status = LatteFixture.wait_exit(app, 15.seconds, "serve to exit after SIGTERM")
+        status = LatteFixture.wait_exit(app, 45.seconds, "serve to exit after SIGTERM")
         stopped = Time.instant - stopping
         assert!(status.success?, "serve exited with #{status} after SIGTERM")
         assert!(job_state(delivery) == "1:true:true:default",
