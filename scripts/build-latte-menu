@@ -7,9 +7,9 @@ APP="$ROOT/bin/Latte.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
-CACHE_ROOT=${CARAMEL_LATTE_SWIFT_CACHE:-/private/tmp/caramel-latte-swift-module-cache}
 
-mkdir -p "$MACOS" "$RESOURCES" "$CACHE_ROOT"
+. "$ROOT/scripts/lib/swift-cache.sh"
+mkdir -p "$MACOS" "$RESOURCES"
 
 /usr/bin/swiftc \
   -parse-as-library \
