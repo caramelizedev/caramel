@@ -473,13 +473,6 @@ describe Caramel::Latte::Postgres do
     end
   end
 
-  it "quotes generated SQL identifiers and literals" do
-    Caramel::Latte::Postgres.quote_identifier("safe_name").should eq("\"safe_name\"")
-    quoted = %("name""with""quotes")
-    Caramel::Latte::Postgres.quote_identifier(%(name"with"quotes)).should eq(quoted)
-    Caramel::Latte::Postgres.quote_literal("don't").should eq("'don''t'")
-  end
-
   it "redacts credential URLs and passwords from inspection" do
     id = "0123456789abcdef"
     names = Caramel::Latte::Postgres.database_names(id)

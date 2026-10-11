@@ -10,12 +10,9 @@ module Caramel::Crema
     @@commands[name] = {syntax, block}
   end
 
-  # Runs the command *name* with *arguments*; nil when none is registered, and for `db`
-  # when the arguments are not `diagnose`, so other words reach the usage error.
+  # Runs the command *name* with *arguments*; nil when none is registered.
   def self.run_command(name : String, arguments : Array(String)) : Int32?
     entry = @@commands[name]? || return
-    return if name == "db" && arguments != ["diagnose"]
-
     entry[1].call(arguments)
   end
 
