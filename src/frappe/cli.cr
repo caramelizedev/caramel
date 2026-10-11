@@ -6,6 +6,7 @@ require "./new_project"
 require "./latte_client"
 require "./installations"
 require "./release"
+require "./release_build"
 require "./launchers"
 require "./tools"
 require "./resource_generator"
@@ -137,6 +138,8 @@ module Caramel::Frappe
         values = development_environment(project).merge({"CARAMEL_ENV" => "development"})
         values["CARAMEL_EXPECTED_DATABASE_URL"] = values["DATABASE_URL"]
         Tools.new(@framework_root, @output, @error).app_command(project, ["seed"], values)
+      when "build"
+        @output.puts(ReleaseBuild.new(Project.load, @error).run)
       when "corretto"
         paths = invocation.list("SPEC_PATHS")
         concurrency = invocation["--concurrency"]?.try(&.to_i) || 1

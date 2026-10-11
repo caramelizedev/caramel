@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Applications can run in production on Linux: `frappe build` writes a static linux/amd64 artifact, `serve` reads public files from `CARAMEL_ROOT`, runs without workers with `--no-workers` and finishes in-flight requests on SIGTERM, `APP jobs unknown` lists queued jobs a binary cannot run and `APP db roles` prints the role script (ADR 0032).
+
 ## 0.11.0 - 2026-10-10
 
 ### Upgrade notes

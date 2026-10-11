@@ -169,6 +169,9 @@ module Caramel::Frappe
       Command.new("migrate [--dev-override] #{MODE}",
         "Lint and apply pending migrations, then report schema drift read-only."),
       Command.new("seed", "Load db/seeds.cr into the development database."),
+      Command.new("build",
+        "Build the Linux release artifact in a container: a static linux/amd64 binary and " \
+        "public/ in .caramel/build/; refuses uncommitted changes and prints the artifact's path."),
       Command.new("corretto [SPEC_PATHS...] " \
                   "[--concurrency=1..#{Latte::Postgres::MAX_TEST_WORKERS}]",
         "Run specs in isolated Latte test databases with synchronous queue drains."),
