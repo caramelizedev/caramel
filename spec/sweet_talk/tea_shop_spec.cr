@@ -376,6 +376,27 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "keeps both changes when two handlers update one projection row at once" do
+    SweetTalkSpec.committed do
+      tea = TeaShopSpec.tea("Sencha")
+      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 1 }
+      done = Channel(Exception?).new
+      spawn do
+        SweetTalk.__sweettalk_unit do
+          Ordering::Sales[tea.id].sold += 2
+          sleep 200.milliseconds
+        end
+        done.send(nil)
+      rescue ex
+        done.send(ex)
+      end
+      sleep 50.milliseconds
+      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 4 }
+      done.receive.should be_nil
+      Ordering::Sales.all.map { |row| {row.tea.raw, row.sold} }.should eq([{tea.id.raw, 7}])
+    end
+  end
+
   it "notifies live pages with the subject's id on commit, and not on rollback" do
     SweetTalkSpec.committed do
       broker = Caramel::ColdBrew::Broker.new(SweetTalkSpec.url(SweetTalkSpec::RUNTIME_URL))
