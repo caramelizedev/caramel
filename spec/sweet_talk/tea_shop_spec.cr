@@ -88,15 +88,6 @@ module TeaShopSpec
       {tea.name, hold.state.to_s.downcase}
     end.sort!
   end
-
-  # Polls every 50 ms until the block is true, for up to 10 s.
-  def self.eventually(what : String, &) : Nil
-    deadline = Time.instant + 10.seconds
-    until yield
-      fail "#{what} not within 10 s" if Time.instant > deadline
-      sleep 50.milliseconds
-    end
-  end
 end
 
 describe "The tea shop on PostgreSQL" do
@@ -584,13 +575,13 @@ describe "The tea shop on PostgreSQL" do
         tea = TeaShopSpec.tea("Sencha")
         order = TeaShopSpec.order({tea, 2})
         order.place
-        TeaShopSpec.eventually("a packed parcel with 2 tins held") do
+        SweetTalkSpec.eventually("a packed parcel with 2 tins held") do
           packed = Fulfilment::Parcel.all.first?.try(&.packed?)
           packed && Catalogue::Tea.find(tea.id).held.raw == 2
         end
 
         TeaShopSpec.parcel.dispatch
-        TeaShopSpec.eventually("a shipped order with 3 tins left") do
+        SweetTalkSpec.eventually("a shipped order with 3 tins left") do
           Ordering::Order.find(order.id).shipped? && Catalogue::Tea.find(tea.id).stock.raw == 3
         end
       ensure

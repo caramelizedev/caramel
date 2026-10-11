@@ -34,5 +34,19 @@ module Renamed
         Larder[refilled.blend_id].restocked += refilled.tins.raw
       end
     end
+
+    process Watch, renamed_from: Lookout, means: "how often a tea was refilled lately" do
+      key tea : Blend
+      has refills : Int32 = 0
+
+      whenever Blend::Refilled, key: refilled.blend_id do |refilled|
+        @refills += 1
+        arm quiet
+      end
+
+      deadline quiet, after: 1.day do
+        @refills = 0
+      end
+    end
   end
 end

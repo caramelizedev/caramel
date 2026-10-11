@@ -111,8 +111,6 @@ module SweetTalk
             {% check = {"length", "length_to_#{hi.id}", "<= #{hi.id}"} %}
           {% end %}
         {% end %}
-        {% sized = length.is_a?(NilLiteral) ? nil : "#{name} must be between #{length.begin} " +
-                                                    "and #{length.end} characters" %}
         struct {{ name }} < ::SweetTalk::Value
           include Comparable({{ name }})
 
@@ -130,7 +128,8 @@ module SweetTalk
             {% end %}
             {% unless length.is_a?(NilLiteral) %}
               unless ({{ length }}).includes?(@raw.size)
-                raise ::SweetTalk::Refusal.new({{ sized }})
+                raise ::SweetTalk::Refusal.new(
+                  ::SweetTalk::Value.__sweettalk_length_refusal({{ name.stringify }}, {{ length }}))
               end
             {% end %}
           end

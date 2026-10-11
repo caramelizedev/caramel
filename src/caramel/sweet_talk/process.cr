@@ -41,9 +41,10 @@ module SweetTalk
     end
 
     # `deadline lapse, after: 7.days do … end` is a timer on each row: `arm lapse` sets
-    # it to fire after the span, `disarm lapse` cancels it, and `lapse_due` tells when it
-    # fires. Each arming enqueues a job to run at that time; the job runs the block only
-    # if no arming or disarming came after its own, which an arming counter tells.
+    # it to fire after the span, or `arm lapse, after: 2.days` after another one,
+    # `disarm lapse` cancels it, and `lapse_due` tells when it fires. Each arming
+    # enqueues a job to run at that time; the job runs the block only if no arming or
+    # disarming came after its own, which an arming counter tells.
     macro deadline(name, after = nil, &block)
       {% process = @type.name.split("::").last %}
       {% job = "#{name.id.camelcase}Deadline".id %}
@@ -52,9 +53,9 @@ module SweetTalk
       has {{ name.id }}_arming : Int32 = 0
       has {{ name.id }}_due : Time?
 
-      protected def __sweettalk_arm_{{ name.id }} : Nil
+      protected def __sweettalk_arm_{{ name.id }}(span : Time::Span = ({{ after }})) : Nil
         @{{ name.id }}_arming += 1
-        due = Time.utc + ({{ after }})
+        due = Time.utc + span
         @{{ name.id }}_due = due
         {{ job }}.enqueue(key: __sweettalk_key_json, arming: @{{ name.id }}_arming, run_at: due)
       end
@@ -99,8 +100,9 @@ module SweetTalk
       end
     end
 
-    # `arm lapse` sets the deadline to fire after its span from now.
-    macro arm(name)
+    # `arm lapse` sets the deadline to fire after its span from now, and
+    # `arm lapse, after: 2.days` after that span instead.
+    macro arm(name, after = nil)
       \{% unless @type.has_constant?({{ "SWEETTALK_DEADLINE_#{name.id.upcase}" }}) %}
         \{% deadlines = @type.constants.select(&.starts_with?("SWEETTALK_DEADLINE_"))
              .map { |constant| @type.constant(constant)[0] }.join(", ") %}
@@ -108,7 +110,7 @@ module SweetTalk
                  "; deadlines: " + deadlines +
                  {{ "\n  --> #{name.filename.id}:#{name.line_number}:#{name.column_number}" }} %}
       \{% end %}
-      __sweettalk_arm_{{ name.id }}
+      __sweettalk_arm_{{ name.id }}{% unless after.is_a?(NilLiteral) %}({{ after }}){% end %}
     end
 
     # `disarm lapse` cancels the deadline.

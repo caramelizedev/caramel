@@ -92,6 +92,15 @@ module SweetTalkSpec
   def self.count(table : String) : Int64
     SugarORM.sql("SELECT count(*) AS value FROM #{table}", as: {value: Int64}).first[:value]
   end
+
+  # Polls every 50 ms until the block is true, for up to 10 s.
+  def self.eventually(what : String, &) : Nil
+    deadline = Time.instant + 10.seconds
+    until yield
+      fail "#{what} not within 10 s" if Time.instant > deadline
+      sleep 50.milliseconds
+    end
+  end
 end
 
 Spec.before_suite do

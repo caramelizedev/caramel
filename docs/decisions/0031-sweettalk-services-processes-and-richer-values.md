@@ -55,6 +55,8 @@ aggregates over days and undo their work when a step is refused.
    event's actor. A field may be nilable, as in `reason : String?`, but not another union;
    a field named like the metadata or the subject's id does not compile. An event reads
    its subject's id when it is dispatched, so a factory's event names the new aggregate.
+   A retried job restores the same `event_id`, the key a handler gives a side effect
+   outside PostgreSQL, such as mail, so a retry can tell it already happened.
 7. **Compensation** (amends decision 6). `compensate Event do |event, …, refusal| … end`,
    after a `whenever` for the same event in the same context, border or process, runs when
    that handler is refused. The handler's work has rolled back; the compensation gets its
@@ -67,9 +69,9 @@ aggregates over days and undo their work when a step is refused.
    follow another context's events outside a border, which draws an event edge, and takes
    `renamed_from:` as a projection does.
 9. **Deadlines.** `deadline name, after: span do … end` in a process: `arm name` sets
-   `<name>_due` and enqueues a job for that time, and `disarm name` clears it. The job
-   runs the block only when no arming or disarming came after its own, acting as
-   `deadline <Process>.<name>`.
+   `<name>_due` and enqueues a job for that time, `arm name, after: other` uses another
+   span, and `disarm name` clears it. The job runs the block only when no arming or
+   disarming came after its own, acting as `deadline <Process>.<name>`.
 10. **Units of work and checks.** A handler's projection and process rows live in a unit
     of work on its fiber and are saved when it returns. The whole-program checks run at the
     first `find?`, dispatch or job as well as at `SweetTalk.boot`.

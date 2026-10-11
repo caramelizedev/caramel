@@ -12,6 +12,21 @@ module SweetTalk
     def self.raw_of(other : Value)
       other.raw
     end
+
+    # The refusal for a string whose length is outside *range*, read at run time so an
+    # open or exclusive range names the lengths it takes.
+    def self.__sweettalk_length_refusal(name : String, range : Range) : String
+      least = range.begin
+      most = range.end
+      most -= 1 if most && range.excludes_end?
+      if least && most
+        "#{name} must be between #{least} and #{most} characters"
+      elsif least
+        "#{name} must be at least #{least} characters"
+      else
+        "#{name} must be at most #{most} characters"
+      end
+    end
   end
 
   # An aggregate's typed id, `Name::Id`, or a record's, `RecordId(Account)`.

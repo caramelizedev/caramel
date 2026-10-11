@@ -1,7 +1,8 @@
 # What PostgreSQL checks of SweetTalk's values: every integer bound and string length
 # is a CHECK constraint on each column that stores it, so a write that goes around the
 # domain is refused too; a pattern, and a value with database_check: false, are checked
-# in Crystal only.
+# in Crystal only. And the tables as PostgreSQL holds them match the declared ones, so
+# `frappe db diff` derives no further migration.
 require "./support/app"
 
 module DatabaseChecksSpec
@@ -36,6 +37,13 @@ describe "SweetTalk's database checks" do
         check_shelf_bins_size_width check_shelf_boxes_count check_store_teas_stock
       ])
     end
+  end
+
+  it "needs no further migration once its tables exist" do
+    snapshot = SugarORM::Introspection.read(SweetTalkSpec.owner)
+    plan = SugarORM::Differ.diff(SugarORM::Catalog.declared, snapshot)
+    (plan.transactional + plan.online).map(&.inspect).should eq([] of String)
+    plan.halts.should be_empty
   end
 
   it "refuses a bound broken around the domain, through a schema or in SQL" do
