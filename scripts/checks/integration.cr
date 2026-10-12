@@ -125,12 +125,14 @@ module Caramel::Checks::Integration
       env["CARAMEL_OWNED_ADMIN_URL"] = url("postgres", "caramel_admin", "", sock, port)
       crystal = File.join(Checks::REPO, "scripts/crystal")
       # spec/tenancy redefines framework hooks for its whole program
-      # (ADR 0025), and spec/sweet_talk opts into SweetTalk (ADR 0030), so
-      # each runs as a program of its own.
+      # (ADR 0025), spec/sweet_talk opts into SweetTalk (ADR 0030), and
+      # spec/sweet_talk_tenancy opts into both (ADR 0033), so each runs as
+      # a program of its own.
       runs = [
         [crystal, "spec", "spec/integration", "--error-trace"] + ARGV,
         [crystal, "spec", "spec/tenancy", "--error-trace"],
         [crystal, "spec", "spec/sweet_talk", "--error-trace"],
+        [crystal, "spec", "spec/sweet_talk_tenancy", "--error-trace"],
       ]
       statuses = runs.map do |specs|
         Process.new(specs,

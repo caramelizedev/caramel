@@ -2,6 +2,8 @@
 module SweetTalk
   # The SugarORM schema and changeset for one aggregate, entity, projection or process,
   # and for a projection or a process `Start`, the upsert that inserts a row by its key.
+  # In a tenanted context the schema declares `tenant`, so SugarORM scopes every read,
+  # lock, key and upsert by the bound tenant (ADR 0033).
   macro __sweettalk_schema(owner)
     {% type = owner.resolve %}
     {% row = type.constant("SWEETTALK_ROW").id %}
@@ -13,9 +15,15 @@ module SweetTalk
     {% key = named ? attributes.find { |attribute| attribute[0] == named } : nil %}
     {% indexed = key && (key[2] == "composite" ? key[7].map { |part| part[1] } : [key[4]]) %}
     {% aggregate = type < ::SweetTalk::Aggregate %}
+    {% home = ::SweetTalk::BoundedContext.includers
+         .find { |context| type.name.starts_with?("#{context.name}::") } %}
+    {% tenant = home && home.constant("SWEETTALK_TENANT") %}
     struct {{ row }} < ::SugarORM::Schema
       schema {{ type.constant("SWEETTALK_TABLE") }} do
         field id : Int64, primary: true
+        {% if tenant %}
+          tenant {{ tenant[1].id }} : ::{{ tenant[0].id }}
+        {% end %}
         {% if parent %}
           belongs_to {{ parent[0].id }} : {{ parent[1].id }}
         {% end %}

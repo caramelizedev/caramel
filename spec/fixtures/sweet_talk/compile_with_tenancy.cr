@@ -29,6 +29,8 @@ end
 module Shop
   include SweetTalk
 
+  tenant Fixture::Account
+
   context Catalogue, means: "the teas on our shelves" do
     aggregate Tea, means: "one tea we sell" do
       has name : String

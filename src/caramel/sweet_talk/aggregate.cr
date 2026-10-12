@@ -11,7 +11,8 @@ module SweetTalk
     @__sweettalk_events = [] of ::SweetTalk::Event
 
     # `entity Line, means: "…" do … end` is an entity inside this aggregate, stored in a
-    # child table named after the aggregate.
+    # child table named after the aggregate. In a tenanted context the aggregate's key
+    # column may not be the tenant's.
     macro entity(name, means = nil, renamed_from = nil, &block)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -19,13 +20,21 @@ module SweetTalk
       {% stored = (renamed_from || name).stringify.underscore %}
       {% table = "#{@type.constant("SWEETTALK_BASE").id}_#{stored.id}" %}
       {% parent = {@type.constant("SWEETTALK_STORED"), @type.constant("SWEETTALK_ROW")} %}
+      {% home = ::SweetTalk::BoundedContext.includers
+           .find { |context| @type.name.starts_with?("#{context.name}::") } %}
+      {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+      {% if tenant && parent[0] == tenant[1] %}
+        {% name.raise "entity #{name} would name its aggregate in #{tenant[1].id}_id, the " +
+                      "column that names each row's tenant #{tenant[0].id}: rename aggregate " +
+                      "#{@type.name.split("::").last.id}" %}
+      {% end %}
       class {{ name }} < ::SweetTalk::Entity
         SWEETTALK_KIND   = "entity"
         SWEETTALK_MEANS  = {{ means }}
         SWEETTALK_ROW    = {{ "#{@type.constant("SWEETTALK_ROW").id}::#{name}" }}
         SWEETTALK_PARENT = {{ parent }}
         ::SweetTalk.__sweettalk_table({{ table }},
-          {{ "entity #{@type.name.split("::").last.id}::#{name}" }})
+          {{ "entity #{@type.name.split("::").last.id}::#{name}" }}, ::{{ @type }})
 
         {{ block ? block.body : nil }}
 
@@ -35,7 +44,8 @@ module SweetTalk
 
     # `event Placed, lines : Array(Line), means: "…"` is one of this aggregate's events. It
     # records its subject and its fields when it is emitted, with an id, the time and the
-    # actor.
+    # actor. Its channel fits PostgreSQL's 63 characters, or 42 in a program that requires
+    # caramel/tenancy, which prefixes a tenant's `t<id>:`.
     macro event(name, *fields, means = nil, renamed_from = nil)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -56,8 +66,12 @@ module SweetTalk
       {% facts = fields.map do |field|
            "#{field.var}: ::SweetTalk.unpack(#{field.type}, data[#{field.var.stringify}])"
          end %}
-      {% if channel.size > 63 %}
-        {% name.raise "event #{name}'s channel #{channel} is longer than PostgreSQL's 63 " +
+      {% if ::Caramel.has_constant?("Tenancy") && channel.size > 42 %}
+        {% name.raise "event #{name}'s channel #{channel.id} is longer than 42 characters: a " +
+                      "tenant's t<id>: prefix adds up to 21 of PostgreSQL's 63; shorten the " +
+                      "context, aggregate or event name" %}
+      {% elsif channel.size > 63 %}
+        {% name.raise "event #{name}'s channel #{channel.id} is longer than PostgreSQL's 63 " +
                       "characters: shorten the context, aggregate or event name" %}
       {% end %}
       class {{ name }} < ::SweetTalk::Event

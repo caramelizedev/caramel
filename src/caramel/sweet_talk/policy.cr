@@ -29,6 +29,7 @@ module SweetTalk
     {% parameters = "#{named[0]} : #{event}" + (each ? ", #{named[1]}" : "") %}
     {% names = each ? "#{named[0]}, #{named[1]}" : "#{named[0]}" %}
     {% compensation = "__sweettalk_compensate_#{suffix}" %}
+    {% handler = border ? "border #{border}" : type.name.split("::").last %}
     {% if kind == "process" %}
       # The row this step runs on.
       def self.__sweettalk_key_{{ suffix }}({{ parameters.id }})
@@ -83,10 +84,13 @@ module SweetTalk
       retry_on ::SweetTalk::Refusal, attempts: 1
       retry_on ::SweetTalk::Boundary, attempts: 1
 
-      # Once every name is known: the job's old name, when a rename changed it.
+      # Once every name is known: the job's old name, when a rename changed it, and the
+      # check that a tenanted handler does not follow a central event.
       macro finished
         ::SweetTalk.__sweettalk_aliased(\{{ @type.name.stringify }},
           \{{ {{ event }}.resolve.name.stringify }}, {{ event.names.size }})
+        ::SweetTalk.__sweettalk_tenancy_of(\{{ @type.name.stringify }},
+          \{{ {{ event }}.resolve.name.stringify }}, {{ event.stringify }}, {{ handler }})
       end
 
       def perform
@@ -162,6 +166,27 @@ module SweetTalk
       protected def __sweettalk_undo_{{ suffix }}({{ parameters.id }}) : Nil
         {{ block.body }}
       end
+    {% end %}
+  end
+
+  # Refuses, in a program that requires caramel/tenancy, a `whenever` in a tenanted
+  # context for an event of a central one (ADR 0033): the event carries no tenant, so the
+  # handler would fail, or write into whichever tenant the command happened to run in.
+  # *job* and *event* are full type names; *written* is the event's path as written, and
+  # *handler* the projection, process, context or border that holds the `whenever`.
+  macro __sweettalk_tenancy_of(job, event, written, handler)
+    {% if ::Caramel.has_constant?("Tenancy") %}
+      {% contexts = ::SweetTalk::BoundedContext.includers %}
+      {% source = contexts.find { |context| event.starts_with?("#{context.name}::") } %}
+      {% owner = contexts.find { |context| job.starts_with?("#{context.name}::") } %}
+      {% if source && owner && source.constant("SWEETTALK_CENTRAL") &&
+              !owner.constant("SWEETTALK_CENTRAL") %}
+        {% central = source.name.split("::").last %}
+        {% raise "whenever #{written.id} in #{handler.id}: #{central.id} is central, so its " +
+                 "events carry no tenant, and #{owner.name.split("::").last.id}'s rows belong " +
+                 "to one; handle it in a central context, or drop central: true from " +
+                 "#{central.id}" %}
+      {% end %}
     {% end %}
   end
 

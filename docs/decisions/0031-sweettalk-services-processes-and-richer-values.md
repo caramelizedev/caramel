@@ -3,6 +3,7 @@
 Date: 2026-10-09
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and 6.
+Decision 11 is amended by [ADR 0033](0033-sweettalk-multi-tenancy.md).
 
 ## Context
 
@@ -84,8 +85,9 @@ aggregates over days and undo their work when a step is refused.
     Crystal only, where they may name a constant. A pattern is checked in Crystal only.
     SweetTalk's changesets do not map these constraints: SweetTalk refuses first, so a
     violation from its own write raises `SugarORM::CheckViolation`. Any other bound, a
-    constraint name over PostgreSQL's 63 bytes, and two declarations whose names give one
-    table do not compile.
+    constraint name over PostgreSQL's 63 bytes, a reference's or a key's index name over
+    them (a reference's foreign-key name is shorter), and two declarations whose names
+    give one table do not compile.
 
 ## Reasons
 

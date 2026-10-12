@@ -11,8 +11,10 @@ module SweetTalk
   # `SWEETTALK_TABLE`, the plural of *singular* by English rules: unchanged when it ends
   # in s, -ies for a consonant and y, -es after x, z, ch and sh, and -s otherwise. A
   # declaration, *owner* as in "aggregate TeaTin", whose name gives a table another
-  # declaration already stores its rows in is refused here, in the domain's words.
-  macro __sweettalk_table(singular, owner)
+  # declaration already stores its rows in is refused here, in the domain's words, and
+  # so is one whose tenant index would pass PostgreSQL's 63 bytes; *scope* is the context,
+  # or the aggregate of an entity.
+  macro __sweettalk_table(singular, owner, scope)
     {% plural = singular + "s" %}
     {% plural = singular[0..-2] + "ies" if singular =~ /[^aeiou]y\z/ %}
     {% plural = singular + "es" if singular =~ /(x|z|ch|sh)\z/ %}
@@ -26,6 +28,16 @@ module SweetTalk
         {% singular.raise "#{owner.id} would store its rows in #{plural.id}, already the " +
                           "table of #{kind.id} #{held.id}: rename one of them" %}
       {% end %}
+    {% end %}
+    {% within = "#{scope.resolve.name}::" %}
+    {% home = ::SweetTalk::BoundedContext.includers
+         .find { |context| within.starts_with?("#{context.name}::") } %}
+    {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+    {% index = tenant && "index_#{plural.id}_on_#{tenant[1].id}_id_and_id" %}
+    {% if index && index.size > 63 %}
+      {% singular.raise "#{owner.id} would store its rows in #{plural.id}, whose tenant index " +
+                        "#{index.id} is longer than PostgreSQL's 63 bytes: shorten the " +
+                        "context's or the #{owner.split(" ")[0].id}'s name" %}
     {% end %}
     SWEETTALK_TABLE = {{ plural }}
   end
@@ -275,7 +287,7 @@ module SweetTalk
         SWEETTALK_STORED  = {{ stored }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
         SWEETTALK_BASE    = {{ base }}
-        ::SweetTalk.__sweettalk_table({{ base }}, {{ "aggregate #{name}" }})
+        ::SweetTalk.__sweettalk_table({{ base }}, {{ "aggregate #{name}" }}, ::{{ @type }})
 
         {{ block ? block.body : nil }}
 
@@ -303,7 +315,7 @@ module SweetTalk
         SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
         SWEETTALK_CONTEXT = {{ context }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
-        ::SweetTalk.__sweettalk_table({{ table }}, {{ "projection #{name}" }})
+        ::SweetTalk.__sweettalk_table({{ table }}, {{ "projection #{name}" }}, ::{{ @type }})
 
         {{ body }}
 
@@ -332,7 +344,7 @@ module SweetTalk
         SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
         SWEETTALK_CONTEXT = {{ context }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
-        ::SweetTalk.__sweettalk_table({{ table }}, {{ "process #{name}" }})
+        ::SweetTalk.__sweettalk_table({{ table }}, {{ "process #{name}" }}, ::{{ @type }})
 
         {{ body }}
 
@@ -432,14 +444,50 @@ module SweetTalk
     end
   end
 
+  # `tenant App::Account`, before the first context, names the tenant model of a program
+  # that requires caramel/tenancy: the model the routes' `tenant` block names.
+  # `SWEETTALK_TENANT` records {the model's path, the attribute named after its last
+  # segment}; every context copies it unless it says `central: true`.
+  macro tenant(model)
+    {% unless ::Caramel.has_constant?("Tenancy") %}
+      {% model.raise "tenant #{model} needs require \"caramel/tenancy\" before this domain" %}
+    {% end %}
+    {% if @type.has_constant?("SWEETTALK_TENANT") %}
+      {% model.raise "tenant #{model} is named twice in #{@type}: keep one" %}
+    {% end %}
+    {% earlier = ::SweetTalk::BoundedContext.includers
+         .find(&.name.starts_with?("#{@type.name}::")) %}
+    {% if earlier %}
+      {% model.raise "tenant #{model} comes after context #{earlier.name.split("::").last.id}: " +
+                     "name the tenant before the contexts" %}
+    {% end %}
+    {% resolved = model.resolve? %}
+    {% unless resolved && resolved < ::SugarORM::Schema %}
+      {% model.raise "tenant #{model} must name a SugarORM schema declared before it" %}
+    {% end %}
+    {% entry = {resolved.name.stringify, resolved.name.split("::").last.underscore} %}
+    SWEETTALK_TENANT = {{ entry }}
+  end
+
   # `context Ordering, follows: Catalogue, means: "…" do … end` is a bounded context. Its
   # source text is kept so the context map can find foreign names, and each border's
   # text apart from the events its `whenever`s name, so reacting to an event is not a
-  # dependency.
-  macro context(name, follows = nil, means = nil, renamed_from = nil, &block)
+  # dependency. In a program that requires caramel/tenancy its rows belong to one tenant,
+  # unless it says `central: true`, which shares them between every tenant.
+  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
+    {% unless central.is_a?(NilLiteral) || (central.is_a?(BoolLiteral) && central) %}
+      {% central.raise "context #{name} takes central: true, which shares its rows between " +
+                       "tenants, not central: #{central}" %}
+    {% end %}
+    {% if central && !::Caramel.has_constant?("Tenancy") %}
+      {% central.raise "context #{name} takes central: true only in a program that requires " +
+                       "caramel/tenancy" %}
+    {% end %}
+    {% tenant = @type.has_constant?("SWEETTALK_TENANT") && !central &&
+                @type.constant("SWEETTALK_TENANT") %}
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
     {% body = block ? block.body : nil %}
     {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
@@ -486,6 +534,9 @@ module SweetTalk
       SWEETTALK_MEANS   = {{ means }}
       SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
       SWEETTALK_STORED  = {{ (renamed_from || name).stringify.underscore }}
+      # {tenant model, attribute} when this context's rows belong to one tenant
+      SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
+      SWEETTALK_CENTRAL = {{ central ? true : false }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows

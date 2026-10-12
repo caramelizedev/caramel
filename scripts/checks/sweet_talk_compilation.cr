@@ -1,9 +1,10 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030 and 0031). Each declaration mistake fails to compile
+# caramel/sweet_talk (ADRs 0030, 0031 and 0033). Each declaration mistake fails to compile
 # with a fixed problem text, naming its file where the mistake has a line; a valid
-# domain compiles; and an application that does not require caramel/sweet_talk holds
-# none of its code. spec/sweet_talk needs PostgreSQL, so scripts/check integration runs it.
+# domain compiles, with and without caramel/tenancy; and an application that does not
+# require caramel/sweet_talk holds none of its code. spec/sweet_talk and
+# spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
 ABSENT   = "SweetTalk code must be absent from an application that does not require " \
@@ -89,16 +90,58 @@ PROBLEMS = [
   {"table_taken",
    "aggregate TeaTin would store its rows in store_tea_tins, already the table of entity " \
    "Tea::Tin: rename one of them"},
-  {"with_tenancy",
-   "caramel/sweet_talk does not support caramel/tenancy yet: every tenant would share its " \
-   "tables, projection and process keys, and channels"},
+  {"central_not_true",
+   "context Catalogue takes central: true, which shares its rows between tenants, not " \
+   "central: :yes"},
+  {"central_without_tenancy",
+   "context Catalogue takes central: true only in a program that requires caramel/tenancy"},
+  {"tenant_unnamed",
+   "Shop uses SweetTalk in a program that requires caramel/tenancy: name the tenant before " \
+   "its contexts"},
+  {"tenant_after_context",
+   "tenant Account comes after context Catalogue: name the tenant before the contexts"},
+  {"tenant_without_tenancy", "tenant Account needs require \"caramel/tenancy\" before this domain"},
+  {"tenant_not_schema", "tenant Catalogue must name a SugarORM schema declared before it"},
+  {"tenant_twice", "tenant Account is named twice in Shop: keep one"},
+  {"tenant_mismatch", "names Shop::Org, but the routes declare Fixture::Account as the tenant"},
+  {"central_has_tenanted",
+   "has order : Ordering::Order would point from central context Reporting at rows that " \
+   "belong to one tenant"},
+  {"central_event_tenanted_handler",
+   "whenever Catalogue::Tea::Renamed in Names: Catalogue is central, so its events carry no " \
+   "tenant"},
+  {"channel_long",
+   "event TemperatureReadingRecorded's channel " \
+   "sweettalk.warehousing.refrigerated_shipping_container.temperature_reading_recorded is " \
+   "longer than PostgreSQL's 63 characters"},
+  {"channel_tenant_budget",
+   "event TemperatureRecorded's channel sweettalk.warehousing.cold_container." \
+   "temperature_recorded is longer than 42 characters"},
+  {"tenant_index_long",
+   "aggregate RefrigeratedShippingContainer would store its rows in " \
+   "warehousing_refrigerated_shipping_containers, whose tenant index " \
+   "index_warehousing_refrigerated_shipping_containers_on_account_id_and_id is longer than " \
+   "PostgreSQL's 63 bytes"},
+  {"reference_index_long",
+   "has destination_warehouse : Warehouse would index destination_warehouse_id as " \
+   "index_warehousing_refrigerated_shipping_containers_on_destination_warehouse_id"},
+  {"key_index_long",
+   "key refrigerated_container_serial_number : Int64 would index its key as " \
+   "index_warehousing_container_readings_on_refrigerated_container_serial_number, longer " \
+   "than PostgreSQL's 63 bytes: shorten the key"},
+  {"tenant_column_taken",
+   "has account : Account would store account_id, the column that names each row's tenant " \
+   "Shop::Account"},
+  {"tenant_parent_column",
+   "entity Charge would name its aggregate in account_id, the column that names each row's " \
+   "tenant Shop::Account: rename aggregate Account"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
-  compile_rows_named compile_with_tenancy]
+  compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler]
 
-cases = {"compile_valid" => nil} of String => String?
+cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }
 
 sources = cases.keys.map { |name| "#{FIXTURES}/#{name}.cr" }

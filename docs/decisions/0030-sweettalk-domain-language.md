@@ -3,7 +3,8 @@
 Date: 2026-10-08
 
 Status: accepted. Decisions 2, 4 and 6 are amended by
-[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md).
+[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), and decisions 1 and 6
+by [ADR 0033](0033-sweettalk-multi-tenancy.md).
 
 ## Context
 
@@ -16,7 +17,6 @@ or a policy, and nothing stops one context from reaching into another's types.
 1. **`require "caramel/sweet_talk"` is the only way in, and `include SweetTalk` scopes the
    words.** The code lives in `src/caramel/sweet_talk/`. A module that includes `SweetTalk`
    may use `context`, and a context's body the other words. No word is a top-level macro.
-   A program that also requires `caramel/tenancy` does not compile.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
      a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
@@ -88,7 +88,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      follow ADR 0009 decision 2.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
-     63 characters does not compile.
+     63 characters, or 42 in a program that requires `caramel/tenancy`, does not compile.
 7. **A projection keeps one row per key.** In a `whenever` block, `Projection[key]` reads
    the key's row locked; when it is absent, a SugarORM upsert that does nothing on a
    conflict inserts it with its defaults, and the row is read locked again. The rows a
@@ -127,8 +127,6 @@ or a policy, and nothing stops one context from reaching into another's types.
 - Writes through `Rows` would skip invariants and the value checks made in Crystal.
 - A notification carries an id, as Cold Brew advises: fields could pass its 8,000-byte
   limit, and the refused publish would roll the command back.
-- SweetTalk scopes no table, key or channel by tenant, so beside `caramel/tenancy` every
-  tenant would share its domain; refusing the pair is safer than a silent leak.
 
 Rejected:
 
@@ -140,4 +138,3 @@ Rejected:
 - **`Hash` attributes.** An entity holds that data in rows.
 - **A separate repository.** SweetTalk expands into macro contracts that
   [ADR 0016](0016-versioning-and-releases.md) does not cover.
-- **Deferred:** tenant scoping ([ADR 0025](0025-multi-tenancy.md)).

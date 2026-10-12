@@ -75,6 +75,7 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
    "index_<t>_on_<col>_and_id" ON "<t>" ("<col>", "id")`. When another tenanted table's
    key references the table, the differ halts until the index exists and prints this SQL.
 4. Run `frappe db diff` for the keys.
+5. Drain every queue before deploying: a job enqueued without a tenant runs with none.
 
 ### Plugging out
 

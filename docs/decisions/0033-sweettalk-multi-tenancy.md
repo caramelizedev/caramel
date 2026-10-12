@@ -2,10 +2,9 @@
 
 Date: 2026-10-11
 
-Status: proposed. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 1 and 6
+Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 1 and 6
 and [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md) decision 11, and
-applies [ADR 0025](0025-multi-tenancy.md) to SweetTalk; accepted in the commit that
-implements it.
+applies [ADR 0025](0025-multi-tenancy.md) to SweetTalk.
 
 ## Context
 
@@ -43,12 +42,12 @@ remains is which rows belong to a tenant, and which combinations would leak acro
    handler runs in the event's tenant and writes shared rows.
 6. **Names fit PostgreSQL** (amends ADR 0030 decision 6 and ADR 0031 decision 11). In a
    program that requires `caramel/tenancy`, a channel name over 42 characters does not
-   compile, which leaves 21 for the `t<id>:` prefix. In every program, a generated index
-   name over 63 bytes does not compile: a tenanted table's
-   `index_<table>_on_account_id_and_id`, a reference's index and a key's index.
+   compile, which leaves 21 for the `t<id>:` prefix. A tenanted table's tenant index,
+   `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), does not
+   compile over 63 bytes, and in every program neither does a reference's or a key's index.
 7. **The tenant's column is reserved.** A `has` or a composite part that would store
-   `account_id`, and an entity whose aggregate is named like the tenant model, do not
-   compile.
+   `<model>_id` (`account_id` for `App::Account`), and an entity whose aggregate is named
+   like the tenant model, do not compile.
 8. **Plugging in on existing data** follows ADR 0025's steps, and `frappe db diff` halts on
    each SweetTalk table they apply to. Every queue is drained before the first deploy with
    tenancy, because a job enqueued without a tenant runs with none.
@@ -86,8 +85,6 @@ Rejected:
 - **Opt-in `tenanted: true`.** One forgotten flag shares a context's rows between tenants.
 - **`central:` per aggregate.** One context's invariants would span tenants.
 - **Requiring the domain after the routes.** Any other order compiles untenanted.
-- **Running a central event's handlers once per tenant.** It inserts a job per tenant in
-  the central command's transaction, and a tenant created later misses the event.
 - **Hashed channel names.** Live pages and `renamed_from:` rely on readable channels.
 - **A generator for the plug-in migrations.** It would cover only a one-tenant backfill.
 - **Deferred:** a central event delivered to every tenant, an `as:` name for the tenant

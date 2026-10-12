@@ -1,12 +1,17 @@
 # The whole program: dispatch, the context map and the glossary.
 module SweetTalk
-  # SweetTalk scopes no table, key or channel by tenant yet (ADR 0025), so a program
-  # that also requires caramel/tenancy would share its domain between tenants.
+  # In a program that requires caramel/tenancy, every domain names its tenant (ADR 0033),
+  # so no domain's rows are shared between tenants by omission.
   macro finished
     {% if ::Caramel.has_constant?("Tenancy") %}
-      {% raise "caramel/sweet_talk does not support caramel/tenancy yet: every tenant " +
-               "would share its tables, projection and process keys, and channels.\n" +
-               "Remediation: require only one of them until SweetTalk has tenant scoping." %}
+      {% for domain in ::SweetTalk.includers %}
+        {% unless domain.has_constant?("SWEETTALK_TENANT") %}
+          {% raise "#{domain} uses SweetTalk in a program that requires caramel/tenancy: name " +
+                   "the tenant before its contexts, as in tenant App::Account, the model the " +
+                   "routes' tenant block names; a context every tenant shares takes " +
+                   "central: true" %}
+        {% end %}
+      {% end %}
     {% end %}
   end
 

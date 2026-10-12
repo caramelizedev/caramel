@@ -45,6 +45,7 @@ Lint/NotNil:
 Lint/UnusedArgument:
   Excluded:
     - "spec/sweet_talk/support/**"
+    - "spec/sweet_talk_tenancy/support/**"
 
 # Ameba's defaults, plus the support files each product keeps under
 # spec/<product>/support, which specs require rather than run.

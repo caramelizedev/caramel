@@ -77,7 +77,9 @@ module SweetTalk
     # also `check` lines on its column, or on each part's column. `SWEETTALK_HAS_<NAME>`
     # records {name, line, kind, declared type, column, schema lines, raw column type,
     # parts, default} for the storage macros; a composite's parts are {part, column, raw
-    # type, part type, part kind, check}.
+    # type, part type, part kind, check}. An index name over PostgreSQL's 63 bytes is
+    # refused, and under caramel/tenancy so are the tenant's column and a central
+    # context's reference to rows that belong to one tenant (ADR 0033).
     macro has(decl)
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
@@ -182,6 +184,44 @@ module SweetTalk
         {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
         {% decl.raise "has #{decl} in #{owner.id} needs a literal default, as in has tins : " +
                       "Int32 = 0: its row starts from its key alone" %}
+      {% end %}
+      {% table = @type.constant("SWEETTALK_TABLE") %}
+      {% stored = parts ? parts.map(&.[1]) : [column] %}
+      {% if keyed && key == name.stringify %}
+        {% index = "index_#{table.id}_on_#{stored.join("_and_").id}" %}
+        {% if index.size > 63 %}
+          {% decl.raise "key #{decl} would index its key as #{index.id}, longer than " +
+                        "PostgreSQL's 63 bytes: shorten the key" %}
+        {% end %}
+      {% elsif kind == "reference" || kind == "record" %}
+        {% index = "index_#{table.id}_on_#{column.id}" %}
+        {% if index.size > 63 %}
+          {% decl.raise "has #{decl} would index #{column.id} as #{index.id}, longer than " +
+                        "PostgreSQL's 63 bytes: shorten the attribute" %}
+        {% end %}
+      {% end %}
+      {% contexts = ::SweetTalk::BoundedContext.includers %}
+      {% home = contexts.find { |context| @type.name.starts_with?("#{context.name}::") } %}
+      {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+      {% if tenant && stored.includes?("#{tenant[1].id}_id") %}
+        {% decl.raise "has #{decl} would store #{tenant[1].id}_id, the column that names each " +
+                      "row's tenant #{tenant[0].id}: name the attribute for its role, as in " +
+                      "has owner : #{type}" %}
+      {% end %}
+      {% if home && home.constant("SWEETTALK_CENTRAL") %}
+        {% shared = true %}
+        {% if kind == "reference" %}
+          {% target = members[0].name %}
+          {% there = contexts.find { |context| target.starts_with?("#{context.name}::") } %}
+          {% shared = there && there.constant("SWEETTALK_CENTRAL") %}
+        {% elsif kind == "record" %}
+          {% shared = !members[0].has_constant?(:SUGAR_TENANT) %}
+        {% end %}
+        {% unless shared %}
+          {% decl.raise "has #{decl} would point from central context " +
+                        "#{home.name.split("::").last.id} at rows that belong to one tenant: " +
+                        "keep the reference in a tenanted context" %}
+        {% end %}
       {% end %}
       {% attribute = {name.stringify, decl.line_number, kind, type.stringify, column, lines, raw,
                       parts, default} %}
