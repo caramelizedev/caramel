@@ -21,6 +21,9 @@ remains is which rows belong to a tenant, and which combinations would leak acro
    before its first context. The model is the one the routes' `tenant` block names, and
    SugarORM refuses another. A domain without it does not compile, nor does `tenant`
    without the require, after a context, twice, or naming anything but a SugarORM schema.
+   `frappe make tenancy` names the tenant in each domain in `app/domain/`, and
+   `frappe make domain` in a multi-tenant application names it in the new domain;
+   `--central` marks its first context `central: true`.
 2. **Every context is tenanted unless it says `central: true`.** A tenanted context's
    aggregates, entities, projections and processes declare SugarORM's
    `tenant account : App::Account` (ADR 0025 decision 4); the attribute is named after the

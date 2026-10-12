@@ -17,6 +17,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 1. **`require "caramel/sweet_talk"` is the only way in, and `include SweetTalk` scopes the
    words.** The code lives in `src/caramel/sweet_talk/`. A module that includes `SweetTalk`
    may use `context`, and a context's body the other words. No word is a top-level macro.
+   `frappe make domain NAME CONTEXT --means=TEXT` starts one in `app/domain/`, required
+   after the models.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
      a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
@@ -99,6 +101,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 8. **Checks.** SweetTalk's specs run against real PostgreSQL in `scripts/check
    integration`. Every refusal that decisions 2 to 6 promise has a fixture in a
    `sweet-talk-compilation` check that must fail to compile with its message.
+   `frappe-project` derives a generated domain's tables with `frappe db diff` and runs its
+   spec in `frappe corretto`.
 
 ## Reasons
 

@@ -163,6 +163,12 @@ module Caramel::Frappe
         "its schema, migration, sign-up page at /PLURAL/new and home at /SLUG, " \
         "require \"caramel/tenancy\" and the tenant block in config/routes.cr; " \
         "frappe make resource then writes resources that belong to a tenant."),
+      Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
+        "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
+        "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
+        "require \"caramel/sweet_talk\" and require \"../app/domain/*\" in " \
+        "config/application.cr. In a multi-tenant application the domain names the " \
+        "tenant, and --central makes the context one every tenant shares."),
       Command.new("translations",
         "List the keys each locale still takes from the default locale; " \
         "exits 1 while any is missing."),
