@@ -3,10 +3,10 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-CACHE_ROOT=${CARAMEL_LATTE_SWIFT_CACHE:-/private/tmp/caramel-latte-swift-module-cache}
 OUTPUT="$ROOT/bin/latte-port-relay"
 
-mkdir -p "$ROOT/bin" "$CACHE_ROOT"
+. "$ROOT/scripts/lib/swift-cache.sh"
+mkdir -p "$ROOT/bin"
 
 /usr/bin/swiftc \
   -parse-as-library \

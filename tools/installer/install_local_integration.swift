@@ -83,10 +83,15 @@ private struct Bundle {
     let payloads: [String: Data]
 }
 
-private func loadBundle(_ path: String) throws -> Bundle {
-    guard let info = statOf(path), info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
-          info.st_mode & 0o077 == 0, info.st_uid != 0 else {
-        throw integrationError("Installation bundle must be a private, user-owned directory")
+// With *invoker*, the bundle must also belong to that user, judged on the same lstat as every other rule.
+private func loadBundle(_ path: String, invoker: uid_t? = nil) throws -> Bundle {
+    let unusable = integrationError("Installation bundle must be a private, user-owned directory")
+    guard let info = statOf(path) else { throw unusable }
+    if let invoker, info.st_uid != invoker {
+        throw integrationError("Installation bundle belongs to another user; prepare it as the user who runs sudo")
+    }
+    guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR), info.st_mode & 0o077 == 0, info.st_uid != 0 else {
+        throw unusable
     }
     let manifest = try jsonObject(ownedBytes(path + "/manifest.json", uid: info.st_uid, privateFile: true))
     guard manifest["version"] as? Int == 1, manifest["uid"] as? Int == Int(info.st_uid) else {
@@ -115,10 +120,12 @@ private func loadBundle(_ path: String) throws -> Bundle {
 private final class FixtureJobState {
     let descriptions: [String?]
     let log: String
+    let invoker: uid_t?
     var index = 0
-    init(descriptions: [String?], log: String) {
+    init(descriptions: [String?], log: String, invoker: uid_t?) {
         self.descriptions = descriptions
         self.log = log
+        self.invoker = invoker
     }
 }
 
@@ -137,6 +144,13 @@ private struct SystemHost {
         trustedAncestorLimit: "/", ports: [80, 443], fixture: nil)
 
     func euid() -> uid_t { fixture == nil ? geteuid() : rootUID }
+
+    // The user who asked for administrator rights, as sudo records it.
+    func invokingUID() -> uid_t? {
+        if let fixture { return fixture.invoker }
+        guard let text = ProcessInfo.processInfo.environment["SUDO_UID"] else { return nil }
+        return uid_t(text)
+    }
 
     func jobDescription() throws -> String? {
         if let fixture {
@@ -314,7 +328,11 @@ private func removeOwnedFiles(_ receipt: [String: Any], host: SystemHost) throws
 
 private func apply(_ bundlePath: String, host: SystemHost) throws {
     guard host.euid() == host.rootUID else { throw integrationError("Apply requires macOS administrator authorization") }
-    let bundle = try loadBundle(bundlePath)
+    // Root installs only the bundle of the user who ran sudo, and reads no other user's files.
+    guard let invoker = host.invokingUID() else {
+        throw integrationError("Apply must run through sudo from the installing user's account")
+    }
+    let bundle = try loadBundle(bundlePath, invoker: invoker)
     let old = try readReceipt(host)
     var reservations: [Int32] = []
     defer { reservations.forEach { _ = Darwin.close($0) } }
@@ -493,9 +511,19 @@ private extension SystemHost {
             guard let text = entry as? String else { throw integrationError("Invalid integration fixture") }
             return text
         }
+        // "sudo_uid" stands in for SUDO_UID: a user id, or null for a root shell without sudo.
+        guard let value = values["sudo_uid"] else { throw integrationError("Invalid integration fixture") }
+        let invoker: uid_t?
+        if value is NSNull {
+            invoker = nil
+        } else if let number = value as? Int, number >= 0 {
+            invoker = uid_t(number)
+        } else {
+            throw integrationError("Invalid integration fixture")
+        }
         return SystemHost(rootUID: uid_t(rootUID), destinations: destinations,
                           receiptPath: receipt, trustedAncestorLimit: systemRoot, ports: ports,
-                          fixture: FixtureJobState(descriptions: descriptions, log: log))
+                          fixture: FixtureJobState(descriptions: descriptions, log: log, invoker: invoker))
     }
 }
 #endif

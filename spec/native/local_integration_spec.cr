@@ -40,10 +40,14 @@ private class IntegrationFixture
     Caramel::Checks.run([binary] + args, env: env, timeout: 12.seconds)
   end
 
-  def fixture(jobs : Array(String?), ports : Array(Int32)) : String
+  # *sudo_uid* is the user who ran sudo; nil is a root shell without sudo.
+  def fixture(jobs : Array(String?),
+              ports : Array(Int32),
+              sudo_uid : Int32? = LibC.getuid.to_i) : String
     path = File.join(@root, "host.json")
     File.write(path, {
       "root_uid"     => LibC.getuid,
+      "sudo_uid"     => sudo_uid,
       "destinations" => @destinations,
       "receipt"      => @receipt,
       "system_root"  => @system_root,
@@ -176,6 +180,29 @@ describe "local integration installer" do
       result = fixture.run(["test-verify-job", path], fixture: no_jobs)
       result.success?.should be_false
       result.stderr.should contain("unexpected arguments")
+    end
+  end
+
+  it "refuses a bundle that the user who ran sudo does not own" do
+    with_integration_fixture do |fixture|
+      ports = [Caramel::Checks.free_tcp_port, Caramel::Checks.free_tcp_port]
+      another = LibC.getuid.to_i + 1
+      host = fixture.fixture([nil] of String?, ports, sudo_uid: another)
+      result = fixture.run(["apply", fixture.bundle], fixture: host)
+      result.success?.should be_false
+      result.stderr.should contain("Installation bundle belongs to another user")
+      File.exists?(fixture.receipt).should be_false
+    end
+  end
+
+  it "refuses to apply as root without sudo" do
+    with_integration_fixture do |fixture|
+      ports = [Caramel::Checks.free_tcp_port, Caramel::Checks.free_tcp_port]
+      host = fixture.fixture([nil] of String?, ports, sudo_uid: nil)
+      result = fixture.run(["apply", fixture.bundle], fixture: host)
+      result.success?.should be_false
+      result.stderr.should contain("Apply must run through sudo")
+      File.exists?(fixture.receipt).should be_false
     end
   end
 
