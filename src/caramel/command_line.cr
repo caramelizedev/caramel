@@ -5,6 +5,7 @@ require "./database"
 require "./cold_brew"
 require "./crema/runtime"
 require "../sugar_orm"
+require "system/group"
 
 module Caramel
   # A generated application's whole main is `Caramel.run(App)` (ADR 0016), so
@@ -333,11 +334,7 @@ module Caramel
       root = served_root(root)
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
-      socket_path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
-      private_parent = Crema.private_directory?(File.dirname(socket_path))
-      abort("CARAMEL_SOCKET must be in a private owned directory") unless private_parent
-      occupied = File.info?(socket_path, follow_symlinks: false)
-      abort("Application socket is already occupied") if occupied
+      socket_path, group = application_socket
       application = Caramel.build(app, db, secret, origin, root)
       server = HTTP::Server.new([application])
       # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
@@ -348,7 +345,8 @@ module Caramel
       begin
         server.bind_unix(socket_path)
         bound = true
-        File.chmod(socket_path, 0o600)
+        File.chown(socket_path, gid: group) if group
+        File.chmod(socket_path, group ? 0o660 : 0o600)
         # Invalid worker settings raise here; the ensure still frees the socket.
         cold_brew = ColdBrew.start(url, workers: workers) unless ENV["CARAMEL_ENV"]? == "test"
         runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
@@ -371,6 +369,31 @@ module Caramel
         cold_brew.try(&.stop)
         runtime.try(&.stop)
       end
+    end
+
+    # CARAMEL_SOCKET and the gid CARAMEL_SOCKET_GROUP names, once their
+    # directory passes the checks ADR 0032 item 10 describes.
+    private def self.application_socket : {String, Int32?}
+      path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
+      group = socket_group
+      directory = File.dirname(path)
+      if group
+        message = "CARAMEL_SOCKET must be in a directory you own that only " \
+                  "CARAMEL_SOCKET_GROUP can enter"
+        abort(message) unless Crema.group_directory?(directory, group)
+      elsif !Crema.private_directory?(directory)
+        abort("CARAMEL_SOCKET must be in a private owned directory")
+      end
+      abort("Application socket is already occupied") if File.info?(path, follow_symlinks: false)
+      {path, group}
+    end
+
+    # The gid CARAMEL_SOCKET_GROUP names, or nil when it is unset.
+    private def self.socket_group : Int32?
+      name = ENV["CARAMEL_SOCKET_GROUP"]?.presence || return
+      group = System::Group.find_by?(name: name) ||
+              abort("CARAMEL_SOCKET_GROUP names no group: #{name}")
+      group.id.to_i
     end
   end
 end

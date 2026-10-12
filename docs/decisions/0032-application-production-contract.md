@@ -48,6 +48,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - (b) The new binary's `jobs unknown` passes before cutover.
    - (c) The old binary's workers stop before the new binary takes traffic.
    - (d) A binary that lacks an applied migration refuses to start (`Drift`). Migrations never roll back, so going back across a migration means restoring the database, and a cutover that fails after `migrate` means rolling forward or restoring.
+10. **Socket access.** `serve` binds `CARAMEL_SOCKET` with mode 0600 in a directory only its user can reach. With `CARAMEL_SOCKET_GROUP=GROUP` the directory may instead belong to the user and GROUP, with no group write and nothing for others. The socket then gets group GROUP and mode 0660, so a proxy running as another user in GROUP can connect. The ops socket always needs a private directory; `CARAMEL_OPS_SOCKET` places it in one.
 
 ## Reasons
 
@@ -60,6 +61,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
 - **Separate workers.** Long jobs drain without holding the web process.
 - **Workers stop before cutover.** A row whose class the running binary lacks fails without retry ([ADR 0019](0019-cold-brew-status-hooks-and-work.md) §4).
 - **Transaction-mode poolers ruled out.** LISTEN, `migrate`'s session advisory lock and `locked_by = pg_backend_pid()` need a session.
+- **`CARAMEL_SOCKET_GROUP`.** A proxy that terminates TLS holds keys the application must not read, and the application holds secrets the proxy must not. A group that may enter one directory and connect to one socket grants nothing else.
 - **Rejected:**
   - a deploy command in Frappé;
   - `SO_REUSEPORT` handover on one socket path;
