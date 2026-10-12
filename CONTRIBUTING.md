@@ -20,7 +20,7 @@ scripts/check all
 What the checks need:
 
 - Every command uses the pinned managed tools; none falls back to a Crystal or Shards on `PATH`. `scripts/install-toolchain` installs into `~/Library/Application Support/Caramel/toolchains/` and records the location in this checkout's `.caramel-toolchain`, which every command and check reads. `--root <dir>` installs elsewhere, and `CARAMEL_TOOLCHAIN_ROOT` overrides the recorded location. The selection and lockfile live in `tools/toolchain/`.
-- `integration` creates and cleans up its own database cluster. It never uses an existing application database or changes system DNS or certificate trust. No check runs the system integration installer or `latte trust install`; those are separate, explicit operations.
+- `integration` and `sweet-talk-workers` each create and clean up their own database cluster. They never use an existing application database or change system DNS or certificate trust. No check runs the system integration installer or `latte trust install`; those are separate, explicit operations.
 - The Latte checks (`latte-ipc`, `latte-postgres`, `latte-network`, `latte-daemon`, `native`) also need the pinned CoreDNS artifact (`scripts/install-latte-tools --help`) and the macOS Swift compiler. Run `scripts/build-latte` and `scripts/build-frappe` before the checks that use them.
 - `website` builds the site with Node.js 22 or newer on `PATH`.
 - `latte-daemon` runs the real `bin/latte daemon` on Latte's fixed DNS and HTTP/HTTPS ports, 15353 and 18080/18443, which must be free. Its trace collector listens on a free port the check picks.
