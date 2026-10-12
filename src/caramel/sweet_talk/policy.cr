@@ -107,7 +107,7 @@ module SweetTalk
         {% end %}
         event = {{ event }}.__sweettalk_load(subject, fields, meta)
         arguments = {% if each %}{event, event.{{ each.id }}[index]}{% else %}{event}{% end %}
-        ::SweetTalk.acting(event.actor) do
+        ::SweetTalk.__sweettalk_following(event.actor, event.event_id, event.flow_id) do
           begin
             ::{{ type }}.__sweettalk_on_{{ suffix }}(*arguments)
           rescue refusal : ::SweetTalk::Refusal

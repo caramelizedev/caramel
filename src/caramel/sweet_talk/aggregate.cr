@@ -51,7 +51,7 @@ module SweetTalk
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
       ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
       {% subject = @type.name.split("::").last.underscore.id %}
-      {% reserved = %w[event_id occurred_at actor] + ["#{subject}_id"] %}
+      {% reserved = %w[event_id occurred_at actor cause_id flow_id] + ["#{subject}_id"] %}
       {% for field in fields %}
         {% if reserved.includes?(field.var.stringify) %}
           {% field.raise "event #{name} cannot have a field named #{field.var}: " +
@@ -480,14 +480,16 @@ module SweetTalk
         fiber = ::Fiber.current
         fiber.__sweettalk_command = self
         begin
-          ::SugarORM::Repo.transaction do
-            locked = {{ row }}.query.where(removed_at: nil).where(id: __sweettalk_raw_id).lock
-            loaded = self.class.__sweettalk_rows(locked).first?
-            __sweettalk_copy(loaded || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}."))
-            yield
-            __sweettalk_check
-            __sweettalk_save
-            __sweettalk_dispatch_events
+          ::SweetTalk.__sweettalk_flowing do
+            ::SugarORM::Repo.transaction do
+              locked = {{ row }}.query.where(removed_at: nil).where(id: __sweettalk_raw_id).lock
+              loaded = self.class.__sweettalk_rows(locked).first?
+              __sweettalk_copy(loaded || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}."))
+              yield
+              __sweettalk_check
+              __sweettalk_save
+              __sweettalk_dispatch_events
+            end
           end
         rescue error : ::SweetTalk::Refusal | ::SweetTalk::Boundary
           @__sweettalk_events.clear
@@ -546,11 +548,13 @@ module SweetTalk
       fiber = ::Fiber.current
       fiber.__sweettalk_command = self
       begin
-        ::SugarORM::Repo.transaction do
-          yield
-          __sweettalk_check
-          __sweettalk_save
-          __sweettalk_dispatch_events
+        ::SweetTalk.__sweettalk_flowing do
+          ::SugarORM::Repo.transaction do
+            yield
+            __sweettalk_check
+            __sweettalk_save
+            __sweettalk_dispatch_events
+          end
         end
       ensure
         fiber.__sweettalk_command = nil

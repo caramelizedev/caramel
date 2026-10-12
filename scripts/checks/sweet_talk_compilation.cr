@@ -69,6 +69,7 @@ PROBLEMS = [
   {"arm_unknown_deadline", "arm lapsee names no deadline of Hold; deadlines: lapse"},
   {"deadline_outside_process", "deadline belongs in a process, not in aggregate Order"},
   {"event_reserved_field", "event Placed cannot have a field named actor: SweetTalk records it"},
+  {"event_reserved_flow", "event Placed cannot have a field named flow_id: SweetTalk records it"},
   {"event_union_field",
    "an event field may be nilable, as in reason : String?, but not a union of other types"},
   {"cycle_without_boot", "the context map runs in a circle of dependencies through"},

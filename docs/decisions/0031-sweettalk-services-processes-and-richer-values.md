@@ -50,14 +50,18 @@ aggregates over days and undo their work when a step is refused.
 5. **Services.** `service verb(args), returns: T, means: "…" do … end` in a context is a
    domain service and a glossary entry. It runs in one transaction and changes at most one
    aggregate. Anywhere but a context it does not compile.
-6. **Event metadata** (amends decision 6). Every event records `event_id`, `occurred_at`
-   and `actor`, and its jobs carry them. `SweetTalk.acting(by) { … }` names the actor of
-   the events emitted inside it, and each policy, compensation and step runs as its
-   event's actor. A field may be nilable, as in `reason : String?`, but not another union;
-   a field named like the metadata or the subject's id does not compile. An event reads
-   its subject's id when it is dispatched, so a factory's event names the new aggregate.
-   A retried job restores the same `event_id`, the key a handler gives a side effect
-   outside PostgreSQL, such as mail, so a retry can tell it already happened.
+6. **Event metadata** (amends decision 6). Every event records `event_id`, `occurred_at`,
+   `actor`, `cause_id` and `flow_id`, and its jobs carry them. `SweetTalk.acting(by) { … }`
+   names the actor of the events emitted inside it, and each policy, compensation and step
+   runs as its event's actor. `cause_id` is the `event_id` of the event whose handler
+   emitted it, or whose step armed the deadline that did; nil for a command outside a
+   handler. `flow_id` is the handled event's, else the current Crema trace id, else a
+   random 32-hex id that one command keeps for all its events. A field may be nilable, as
+   in `reason : String?`, but not another union; a field named like the metadata or the
+   subject's id does not compile. An event reads its subject's id when it is dispatched,
+   so a factory's event names the new aggregate. A retried job restores the same
+   `event_id`, the key a handler gives a side effect outside PostgreSQL, such as mail, so a
+   retry can tell it already happened.
 7. **Compensation** (amends decision 6). `compensate Event do |event, …, refusal| … end`,
    after a `whenever` for the same event in the same context, border or process, runs when
    that handler is refused. The handler's work has rolled back; the compensation gets its
@@ -108,7 +112,9 @@ aggregates over days and undo their work when a step is refused.
 - Removing by a timestamp keeps every reference valid: an order line still names its tea,
   and a projection still keys its rows by it.
 - `acting` keeps call sites unchanged: no command takes an actor argument, yet every event
-  and every job that follows it knows who acted.
+  and every job that follows it knows who acted. `cause_id` and `flow_id` follow it the
+  same way. A flow is the trace id where one exists, so a trace and its events share an
+  id; it outlives the trace, which each job queued outside a trace starts anew.
 - A compensation is the policy's own answer to a refusal. Without it, a parcel dispatched
   for a cancelled order left Ordering's job failed.
 
@@ -123,4 +129,4 @@ Rejected:
   from Crystal: it refuses `\z`, which `Email` uses.
 - **Leaving a non-literal bound out of the database unannounced.** A reader of the value
   could not tell which bounds the database holds.
-- **Deferred:** correlation and causation ids linking a command to its events and jobs.
+- **Ids in log lines only.** A queued event could not name what caused it.

@@ -57,7 +57,9 @@ module SweetTalk
         @{{ name.id }}_arming += 1
         due = Time.utc + span
         @{{ name.id }}_due = due
-        {{ job }}.enqueue(key: __sweettalk_key_json, arming: @{{ name.id }}_arming, run_at: due)
+        fiber = ::Fiber.current
+        {{ job }}.enqueue(key: __sweettalk_key_json, arming: @{{ name.id }}_arming, run_at: due,
+          cause: fiber.__sweettalk_cause, flow: fiber.__sweettalk_flow)
       end
 
       protected def __sweettalk_disarm_{{ name.id }} : Nil
@@ -78,6 +80,8 @@ module SweetTalk
       struct {{ job }} < ::Caramel::ColdBrew::Job
         param key : String
         param arming : Int32
+        param cause : String? = nil
+        param flow : String? = nil
         retry_on ::SweetTalk::Refusal, attempts: 1
         retry_on ::SweetTalk::Boundary, attempts: 1
 
@@ -88,7 +92,8 @@ module SweetTalk
 
         def perform
           ::SweetTalk.__sweettalk_checked
-          ::SweetTalk.acting({{ "deadline #{process.id}.#{name.id}" }}) do
+          by = {{ "deadline #{process.id}.#{name.id}" }}
+          ::SweetTalk.__sweettalk_following(by, cause, flow) do
             ::SweetTalk.__sweettalk_handling("a deadline", ::SweetTalk::INSTEAD) do
               ::SweetTalk.__sweettalk_unit do
                 row = ::{{ @type }}[::{{ @type }}.__sweettalk_key_from(key)]

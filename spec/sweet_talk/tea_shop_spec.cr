@@ -1,7 +1,7 @@
-# The tea shop on PostgreSQL: commands, invariants, events that carry their facts and who
-# acted, one aggregate per transaction, factories, queries, removal, string and composite
-# values, a service, a process that holds stock, compensates and keeps a deadline, row
-# locks, notifications and Cold Brew workers.
+# The tea shop on PostgreSQL: commands, invariants, events that carry their facts, who
+# acted, their cause and their flow, one aggregate per transaction, factories, queries,
+# removal, string and composite values, a service, a process that holds stock, compensates
+# and keeps a deadline, row locks, notifications and Cold Brew workers.
 require "./support/app"
 
 alias Catalogue = TeaShop::Catalogue
@@ -565,6 +565,78 @@ describe "The tea shop on PostgreSQL" do
       cancelled.size.should eq(2)
       cancelled.map(&.["by"]).uniq!.should eq([JSON::Any.new("member:7")])
     end
+  end
+
+  it "links each event and job that follows a command by its cause and flow" do
+    SweetTalkSpec.rolled_back do |connection|
+      tea = TeaShopSpec.tea("Sencha")
+      order = TeaShopSpec.order({tea, 2})
+      flow = "4bf92f3577b34da6a3ce929d0e0e4736"
+      trace = Caramel::Crema::Trace.new(Caramel::Crema::Kind::Request, "spec", flow,
+        "00f067aa0ba902b7")
+      Caramel::Crema.bound(trace) { order.place }
+      TeaShopSpec.drain(connection)
+      TeaShopSpec.drain(connection, true)
+
+      names = [TeaShopSpec::PLACED_BY_FULFILMENT, TeaShopSpec::PLACED_BY_SALES,
+               TeaShopSpec::PLACED_BY_HOLD]
+      placed = names.flat_map { |name| TeaShopSpec.meta(name) }
+      placed.size.should eq(3)
+      placed.map(&.["flow"]).uniq!.should eq([JSON::Any.new(flow)])
+      placed.map(&.["cause"]).uniq!.should eq([JSON::Any.new(nil)])
+      ids = placed.map(&.["id"].as_s).uniq!
+      ids.size.should eq(1)
+      id = ids.first
+
+      lapse = SugarORM.sql("SELECT payload->>'cause' AS cause, payload->>'flow' AS flow " \
+                           "FROM caramel_jobs WHERE class_name = $1", TeaShopSpec::LAPSE,
+        as: {cause: String?, flow: String?})
+      lapse.should eq([{cause: id, flow: flow}])
+
+      cancelled = [TeaShopSpec::CANCELLED_BY_HOLD, TeaShopSpec::CANCELLED_BY_FULFILMENT]
+        .flat_map { |name| TeaShopSpec.meta(name) }
+      cancelled.size.should eq(2)
+      cancelled.map(&.["cause"]).uniq!.should eq([JSON::Any.new(id)])
+      cancelled.map(&.["flow"]).uniq!.should eq([JSON::Any.new(flow)])
+    end
+  end
+
+  it "starts one flow outside a trace and keeps it through every job" do
+    SweetTalkSpec.rolled_back do |connection|
+      tea = TeaShopSpec.tea("Sencha")
+      order = TeaShopSpec.order({tea, 2})
+      order.place
+      TeaShopSpec.drain(connection)
+      TeaShopSpec.drain(connection, true)
+
+      names = [TeaShopSpec::PLACED_BY_FULFILMENT, TeaShopSpec::PLACED_BY_SALES,
+               TeaShopSpec::PLACED_BY_HOLD, TeaShopSpec::CANCELLED_BY_HOLD,
+               TeaShopSpec::CANCELLED_BY_FULFILMENT]
+      metas = names.flat_map { |name| TeaShopSpec.meta(name) }
+      metas.size.should eq(5)
+      lapse = SugarORM.sql("SELECT payload->>'flow' AS flow FROM caramel_jobs " \
+                           "WHERE class_name = $1", TeaShopSpec::LAPSE, as: {flow: String?})
+      flows = (metas.map(&.["flow"].as_s) + lapse.map(&.[:flow])).uniq!
+      flows.size.should eq(1)
+      flows.first.should match(/\A[0-9a-f]{32}\z/)
+
+      untraced = SugarORM.sql("SELECT count(*) AS count FROM caramel_jobs " \
+                              "WHERE class_name = $1 AND context IS NULL",
+        TeaShopSpec::PLACED_BY_SALES, as: {count: Int64})
+      untraced.first[:count].should eq(1)
+    end
+  end
+
+  it "loads an event and a deadline queued before causes and flows were recorded" do
+    id = "6f1c2a9e-0000-4000-8000-000000000001"
+    meta = {id: id, at: "2026-10-11T00:00:00.000000Z", by: nil}.to_json
+    event = Ordering::Order::Cancelled.__sweettalk_load(1_i64, %({"lines":[],"reason":null}), meta)
+    event.cause_id.should be_nil
+    event.flow_id.should eq(id)
+
+    deadline = TeaShop::Ordering::Hold::LapseDeadline.from_json(%({"key":"{}","arming":1}))
+    deadline.cause.should be_nil
+    deadline.flow.should be_nil
   end
 
   it "carries a nilable fact" do

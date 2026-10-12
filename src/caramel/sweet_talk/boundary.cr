@@ -1,4 +1,5 @@
-# One aggregate per transaction, the actor, and units of work, kept on the fiber.
+# One aggregate per transaction, the actor, cause and flow, and units of work, kept on the
+# fiber.
 module SweetTalk
   # What a service, a compensation or a deadline should do instead of changing a second
   # aggregate.
@@ -62,6 +63,39 @@ module SweetTalk
     end
   end
 
+  # Runs the block as a handler of the event *cause*, in its *flow*, as *by*: every event
+  # emitted inside it names *cause* as its cause and keeps *flow*. Returns the block's value.
+  def self.__sweettalk_following(by : String?, cause : String?, flow : String?, &)
+    fiber = ::Fiber.current
+    previous = {fiber.__sweettalk_cause, fiber.__sweettalk_flow}
+    fiber.__sweettalk_cause, fiber.__sweettalk_flow = cause, flow
+    begin
+      acting(by) { yield }
+    ensure
+      fiber.__sweettalk_cause, fiber.__sweettalk_flow = previous
+    end
+  end
+
+  # The flow a new event keeps: the handled event's or the running command's, else the
+  # current trace's id, else a random 32-hex one.
+  def self.__sweettalk_flow : String
+    ::Fiber.current.__sweettalk_flow || ::Caramel::Crema.current?.try(&.trace_id) ||
+      Random::Secure.hex(16)
+  end
+
+  # Pins the flow for a command or a factory that runs outside a handler, so every event
+  # it emits shares one; a handler's flow is already pinned. Returns the block's value.
+  def self.__sweettalk_flowing(&)
+    fiber = ::Fiber.current
+    return yield if fiber.__sweettalk_flow
+    fiber.__sweettalk_flow = __sweettalk_flow
+    begin
+      yield
+    ensure
+      fiber.__sweettalk_flow = nil
+    end
+  end
+
   # A row of a projection or a process, saved when its unit of work ends.
   module Keyed
     abstract def __sweettalk_save : Nil
@@ -92,10 +126,12 @@ end
 class Fiber
   # The aggregate whose command this fiber runs; how many aggregates the open handling
   # has changed, and what it is and how to fix a second change; the open unit of work;
-  # and who acts. SweetTalk sets and restores each.
+  # who acts; and the event being handled and its flow. SweetTalk sets and restores each.
   property __sweettalk_command : ::SweetTalk::Aggregate? = nil
   property __sweettalk_changes : Int32? = nil
   property __sweettalk_handled : {String, String}? = nil
   property __sweettalk_unit : ::SweetTalk::Unit? = nil
   property __sweettalk_actor : String? = nil
+  property __sweettalk_cause : String? = nil
+  property __sweettalk_flow : String? = nil
 end
