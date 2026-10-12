@@ -19,6 +19,21 @@ describe SugarORM::Query do
     query.binds.should eq([[1_i64, 2_i64], "Acme", 3, 7] of SugarORM::Value)
   end
 
+  it "renders where_null as IS NULL and combines it with other conditions" do
+    unbilled = SugarUnit::Team.query.where_null(:billing_email)
+    unbilled.to_sql.should eq(%(#{SELECT} WHERE "billing_email" IS NULL))
+    unbilled.binds.should be_empty
+    named = SugarUnit::Team::Query.where_null(:owner_id).where(name: "Acme")
+    named.to_sql.should end_with(%(WHERE "owner_id" IS NULL AND "name" = $1))
+  end
+
+  it "takes a value narrowed from a nilable one" do
+    email = ["billing@acme.test", nil].first
+    query = SugarUnit::Team.query
+    query = query.where(billing_email: email) if email
+    query.to_sql.should end_with(%(WHERE "billing_email" = $1))
+  end
+
   it "renders half-open and endless ranges" do
     teams = SugarUnit::Team.query
     half_open = %(WHERE "seats" >= $1 AND "seats" < $2)

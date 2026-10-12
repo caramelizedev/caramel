@@ -37,7 +37,7 @@ An application needs pure schemas, compile-time association safety, explicit cha
    - Each overload merges a loader into the query's type parameter. Preloading terminals then return `SugarORM::Loaded(Team, NamedTuple(users: Array(User)))`, where `users` is a real array.
    - Each association costs exactly one extra query.
 5. **Queries are immutable.**
-   - `where` keywords are generated per schema and typed: a value, `nil`, an `Array` or a `Range`. A raw `where("x > ?", v)` fragment is also available.
+   - `where` keywords are generated per schema and typed: a value, an `Array`, a `Range`, or the literal `nil` for IS NULL. A value that may be nil (its type is a union with `Nil`) does not compile: `where` returns `T::<Column>MayBeNil`, which has no query methods, so the error is at the caller's line with the remediation in the type's name. `where_null(:column)` matches IS NULL explicitly and takes only nullable columns. A raw `where("x > ?", v)` fragment is also available.
    - `order_by(:field, :asc)` validates the field through a generated `Field` enum.
    - `lock` adds `FOR UPDATE` to the rows a query returns and keeps its tenant scope. It runs only inside a transaction, and `count`, `exists?` and `delete_all` refuse it. Applications lock several rows in one order (`order_by(:id).lock`) and still check permissions.
 6. **Repo.** One application pool is set at boot. `Repo.bind` binds a connection or transaction to the current fiber, which Corretto and Cold Brew use; `transaction` nests as savepoints.
@@ -51,3 +51,4 @@ An application needs pure schemas, compile-time association safety, explicit cha
 - Failed validation performs no write, and constraint violations stay explicit.
 - Codecs keep exact decimals and structured values out of the type map, so an application that never uses BigDecimal never links GMP, and each application picks its own decimal type.
 - Remediation travels with the error, in the sentinel's type name.
+- A lookup such as `where(reset_token: token)` must not match the rows whose token is NULL when `token` happens to be nil. Ecto refuses a comparison with nil for the same reason; here the compiler knows whether a value can be nil, so the refusal is a compile error. The literal `nil` stays, because it cannot be nil by accident. The change shipped without a deprecation release: a compile-time warning is reported in the framework's file, and Crystal hides warnings from `lib/`.
