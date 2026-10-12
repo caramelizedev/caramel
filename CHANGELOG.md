@@ -4,12 +4,43 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-12
+
+### Upgrade notes
+
 - A request may send at most 4,096 values and 128 files, and a multipart body's boundaries and part headers now count toward its size; more answers 413. Multipart files are stored only for a route whose contract has an `UploadedFile` field.
 - Keyword `where` no longer takes a value that may be nil, such as a `String?` variable: it matched the rows whose column IS NULL whenever the value was nil. The call fails to compile with `…MayBeNil` in the error. Narrow the value first (`if token = contract.token`), or use the new `where_null(:column)` to match NULL. The literal `where(column: nil)` still works.
 - `sudo scripts/install-local-integration apply` installs only a bundle that the user who ran `sudo` prepared, and refuses to run as root without `sudo`. The Swift build scripts keep their module cache in a private directory per user; a `CARAMEL_LATTE_SWIFT_CACHE` directory must be yours alone.
 - An application can model its domain in SweetTalk, an opt-in language for Domain-Driven Design ([ADR 0030](docs/decisions/0030-sweettalk-domain-language.md), [ADR 0031](docs/decisions/0031-sweettalk-services-processes-and-richer-values.md) and [ADR 0033](docs/decisions/0033-sweettalk-multi-tenancy.md)). Nothing changes until it requires `caramel/sweet_talk`. SweetTalk is experimental until an application has run it in production: a minor release may still change the names it stores (its tables and their constraints, its job class names, its channels and its event metadata keys), and that release's upgrade notes will say how to move them. In a multi-tenant application, the domain names its tenant with `tenant App::Account` before its first context, and every context belongs to the tenant unless it says `central: true`.
 - Crema has a `domain` span kind, which times SweetTalk's commands, factories and services. A sink or exporter that matches `Caramel::Crema::SpanKind` exhaustively must handle it.
 - An application can start a SweetTalk domain with `frappe make domain NAME CONTEXT --means=TEXT`, such as `frappe make domain Shop Ordering --means="choosing teas and checking out"`. It adds `require "caramel/sweet_talk"` and `require "../app/domain/*"` to `config/application.cr`, and writes `app/domain/shop.cr` and `spec/domain/shop_spec.cr`. `frappe make tenancy` names the tenant in each domain in `app/domain/`. Applications generated before this release add the `Lint/UnusedArgument` exclusion for `app/domain/**` to their `.ameba.yml` by hand.
+
+### Breaking changes
+
+- **sugar_orm:** refuse a value that may be nil in keyword where (27f2e4e)
+
+### Features
+
+- **core:** let a proxy group connect to the application socket (44be218)
+- **sweettalk:** add SweetTalk, an opt-in language for Domain-Driven Design (5909476)
+- **sweettalk:** check value bounds and lengths in PostgreSQL (0a2beed)
+- **sweettalk:** lock and upsert rows through SugarORM (b7f2569)
+- **sweettalk:** refuse a program that also requires caramel/tenancy (5a6de73)
+- **sweettalk:** arm a deadline for another span, and name a length range's real bounds (c9b8b5f)
+- **sweettalk:** share a domain between tenants (ADR 0033) (ddbedf3)
+- **crema:** time SweetTalk commands as domain spans (a1798b9)
+- **sweettalk:** link events and jobs by cause and flow (0d25a98)
+- **frappe:** make a SweetTalk domain (8c2ff55)
+
+### Fixes
+
+- **website:** publish only origin's main commit (6f5465e)
+- **frappe:** name the artifact with exactly seven commit digits (6830340)
+- **core:** bound what a request body can make the server hold (9bb970b)
+- **latte:** keep the Swift module cache in a private directory per user (b86bf35)
+- **latte:** install only the bundle of the user who ran sudo (32b0758)
+- **sweettalk:** let an entity update only its own aggregate's row (9b6c0a7)
+- **cold_brew:** refuse a late job alias that another job claims (8e1a133)
 
 ## 0.12.0 - 2026-10-11
 
