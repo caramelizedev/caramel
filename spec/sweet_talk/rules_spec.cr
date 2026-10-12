@@ -1,7 +1,8 @@
 # SweetTalk's rules on a small shelf: one aggregate per command, per handler and per
 # service, unit-safe multiplication, a branching lifecycle, a factory whose event's
 # policy runs as the actor who made the aggregate, string lengths, a process row two
-# steps update at once, a deadline armed for a step's own span, and a retried policy.
+# steps update at once, a deadline armed for a step's own span, a retried policy, and
+# entities stored again by a second aggregate or after a failed create.
 require "./support/app"
 
 module RulesSpec
@@ -134,6 +135,28 @@ describe "SweetTalk's rules" do
       meta = SugarORM.sql("SELECT payload->>'meta' AS meta FROM caramel_jobs", as: {meta: String})
       id = JSON.parse(meta.first[:meta])["id"].as_s
       Rules::Shelf.notes.should eq([id, id])
+    end
+  end
+
+  it "inserts held entities again after a create that failed" do
+    SweetTalkSpec.rolled_back do
+      box = RulesSpec.box("held")
+      held = Rules::Shelf::Rack::Slot.new(box)
+      missing = Rules::Shelf::Rack::Slot.new(Rules::Shelf::Box::Id.new(999_999))
+      expect_raises(PQ::PQError, "fk_shelf_rack_slots_box_id") do
+        Rules::Shelf::Rack.create(slots: [held, missing])
+      end
+      rack = Rules::Shelf::Rack.create(slots: [held])
+      Rules::Shelf::Rack.find(rack.id).slots.map(&.box).should eq([box.id])
+    end
+  end
+
+  it "copies an entity taken from another aggregate instead of moving its row" do
+    SweetTalkSpec.rolled_back do
+      box = RulesSpec.box("shared")
+      first = Rules::Shelf::Rack.create(slots: [Rules::Shelf::Rack::Slot.new(box)])
+      second = Rules::Shelf::Rack.create(slots: Rules::Shelf::Rack.find(first.id).slots)
+      [first, second].map { |rack| Rules::Shelf::Rack.find(rack.id).slots.size }.should eq([1, 1])
     end
   end
 end

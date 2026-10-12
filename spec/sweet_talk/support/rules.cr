@@ -2,7 +2,8 @@
 # service, unit-safe multiplication, a branching lifecycle, a factory whose event's
 # policy runs as the actor who made the aggregate, values whose bounds and lengths
 # PostgreSQL checks too, except one that opts out, a process whose steps may overlap and
-# whose deadline a step arms for its own span, and a policy whose first delivery fails.
+# whose deadline a step arms for its own span, a policy whose first delivery fails, and
+# an entity a second aggregate stores again as its own.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
@@ -91,6 +92,14 @@ module Rules
       has stack : Stack
       has size : Size
       has code : Code
+    end
+
+    aggregate Rack, means: "a rack whose slots each hold a box" do
+      has slots : Array(Slot)
+
+      entity Slot, means: "one place on a rack, holding one box" do
+        has box : Box
+      end
     end
 
     process Tally, means: "how much a box was counted, until it goes quiet" do

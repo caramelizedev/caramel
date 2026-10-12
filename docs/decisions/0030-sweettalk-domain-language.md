@@ -62,9 +62,11 @@ or a policy, and nothing stops one context from reaching into another's types.
    - an aggregate as a foreign key, whose getter returns the aggregate's `Id`;
    - an `Array` of the aggregate's own entity as a child table, loaded with `preload`.
 
-   Any other type does not compile. A value or an aggregate is declared before the
-   aggregate that stores it. A projection's table has a unique index on its key's column.
-   `frappe db diff` derives the migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
+   Any other type does not compile. An entity updates only a row of the aggregate that
+   saves it; a row another aggregate holds, or one a failed `create` or factory left, is
+   inserted anew. A value or an aggregate is declared before the aggregate that stores it.
+   A projection's table has a unique index on its key's column. `frappe db diff` derives
+   the migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
 5. **A command is one transaction on one aggregate.** `to` runs in
    `SugarORM::Repo.transaction`: it loads the aggregate with its root's row locked
    (SugarORM's `lock`), runs the body, checks every `never` and `always`, saves the root
@@ -125,6 +127,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 - Refactoring toward deeper insight renames concepts, but tables, channels and queued jobs
   keep the names they were stored under; `renamed_from:` lets the code move on.
 - Writes through `Rows` would skip invariants and the value checks made in Crystal.
+- An entity's identity is its aggregate's: updating the row it was loaded from would move
+  another aggregate's entity, and a row a rolled-back write left no longer exists.
 - A notification carries an id, as Cold Brew advises: fields could pass its 8,000-byte
   limit, and the refused publish would roll the command back.
 

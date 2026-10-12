@@ -90,9 +90,13 @@ module SweetTalk
         end
       end
 
-      # Inserts or updates this entity's row under its aggregate; returns its id.
+      # Inserts or updates this entity's row under its aggregate; returns its id. A row
+      # another aggregate holds, or one a rolled-back create or factory left behind, is not
+      # this aggregate's, so the entity is inserted again as a new row of its own.
       def __sweettalk_save(*, {{ foreign }} : Int64) : Int64
-        changeset = if row = @__sweettalk_row
+        row = @__sweettalk_row
+        row = nil if row && row.{{ foreign }} != {{ foreign }}
+        changeset = if row
                       {{ row }}::Changeset.new(row, {{ arguments.id }})
                     else
                       {{ row }}::Changeset.new({{ arguments.id }})
