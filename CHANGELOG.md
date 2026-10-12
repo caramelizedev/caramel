@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- A request may send at most 4,096 values and 128 files, and a multipart body's boundaries and part headers now count toward its size; more answers 413. Multipart files are stored only for a route whose contract has an `UploadedFile` field.
+
 ## 0.12.0 - 2026-10-11
 
 ### Upgrade notes

@@ -24,6 +24,24 @@ module Caramel
 
     class InvalidEncoding < Exception; end
 
+    # A body that raises TooLarge once more than *limit* bytes are read from it.
+    private class Bounded < IO
+      def initialize(@source : IO, @limit : Int64)
+        @taken = 0_i64
+      end
+
+      def read(slice : Bytes) : Int32
+        count = @source.read(slice)
+        @taken += count
+        raise TooLarge.new("Body exceeds #{@limit} bytes") if @taken > @limit
+        count
+      end
+
+      def write(slice : Bytes) : Nil
+        raise IO::Error.new("A request body is read-only")
+      end
+    end
+
     # The JSON type each member of a JSON body arrived as; a contract field
     # accepts only its own.
     enum JsonKind
@@ -37,9 +55,17 @@ module Caramel
 
     MAX_FORM_BYTES   =      2_097_152
     MAX_UPLOAD_BYTES = 67_108_864_i64
-    OVERRIDES        = {"PATCH", "PUT", "DELETE"}
-    BODY_METHODS     = {"POST", "PUT", "PATCH", "DELETE"}
-    UNSUPPORTED      = "Expected a URL-encoded form, multipart form or JSON object"
+    # The most values one request may send: every query and form pair, JSON
+    # member, JSON array item and multipart part counts as one.
+    MAX_FIELDS = 4_096
+    # The most file parts one multipart body may send.
+    MAX_FILES = 128
+    # What a multipart body may spend on boundaries and part headers, beyond
+    # its text and its uploads.
+    MULTIPART_FRAMING_BYTES = 1_048_576_i64
+    OVERRIDES               = {"PATCH", "PUT", "DELETE"}
+    BODY_METHODS            = {"POST", "PUT", "PATCH", "DELETE"}
+    UNSUPPORTED             = "Expected a URL-encoded form, multipart form or JSON object"
 
     getter query = {} of String => String
     getter body = {} of String => String
@@ -55,15 +81,20 @@ module Caramel
     @json_kinds = {} of String => JsonKind
     @json_items = {} of String => Array({String?, JsonKind})
     @repeated = {} of String => Array(String)
+    @refused_files = Set(String).new
+    @fields = 0
+    @file_parts = 0
 
     # Reads *request* as its route's *ingress* allows: its limit bounds the
-    # body text, and uploads share *max_upload_bytes*.
+    # body text, and uploads share *max_upload_bytes*. Without *uploads* a
+    # file part is never stored, and its name is an unknown field.
     def self.read(request : HTTP::Request,
                   ingress : Ingress = Ingress::DEFAULT,
-                  max_upload_bytes : Int64 = MAX_UPLOAD_BYTES) : self
+                  max_upload_bytes : Int64 = MAX_UPLOAD_BYTES,
+                  uploads : Bool = true) : self
       input = new({"GET", "HEAD"}.includes?(request.method))
       begin
-        input.parse(request, ingress, max_upload_bytes)
+        input.parse(request, ingress, uploads ? max_upload_bytes : 0_i64)
       rescue error
         input.cleanup
         raise error
@@ -144,6 +175,7 @@ module Caramel
     # parameters such as analytics or cache busters.
     def strict_keys : Array(String)
       keys = (@json_kinds.empty? ? @body.keys : @json_kinds.keys) + @files.keys
+      keys.concat(@refused_files)
       keys.concat(@query.keys) unless @lenient_query
       keys
     end
@@ -154,6 +186,18 @@ module Caramel
 
     private def add_error(field : String, message : String) : Nil
       (@errors[field] ||= [] of String) << message
+    end
+
+    # Counts one value against MAX_FIELDS.
+    private def count_field : Nil
+      @fields += 1
+      raise TooLarge.new("Request exceeds #{MAX_FIELDS} fields") if @fields > MAX_FIELDS
+    end
+
+    # Counts one file part against MAX_FILES.
+    private def count_file : Nil
+      @file_parts += 1
+      raise TooLarge.new("Request exceeds #{MAX_FILES} files") if @file_parts > MAX_FILES
     end
 
     private def empty_body?(request : HTTP::Request) : Bool
@@ -230,6 +274,7 @@ module Caramel
     # Records one member, and the JSON type it arrived as. The first of two
     # members with one name wins; the second is an error.
     private def read_json_member(parser : JSON::PullParser, key : String) : Nil
+      count_field
       check_text(key)
       if @json_kinds.has_key?(key)
         add_error("_base", Wording.duplicate_field(key))
@@ -268,6 +313,7 @@ module Caramel
     end
 
     private def read_json_item(parser : JSON::PullParser) : {String?, JsonKind}
+      count_field
       case parser.kind
       when .string?
         value = parser.read_string
@@ -292,7 +338,8 @@ module Caramel
       malformed = !text.valid_encoding? || text.matches?(/%(?![0-9a-fA-F]{2})/)
       raise InvalidEncoding.new("Malformed form encoding") if malformed
       seen = Set(String).new
-      URI::Params.parse(text).each do |key, value|
+      URI::Params.parse(text) do |key, value|
+        count_field
         check_text(key)
         check_text(value)
         unless seen.add?(key)
@@ -308,47 +355,39 @@ module Caramel
       end
     end
 
+    # Reads a multipart body's parts. The whole body, boundaries and part
+    # headers included, is bounded by its text, its uploads and
+    # MULTIPART_FRAMING_BYTES together. *max_upload_bytes* is zero for a route
+    # that takes no files.
     private def parse_multipart(request : HTTP::Request,
                                 max_form_bytes : Int64,
                                 max_upload_bytes : Int64) : Nil
+      bound(request, max_form_bytes + max_upload_bytes + MULTIPART_FRAMING_BYTES)
       text_budget = max_form_bytes
       upload_budget = max_upload_bytes
       seen = Set(String).new
       HTTP::FormData.parse(request) do |part|
+        count_field
         name = part.name
         check_text(name)
         repeat = !seen.add?(name)
-        if repeat && (part.filename || @files.has_key?(name) || control_name?(name))
+        if repeat && (part.filename || @files.has_key?(name) ||
+           @refused_files.includes?(name) || control_name?(name))
           add_error("_base", Wording.duplicate_field(name))
           next
         end
         if part.filename
-          file = File.tempfile("caramel-upload-")
-          begin
-            copied = IO.copy(part.body, file, upload_budget + 1)
-            if copied > upload_budget
-              raise TooLarge.new("Uploads exceed #{max_upload_bytes} bytes")
-            end
-          rescue error
-            file.close
-            file.delete
-            raise error
+          count_file
+          if max_upload_bytes.zero?
+            @refused_files << name
+            next
           end
-          file.close
-          upload_budget -= copied
-          @files[name] = UploadedFile.new(
-            filename: part.filename,
-            content_type: part.headers["Content-Type"]?,
-            path: file.path,
-            size: copied)
+          upload = store_upload(part, upload_budget, max_upload_bytes)
+          upload_budget -= upload.size
+          @files[name] = upload
         else
-          copied = 0_i64
-          value = String.build do |io|
-            copied = IO.copy(part.body, io, text_budget + 1)
-          end
-          raise TooLarge.new("Form exceeds #{max_form_bytes} bytes") if copied > text_budget
-          text_budget -= copied
-          check_text(value)
+          value = read_text_part(part, text_budget, max_form_bytes)
+          text_budget -= value.bytesize
           if repeat
             (@repeated[name] ||= [@body[name]]) << value
           else
@@ -358,6 +397,47 @@ module Caramel
       end
     rescue HTTP::FormData::Error | MIME::Multipart::Error
       raise InvalidEncoding.new("Malformed multipart form")
+    end
+
+    # Refuses a body that declares more than *total* bytes, and stops reading
+    # one that sends more.
+    private def bound(request : HTTP::Request, total : Int64) : Nil
+      declared = request.headers["Content-Length"]?.try(&.to_i64?)
+      raise TooLarge.new("Body exceeds #{total} bytes") if declared && declared > total
+      request.body.try { |body| request.body = Bounded.new(body, total) }
+    end
+
+    # A text part's value, within *budget* bytes.
+    private def read_text_part(part : HTTP::FormData::Part,
+                               budget : Int64,
+                               max_form_bytes : Int64) : String
+      copied = 0_i64
+      value = String.build { |io| copied = IO.copy(part.body, io, budget + 1) }
+      raise TooLarge.new("Form exceeds #{max_form_bytes} bytes") if copied > budget
+      check_text(value)
+      value
+    end
+
+    # Streams a file part to a private tempfile within *budget* bytes; the
+    # file is deleted when it is larger.
+    private def store_upload(part : HTTP::FormData::Part,
+                             budget : Int64,
+                             max_upload_bytes : Int64) : UploadedFile
+      file = File.tempfile("caramel-upload-")
+      begin
+        copied = IO.copy(part.body, file, budget + 1)
+        raise TooLarge.new("Uploads exceed #{max_upload_bytes} bytes") if copied > budget
+      rescue error
+        file.close
+        file.delete
+        raise error
+      end
+      file.close
+      UploadedFile.new(
+        filename: part.filename,
+        content_type: part.headers["Content-Type"]?,
+        path: file.path,
+        size: copied)
     end
 
     private def check_text(text : String) : Nil

@@ -13,14 +13,16 @@ module Caramel
   module Router
     MAX_SEGMENTS = 32
 
-    # A route; `tenant` routes live under a tenant's `/SLUG` prefix.
+    # A route; `tenant` routes live under a tenant's `/SLUG` prefix, and
+    # `uploads` routes have a contract field that takes a file.
     record Entry,
       method : String,
       path : String,
       action : String,
       contract : String,
       ingress : Ingress = Ingress::DEFAULT,
-      tenant : Bool = false do
+      tenant : Bool = false,
+      uploads : Bool = false do
       # The path as `frappe routes` and Crema list it: a tenant route under `/:tenant`.
       def listed_path : String
         return path unless tenant
@@ -32,14 +34,17 @@ module Caramel
     # The route a request's real method and path select. It is found before
     # the body is read, so the route's ingress decides how to read it; an
     # unmatched request reads with DEFAULT, so it still meets the CSRF check.
-    # `tenant` says which routes it was matched against.
+    # `tenant` says which routes it was matched against, and `uploads` whether
+    # the body's file parts are stored; a dispatcher of its own that does not
+    # say stores them.
     record Match,
       path : String,
       segments : Segments?,
       index : Int32,
       mask : UInt8,
       ingress : Ingress,
-      tenant : Bool = false
+      tenant : Bool = false,
+      uploads : Bool = true
 
     METHOD_BITS = {
       "GET"    => 1_u8,
@@ -238,12 +243,29 @@ module Caramel
       def route(path : String, method : String, tenant : Bool = false) : Match
         segments = Segments.parse(path)
         unless segments && segments.size <= MAX_SEGMENTS
-          return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT, tenant)
+          return Match.new(path, segments, -1, 0_u8, Ingress::DEFAULT, tenant, uploads: false)
         end
 
         index, mask = match(path, segments, method, tenant)
         ingress = index >= 0 ? @entries[index].ingress : Ingress::DEFAULT
-        Match.new(path, segments, index, mask, ingress, tenant)
+        uploads = uploads?(path, segments, method, index, tenant)
+        Match.new(path, segments, index, mask, ingress, tenant, uploads)
+      end
+
+      # Whether the matched route takes files, or a route this POST's `_method`
+      # may reach at the same path does.
+      private def uploads?(path : String,
+                           segments : Segments,
+                           method : String,
+                           index : Int32,
+                           tenant : Bool) : Bool
+        return true if index >= 0 && @entries[index].uploads
+        return false unless method == "POST"
+
+        RequestInput::OVERRIDES.any? do |override|
+          found = match(path, segments, override, tenant)[0]
+          found >= 0 && @entries[found].uploads
+        end
       end
 
       # Every method the routes at this path take, whatever the request's.
@@ -565,6 +587,7 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
         ::Caramel::Router::Entry.new(
           {{ route[0] }}, {{ route[1] }}, {{ route[6] }}, {{ route[5] }},
           ::{{ route[2] }}::CARAMEL_INGRESS, {{ route[7] }},
+          uploads: ::{{ route[2] }}::Contract.__caramel_uploads?,
         ),
       {% end %}
     ] of ::Caramel::Router::Entry)
