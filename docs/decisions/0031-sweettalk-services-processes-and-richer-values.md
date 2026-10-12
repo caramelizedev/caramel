@@ -126,7 +126,9 @@ Rejected:
   policy would have to pass it on.
 - **Deleting rows.** References to the aggregate would dangle.
 - **Patterns as `CHECK` constraints.** PostgreSQL reads regular expressions differently
-  from Crystal: it refuses `\z`, which `Email` uses.
+  from Crystal: it refuses `\z`, which `Email` uses, reads `\b` as a backspace and lets `.`
+  match a newline; its `\d`, `\s`, `\w` and `(?i)` follow the database's locale, ASCII-only
+  under Latte's `C`, where Crystal's follow Unicode.
 - **Leaving a non-literal bound out of the database unannounced.** A reader of the value
   could not tell which bounds the database holds.
 - **Ids in log lines only.** A queued event could not name what caused it.
