@@ -7,7 +7,7 @@ module Caramel::Checks::Prose
   extend self
 
   HOMES = [
-    /\A(README|CONTRIBUTING|CHANGELOG|AGENTS|CLAUDE|THIRD_PARTY_NOTICES)\.md\z/,
+    /\A(README|CONTRIBUTING|CHANGELOG|AGENTS|CLAUDE|SECURITY|THIRD_PARTY_NOTICES)\.md\z/,
     /\Adocs\/decisions\/\d{4}-[a-z0-9-]+\.md\z/,
     /\Awebsite\/README\.md\z/,
     /\Atemplates\/application\/(README|AGENTS|CLAUDE)\.md\z/,
@@ -19,6 +19,7 @@ module Caramel::Checks::Prose
     "AGENTS.md"                       => 3_000,
     "CLAUDE.md"                       => 200,
     "CONTRIBUTING.md"                 => 12_000,
+    "SECURITY.md"                     => 2_000,
     "website/README.md"               => 5_000,
     "templates/application/README.md" => 3_000,
     "templates/application/AGENTS.md" => 2_000,
