@@ -35,6 +35,17 @@ cases = {
     "no overload matches 'Team::QueryOf(NamedTuple()).where', seats: String",
     "seats : ::Int32 | Array(::Int32) | Range(::Int32, ::Int32)",
   ],
+  "compile_where_may_be_nil" => [
+    "compile_where_may_be_nil.cr:4:43",
+    "undefined method 'to_a' for Team::BillingEmailMayBeNil",
+    "got a value that may be nil, and nil matches the rows whose billing_email IS NULL",
+    "Remediation: pass a value that is never nil, or write where_null(:billing_email)",
+  ],
+  "compile_where_null_not_nullable" => [
+    "compile_where_null_not_nullable.cr:3:24",
+    "to match a member of enum Team::NullableField",
+    "Options are: :billing_email and :owner_id",
+  ],
   "compile_unknown_order" => [
     "compile_unknown_order.cr:3:44",
     "expected argument #1 to 'Team::QueryOf(NamedTuple())#order_by' " \

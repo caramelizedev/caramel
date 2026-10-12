@@ -732,6 +732,24 @@ module SugarORM
         {% end %}
       end
 
+      {% nullable = columns.select { |column| column[:nullable] } %}
+      {% unless nullable.empty? %}
+        # The columns that may hold NULL, for `where_null`.
+        enum NullableField
+          {% for column in nullable %}
+            {{ column[:name].camelcase.id }}
+          {% end %}
+        end
+      {% end %}
+
+      {% for column in nullable %}
+        # Returned by `where({{ column[:name].id }}: value)` when *value* may be
+        # nil. It defines no query methods, so using it fails to compile at the
+        # caller's line, with the remediation in the type's name.
+        struct {{ column[:name].camelcase.id }}MayBeNil(Remediation) < ::SugarORM::MayBeNil
+        end
+      {% end %}
+
       {% for column in columns %}
         {% if column[:codec] %}
           alias SugarType{{ column[:name].camelcase.id }} = {{ column[:written] }}
@@ -978,8 +996,10 @@ module SugarORM
            end.join(", ") %}
 
         # Keyword conditions, checked against the columns at compile time: a
-        # value, nil (IS NULL), an Array (= ANY) or a Range.
-        def where(*, {{ signature.id }}) : self
+        # value, an Array (= ANY), a Range, or the literal `nil` (IS NULL). A
+        # value that may be nil is refused: it would match the NULL rows
+        # whenever it happened to be nil.
+        def where(*, {{ signature.id }})
           __sugar_conditions = [] of ::SugarORM::Condition
           {% for column in columns %}
             unless {{ column[:name].id }}.is_a?(::SugarORM::Unset)
@@ -990,12 +1010,61 @@ module SugarORM
               )
             end
           {% end %}
-          __sugar_where(__sugar_conditions)
+          {% if nullable.empty? %}
+            __sugar_where(__sugar_conditions)
+          {% else %}
+            __sugar_refuse_nilable(
+              __sugar_where(__sugar_conditions), {{ nullable.map(&.[:name].id).join(", ").id }}
+            )
+          {% end %}
         end
 
         def self.where(*, {{ signature.id }})
           new.where({{ forwarded.join(", ").id }})
         end
+
+        {% unless nullable.empty? %}
+          {% guarded = nullable.map_with_index do |column, index|
+               "#{column[:name].id} : V#{index}"
+             end %}
+          {% free = nullable.map_with_index { |_column, index| "V#{index}" } %}
+          {% arguments = (["query : Q"] + guarded).join(", ") %}
+          {% variables = (["Q"] + free).join(", ") %}
+
+          # *query*, or the sentinel of the first column whose value may be nil.
+          # A union with Nil is a value that may be nil; Nil alone is the literal.
+          private def __sugar_refuse_nilable({{ arguments.id }}) forall {{ variables.id }}
+            \{% if false %}
+            {% for column, index in nullable %}
+              {% name = column[:name].id %}
+              {% message = "where(#{name}: value) got a value that may be nil, and nil " +
+                           "matches the rows whose #{name} IS NULL. Remediation: pass a " +
+                           "value that is never nil, or write where_null(:#{name}) " +
+                           "to match those rows" %}
+              \{% elsif V{{ index }}.union? && V{{ index }}.nilable? %}
+                ::{{ @type }}::{{ column[:name].camelcase.id }}MayBeNil(
+                  NamedTuple({{ message }}: ::Nil)
+                ).new
+            {% end %}
+            \{% else %}
+              query
+            \{% end %}
+          end
+
+          # The rows whose *field* IS NULL; only a nullable column is a field.
+          def where_null(field : ::{{ @type }}::NullableField) : self
+            column = case field
+                     {% for column in nullable %}
+                       in .{{ column[:name].id }}? then {{ column[:name] }}
+                     {% end %}
+                     end
+            __sugar_where([::SugarORM::Condition.column(column, nil)])
+          end
+
+          def self.where_null(field : ::{{ @type }}::NullableField)
+            new.where_null(field)
+          end
+        {% end %}
 
         {% for association in associations %}
           {% camel = association[:name].camelcase %}

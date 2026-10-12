@@ -31,6 +31,11 @@ module SugarORM
     end
   end
 
+  # What a keyword `where` returns for a value that may be nil. Each schema
+  # generates `T::<Column>MayBeNil(Remediation)`, which has no query methods.
+  abstract struct MayBeNil
+  end
+
   # ` AND "<tenant column>" = $n`, with the tenant appended to *args*, when
   # `T` is tenanted and scoped; "" otherwise.
   def self.tenant_filter(schema : T.class, args : Array(Value)) : String forall T

@@ -24,6 +24,8 @@ def exercise(db : DB::Database)
   User::Query.where(team_id: team.id).count(db)
   Team.query.active.larger_than(3).where(id: [1_i64], seats: 1..5, billing_email: nil).order_by(:name, :desc).limit(5).offset(1).to_a.map(&.name)
   Team.query.where("seats > ?", 3).each { |row| row.with(name: "copy").name }
+  Team.query.where_null(:billing_email).where(owner_id: team.owner_id || 0_i64).to_a
+  Team::Query.where_null(:owner_id).count(db)
 
   Team.query.preload(:users).preload(:owner).preload(:profile).to_a.each do |loaded|
     loaded.users.each { |user| user.email }
