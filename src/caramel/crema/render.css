@@ -15,6 +15,7 @@ th .axis{display:flex;justify-content:space-between;font-weight:400}
 .bar.enqueue rect{fill:var(--k-enqueue)}
 .bar.log rect{fill:var(--k-log)}
 .bar.dump rect{fill:var(--k-dump)}
+.bar.domain rect{fill:var(--k-domain)}
 .bar.error rect{fill:var(--bad)}
 .warning{padding:8px 12px;border:1px solid var(--note-line);background:var(--note);border-radius:6px}
 .repeat-mark{display:inline-block;margin:0;padding:0 8px;border:1px solid var(--note-line);border-radius:999px;font-size:12px;font-weight:600}

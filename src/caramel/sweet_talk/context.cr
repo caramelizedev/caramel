@@ -354,7 +354,8 @@ module SweetTalk
 
     # `service requote(order : Order::Id), returns: Cents, means: "…" do … end` is a
     # domain service: an operation that belongs to no one aggregate. It runs in one
-    # transaction and may change one aggregate.
+    # transaction and may change one aggregate, timed as a domain span named
+    # `Ordering.requote`.
     macro service(call, returns = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -366,27 +367,32 @@ module SweetTalk
       {% call.raise "#{@type.name.id}.#{call.name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
       {% what = "service #{short.id}.#{call.name}" %}
+      {% span = "#{short.id}.#{call.name}" %}
       {% service = {call.name.stringify, means, call.line_number} %}
       SWEETTALK_SERVICE_{{ call.name.upcase }} = {{ service }}
 
       {% if returns.is_a?(NilLiteral) %}
         def self.{{ call.name }}({{ call.args.splat }}) : Nil
-          ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
-            ::SugarORM::Repo.transaction do
-              {{ block.body }}
+          ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+            ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
+              ::SugarORM::Repo.transaction do
+                {{ block.body }}
+              end
             end
           end
         end
       {% else %}
         def self.{{ call.name }}({{ call.args.splat }}) : {{ returns }}
-          ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
-            %result = nil
-            ::SugarORM::Repo.transaction do
-              %result = begin
-                {{ block.body }}
+          ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+            ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
+              %result = nil
+              ::SugarORM::Repo.transaction do
+                %result = begin
+                  {{ block.body }}
+                end
               end
+              %result.as({{ returns }})
             end
-            %result.as({{ returns }})
           end
         end
       {% end %}

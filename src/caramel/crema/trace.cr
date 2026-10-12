@@ -18,6 +18,7 @@ module Caramel::Crema
     Enqueue
     Log
     Dump
+    Domain
 
     def wire : String
       to_s.downcase
@@ -175,7 +176,7 @@ module Caramel::Crema
       in .http?    then @outbound_count += 1; @outbound_time += elapsed
       in .view?    then @view_time += elapsed if @view_depth == 0
       in .enqueue? then @enqueued += 1
-      in .log?, .dump?
+      in .log?, .dump?, .domain?
       end
     end
 

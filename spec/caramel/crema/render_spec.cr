@@ -189,6 +189,33 @@ describe Caramel::Crema::Render do
     Caramel::Crema::Render.trace_html(event, nil, nil).should contain(%(class="bar http error"))
   end
 
+  it "colours a domain span and indents the queries inside it" do
+    event = EventFixtures.trace
+    place = Caramel::Crema::SpanEvent.new("domain", "Ordering::Order#place", 10.0, 50.0)
+    inside = Caramel::Crema::SpanEvent.new("sql", "SELECT a", 20.0, 2.0)
+    inside.detail = "SELECT 1"
+    event.spans = [place, inside]
+    html = Caramel::Crema::Render.trace_html(event, nil, nil)
+    html.should contain(%(class="bar domain"))
+    html.should contain(%(<td class="d1"><a href="#q1">SELECT a</a></td>))
+  end
+
+  it "lists domain spans in the Markdown, a refused one with its class" do
+    event = EventFixtures.trace
+    place = Caramel::Crema::SpanEvent.new("domain", "Ordering::Order#place", 10.0, 50.0)
+    add = Caramel::Crema::SpanEvent.new("domain", "Ordering::Order#add", 70.0, 2.0)
+    add.error_class = "SweetTalk::Refusal"
+    event.spans = [place, add]
+    expected = <<-MARKDOWN
+      ## Domain
+
+      - `Ordering::Order#place` 50.0 ms
+      - `Ordering::Order#add` 2.0 ms, SweetTalk::Refusal
+
+      MARKDOWN
+    Caramel::Crema::Render.markdown(event).should contain(expected)
+  end
+
   it "shows the binds the way the copied statement writes them" do
     render = Caramel::Crema::Render
     nothing = Caramel::Crema::NULL_BIND

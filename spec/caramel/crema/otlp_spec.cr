@@ -74,6 +74,23 @@ describe Caramel::Crema::Otlp do
     child["parentSpanId"].should eq(root["spanId"])
   end
 
+  it "exports a domain span as an internal span without attributes" do
+    collector = Collector.new
+    exporting(collector) do
+      Caramel::Crema.request(HTTP::Request.new("GET", "/orders")) do
+        domain = Caramel::Crema::SpanKind::Domain
+        Caramel::Crema.measure(domain, "Ordering::Order#place") { }
+        Caramel::Response.new(body: "ok")
+      end
+    end
+    spans = spans_of(collector.bodies.first)
+    root = spans.find! { |span| span["kind"] == 2 }
+    child = spans.find! { |span| span["name"] == "Ordering::Order#place" }
+    child["kind"].should eq(1)
+    child["attributes"].as_a.should be_empty
+    child["parentSpanId"].should eq(root["spanId"])
+  end
+
   it "names the service and environment in the resource" do
     collector = Collector.new
     exporting(collector, {"OTEL_SERVICE_NAME" => "bookshelf-web"}) do

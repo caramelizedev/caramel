@@ -139,7 +139,8 @@ module SweetTalk
       @__sweettalk_events << {{ event }}.new(self{{ given.id }})
     end
 
-    # `to restock(tins : Tins) do … end` is a command.
+    # `to restock(tins : Tins) do … end` is a command, timed as a domain span named
+    # `Catalogue::Tea#restock`.
     macro to(call, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -147,9 +148,13 @@ module SweetTalk
         {% call.raise "to takes a verb and typed arguments, " +
                       "as in to restock(tins : Tins) do … end" %}
       {% end %}
+      {% parts = @type.name.split("::") %}
+      {% span = "#{parts[-2].id}::#{parts[-1].id}##{call.name}" %}
       def {{ call.name }}({{ call.args.splat }}) : Nil
-        __sweettalk_command do
-          {{ block.body }}
+        ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+          __sweettalk_command do
+            {{ block.body }}
+          end
         end
       end
     end
@@ -158,7 +163,7 @@ module SweetTalk
     # builds the aggregate from the arguments named like its attributes, then runs the body
     # as its first change, in one transaction: the body may emit, and the events are
     # dispatched once the aggregate is saved and has an id. An aggregate with a factory
-    # has no `create`.
+    # has no `create`. It is timed as a domain span named `Ordering::Order.open`.
     macro factory(call, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -167,7 +172,9 @@ module SweetTalk
                       "as in factory open(member : Account) do … end" %}
       {% end %}
       {% verb = call.name %}
-      {% short = @type.name.split("::").last %}
+      {% parts = @type.name.split("::") %}
+      {% short = parts.last %}
+      {% span = "#{parts[-2].id}::#{short.id}.#{verb}" %}
       {% if %w(create find find? all new allocate).includes?(verb.stringify) %}
         {% call.raise "factory #{verb} would replace #{short.id}.#{verb}: " +
                       "name it for what it makes, as in factory open" %}
@@ -192,10 +199,12 @@ module SweetTalk
           \{% end %}
           \{% named = attributes.select { |attribute| {{ given }}.includes?(attribute[0]) }
                .map { |attribute| "#{attribute[0].id}: #{attribute[0].id}" } %}
-          ::SweetTalk.__sweettalk_enter(nil)
-          aggregate = new(\{{ named.join(", ").id }})
-          aggregate.__sweettalk_make_{{ verb }}({{ call.args.map(&.var).splat }})
-          aggregate
+          ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+            ::SweetTalk.__sweettalk_enter(nil)
+            aggregate = new(\{{ named.join(", ").id }})
+            aggregate.__sweettalk_make_{{ verb }}({{ call.args.map(&.var).splat }})
+            aggregate
+          end
         \{% end %}
       end
 
@@ -383,15 +392,19 @@ module SweetTalk
       end
 
       {% if factories.empty? %}
-        # Checks the invariants and inserts the root, then its entities, in one transaction.
+        {% span = "#{@type.name.split("::")[-2].id}::#{short.id}.create" %}
+        # Checks the invariants and inserts the root, then its entities, in one transaction,
+        # timed as a domain span named `Catalogue::Tea.create`.
         def self.create(*, {{ keywords.join(", ").id }}) : self
-          ::SweetTalk.__sweettalk_enter(nil)
-          aggregate = new({{ attributes.map(&.[0].id).splat }})
-          ::SugarORM::Repo.transaction do
-            aggregate.__sweettalk_check
-            aggregate.__sweettalk_save
+          ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+            ::SweetTalk.__sweettalk_enter(nil)
+            aggregate = new({{ attributes.map(&.[0].id).splat }})
+            ::SugarORM::Repo.transaction do
+              aggregate.__sweettalk_check
+              aggregate.__sweettalk_save
+            end
+            aggregate
           end
-          aggregate
         end
       {% end %}
 

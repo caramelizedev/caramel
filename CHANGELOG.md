@@ -7,6 +7,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - A request may send at most 4,096 values and 128 files, and a multipart body's boundaries and part headers now count toward its size; more answers 413. Multipart files are stored only for a route whose contract has an `UploadedFile` field.
 - Keyword `where` no longer takes a value that may be nil, such as a `String?` variable: it matched the rows whose column IS NULL whenever the value was nil. The call fails to compile with `…MayBeNil` in the error. Narrow the value first (`if token = contract.token`), or use the new `where_null(:column)` to match NULL. The literal `where(column: nil)` still works.
 - `sudo scripts/install-local-integration apply` installs only a bundle that the user who ran `sudo` prepared, and refuses to run as root without `sudo`. The Swift build scripts keep their module cache in a private directory per user; a `CARAMEL_LATTE_SWIFT_CACHE` directory must be yours alone.
+- Crema has a `domain` span kind, which times SweetTalk's commands, factories and services. A sink or exporter that matches `Caramel::Crema::SpanKind` exhaustively must handle it.
 
 ## 0.12.0 - 2026-10-11
 

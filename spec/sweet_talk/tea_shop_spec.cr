@@ -116,6 +116,33 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "times each command, factory and service as a domain span, and marks a refused one" do
+    SweetTalkSpec.rolled_back do
+      request = Caramel::Crema::Kind::Request
+      trace = Caramel::Crema::Trace.new(request, "spec", "4bf92f3577b34da6a3ce929d0e0e4736",
+        "00f067aa0ba902b7")
+      trace.recording = true
+      Caramel::Crema.bound(trace) do
+        tea = TeaShopSpec.tea("Sencha")
+        order = TeaShopSpec.order({tea, 2})
+        order.place
+        expect_raises(SweetTalk::Refusal) { order.add tea, Ordering::Quantity.new(1) }
+        Ordering.requote(order.id)
+      end
+      domains = trace.spans.select(&.kind.domain?).map { |span| {span.name, span.error_class} }
+      domains.should eq([
+        {"Catalogue::Tea.create", nil},
+        {"Ordering::Order.open", nil},
+        {"Ordering::Order#add", nil},
+        {"Ordering::Order#place", nil},
+        {"Ordering::Order#add", "SweetTalk::Refusal"},
+        {"Ordering.requote", nil},
+      ])
+      production = trace.to_event(Caramel::Crema::Detail::Production).spans
+      production.select { |span| span.kind == "domain" }.map(&.detail).should eq([nil] * 6)
+    end
+  end
+
   it "rolls a refused command back, in the table and in memory" do
     SweetTalkSpec.rolled_back do
       tea = TeaShopSpec.tea("Sencha")
