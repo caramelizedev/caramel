@@ -67,6 +67,16 @@ module Caramel::Crema
     info.owner_id == LibC.getuid.to_s && (info.permissions.value & 0o077) == 0
   end
 
+  # True when *path* is a directory its owner owns, group *gid* may enter but
+  # not write, and others cannot reach.
+  def self.group_directory?(path : String, gid : Int) : Bool
+    info = File.info?(path, follow_symlinks: false)
+    return false if info.nil? || !info.directory?
+
+    info.owner_id == LibC.getuid.to_s && info.group_id == gid.to_s &&
+      (info.permissions.value & 0o027) == 0
+  end
+
   def self.fiber_count : Int32
     count = 0
     Fiber.each { |_| count += 1 }
