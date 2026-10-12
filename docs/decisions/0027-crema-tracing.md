@@ -71,7 +71,10 @@ secrets in logs and without a diagnostic that costs a production binary anything
     The job's trace continues that trace; its `parent_id` is the enqueuing span. A schedule
     run starts a trace of its own. `Caramel::Outbound` times each call as an `http` span and
     sends `traceparent` unless the caller set one; cache reads count hits and misses; views
-    are `view` spans and only the outermost counts in `view_ms`.
+    are `view` spans and only the outermost counts in `view_ms`. SweetTalk times each
+    command, factory, `create` and service as a `domain` span named after it, such as
+    `Ordering::Order#place` or `Ordering.requote`, with no detail and no counter; a refusal
+    sets its `error_class`. The inspector indents spans inside a `view` or `domain` span.
 14. **Cold Brew reports through Crema.** A job's failure, a failing hook and the worker,
     maintenance and scheduler loops call `Crema.report`; the old per-component `error_type`
     log lines are gone. A fiber reports an exception once.
@@ -119,6 +122,8 @@ secrets in logs and without a diagnostic that costs a production binary anything
 - A fingerprint without lines or messages keeps one defect in one group across deploys
   and keeps secrets out of grouping keys.
 - Reusing the existing redaction and application-frame rules gives one classifier.
+- A domain span names the command a trace ran, which its SQL alone does not; it carries no
+  arguments or ids, so production detail keeps it whole.
 - Rejected: logging exception messages (dependency errors carry URLs and form values);
   storing errors or traces in PostgreSQL (the database keeps aggregates only, see
   ADR 0028).

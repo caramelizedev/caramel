@@ -12,6 +12,7 @@ require "./tools"
 require "./resource_generator"
 require "./locale_generator"
 require "./tenancy_generator"
+require "./domain_generator"
 require "./dev_session"
 require "./site_log"
 require "./schema_diff"
@@ -129,6 +130,8 @@ module Caramel::Frappe
         make_locale(invocation["CODE"])
       when "make tenancy"
         make_tenancy(invocation["MODEL"])
+      when "make domain"
+        make_domain(invocation)
       when "translations"
         return translations
       when "migrate"
@@ -323,9 +326,25 @@ module Caramel::Frappe
       files = TenancyGenerator.new(@framework_root).generate(Project.load, model)
       files.each { |path| @output.puts("Generated #{path}") }
       plural = ResourceGenerator.pluralize(model.underscore)
-      @output.puts("\nNext: run frappe migrate and open /#{plural}/new. " \
-                   "frappe make resource now writes tenant resources; " \
-                   "pass --central for one every tenant shares.")
+      next_step = "\nNext: run frappe migrate and open /#{plural}/new. " \
+                  "frappe make resource now writes tenant resources; " \
+                  "pass --central for one every tenant shares."
+      if files.any?(&.starts_with?("app/domain/"))
+        next_step += " Each SweetTalk domain in app/domain/ now names App::#{model}, " \
+                     "and its contexts belong to the tenant unless they say central: true; " \
+                     "a domain that already holds data follows Add tenancy to existing data first."
+      end
+      @output.puts(next_step)
+    end
+
+    private def make_domain(invocation : Commands::Invocation) : Nil
+      name = invocation["NAME"]
+      files = DomainGenerator.new.generate(Project.load, name, invocation["CONTEXT"],
+        invocation["--means"], central: invocation.flag?("--central"))
+      files.each { |path| @output.puts("Generated #{path}") }
+      singular = name.underscore
+      @output.puts("\nNext: write the domain in app/domain/#{singular}.cr, " \
+                   "then run frappe db diff --name create_#{singular} and frappe migrate.")
     end
 
     # Prints the application's report of keys each locale still lacks.

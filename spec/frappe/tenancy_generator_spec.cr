@@ -2,6 +2,7 @@ require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/tenancy_generator"
+require "../../src/frappe/domain_generator"
 
 private VERSION = 20261003000001_i64
 
@@ -18,6 +19,12 @@ end
 
 private def read(project : Caramel::Frappe::Project, relative : String) : String
   File.read(File.join(project.root, relative))
+end
+
+# Starts the Shop domain, as frappe make domain does.
+private def shop(project : Caramel::Frappe::Project) : Nil
+  generator = Caramel::Frappe::DomainGenerator.new
+  generator.generate(project, "Shop", "Ordering", "choosing teas and checking out")
 end
 
 # Every file under the project, with its content, to prove a refusal wrote nothing.
@@ -174,6 +181,25 @@ describe Caramel::Frappe::TenancyGenerator do
     tenancy_project do |project, generator|
       File.delete(File.join(project.root, "spec/spec_helper.cr"))
       refuses(project, generator, "spec/spec_helper.cr needs exactly one Corretto.configure(App);")
+    end
+  end
+
+  it "names the tenant in each SweetTalk domain" do
+    tenancy_project do |project, generator|
+      shop(project)
+      written = generator.generate(project, "Account", version: VERSION)
+      written.should contain("app/domain/shop.cr")
+      tenanted = "  include SweetTalk\n  tenant App::Account\n"
+      read(project, "app/domain/shop.cr").should contain(tenanted)
+    end
+  end
+
+  it "refuses a domain without its include SweetTalk line, writing nothing" do
+    tenancy_project do |project, generator|
+      shop(project)
+      path = File.join(project.root, "app/domain/shop.cr")
+      File.write(path, File.read(path).sub("  include SweetTalk", "  include ::SweetTalk"))
+      refuses(project, generator, "app/domain/shop.cr needs exactly one include SweetTalk line")
     end
   end
 

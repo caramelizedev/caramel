@@ -83,9 +83,11 @@ module Caramel::Checks
         [show, update, create].each do |route|
           assert!(routes.lines.any? { |line| line.split == route }, routes)
         end
+        domain
         tenancy
         translations
         agent_tooling
+        sweet_talk_diff
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
         # The generated create_* migrations must be exactly what the differ
@@ -95,7 +97,7 @@ module Caramel::Checks
         nothing = "already matches the declared schema; no migration was written"
         assert!(probe.stdout.includes?(nothing), probe.stdout)
         assert!(Dir.glob(File.join(@project, "db/migrations/*drift_probe*")).empty?)
-        puts "PASS: generated SugarORM resources migrate without drift, " \
+        puts "PASS: generated SugarORM resources and a SweetTalk domain migrate without drift, " \
              "and frappe db diff --name drift_probe derives nothing"
         sentinel = "CREATE TABLE dev_sentinel (value text NOT NULL); " \
                    "INSERT INTO dev_sentinel VALUES ('keep');"
@@ -374,6 +376,15 @@ module Caramel::Checks
     # shared by every tenant.
     def tenancy : Nil
       command([@frappe, "make", "tenancy", "Account"], chdir: @project)
+      shop = File.read(File.join(@project, "app/domain/shop.cr"))
+      assert!(shop.includes?("  include SweetTalk\n  tenant App::Account\n"), shop)
+      command([@frappe, "make", "domain", "Catalogue", "Shelf",
+               "--means=the teas on our shelves", "--central"], chdir: @project)
+      catalogue = File.read(File.join(@project, "app/domain/catalogue.cr"))
+      shelf = %(context Shelf, central: true, means: "the teas on our shelves" do)
+      named = catalogue.includes?("  tenant App::Account\n")
+      assert!(named && catalogue.includes?(shelf), catalogue)
+      File.write(File.join(@project, "spec/domain/shop_orders_spec.cr"), SHOP_SPEC)
       make = [@frappe, "make", "resource"]
       command(make + %w[Note body:string], chdir: @project)
       command(make + %w[Tag label:string --central], chdir: @project)
@@ -386,8 +397,35 @@ module Caramel::Checks
       expected.each do |route|
         assert!(routes.lines.any? { |line| line.split == route }, routes)
       end
-      puts "PASS: frappe make tenancy wires caramel/tenancy; " \
-           "tenant resources route under /:tenant beside central ones"
+      puts "PASS: frappe make tenancy wires caramel/tenancy and names the tenant in the " \
+           "SweetTalk domain; tenant resources route under /:tenant beside central ones, " \
+           "and frappe make domain --central writes a shared context"
+    end
+
+    # Starts the Shop domain before tenancy, then gives it P5's Ordering context
+    # with a policy and a compensation whose parameters go unread.
+    def domain : Nil
+      made = command([@frappe, "make", "domain", "Shop", "Ordering",
+                      "--means=choosing teas and checking out"], chdir: @project)
+      %w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr].each do |path|
+        assert!(made.stdout.includes?("Generated #{path}\n"), made.stdout)
+      end
+      File.write(File.join(@project, "app/domain/shop.cr"), SHOP_DOMAIN)
+      puts "PASS: frappe make domain writes a SweetTalk domain, its spec and the require lines"
+    end
+
+    # Derives the Shop domain's tables, tenanted by now, in one migration.
+    def sweet_talk_diff : Nil
+      pattern = File.join(@project, "db/migrations/*.cr")
+      before = Dir.glob(pattern)
+      command([@frappe, "db", "diff", "--name", "create_shop"],
+        chdir: @project, timeout: 300.seconds)
+      written = Dir.glob(pattern) - before
+      assert!(written.size == 1 && written.first.ends_with?("_create_shop.cr"), written.inspect)
+      migration = File.read(written.first)
+      SHOP_DDL.each { |fragment| assert!(migration.includes?(fragment), migration) }
+      puts "PASS: frappe db diff derives the SweetTalk domain's tenanted tables " \
+           "with their check constraints in one migration"
     end
 
     # The application took fr before Person, so fr lacks Person's messages.
@@ -701,7 +739,7 @@ module Caramel::Checks
       result = command([@frappe, "corretto", "--concurrency=2"],
         chdir: @project, timeout: 900.seconds)
       output = result.stdout + result.stderr
-      spread = result.stdout.includes?("Corretto: 9 spec files across 2 workers")
+      spread = result.stdout.includes?("Corretto: 12 spec files across 2 workers")
       passed = result.stdout.includes?("Corretto: 2 of 2 workers passed")
       assert!(spread && passed, output)
       %w[[w1] [w2]].each do |prefix|
@@ -717,7 +755,8 @@ module Caramel::Checks
       assert!(sql(values["SPEC_DATABASE_URL"], workers) == "0")
       puts "PASS: frappe corretto --concurrency=2 runs the generated Corretto specs " \
            "in two Latte test workers with savepoint isolation, catalog resets, " \
-           "wire isolation and a synchronously drained Cold Brew job, " \
+           "wire isolation, a synchronously drained Cold Brew job and " \
+           "a SweetTalk command whose two policies drain in its tenant, " \
            "then drops the workers"
     end
 
@@ -855,6 +894,100 @@ module Caramel::Checks
         end
         CRYSTAL
     }
+
+    # The generated Shop domain with P5's Ordering context, a policy that does
+    # not read its event and a compensation that does not read its refusal.
+    SHOP_DOMAIN = <<-CRYSTAL
+      # The Shop domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
+      # context, value, aggregate, event and whenever, exist only inside this module.
+      module App::Shop
+        include SweetTalk
+
+        context Ordering, means: "choosing teas and checking out" do
+          value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"
+          value Note, String, length: 1..80, means: "what the customer asked for"
+
+          aggregate Order, means: "one customer's order" do
+            has note : Note
+            has tins : Quantity
+            moves open >> placed
+
+            event Placed, tins : Quantity, means: "the customer confirmed the order"
+
+            factory open(note : Note, tins : Quantity) do
+            end
+
+            to place do
+              placed!
+              emit Placed, tins: @tins
+            end
+          end
+
+          projection Sales, means: "tins placed per order" do
+            key order : Order
+            has tins : Int32 = 0
+
+            whenever Order::Placed do |placed|
+              Sales[placed.order_id].tins += placed.tins.to_i
+            end
+          end
+
+          whenever Order::Placed do |placed|
+            Sales.all.size
+          end
+
+          compensate Order::Placed do |placed, refusal|
+            Order.find(placed.order_id)
+          end
+        end
+      end\n
+      CRYSTAL
+
+    # What frappe db diff must write for SHOP_DOMAIN once the application is
+    # multi-tenant.
+    SHOP_DDL = [
+      "CREATE TABLE \"ordering_orders\" (",
+      %(CONSTRAINT "check_ordering_orders_note_length_1_80" ) +
+      %(CHECK (char_length("note") BETWEEN 1 AND 80)),
+      %(CONSTRAINT "check_ordering_orders_tins" CHECK ("tins" >= 1 AND "tins" <= 10)),
+      "CREATE TABLE \"ordering_sales\" (",
+      %("account_id"),
+      "index_ordering_orders_on_account_id_and_id",
+    ]
+
+    SHOP_SPEC = <<-CRYSTAL
+      require "../spec_helper"
+
+      describe App::Shop::Ordering::Order do
+        it "places an order in its tenant and drains the policies that follow" do
+          tenant_session("acme") do |_client, db|
+            order = App::Shop::Ordering::Order.open(App::Shop::Ordering::Note.new("two tins"),
+              App::Shop::Ordering::Quantity.new(2))
+            order.place
+            Caramel::ColdBrew.drain_queue!(db, "default").should eq(2)
+            sales = App::Shop::Ordering::Sales.all.map { |row| {row.order.raw, row.tins} }
+            sales.should eq([{order.id.raw, 2}])
+          end
+        end
+
+        it "no longer sees the previous example's order" do
+          tenant_session("globex") do |_client, db|
+            db.query_one("SELECT count(*) FROM ordering_orders", as: Int64).should eq(0)
+          end
+        end
+
+        it "refuses a second place and keeps the example going" do
+          tenant_session("acme") do |_client, _db|
+            order = App::Shop::Ordering::Order.open(App::Shop::Ordering::Note.new("one tin"),
+              App::Shop::Ordering::Quantity.new(1))
+            order.place
+            refusal = "Order cannot become placed while placed"
+            expect_raises(SweetTalk::Refusal, refusal) { order.place }
+            App::Shop::Ordering::Order.find(order.id).placed?.should be_true
+          end
+        end
+      end\n
+      CRYSTAL
 
     CORRETTO_PROBE = <<-CRYSTAL
       require "../spec_helper"

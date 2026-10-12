@@ -23,6 +23,8 @@ describe Caramel::Frappe::Commands do
     make.command.name.should eq("make resource")
     bound = {make["NAME"], make.list("FIELD:TYPE"), make["--plural"]}
     bound.should eq({"Person", ["name:string", "age:int32"], "people"})
+    domain = parse("make", "domain", "Shop", "Ordering", "--means=choosing teas and checking out")
+    domain["--means"].should eq("choosing teas and checking out")
 
     parse("db", "branch", "create", "feature_x")["NAME"].should eq("feature_x")
     parse("db", "diff", "--dev-override", "--name", "add_isbn")["--name"].should eq("add_isbn")

@@ -13,7 +13,7 @@ module Caramel::Crema
   # take events, not live objects, so Frappé and Latte can use them.
   module Render
     APPLICATION_DIRECTORIES = {"app/", "config/", "src/", "db/"}
-    KINDS                   = %w[sql http view enqueue log dump]
+    KINDS                   = %w[sql http view enqueue log dump domain]
     MAX_DEPTH               = 4
     SHOWN_FRAMES            = 8
     UNFILLED_NOTE           = "-- Some values could not be filled in; their $n stays.\n"
@@ -98,6 +98,7 @@ module Caramel::Crema
       String.build do |io|
         io << "# " << inline(event.error.try(&.error_class) || event.name) << "\n\n"
         summary_list(io, event)
+        domain_section(io, event)
         error_section(io, event.error)
         backtrace_section(io, event.error, root)
         query_section(io, event)
@@ -232,6 +233,20 @@ module Caramel::Crema
       end
     end
 
+    # One line per domain span, the command it timed and how long it took; a failed one
+    # names its error's class.
+    private def self.domain_section(io : IO, event : TraceEvent) : Nil
+      domains = event.spans.select { |span| span.kind == "domain" }
+      return if domains.empty?
+
+      io << "\n## Domain\n\n"
+      domains.each do |span|
+        io << "- `" << inline(span.name) << "` " << ms(span.duration_ms) << " ms"
+        span.error_class.try { |error_class| io << ", " << inline(error_class) }
+        io << '\n'
+      end
+    end
+
     # The trace as plain text: its line, its spans in order and its error.
     def self.detail(event : TraceEvent) : String
       String.build do |io|
@@ -332,20 +347,21 @@ module Caramel::Crema
       io << "<dt>" << HTML.escape(name) << "</dt><dd>" << HTML.escape(value) << "</dd>"
     end
 
-    # How deeply a span sits inside view spans that contain it, at most MAX_DEPTH.
+    # How deeply a span sits inside view and domain spans that contain it, at most MAX_DEPTH.
     private def self.depth(spans : Array(SpanEvent), index : Int32) : Int32
       span = spans[index]
       ending = span.offset_ms + span.duration_ms - 0.001
       inside = spans.each_with_index.count do |other, position|
-        position != index && other.kind == "view" && other.offset_ms <= span.offset_ms &&
+        position != index && other.kind.in?("view", "domain") &&
+          other.offset_ms <= span.offset_ms &&
           other.offset_ms + other.duration_ms >= ending
       end
       {inside, MAX_DEPTH}.min
     end
 
     # One row per span, in start order; each bar is an SVG, because the inspector's CSP
-    # forbids inline styles. A span inside a view is indented, its bar takes its kind's
-    # colour, and a query's name links to its row in the Queries table.
+    # forbids inline styles. A span inside a view or domain span is indented, its bar takes
+    # its kind's colour, and a query's name links to its row in the Queries table.
     private def self.waterfall_html(io : IO, event : TraceEvent) : Nil
       if event.spans.empty?
         io << "<h3 id=\"timeline\">Timeline</h3><p>No spans were recorded for this trace.</p>"

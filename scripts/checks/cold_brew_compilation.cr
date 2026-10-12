@@ -34,6 +34,10 @@ cases = {
     "App::RestockTea declares renamed_from twice",
     "Remediation: list every old name in one `renamed_from` line",
   ],
+  "compile_renamed_from_late" => [
+    "App::Restock and App::RestockTea both claim \"App::Stock\" in renamed_from",
+    "Remediation: only one job can take over a name",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/cold_brew/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)

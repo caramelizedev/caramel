@@ -35,3 +35,10 @@ Documentation/Admonition:
 Lint/DebugCalls:
   Excluded:
     - "app/views/**/*.cr"
+
+# SweetTalk's whenever and compensate blocks are macro arguments: their
+# parameters name what the handler the macro writes receives, and a process
+# step's key: reads them outside the block (ADR 0030).
+Lint/UnusedArgument:
+  Excluded:
+    - "app/domain/**"

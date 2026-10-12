@@ -17,6 +17,7 @@ The repository is the shard `caramel`. Crystal resolves `require "caramel"` to `
   - `src/frappe/` for Frappé.
 - Cold Brew lives in `src/caramel/cold_brew/`, `cache.cr` and `sse.cr`, because `require "caramel"` loads it into every application.
 - Corretto lives in `src/caramel/corretto/`, reached by `require "caramel/corretto"` from specs only.
+- SweetTalk lives in `src/caramel/sweet_talk/`, reached by `require "caramel/sweet_talk"`; its specs in `spec/sweet_talk/` run in `scripts/check integration`.
 - `docs/decisions/` holds the ADRs; `docs/` holds nothing else.
 - `bin/` is build output from `scripts/build-*`: `frappe`, `latte`, `latte-port-relay` and `Latte.app`.
 
