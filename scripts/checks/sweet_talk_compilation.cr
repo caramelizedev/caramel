@@ -135,11 +135,15 @@ PROBLEMS = [
   {"tenant_parent_column",
    "entity Charge would name its aggregate in account_id, the column that names each row's " \
    "tenant Shop::Account: rename aggregate Account"},
+  {"job_alias_taken",
+   "Shop::Pantry::Larder::WhenBlendRefilled claims \"Shop::Pantry::Larder::WhenBlendRestocked\" " \
+   "in renamed_from, but Shop::Pantry::Larder::WhenBlendRestocked is a job of that name"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
-  compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler]
+  compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
+  compile_job_alias_taken]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

@@ -194,8 +194,9 @@ module Caramel::ColdBrew
       COLD_BREW_RENAMED_FROM = { {{ names.splat }} }
     end
 
-    # Fails to compile when a name this job claims is its own, another job's
-    # name or another job's alias.
+    # Fails to compile, at the claim's line, when a name this job claims is its
+    # own, another job's name or another job's alias. `__cold_brew_check_claims`
+    # checks the claims a later `macro finished` declares.
     macro __cold_brew_check_names
       {% if @type.has_constant?(:COLD_BREW_RENAMED_FROM) %}
         {% jobs = ::Caramel::ColdBrew::Job.all_subclasses.reject(&.abstract?) %}
@@ -283,6 +284,7 @@ module Caramel::ColdBrew
                            \{% for keyword in keywords %}\{{keyword.id}}, \{% end %}
                            run_at : ::Time? = nil,
                            priority : ::Int32 = 0) : ::Int64
+            ::Caramel::ColdBrew::Job.__cold_brew_check_claims
             ::Caramel::ColdBrew::Queue.push(
               queue_name,
               \{{@type.name.stringify}},
@@ -310,11 +312,43 @@ module Caramel::ColdBrew
     end
 
     # :nodoc:
+    # Fails to compile when two jobs claim one stored name. It is typed with the
+    # registry and with every `enqueue`, once the whole program is known, so it
+    # also sees the names a `macro finished` declares after
+    # `__cold_brew_check_names` has run, as SweetTalk's jobs do.
+    def self.__cold_brew_check_claims : Nil
+      {% begin %}
+        {% owners = {} of Nil => Nil %}
+        {% jobs = @type.all_subclasses.reject(&.abstract?) %}
+        {% for job in jobs %}
+          {% owners[job.name.stringify] = {job, "name"} %}
+        {% end %}
+        {% for job in jobs %}
+          {% if job.has_constant?(:COLD_BREW_RENAMED_FROM) %}
+            {% for old in job.constant(:COLD_BREW_RENAMED_FROM) %}
+              {% owner = owners[old] %}
+              {% if owner && owner[1] == "name" %}
+                {% raise "#{job} claims #{old} in renamed_from, but #{owner[0]} is a job " \
+                         "of that name.\nRemediation: rename or remove one of them." %}
+              {% elsif owner %}
+                {% raise "#{owner[0]} and #{job} both claim #{old} in renamed_from.\n" \
+                         "Remediation: only one job can take over a name; remove it " \
+                         "from the other." %}
+              {% end %}
+              {% owners[old] = {job, "alias"} %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    end
+
+    # :nodoc:
     # The compile-time registry: every concrete job by the name it is stored
     # under in `caramel_jobs.class_name`, its current fully qualified name,
     # and by each name it declares in `renamed_from`. Returns the current
     # name, or nil when no compiled job has *class_name*.
     def self.__cold_brew_canonical(class_name : String) : String?
+      __cold_brew_check_claims
       {% begin %}
         case class_name
         {% for job in @type.all_subclasses.reject(&.abstract?) %}

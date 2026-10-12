@@ -84,8 +84,9 @@ or a policy, and nothing stops one context from reaching into another's types.
      :lines do |event, line|` enqueues one job per element instead.
    - **Job names.** A job is named after its owner (a context and its border, or a
      projection) and the event's path as written; when a rename changes that name, the job
-     declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. Two
-     `whenever`s for one event in one owner do not compile.
+     declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. An old
+     name that another job has or claims does not compile. Two `whenever`s for one event in
+     one owner do not compile.
    - **Retries.** A refusal or `SweetTalk::Boundary` fails a job at once. Other errors
      follow ADR 0009 decision 2.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
