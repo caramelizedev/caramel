@@ -1,9 +1,12 @@
 require "./harness"
+require "./browser_tools"
 
 module Caramel::Checks
-  # A minimal W3C WebDriver client for safaridriver. Safari allows one
-  # automation session at a time, so `open` always deletes the session and
-  # stops the driver.
+  # A minimal W3C WebDriver client for chromedriver driving Chrome for
+  # Testing's headless shell. `open` always deletes the session and stops the
+  # driver. It sets no --user-data-dir: with one, chromedriver launches the
+  # headless shell without a start page and never finds a page to attach to,
+  # so chromedriver keeps its own temporary profile and removes it with the session.
   class WebDriver
     ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf"
 
@@ -15,8 +18,18 @@ module Caramel::Checks
       end
     end
 
-    def self.open(log : IO, capabilities = {browserName: "safari", acceptInsecureCerts: true}, &)
-      driver = new(log)
+    # *browser_log* receives Chrome's own log, which otherwise lands in
+    # chrome_debug.log beside the pinned executable.
+    def self.open(log : IO,
+                  tools : BrowserTools::Installed,
+                  browser_log : String,
+                  env : Hash(String, String?), &)
+      driver = new(log, tools.chromedriver, env)
+      capabilities = {
+        browserName:          "chrome",
+        acceptInsecureCerts:  true,
+        "goog:chromeOptions": {binary: tools.headless_shell, args: ["--log-file=#{browser_log}"]},
+      }
       begin
         driver.start
         driver.create_session(capabilities)
@@ -26,20 +39,19 @@ module Caramel::Checks
       end
     end
 
-    def initialize(@log : IO, @executable : String = "/usr/bin/safaridriver")
+    def initialize(@log : IO, @executable : String, @env : Hash(String, String?))
       @port = Checks.free_tcp_port
       @process = nil.as(Process?)
       @session = nil.as(String?)
     end
 
     def start : Nil
-      process = Process.new(@executable, ["--port", @port.to_s], output: @log, error: @log)
+      process = Process.new(@executable, ["--port=#{@port}"], env: @env, output: @log, error: @log)
       @process = process
       ready = Checks.wait_until(15.seconds, 100.milliseconds) { process.terminated? || ready? }
       return if ready && !process.terminated?
 
-      raise Error.new("safaridriver did not become ready on port #{@port}; " \
-                      "run safaridriver --enable once")
+      raise Error.new("chromedriver did not become ready on port #{@port}")
     end
 
     def create_session(capabilities) : String
@@ -84,6 +96,9 @@ module Caramel::Checks
         @session = nil
         begin
           command("DELETE", "/session/#{session}")
+          # chromedriver answers before it deletes its temporary profile, and
+          # a SIGTERM in between would leave that directory in the system temp.
+          sleep 1.second
         rescue ex
           @log.puts("WebDriver session cleanup failed: #{ex.message}")
         end

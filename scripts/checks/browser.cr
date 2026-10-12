@@ -1,11 +1,12 @@
 require "./support/latte_fixture"
 require "./support/webdriver"
+require "./support/browser_tools"
 require "uri"
 require "http/params"
 
 module Caramel::Checks
-  # Drives Safari against a generated app served through Latte's Caddy to
-  # prove the hypermedia promises that only a real browser can observe.
+  # Drives headless Chrome against a generated app served through Latte's
+  # Caddy to prove the hypermedia promises that only a real browser can observe.
   class BrowserCheck
     PROBE = File.join(REPO, "spec/fixtures/browser")
     NAME  = "browser"
@@ -76,19 +77,10 @@ module Caramel::Checks
 
     @driver : WebDriver?
 
-    # Safari delivers WebDriver clicks through the window server, which
-    # drops them while the screen is locked. Typing still works, so the
-    # check would otherwise time out at its first click.
-    def self.require_unlocked_screen : Nil
-      ioreg = ["/usr/sbin/ioreg", "-r", "-k", "IOConsoleUsers", "-d1"]
-      consoles = Checks.run(ioreg, timeout: 10.seconds).stdout
-      return unless consoles.includes?(%("CGSSessionScreenIsLocked"=Yes))
-
-      raise "The screen is locked, so Safari cannot deliver clicks. " \
-            "Unlock it and run scripts/check browser again."
-    end
-
+    # Verifies the browser first, so a missing install fails at once and
+    # leaves no fixture behind.
     def initialize
+      @tools = BrowserTools.installed
       toolchain = Checks.toolchain_root
       @psql = File.join(toolchain, "data/installs/conda-postgresql/18.6/bin/psql")
       @fixture = LatteFixture.new("caramel-browser-")
@@ -98,6 +90,7 @@ module Caramel::Checks
     end
 
     def execute : Nil
+      tools = @tools
       started = Time.instant
       fixture = @fixture
       puts "Browser fixture: #{fixture.root}"
@@ -109,8 +102,10 @@ module Caramel::Checks
         @database_url = values["DATABASE_URL"]
         @origin = "https://#{NAME}.localhost:#{fixture.https_port}"
         fixture.serve(@project, NAME, values.merge({"APP_ORIGIN" => @origin}))
-        File.open(File.join(fixture.root, "safaridriver.log"), "w") do |log|
-          WebDriver.open(log) do |driver|
+        environment = fixture.environment({"HOME" => File.join(fixture.root, "home")})
+        File.open(File.join(fixture.root, "chromedriver.log"), "w") do |log|
+          browser_log = File.join(fixture.root, "chrome.log")
+          WebDriver.open(log, tools, browser_log, environment) do |driver|
             @driver = driver
             check_morph
             check_partials
@@ -130,7 +125,7 @@ module Caramel::Checks
     end
 
     # Exercises the real CLI: a new project moves from the default suffix to
-    # `localhost`, which Safari resolves to loopback without system DNS.
+    # `localhost`, which Chrome resolves to loopback itself, without system DNS.
     private def create_project : Hash(String, String)
       fixture = @fixture
       frappe = File.join(fixture.repo, "bin/frappe")
@@ -295,9 +290,10 @@ module Caramel::Checks
         visit("/probe/islands")
         wait_for("the ProbeCounter island to mount") { island_state["state"] == "mounted" }
         state = island_state
-        mount = %([{"event":"mount","component":"ProbeCounter",) \
-                %("props":{"label":"first","version":1}}])
-        assert!(state["log"].to_json == mount,
+        # chromedriver returns object keys sorted, so compare values, not text.
+        mount = JSON.parse(%([{"event":"mount","component":"ProbeCounter",) \
+                           %("props":{"label":"first","version":1}}]))
+        assert!(state["log"] == mount,
           "Mount did not receive the server props exactly once: #{state.to_json}")
         assert!(state["label"] == "first" && state["count"] == "0",
           "Mount did not render client children: #{state.to_json}")
@@ -316,9 +312,9 @@ module Caramel::Checks
         end
         state = island_state
         log = state["log"].as_a
-        update = %({"event":"update","component":"ProbeCounter",) \
-                 %("props":{"label":"second","version":2}})
-        assert!(log.size == 2 && log[1].to_json == update,
+        update = JSON.parse(%({"event":"update","component":"ProbeCounter",) \
+                            %("props":{"label":"second","version":2}}))
+        assert!(log.size == 2 && log[1] == update,
           "update(props) was not called exactly once " \
           "with the new props: #{state.to_json}")
         same = state["sameIsland"].as_bool && state["sameButton"].as_bool
@@ -333,8 +329,8 @@ module Caramel::Checks
         end
         state = island_state
         log = state["log"].as_a
-        unmount = %({"event":"unmount","component":"ProbeCounter"})
-        unmounted = log.size == 3 && log[2].to_json == unmount
+        unmount = JSON.parse(%({"event":"unmount","component":"ProbeCounter"}))
+        unmounted = log.size == 3 && log[2] == unmount
         assert!(unmounted && state["storedConnected"] == false,
           "Removing the island did not unmount it: #{state.to_json}")
         puts "PASS: island mounted with server props; " \
@@ -345,8 +341,8 @@ module Caramel::Checks
         driver.click(driver.find("#define-late"))
         wait_for("the late island to mount") { island_state["lateState"] == "mounted" }
         state = island_state
-        late = %({"event":"mount","component":"LateProbe","props":{"label":"late"}})
-        late_mount = state["log"].as_a.last.to_json == late
+        late = JSON.parse(%({"event":"mount","component":"LateProbe","props":{"label":"late"}}))
+        late_mount = state["log"].as_a.last == late
         assert!(late_mount && state["lateText"] == "Mounted late",
           "The late definition did not mount the pending island: #{state.to_json}")
         puts "PASS: an island connected before CaramelIslands.define " \
@@ -394,7 +390,7 @@ module Caramel::Checks
     end
 
     # The page streams the Boards::Live action; a POST commits a business row
-    # with its job; serve's worker runs the job, whose publish reaches Safari.
+    # with its job; serve's worker runs the job, whose publish reaches the browser.
     private def check_pubsub : Nil
       group("Cold Brew job to PubSub through Caddy", "#pubsub") do
         visit("/probe/pubsub")
@@ -436,7 +432,7 @@ module Caramel::Checks
         click_ms = latency.total_milliseconds.round.to_i
         puts "PASS: a POST committed delivery #{delivery} with its Cold Brew job; " \
              "serve's worker finished the job (1 attempt) and its publish reached " \
-             "Safari's EventSource on the Boards::Live action through Caddy " \
+             "the browser's EventSource on the Boards::Live action through Caddy " \
              "#{click_ms} ms after the click"
       end
     end
@@ -594,7 +590,6 @@ module Caramel::Checks
 end
 
 begin
-  Caramel::Checks::BrowserCheck.require_unlocked_screen
   Caramel::Checks::BrowserCheck.new.execute
 rescue ex
   STDERR.puts ex.message

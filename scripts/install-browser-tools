@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installs the Chrome for Testing that scripts/check browser drives
+# (tools/browser-darwin-arm64.json) into this checkout's toolchain.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$ROOT/bin"
+"$ROOT/scripts/crystal" build "$ROOT/scripts/browser_tools/main.cr" -o "$ROOT/bin/install-browser-tools"
+exec "$ROOT/bin/install-browser-tools" "$@"

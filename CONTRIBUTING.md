@@ -9,12 +9,13 @@ Corretto's Lexbor parser):
 
 ```sh
 scripts/install-toolchain
+scripts/install-browser-tools
 scripts/shards install --frozen
 scripts/build-frappe && scripts/build-latte
 scripts/check all
 ```
 
-`scripts/check all` builds everything, then runs the spec suite and every check in three lanes side by side ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. Three lanes' compilers peaked at about 6 GB; on a machine with less memory, `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one, and `scripts/check` alone lists them. The browser check needs an unlocked screen and Safari's Allow Remote Automation. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first: run `frappe services stop`, wait until `frappe services` shows every service stopped, then run `latte stop`.
+`scripts/check all` builds everything, then runs the spec suite and every check in three lanes side by side ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. Three lanes' compilers peaked at about 6 GB; on a machine with less memory, `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one, and `scripts/check` alone lists them. The Latte daemon check needs Latte's fixed ports, so stop your own Latte first: run `frappe services stop`, wait until `frappe services` shows every service stopped, then run `latte stop`.
 
 What the checks need:
 
@@ -23,7 +24,7 @@ What the checks need:
 - The Latte checks (`latte-ipc`, `latte-postgres`, `latte-network`, `latte-daemon`, `native`) also need the pinned CoreDNS artifact (`scripts/install-latte-tools --help`) and the macOS Swift compiler. Run `scripts/build-latte` and `scripts/build-frappe` before the checks that use them.
 - `website` builds the site with Node.js 22 or newer on `PATH`.
 - `latte-daemon` runs the real `bin/latte daemon` on Latte's fixed DNS and HTTP/HTTPS ports, 15353 and 18080/18443, which must be free. Its trace collector listens on a free port the check picks.
-- `browser` drives Safari through `safaridriver` against a generated app on an isolated Latte stack; enable Safari's "Allow Remote Automation" once with `safaridriver --enable`.
+- `browser` drives Chrome for Testing's headless shell through `chromedriver` against a generated app on an isolated Latte stack. Run `scripts/install-browser-tools` once to install them, about 210 MB, into the toolchain; the check never downloads them.
 - `scripts/check all --except NAME` skips a check, for example `--except latte-daemon` while your own Latte holds its ports. It runs `frappe-project` once, as `frappe-project-dev`, because the `--dev` run covers every step of the plain flow.
 
 Editor tools: build Frappé first (`scripts/build-frappe`), then run `bin/frappe lsp install`; the repo's `.zed/settings.json` runs `bin/frappe lsp …`, so trust the worktree when Zed asks. `scripts/check editor-tools` verifies them.
