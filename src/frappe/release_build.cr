@@ -45,7 +45,8 @@ module Caramel::Frappe
                raise Error.new("frappe build needs Docker: put docker on PATH, " \
                                "for example by starting Docker Desktop")
       shard = shard_name(root)
-      sha7 = git!(root, "rev-parse", "--short=7", "HEAD")
+      # Exactly 7 digits: `rev-parse --short=7` prints more when 7 are ambiguous.
+      sha7 = git!(root, "rev-parse", "HEAD")[0, 7]
       artifact = self.class.artifact_name(shard, @now, sha7)
       state = Latte::StateSecurity.ensure_owned_directory(File.join(root, ".caramel"))
       build = File.join(state, "build")
