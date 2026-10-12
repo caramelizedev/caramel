@@ -4,8 +4,21 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.12.0 - 2026-10-11
+
+### Upgrade notes
+
 - Applications can run in production on Linux: `frappe build` writes a static linux/amd64 artifact, `serve` reads public files from `CARAMEL_ROOT`, runs without workers with `--no-workers` and finishes in-flight requests on SIGTERM, `APP jobs unknown` lists queued jobs a binary cannot run and `APP db roles` prints the role script (ADR 0032).
 - On SIGTERM, `serve` now finishes in-flight requests for up to 25 s before it exits, and an open server-sent events stream holds it for the whole 25 s. Give a supervisor that stops `serve` at least 30 s.
+
+### Features
+
+- **core:** read public files from CARAMEL_ROOT (e033ab4)
+- **core:** serve without Cold Brew workers (ccc98b7)
+- **core:** finish in-flight requests on SIGTERM (5049929)
+- **crema:** list queued jobs this binary cannot run (bf93952)
+- **core:** print the database role script Latte runs (be568d1)
+- **frappe:** build the Linux release artifact (d82e70b)
 
 ## 0.11.0 - 2026-10-10
 
