@@ -324,6 +324,7 @@
           <h3>Start here</h3><button class="cursor-interaction" data-page="releases">Current release</button><button class="cursor-interaction" data-page="learn">Your first application</button><button class="cursor-interaction" data-page="map">Project map</button><button class="cursor-interaction" data-page="practices">Best practices</button>
           <h3>Build something</h3><button class="cursor-interaction" data-page="crud">Create a resource</button><button class="cursor-interaction" data-page="json">Read and write JSON</button><button class="cursor-interaction" data-page="uploads">Upload a file</button><button class="cursor-interaction" data-page="jobs">Run a background job</button><button class="cursor-interaction" data-page="islands">Mount a component</button>
           <h3>Go further</h3><button class="cursor-interaction" data-page="i18n">Internationalization</button><button class="cursor-interaction" data-page="tenancy">Multi-tenancy</button><button class="cursor-interaction" data-page="crema">Observability</button><button class="cursor-interaction" data-page="testing">Test rendered HTML</button><button class="cursor-interaction" data-page="webhooks">Receive a webhook</button><button class="cursor-interaction" data-page="sessions">Revocable sessions</button><button class="cursor-interaction" data-page="agents">Work with an agent</button><button class="cursor-interaction" data-page="deploy">Deployment status</button>
+          <h3>Next release</h3><button class="cursor-interaction" data-page="sweettalk">SweetTalk</button>
           <h3>Reference</h3><button class="cursor-interaction" data-page="routing">Routes and contracts</button><button class="cursor-interaction" data-page="actions">Actions and responses</button><button class="cursor-interaction" data-page="views">Views</button><button class="cursor-interaction" data-page="sugarorm">SugarORM</button><button class="cursor-interaction" data-page="coldbrew">Cold Brew</button><button class="cursor-interaction" data-page="corretto">Corretto</button><button class="cursor-interaction" data-page="cremaref">Crema</button><button class="cursor-interaction" data-page="security">Security defaults</button><button class="cursor-interaction" data-page="commands">Commands</button><button class="cursor-interaction" data-page="local">Local environment</button>
         </aside>
         <article class="c-doccontent" id="c-article"></article>
@@ -996,6 +997,191 @@ end`)+
       '<div class="c-tagrow"><span class="c-tag">0.12.0 baseline</span></div><h2 id="c-deploy-now">Available process roles</h2><p>Latte manages local services and named HTTPS; Frappé builds and supervises the development app. A compiled application can serve HTTP or run Cold Brew with <code>work</code>, including queue selection, concurrency, and graceful completion of in-flight jobs. On SIGTERM, <code>serve</code> stops accepting connections, answers in-flight requests with <code>Connection: close</code> and exits when they finish or after 25 s.</p>'+
       '<h2 id="c-deploy-contract">The production contract</h2><p>A compiled application promises any deploy tool the behaviour below, as <a href="https://github.com/caramelizedev/caramel/blob/v0.12.0/docs/decisions/0032-application-production-contract.md" target="_blank" rel="noopener noreferrer">ADR 0032 ↗</a> records. Caramel itself ships no command that provisions servers or deploys.</p>'+snippet('Terminal · inside the application','frappe build','bash')+
       '<ul><li><strong>Artifact.</strong> <code>frappe build</code> refuses uncommitted changes, publishes <code>app/assets</code> into <code>public/</code> and refuses if that leaves changes, then compiles the committed tree with <code>crystal build --release --static</code> in the pinned <code>crystallang/crystal:1.21.1-alpine</code> image for <code>linux/amd64</code>, keeping debug info. It needs a container engine, such as Docker Desktop, for this build only. It writes <code>.caramel/build/SHARD-YYYYmmddTHHMMSSZ-SHA7-linux-amd64.tar.gz</code>, which holds <code>bin/SHARD</code> and <code>public/</code>, and prints that path as its only line of output.</li><li><strong>Public files.</strong> <code>serve</code> reads <code>public/</code> from <code>CARAMEL_ROOT</code> when it is set, so the binary runs from wherever the artifact is unpacked.</li><li><strong>Process roles.</strong> Run each web process as <code>serve --no-workers</code>, which keeps the PubSub broker and maintenance but runs no jobs or schedules, and run one <code>work</code> process.</li><li><strong>Readiness.</strong> A new web process is ready when its own socket answers <code>GET /health</code>, sent with <code>Host</code> set to the authority of <code>APP_ORIGIN</code>, with 200 and <code>ok</code>. Each process binds a socket path of its own, and the proxy moves to it once it is ready.</li><li><strong>Shutdown.</strong> On SIGTERM, <code>serve</code> stops accepting connections, answers in-flight requests with <code>Connection: close</code> and exits when they finish or after 25 s. An open server-sent events stream counts as in flight.</li><li><strong>Unknown jobs.</strong> Before cutover, the new binary’s <code>jobs unknown</code> must print nothing and exit 0; otherwise queued jobs name classes it does not compile.</li><li><strong>Database.</strong> <code>APP db roles DATABASE MIGRATION_ROLE RUNTIME_ROLE</code> prints, without passwords, the psql script that creates a migration role that owns the database and a runtime role with DML through default privileges. Connect with <code>sslmode=verify-full</code>, plus <code>sslrootcert</code> for a private CA, or through a Unix socket, directly or through a session-mode pooler, never a transaction-mode one. The application needs no superuser and no extension.</li><li><strong>Order.</strong> Run the new binary’s <code>migrate</code> while the old one serves, stop the old workers, then move traffic to the new web process. A binary that lacks an applied migration refuses to start, so going back across a migration means restoring the database.</li></ul>'+next('jobs','Review worker process options'),
+    sweettalk: () => heading('Guides / SweetTalk','Speak the domain’s language.','SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into SugarORM schemas and changesets and Cold Brew jobs, so the domain keeps its own vocabulary and Caramel keeps one way to store and run it.')+
+      '<div class="c-tagrow"><span class="c-tag">Accepted · ADRs 0030 and 0031</span><span class="c-tag c-draft">Not in Caramel 0.12.0</span></div>'+
+      note('Arrives in the next release','SweetTalk is accepted in ADRs 0030 and 0031 and arrives in the next release; <code>caramel/sweet_talk</code> does not exist in 0.12.0. The examples are the tea shop that its specs run against PostgreSQL.')+
+      '<h2 id="c-sweettalk-enable">Opt in</h2><p>Require SweetTalk after Caramel. A plain application compiles none of it.</p>'+
+      snippet('config/application.cr · excerpt',`require "caramel"
+require "caramel/sweet_talk"`)+
+      '<p>Then include <code>SweetTalk</code> in the module that holds your domain. The words exist only there: a <code>context</code> or <code>has</code> anywhere else is an ordinary call.</p>'+
+      snippet('tea_shop.cr · opening',`module TeaShop
+  include SweetTalk
+
+  context Catalogue, means: "the teas on our shelves" do
+    # values, aggregates and projections
+  end
+end`)+
+      '<h2 id="c-sweettalk-meaning">Give every noun a meaning</h2><p>Every context, value, aggregate, entity, event, projection, service and process carries <code>means:</code>. A noun without one does not compile, and <code>SweetTalk.glossary</code> lists every entry with its kind and context, so the ubiquitous language is part of the program. The same word may mean different things in two contexts: Catalogue’s <code>Tins</code> is “a count of tins on the shelf”, and Fulfilment’s is “tins of one tea packed in a parcel”.</p>'+
+      '<h2 id="c-sweettalk-contexts">Draw the contexts</h2><p>A <code>context</code> is a bounded context: a module with its own vocabulary. <code>follows:</code> adopts another context’s types as they are. A <code>border</code> is the one place where a context may name a context it does not follow, and it translates that context’s values and ids into its own. Here each context reacts to the other’s event:</p>'+
+      snippet('tea_shop.cr · two contexts',`context Ordering, follows: Catalogue, means: "choosing teas and checking out" do
+  # Ordering may name Catalogue::Tea anywhere.
+
+  border Fulfilment do
+    whenever Fulfilment::Parcel::Dispatched do |dispatched|
+      Order.find(Order::Id.new(dispatched.order)).ship
+    end
+    # …
+  end
+end
+
+context Fulfilment, means: "packing and dispatching parcels" do
+  value Tins, Int32, at_least: 1, means: "tins of one tea packed in a parcel"
+  # …
+
+  border Ordering do
+    whenever Ordering::Order::Placed do |placed|
+      packings = placed.lines.map do |line|
+        Parcel::Packing.new(line.tea.raw, Tins.new(line.quantity))
+      end
+      address = placed.deliver_to
+      label = Label.new(street: address.street, city: address.city,
+        postcode: address.postcode.raw)
+      Parcel.pack placed.order_id.raw, packings, label
+    end
+    # …
+  end
+end`)+
+      '<p>The context map is checked when the program compiles. <code>follows: B</code> draws a dependency edge to B, and so does anything in <code>border B</code> other than the event a <code>whenever</code> names; reacting to one of B’s events draws an event edge. A context names <code>B::</code> anywhere when it follows B, and only inside <code>border B</code> otherwise. A foreign name anywhere else, an edge to an unknown context, or a cycle of dependency edges stops the build, for example with “Shop::Ordering names Catalogue:: outside a border: move that code into border Catalogue do … end, or declare follows: Catalogue”. So Ordering and Fulfilment may react to each other’s events, but may not follow each other. <code>SweetTalk.context_map</code> returns the edges.</p>'+
+      '<h2 id="c-sweettalk-values">Name the values</h2>'+
+      snippet('tea_shop.cr · values',`value Tins, Int32, at_least: 0, means: "a count of tins on the shelf"
+value Cents, Int64, at_least: 0, means: "an amount of money"
+value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"`)+
+      '<p>A value wraps an <code>Int32</code>, an <code>Int64</code> or a <code>String</code>, or has parts. An integer value takes <code>at_least:</code>, <code>at_most:</code>, <code>within:</code> and <code>times:</code>. It is validated when it is built and by every arithmetic result, so <code>@stock -= tins</code> refuses to go below zero with “Tins must be at least 0”. <code>+</code> and <code>-</code> take the same value or an integer, and <code>*</code> takes an integer: tins plus cents does not compile. <code>times: Quantity</code> on <code>Cents</code> would let <code>*</code> take a quantity. A value is stored as a column of its raw type and rebuilt, and so validated again, when it is loaded.</p><p>PostgreSQL checks the bounds too. Every column that stores <code>Tins</code> gets a <code>CHECK</code> constraint, such as <code>check_catalogue_teas_stock</code>, so a write that goes around SweetTalk, through SQL or another service, is refused when it is written. Bounds are therefore integer literals. <code>database_check: false</code> keeps a value’s bounds in Crystal only, where they may name a constant.</p>'+
+      '<h2 id="c-sweettalk-richer-values">Name strings and values with parts</h2>'+
+      snippet('tea_shop.cr · string and composite values',`value Email, String, matches: /\\A[^@\\s]+@[^@\\s]+\\z/, length: 3..254,
+  means: "an address we can write to"
+value Postcode, String, matches: /\\A[A-Z0-9][A-Z0-9 ]{1,8}[A-Z0-9]\\z/,
+  means: "a postal code, in capitals"
+
+value Address, means: "where a parcel goes" do
+  part street : String
+  part city : String
+  part postcode : Postcode
+  never "An address needs a street and a city." { street.blank? || city.blank? }
+end`)+
+      '<p>A string value takes <code>matches:</code> and <code>length:</code>, and has no arithmetic. <code>Email.new("ada")</code> refuses with “Email must match /\\A[^@\\s]+@[^@\\s]+\\z/” before anything is written. It is stored as a text column. Its length is a <code>CHECK</code> constraint too, <code>check_ordering_orders_receipt_to_length_3_254</code>; its pattern is checked in Crystal only, because PostgreSQL reads regular expressions differently.</p><p>A value with parts is built with one keyword per part, as in <code>Address.new(street: "1 Leaf Lane", city: "Camellia", postcode: Postcode.new("CA1 1TE"))</code>. It checks its <code>never</code> and <code>always</code> when it is built, and equals another address with the same parts. A part is a column type or a value that wraps one. <code>has deliver_to : Address</code> stores one column per part: <code>deliver_to_street</code>, <code>deliver_to_city</code> and <code>deliver_to_postcode</code>. A part’s value brings its constraints to its column.</p>'+
+      '<h2 id="c-sweettalk-aggregates">Declare aggregates and entities</h2><p>An aggregate is a root with an id, such as <code>Order::Id</code>, and a repository: <code>find</code>, <code>find?</code>, <code>all</code>, and <code>create</code> unless it has a factory. An entity lives inside one aggregate and is saved with it.</p>'+
+      snippet('tea_shop.cr · an aggregate',`aggregate Order, means: "what a member buys at one checkout" do
+  has member : Account
+  has receipt_to : Email
+  has deliver_to : Address
+  has lines : Array(Line)
+  has late_parcel : Bool = false
+  moves open >> placed >> shipped, open >> cancelled, placed >> cancelled
+  never "An order needs at least one tea." { placed? && lines.empty? }
+
+  entity Line, means: "one tea in an order, its price when added, and how many tins" do
+    has tea : Catalogue::Tea
+    has price : Catalogue::Cents
+    has quantity : Quantity
+    the cost : Catalogue::Cents = price * quantity.to_i
+  end
+
+  the total : Catalogue::Cents = lines.sum(&.cost)
+
+  event Placed, lines : Array(Line), deliver_to : Address, means: "a member checked out"
+  # …
+
+  to add(tea : Catalogue::Tea, quantity : Quantity) do
+    refuse "Teas can be added only while the order is open." unless open?
+    refuse "#{tea.name} is already in this order." if lines.any? { |line| line.tea == tea.id }
+    @lines << Line.new(tea, tea.price, quantity)
+  end
+
+  to place do
+    placed!
+    emit Placed, lines: lines, deliver_to: deliver_to
+  end
+end`)+
+      '<p>Each aggregate, entity, projection and process is a SugarORM schema with its own changeset, and every write goes through that changeset. <code>has</code> chooses the storage from the type:</p><ul><li><code>String</code>, <code>Int32</code>, <code>Int64</code>, <code>Bool</code>, <code>Float64</code> or <code>Time</code> is a column.</li><li>A value that wraps a number or a string is a column of its raw type.</li><li>A value with parts is one column per part.</li><li>Another aggregate is a foreign key, and its getter returns that aggregate’s id: <code>line.tea</code> is a <code>Catalogue::Tea::Id</code>. Load the tea with <code>Catalogue::Tea.find</code> when you need it.</li><li>One of the application’s own SugarORM schemas, as in <code>has member : Account</code>, is a foreign key too. Its getter returns a <code>SweetTalk::RecordId(Account)</code>, and <code>order.member.load</code> reads the account.</li><li>An <code>Array</code> of the aggregate’s own entity is a child table, loaded with <code>preload</code>.</li></ul><p><code>has name : Type = expression</code> gives an attribute a default, as in <code>has held : Tins = Tins.zero</code>. The column gets a SQL default when the expression is a literal, as in <code>has late_parcel : Bool = false</code>.</p><p>Any other type does not compile; a <code>Hash</code> is refused with a pointer to the entity form. The schemas live in each context’s <code>Rows</code> module, and a context that names <code>Rows</code> does not compile, so every change goes through a command. Table names take English plurals. The tea shop’s tables are <code>catalogue_teas</code>, <code>ordering_orders</code>, <code>ordering_order_lines</code>, <code>ordering_sales</code>, <code>ordering_holds</code>, <code>fulfilment_parcels</code> and <code>fulfilment_parcel_packings</code>. They are ordinary schemas, so <code>frappe db diff</code> derives their migrations.</p>'+
+      '<h2 id="c-sweettalk-lifecycle">Guard the lifecycle and the invariants</h2><p><code>moves</code> lists one or more chains of states, and the first state is the initial one. <code>moves open &gt;&gt; placed &gt;&gt; shipped, open &gt;&gt; cancelled, placed &gt;&gt; cancelled</code> stores the state and adds <code>open?</code>, <code>placed?</code>, <code>shipped?</code> and <code>cancelled?</code>, and the private movers <code>placed!</code>, <code>shipped!</code> and <code>cancelled!</code>. A mover refuses unless the current state comes just before it in a chain: “Order cannot become shipped while cancelled”. <code>never</code> refuses a command that leaves its condition true, and <code>always</code> one that leaves it false. <code>the</code> is a derived value, computed on every read and never stored.</p>'+
+      '<h2 id="c-sweettalk-commands">Change state with commands</h2><p><code>to verb(arg : Type) do … end</code> is a command, and it runs as one transaction:</p><ol><li>load the aggregate with its row locked through SugarORM’s <code>lock</code>, so commands on one aggregate run one after another and the body sees the last committed state;</li><li>run the body;</li><li>check every <code>never</code> and <code>always</code>;</li><li>save the root through its changeset, then its entities;</li><li>dispatch the queued events.</li></ol><p><code>refuse "message"</code> raises <code>SweetTalk::Refusal</code>. The transaction rolls back and the aggregate reloads what is stored, so neither the table nor the object keeps half a change. <code>create</code> and a factory check the invariants before they insert.</p>'+
+      '<p>A command changes one aggregate. Running another aggregate’s command, a <code>create</code> or a factory while a command runs raises <code>SweetTalk::Boundary</code> and rolls the command back. A command may read another aggregate it is given: <code>add</code> copies the tea’s price into the line, so repricing the tea later does not change the order.</p>'+
+      '<h2 id="c-sweettalk-factories">Make aggregates with factories</h2><p><code>factory verb(args) do … end</code> makes an aggregate. Arguments named like attributes set them, and the body runs as the aggregate’s first change and may <code>emit</code>. The aggregate is checked, saved and its events dispatched in one transaction, and each event names the new aggregate’s id.</p>'+
+      snippet('tea_shop.cr · a factory',`factory open(member : Account, receipt_to : Email, deliver_to : Address) do
+  emit Opened, receipt_to: receipt_to
+end`)+
+      '<p><code>Ordering::Order.open(account, Email.new("ada@example.com"), address)</code> opens an order. An aggregate with a factory has no <code>create</code>, so every order starts with <code>Opened</code>. A factory that leaves an attribute unset, when no default covers it, does not compile, and neither does one named like a repository method, such as <code>factory find</code>.</p>'+
+      '<h2 id="c-sweettalk-queries">Find and retire aggregates</h2>'+
+      snippet('tea_shop.cr · a query and a removal',`finds placed_for(member : Account), where: {member: member, state: :placed}
+
+to forget do
+  refuse "Only a cancelled order can be forgotten." unless cancelled?
+  remove
+end`)+
+      '<p><code>finds</code> defines a query: <code>Order.placed_for(account)</code> returns the orders whose columns equal the expressions, by id. A list matches any of its members and a range its span, and <code>state:</code> takes a state or a list of states. A key that names no stored attribute, a list of entities, or a state the lifecycle lacks does not compile.</p><p><code>find</code>, <code>find?</code>, <code>all</code> and every query read one statement per table: the roots, then each list of entities through <code>preload</code>. So <code>placed_for</code> runs two queries however many orders it returns.</p><p><code>remove</code> in a command retires the aggregate. Its row stays with <code>removed_at</code> set, so the lines and projection rows that name it stay valid. <code>find</code>, <code>find?</code>, <code>all</code>, every query and the command’s row lock skip it: <code>find</code> raises “There is no Order 7.”.</p>'+
+      '<h2 id="c-sweettalk-services">Name operations with services</h2><p>A service is an operation that belongs to no one aggregate. It lives in a context, carries <code>means:</code> and joins the glossary.</p>'+
+      snippet('tea_shop.cr · a service',`service requote(order : Order::Id), returns: Catalogue::Cents,
+  means: "what an order would cost at today's prices" do
+  Order.find(order).lines.sum do |line|
+    Catalogue::Tea.find(line.tea).price * line.quantity.to_i
+  end
+end`)+
+      '<p>Call it on its context: <code>Ordering.requote(order.id)</code>. <code>returns:</code> defaults to <code>Nil</code>. A service runs in one transaction and changes at most one aggregate: a second raises <code>SweetTalk::Boundary</code> and rolls both back. To change two, emit an event and react to it in a <code>whenever</code>. A <code>service</code> anywhere but a context does not compile.</p>'+
+      '<h2 id="c-sweettalk-events">Follow events with policies</h2><p><code>event</code> declares one of the aggregate’s events, and <code>emit</code> queues one from a command with its facts; an aggregate emits only its own. An event holds its subject’s id (<code>placed.order_id</code>) and its fields as they were when it was emitted: column types, values, ids and an <code>Array</code> of the aggregate’s entity. No getter on an event loads an aggregate, so a handler reads what happened, not what is true now.</p>'+
+      '<p><code>whenever</code> in a context or a border is a policy, run as a Cold Brew job. The command enqueues one job per policy in its own transaction, so a job is never lost and never sent for a rolled-back change. A handler changes one aggregate too. With <code>each:</code> it runs once per element of a list in the event, each in its own job: the <code>Sales</code> projection below counts one order line per job.</p>'+
+      '<ul><li>A job carries the event as JSON. When one line’s job fails, the other lines’ jobs still run.</li><li>A job is named after its owner (a context and its border, a projection or a process) and the event, never after a line, because <code>caramel_jobs</code> stores the name. Two <code>whenever</code> blocks for one event in one owner do not compile.</li><li>A refusal, or a handler that changes a second aggregate, fails its job at the first attempt, unless a <code>compensate</code> answers the refusal; other errors follow Cold Brew’s retry rules. The command that emitted the event stays committed.</li><li>The command also publishes <code>{"subject": id}</code> on <code>sweettalk.CONTEXT.AGGREGATE.EVENT</code> for live pages, delivered on commit and at most once.</li></ul>'+
+      '<h2 id="c-sweettalk-metadata">Record who acted</h2><p>Every event records <code>event_id</code>, a UUID, <code>occurred_at</code>, and <code>actor</code>, a <code>String?</code>. Its jobs carry all three. No command takes an actor: wrap the call in <code>SweetTalk.acting</code> instead.</p>'+
+      snippet('Inside an action · order is a loaded Ordering::Order',`SweetTalk.acting("member:7") { order.place }`)+
+      '<p>Each policy, compensation and process step runs as its event’s actor, so the <code>Cancelled</code> event a refused hold leads to still names <code>member:7</code>. A deadline acts as <code>deadline Hold.lapse</code>. A field named <code>event_id</code>, <code>occurred_at</code>, <code>actor</code> or like the subject’s id does not compile.</p><p>A field may be nilable. <code>cancel</code> without a reason sends <code>reason</code> as JSON null:</p>'+
+      snippet('tea_shop.cr · a nilable fact',`event Cancelled, lines : Array(Line), reason : String?,
+  means: "the order was given up, and why"
+
+to cancel(reason : String? = nil) do
+  unless cancelled?
+    cancelled!
+    emit Cancelled, lines: lines, reason: reason
+  end
+end`)+
+      '<p>A union of other types, such as <code>String | Int32</code>, does not compile.</p>'+
+      '<p>A retried job carries the same <code>event_id</code>. A handler that sends mail or calls an API can key that side effect on it, so a retry can tell the side effect already happened.</p>'+
+      '<h2 id="c-sweettalk-projections">Keep read models</h2><p>A projection is a table with one row per key. Inside a <code>whenever</code> block, <code>Sales[tea]</code> reads the row locked and saves it when the handler returns. When the row is missing, an upsert on the key’s unique index inserts it with its defaults, so two handlers that insert one key at once keep one row.</p>'+
+      snippet('tea_shop.cr · a projection',`projection Sales, means: "tins sold of one tea" do
+  key tea : Catalogue::Tea
+  has sold : Int32 = 0
+
+  whenever Order::Placed, each: :lines do |placed, line|
+    Sales[line.tea].sold += line.quantity.to_i
+  end
+end`)+
+      '<h2 id="c-sweettalk-processes">Run processes with deadlines and compensation</h2><p>A process is a workflow across aggregates. It keeps one row per <code>key</code>, with attributes, a lifecycle and deadlines, in a table such as <code>ordering_holds</code>. <code>Hold</code> holds the tins of one tea for one placed order until the parcel leaves, and gives them back when the order is cancelled or the parcel is late.</p>'+
+      snippet('tea_shop.cr · a process',`process Hold, means: "tins of one tea held on the shelf for one placed order" do
+  key slot : Slot
+  has tins : Int32 = 0
+  moves waiting >> holding >> taken, waiting >> refused, waiting >> released,
+    holding >> released
+
+  whenever Order::Placed, each: :lines,
+    key: Slot.new(order: placed.order_id.raw, tea: line.tea.raw) do |placed, line|
+    if waiting?
+      Catalogue::Tea.find(line.tea).hold Catalogue::Tins.new(line.quantity.to_i)
+      @tins = line.quantity.to_i
+      holding!
+      arm lapse
+    end
+  end
+
+  compensate Order::Placed do |placed, line, refusal|
+    refused!
+    Order.find(placed.order_id).cancel refusal.message
+  end
+
+  # whenever Order::Cancelled releases the tins; Fulfilment::Parcel::Dispatched takes them
+
+  deadline lapse, after: 7.days do
+    Order.find(Order::Id.new(slot.order)).cancel "not dispatched within 7 days" if holding?
+  end
+end`)+
+      '<ul><li><code>whenever Event, key: expression</code> is a step. Its job inserts the row when it is missing, locks it and runs the block on it. A step changes at most one aggregate; its own row does not count. Attributes other than the key are nilable or have a literal default, because a row starts from its key alone.</li><li>A process may react to another context’s events outside a border. <code>Hold</code> follows <code>Fulfilment::Parcel::Dispatched</code>, which draws an event edge from Ordering to Fulfilment.</li><li><code>compensate</code> runs when its <code>whenever</code> is refused. The handler’s work has already rolled back; the compensation gets the same arguments and the refusal, and runs in its own transaction. Here a tea that cannot be held cancels its order with “Only 1 tins of Gyokuro free.”. A refusal in the compensation fails the job. A context or a border may compensate its own <code>whenever</code> too: Ordering’s border notes a parcel that left after its order was cancelled.</li><li><code>arm lapse</code> sets <code>lapse_due</code> and enqueues a job for that time, and <code>disarm lapse</code> clears it. Cold Brew cannot cancel a job, so every arm and disarm counts up an arming counter: a stale deadline job finds a newer arming and does nothing.</li></ul>'+
+      '<p><code>arm lapse, after: 2.days</code> arms the deadline for another span than its own.</p>'+
+      '<h2 id="c-sweettalk-renames">Rename without moving data</h2><p>A name SweetTalk stores, such as a table, a channel or a job name, comes from a domain name. When the model finds a better word, <code>renamed_from:</code> keeps the table and the channel the old name used, so no data moves.</p>'+
+      snippet('tea_shop.cr · a renamed aggregate',`aggregate Blend, renamed_from: Tea, means: "one tea we sell" do
+  # still stored in catalogue_teas, still announced on sweettalk.catalogue.tea.*
+end`)+
+      '<p>A job’s name follows its owner and the event’s path as written. When a rename changes it, SweetTalk declares Cold Brew’s <code>renamed_from</code> on the job with the old name, so jobs queued before the rename keep running.</p>'+
+      '<h2 id="c-sweettalk-refusals">What does not compile</h2><p>Each mistake below stops the build with a message that names the sentence and its fix:</p><ul><li>a noun without <code>means:</code>;</li><li>a foreign name outside a border, a border or <code>follows:</code> to an unknown context, or a cycle of dependency edges;</li><li><code>emit</code> of another aggregate’s event;</li><li>a mover the lifecycle does not declare;</li><li><code>the</code> without a type;</li><li>a value that wraps anything but <code>Int32</code>, <code>Int64</code> or <code>String</code>, or has no parts;</li><li>a bound that is not an integer literal, unless the value takes <code>database_check: false</code>;</li><li>two different values mixed in arithmetic without <code>times:</code>;</li><li><code>whenever</code> inside an aggregate;</li><li><code>has</code> with a type that cannot be stored, or whose constraint name would pass PostgreSQL’s 63 bytes;</li><li>two declarations whose names give one table;</li><li>a context that names <code>Rows</code>;</li><li>a projection or a process without <code>key</code>, or a process step without <code>key:</code>;</li><li>two <code>whenever</code> blocks for one event in one place;</li><li>a factory that leaves an attribute unset;</li><li>a query on an unknown attribute or state;</li><li>a <code>compensate</code> without its <code>whenever</code>;</li><li>a <code>deadline</code> outside a process;</li><li>an event field named like its metadata.</li></ul>'+
+      '<h2 id="c-sweettalk-limits">Not covered yet</h2><p>SweetTalk covers the domain. Resources, representations and guards for the web are not part of it. String patterns and the <code>never</code> rules of values and aggregates are checked in Crystal only. SweetTalk scopes nothing by tenant, so a program that also requires <code>caramel/tenancy</code> does not compile. Events carry no correlation or causation ids, so nothing yet links a command to the events and jobs that follow it.</p>'+
+      '<button class="c-secondary cursor-interaction" data-page="coldbrew">Read the Cold Brew reference →</button>',
     practices: () => heading('Guides / Best practices','Build it the Caramel way.','The conventions that keep a Caramel application typed, safe, and easy to change, and the checks that hold it to them.')+
       '<h2 id="c-practices-home">Give every change its home</h2><p>Each kind of change has one place. Routes live in <code>config/routes.cr</code>, actions and their contracts in <code>app/actions/</code>, stored shapes in <code>app/models/</code>, and write rules in <code>app/changesets/</code>. HTML lives in <code>app/views/</code>, background work in <code>app/jobs/</code>, translations in <code>app/locales/</code>, and request specs in <code>spec/requests/</code>.</p><p>Your application’s files are the extension point. When the public API cannot do what a task needs, name the gap instead of patching framework code.</p><button class="c-secondary cursor-interaction" data-page="map">Find the file for a change →</button>'+
       '<h2 id="c-practices-inputs">Declare every input</h2><p>Read request data only through the action’s contract. Give each field its type, and bounds or a default where they apply. A submitted field the contract does not declare is an error, except in the query of a GET or HEAD request. The compiler checks that every route parameter has a matching field, and <code>frappe check</code> prints the line that adds a missing one.</p>'+
@@ -1344,6 +1530,7 @@ end`)+
     {page:'deploy',title:'Deploy an application',text:'Build the Linux release artifact and run it under the production contract any deploy tool can rely on.',category:'Production',status:'draft',keywords:'ship hosting linux binary release frappe build artifact docker static health readiness sigterm drain no-workers caramel_root jobs unknown db roles'}
   ];
   const searchIndex = [{page:'learn',title:'Your first application',type:'Learning path',terms:'setup install create macos apple silicon'}, {page:'map',title:'Project map',type:'Guide',terms:'directory files controller action model view frappe latte sugarorm corretto blueprint'}, {page:'agents',title:'Work with an agent',type:'Guide',terms:'AI AGENTS manifest check commands mrdp diagnostics patch expand'}, {page:'i18n',title:'Internationalization',type:'Guide',terms:'i18n translate translations localization locales language French plurals formatting dates number fallback cookie accept language rtl wording make locale catalog reference keys errors pages directives plural rules languages'}, {page:'crema',title:'Observability',type:'Guide',terms:'crema observability logs log request id trace traceparent error report fingerprint slow monitoring debugging on_error'}, {page:'cremaref',title:'Crema',type:'Reference',terms:'crema observability reference ops socket ops status tail errors traces metrics prometheus debug token recorder insights otlp opentelemetry sampler log line fields redaction fingerprint inspector toolbar theme dark light copy sql bind values shortcut dump traceparent jobs db diagnose collector pg_stat_statements access log'}, {page:'tenancy',title:'Multi-tenancy',type:'Guide',terms:'tenant tenancy multi-tenant saas accounts organizations slug scope isolation central make tenancy tenant_session'}, {page:'testing',title:'Test rendered HTML',type:'Guide',terms:'corretto have_html blueprint lexbor render_partial render_page doctype strict count scope assertions'}, {page:'releases',title:'Current release',type:'Guide',terms:'current release i18n internationalization translations locales version 0.12.0 crystal postgres lock shard lexbor only url server unique render_errors requirements limits'}, {page:'practices',title:'Best practices',type:'Guide',terms:'best practices conventions guidelines style lint service nouns contracts changesets preload migrations escaping csrf security jobs idempotent retries testing corretto mocks translations proof checks agents'}, {page:'routing',title:'Routes and contracts',type:'Reference',terms:'routes router draw path parameters 404 405 head method override contract field params validation min max default nilable string int64 time uploadedfile json query duplicate unknown errors 422 resource_paths path helpers frappe routes contract_mismatch ingress'}, {page:'actions',title:'Actions and responses',type:'Reference',terms:'action controller handle render respond status page layout title_for markup htmx partials morph fragment redirect_to redirect_external not_found stream sse server-sent events render_errors contract_failure_page session sign_out csrf_token negotiation accept json'}, {page:'views',title:'Views',type:'Reference',terms:'views blueprint templates html elements escaping attributes plain raw safe markup islands render partials forms csrf _method layout lang'}, {page:'sugarorm',title:'SugarORM',type:'Reference',terms:'sugarorm orm database model schema field belongs_to has_many has_one index scope query where order_by find preload n+1 sql changeset validations validate_presence unique_constraint check constraint check_constraint create update transaction migrations db diff migrate linter dev-override branch lock for update upsert on conflict version lock_version stale etag if-match'}, {page:'coldbrew',title:'Cold Brew',type:'Reference',terms:'cold brew jobs background queue worker enqueue param perform retry_on backoff run_at priority work concurrency schedules every cron pubsub publish subscribe cache drain_queue'}, {page:'corretto',title:'Corretto',type:'Reference',terms:'corretto testing specs request specs session client get post json body files upload headers csrf forged follow_redirect matchers have_status have_header redirect_to render_page have_row stub_wire wire fixtures mocks drain_queue concurrency env.test'}, {page:'security',title:'Security defaults',type:'Reference',terms:'security csrf token origin session cookie host headers content security policy csp referrer nosniff 421 escaping xss safe ingress authenticate webhook redirect external url outbound static files errors request id'}, {page:'commands',title:'Commands',type:'Reference',terms:'commands cli frappe reference help syntax flags latte binary serve work seed routes schema drift migrate lint translations check format expand db dump restore diff branch logs services sites installations doctor open lsp corretto agent-manifest mrdp'}, {page:'local',title:'Local environment',type:'Reference',terms:'local environment latte services postgres dns caddy https sites origins localhost resolver trust frappe dev logs doctor databases env seed dump restore installations releases editor lsp zed crystalline ameba'}].concat(recipes.map(r=>({page:r.page,title:r.title,type:r.status==='gap'?'Framework gap':'Draft recipe',terms:r.text+' '+r.keywords})));
+  searchIndex.push({page:'sweettalk',title:'SweetTalk (next release)',type:'Guide',terms:'sweettalk domain-driven design ddd bounded context aggregate entity value object event policy projection glossary ubiquitous language factory query finds remove service process saga deadline compensate compensation actor acting metadata composite check constraint database_check'});
   function persist(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{page:currentPage,task:selectedTask},privateContent:{recipeFilter}}).catch(()=>{});}
   function renderTask(){const el=root.querySelector('#c-map-result');if(!el)return;const task=tasks[selectedTask];el.innerHTML=`<strong>${task.title}</strong>${task.files.map(f=>`<code>${f}</code>`).join('')}<p>${task.detail}</p><small>${task.proof}</small>`;root.querySelectorAll('[data-task]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.task===selectedTask)));}
   function renderRecipes(){const term=root.querySelector('#c-recipe-search').value.toLowerCase();const list=recipes.filter(r=>(recipeFilter==='all'||r.status===recipeFilter)&&(r.title+' '+r.text+' '+r.keywords).toLowerCase().includes(term));root.querySelector('#c-recipes').innerHTML=list.map(r=>`<button class="c-recipe cursor-interaction" data-page="${r.page}"><span class="c-tag ${r.status==='gap'?'c-draft':''}">${r.status==='gap'?'Framework gap':'Draft recipe'}</span><h2>${r.title}</h2><p>${r.text}</p><footer><span>${r.category} · 0.12.0</span><span aria-hidden="true">↗</span></footer></button>`).join('');root.querySelector('#c-empty').hidden=list.length>0;root.querySelectorAll('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.filter===recipeFilter)));}
