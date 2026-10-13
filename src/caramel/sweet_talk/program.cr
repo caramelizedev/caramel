@@ -142,18 +142,20 @@ module SweetTalk
   end
 
   # The ubiquitous language: every context, service, value, aggregate, entity, event,
-  # projection and process with its meaning.
+  # projection and process with its meaning, and its context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
     terms = [] of ::SweetTalk::Term
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
+      {% part = context.constant("SWEETTALK_SUBDOMAIN") %}
       terms << ::SweetTalk::Term.new("context", {{ short }}, {{ short }},
-        {{ context.constant("SWEETTALK_MEANS") }})
+        {{ context.constant("SWEETTALK_MEANS") }}, {{ part }})
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_SERVICE_")) %}
         {% service = context.constant(constant) %}
-        terms << ::SweetTalk::Term.new("service", {{ service[0] }}, {{ short }}, {{ service[1] }})
+        terms << ::SweetTalk::Term.new("service", {{ service[0] }}, {{ short }}, {{ service[1] }},
+          {{ part }})
       {% end %}
     {% end %}
     {% kinds = [{"value", ::SweetTalk::Value}, {"value", ::SweetTalk::Composite},
@@ -168,8 +170,9 @@ module SweetTalk
           {% full = type.name.stringify %}
           {% name = home ? full[home.name.stringify.size + 2..] : full %}
           {% within = home ? home.name.split("::").last : "" %}
+          {% part = home ? home.constant("SWEETTALK_SUBDOMAIN") : nil %}
           terms << ::SweetTalk::Term.new({{ pair[0] }}, {{ name }}, {{ within }},
-            {{ type.constant("SWEETTALK_MEANS") }})
+            {{ type.constant("SWEETTALK_MEANS") }}, {{ part }})
         {% end %}
       {% end %}
     {% end %}

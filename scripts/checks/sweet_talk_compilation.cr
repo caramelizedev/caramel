@@ -230,6 +230,8 @@ PROBLEMS = [
   {"projection_finds_block_count",
    "finds how_many narrows rows with where, where_null, order_by, limit and offset only, so " \
    "it reads Sales rows and writes nothing, not count"},
+  {"subdomain_unknown",
+   "context Catalogue takes subdomain: :core, :supporting or :generic, not subdomain: :main"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

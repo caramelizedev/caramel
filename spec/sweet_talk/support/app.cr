@@ -3,6 +3,7 @@ require "random/secure"
 require "./tea_shop"
 require "./rules"
 require "./renamed"
+require "./tea_house"
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
 private def owned_url(variable : String) : String

@@ -736,7 +736,9 @@ module SweetTalk
   # text apart from the events its `whenever`s name, so reacting to an event is not a
   # dependency. In a program that requires caramel/tenancy its rows belong to one tenant,
   # unless it says `central: true`, which shares them between every tenant.
-  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil, &block)
+  # `subdomain: :core`, `:supporting` or `:generic` says what part of the domain it is.
+  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil,
+                subdomain = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -747,6 +749,12 @@ module SweetTalk
     {% if central && !::Caramel.has_constant?("Tenancy") %}
       {% central.raise "context #{name} takes central: true only in a program that requires " +
                        "caramel/tenancy" %}
+    {% end %}
+    {% subdomains = %w[core supporting generic] %}
+    {% unless subdomain.is_a?(NilLiteral) ||
+                (subdomain.is_a?(SymbolLiteral) && subdomains.includes?(subdomain.id.stringify)) %}
+      {% subdomain.raise "context #{name} takes subdomain: :core, :supporting or :generic, " +
+                         "not subdomain: #{subdomain}" %}
     {% end %}
     {% tenant = @type.has_constant?("SWEETTALK_TENANT") && !central &&
                 @type.constant("SWEETTALK_TENANT") %}
@@ -799,6 +807,7 @@ module SweetTalk
       # {tenant model, attribute} when this context's rows belong to one tenant
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
+      SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows

@@ -5,7 +5,7 @@ module Shop
 
   MOST_PARCELS = 5
 
-  context Ordering, means: "choosing teas and checking out" do
+  context Ordering, subdomain: :core, means: "choosing teas and checking out" do
     value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"
     value Email, String, matches: /\A[^@\s]+@[^@\s]+\z/, length: 3..254,
       means: "an address we can write to"

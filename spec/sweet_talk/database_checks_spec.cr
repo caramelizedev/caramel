@@ -32,14 +32,15 @@ describe "SweetTalk's database checks" do
         WHERE contype = 'c' AND conname LIKE 'check\\_%' ORDER BY conname
         SQL
       checks.map(&.[:name]).should eq(%w[
+        check_billing_bills_amount check_billing_bills_state_16e92b19
         check_catalogue_teas_held check_catalogue_teas_price check_catalogue_teas_stock
         check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
         check_ordering_holds_state_a8664243 check_ordering_order_lines_price
         check_ordering_order_lines_quantity check_ordering_orders_receipt_to_length_3_254
-        check_ordering_orders_state_ef9524ce check_shelf_bins_code_length_2_4
-        check_shelf_bins_size_depth check_shelf_bins_size_width check_shelf_boxes_count
-        check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count check_shelf_jars_size_depth
-        check_shelf_jars_size_width check_shelf_jars_state_d37e3be8
+        check_ordering_orders_state_ef9524ce check_pricing_teas_price
+        check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
+        check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
+        check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8
         check_shelf_tabs_state_d74ee900 check_store_teas_stock
       ])
     end

@@ -469,6 +469,7 @@ describe "The tea shop on PostgreSQL" do
     terms.should contain({"service", "requote", "Ordering"})
     terms.should contain({"process", "Hold", "Ordering"})
     SweetTalk.context_map.sort.should eq([
+      {"Billing", "Pricing", "dependency"},
       {"Fulfilment", "Ordering", "event"},
       {"Ordering", "Catalogue", "dependency"},
       {"Ordering", "Fulfilment", "event"},
