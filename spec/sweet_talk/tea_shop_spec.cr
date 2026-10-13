@@ -101,6 +101,11 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "raises NilAssertionError for an aggregate's id before create" do
+    tea = Catalogue::Tea.new("Sencha", Catalogue::Cents.new(100), Catalogue::Tins.new(3))
+    expect_raises(NilAssertionError, "Tea has no id until it is created") { tea.id }
+  end
+
   it "refuses a value out of bounds before anything is written" do
     SweetTalkSpec.rolled_back do
       expect_raises(SweetTalk::Refusal, "Tins must be at least 0") { Catalogue::Tins.new(-1) }

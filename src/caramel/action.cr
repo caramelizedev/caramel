@@ -329,6 +329,14 @@ module Caramel
       @context.wants_json? ? json(outcome) : render(outcome)
     end
 
+    # :nodoc:
+    # The router answers a valid *contract* through this hook, which only yields. An
+    # opt-in require replaces it to answer errors of its own, as `caramel/sweet_talk`
+    # answers a refusal with 422 (ADR 0034).
+    def __caramel_answer(contract : RequestContract, & : -> Response) : Response
+      yield
+    end
+
     def render_contract_failure(contract : RequestContract) : Response
       if @context.wants_json?
         json({errors: contract.errors}, 422)

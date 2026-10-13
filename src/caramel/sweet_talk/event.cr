@@ -34,7 +34,7 @@ module SweetTalk
     end
 
     private def __sweettalk_subject : ::SweetTalk::Aggregate
-      @__sweettalk_subject || raise ::SweetTalk::Missing.new("#{self.class.name} has no subject")
+      @__sweettalk_subject || raise NilAssertionError.new("#{self.class.name} has no subject")
     end
 
     def __sweettalk_fields : String

@@ -666,7 +666,7 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
           end
         {% end %}
         return action.render_contract_failure(contract) unless contract.valid?
-        action.respond(action.handle(contract))
+        action.__caramel_answer(contract) { action.respond(action.handle(contract)) }
       end
     {% end %}
   end

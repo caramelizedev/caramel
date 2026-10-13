@@ -5,6 +5,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 ## Unreleased
 
 - SweetTalk stores a state of two or more words as `moves` spells it: 0.13.0 wrote `awaiting_payment` as `awaitingpayment`, so `finds state: :awaiting_payment` missed those rows. Respell existing rows in a migration, one `UPDATE <table> SET state = '<state>' WHERE state = '<state without underscores>'` per table and such state, such as `UPDATE ordering_payments SET state = 'awaiting_payment' WHERE state = 'awaitingpayment'`, and migrate.
+- In an application that requires `caramel/sweet_talk`, a `SweetTalk::Refusal` that an action's `handle` does not rescue now answers 422 with its message under `_base`, shaped like a failed contract: `{"errors": {"_base": [message]}}` for JSON clients, `contract_failure_page` for browsers and htmx, and text starting `ERR INVALID:422` for other clients ([ADR 0034](docs/decisions/0034-sweettalk-at-the-web-boundary.md)). A `SweetTalk::Missing` answers 404. Neither is reported to Crema as an error any more. An action that rescues them itself is unchanged, and `SweetTalk::Boundary` still answers 500. Asking an aggregate for its id before `create`, or an event for its subject before it is emitted, now raises `NilAssertionError` instead of `SweetTalk::Missing`.
 
 ## 0.13.0 - 2026-10-12
 

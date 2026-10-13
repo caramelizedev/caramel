@@ -510,7 +510,7 @@ module SweetTalk
 
     def __sweettalk_raw_id : Int64
       short = self.class.name.split("::").last
-      @__sweettalk_id || raise ::SweetTalk::Missing.new("#{short} has no id until it is created")
+      @__sweettalk_id || raise NilAssertionError.new("#{short} has no id until it is created")
     end
 
     def __sweettalk_same?(other : ::SweetTalk::Aggregate) : Bool
