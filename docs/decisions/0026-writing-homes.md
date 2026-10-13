@@ -33,15 +33,19 @@ half of the repository's markdown and most of what a repository-wide grep return
    CHANGELOG.
 7. A fact is stated once and linked from elsewhere.
 8. Generated applications get a short README and an `AGENTS.md` (which `CLAUDE.md`
-   imports); the website renders its agent guide from that file.
+   imports); the website renders its agent guide from that file. `frappe make domain`
+   writes the SweetTalk skill, `.claude/skills/sweettalk/SKILL.md` from
+   `templates/skills/sweettalk/SKILL.md`, when the application has none. The skill states
+   no rule the website does not, and each rule ends with a link to its section in the
+   release's Markdown edition, which the website check verifies.
 9. `scripts/check prose` enforces where markdown lives, the ADR sections, relative links
    and a byte cap per file.
 
 ## Reasons
 
 - Every byte in the tagged tree reaches every application and every repository search.
-- A rule stated once cannot drift. A Markdown edition generated from the pages adds no
-  second source.
+- A rule stated once cannot drift. A Markdown edition generated from the pages, and a skill
+  whose every rule links the page that states it, add no second source.
 - Rejected: moving all documentation to another repository, because contracts must change
   in the same commit as the code, and the website's checks read the source at that commit.
 - Rejected: hiding prose from search with ignore files, because it would still ship in

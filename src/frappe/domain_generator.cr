@@ -4,12 +4,16 @@ require "./resource_generator"
 
 module Caramel::Frappe
   # Adds a SweetTalk domain (ADRs 0030 and 0031): the module with its first
-  # context, its spec, and on first use the require lines in
-  # config/application.cr. In a multi-tenant application the domain names the
-  # tenant the routes' tenant block names (ADR 0033).
+  # context, its spec, on first use the require lines in config/application.cr,
+  # and the SweetTalk skill for Claude Code when the application has none. In a
+  # multi-tenant application the domain names the tenant the routes' tenant
+  # block names (ADR 0033).
   class DomainGenerator
     CONFIG = "config/application.cr"
     ROUTES = "config/routes.cr"
+    SKILL  = ".claude/skills/sweettalk/SKILL.md"
+    # The release's skill (ADR 0026 decision 8), compiled into Frappé.
+    SKILL_TEXT = {{ read_file("#{__DIR__}/../../templates/skills/sweettalk/SKILL.md") }}
 
     CARAMEL_REQUIRE    = %(require "caramel")
     SWEET_TALK_REQUIRE = %(require "caramel/sweet_talk")
@@ -27,8 +31,8 @@ module Caramel::Frappe
     CENTRAL_UNTENANTED = "--central is for multi-tenant applications; " \
                          "config/application.cr does not require caramel/tenancy"
 
-    # Writes app/domain/NAME.cr and spec/domain/NAME_spec.cr. Returns the
-    # written paths.
+    # Writes app/domain/NAME.cr, spec/domain/NAME_spec.cr and, when missing,
+    # the skill. Returns the written paths.
     def generate(project : Project, name : String, context : String,
                  means : String, *, central : Bool = false) : Array(String)
       validate(name, context, means)
@@ -49,6 +53,7 @@ module Caramel::Frappe
       singular = name.underscore
       files["app/domain/#{singular}.cr"] = domain(name, context, means, tenant, central)
       files["spec/domain/#{singular}_spec.cr"] = spec(name, context, means)
+      files[SKILL] = SKILL_TEXT if skill_missing?(root)
       Publication.publish(project, files, originals)
       files.keys.sort!
     end
@@ -60,6 +65,15 @@ module Caramel::Frappe
       end
       raise Error.new(NAMES) unless valid && name != context
       raise Error.new(NO_MEANING) if means.blank? || means.each_char.any?(&.control?)
+    end
+
+    # An existing skill, edited or not, is the application's own, and a
+    # symlink on its path is left alone too: Publication refuses to follow it.
+    private def skill_missing?(root : String) : Bool
+      Publication.validate_path(root, SKILL)
+      !File.info?(File.join(root, SKILL), follow_symlinks: false)
+    rescue Error
+      false
     end
 
     # The tenant block's model, as `frappe make resource` reads it.

@@ -1004,7 +1004,7 @@ end`)+
       '<h2 id="c-sweettalk-enable">Opt in</h2><p>Require SweetTalk after Caramel. A plain application compiles none of it.</p>'+
       snippet('config/application.cr · excerpt',`require "caramel"
 require "caramel/sweet_talk"`)+
-      '<p>Or let Frappé start one: <code>frappe make domain Shop Ordering --means="choosing teas and checking out"</code> adds both requires, writes <code>app/domain/shop.cr</code> with that context, and a spec in <code>spec/domain/</code>. In a multi-tenant application the domain names the tenant, and <code>--central</code> makes the context one every tenant shares.</p>'+
+      '<p>Or let Frappé start one: <code>frappe make domain Shop Ordering --means="choosing teas and checking out"</code> adds both requires, writes <code>app/domain/shop.cr</code> with that context, and a spec in <code>spec/domain/</code>. When the application has no SweetTalk skill, it also writes <code>.claude/skills/sweettalk/SKILL.md</code>: the rules agents most often break, each ending with a link to its section here. An existing skill, edited or not, is left alone. In a multi-tenant application the domain names the tenant, and <code>--central</code> makes the context one every tenant shares.</p>'+
       '<p>Then include <code>SweetTalk</code> in the module that holds your domain. The words exist only there: a <code>context</code> or <code>has</code> anywhere else is an ordinary call.</p>'+
       snippet('tea_shop.cr · opening',`module TeaShop
   include SweetTalk

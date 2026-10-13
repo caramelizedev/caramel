@@ -67,8 +67,8 @@ for (const preset of named(/^\s+"([a-z]+)"\s+=>/gm, editors.slice(editors.indexO
 }
 assert(read(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page omits the agent guide');
 assert(read(`docs/${version}/sweettalk`).includes('<h2 id="c-sweettalk-ddd">'), 'The SweetTalk page omits its Domain-Driven Design map');
-// A pattern the guide calls planned must be planned for a later release: an
-// edition never calls its own release, or an earlier one, the future.
+// A pattern the guide or the skill calls planned must be planned for a later release:
+// an edition never calls its own release, or an earlier one, the future.
 const reached = planned => {
   const [a, b] = [planned, version].map(v => v.split('.').map(Number));
   return a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] <= b[2])));
@@ -109,4 +109,20 @@ assert.equal(converted('<p>Never &lt;script&gt; here, but <code>&lt;b&gt;</code>
 assert.equal(converted('<ul><li><p>One.</p><p>Two.</p></li></ul>'), '- One.\n\n  Two.\n', 'An item\'s paragraphs run together in Markdown');
 assert.equal(llmsEntry('Read [this]', 'https://caramelize.dev/a b/', 'Why.'), '- [Read \\[this\\]](https://caramelize.dev/a%20b/): Why.', 'An llms.txt name ends its link early');
 assert(!/&(lt|gt|quot|#39|amp);/.test(llms), 'llms.txt holds an undecoded entity');
+// The SweetTalk skill that frappe make domain writes ends each rule with a section of
+// the Markdown edition, and every section it cites exists.
+const skill = fs.readFileSync(new URL('../templates/skills/sweettalk/SKILL.md', import.meta.url), 'utf8');
+assert(skill.startsWith('---\nname: sweettalk\ndescription: '), 'The SweetTalk skill lacks its name and description');
+const cited = / https:\/\/caramelize\.dev\/docs\/VERSION\/([a-z-]+)\/index\.md#([a-z0-9-]+)$/;
+for (const rule of skill.split('\n').filter(line => line.startsWith('- '))) {
+  assert(cited.test(rule), `The SweetTalk skill's rule cites no section: ${rule}`);
+}
+for (const [, page, anchor] of skill.matchAll(new RegExp(cited.source.slice(1, -1), 'g'))) {
+  const edition = path.join(root, 'docs', version, page, 'index.md');
+  assert(fs.existsSync(edition) && fs.readFileSync(edition, 'utf8').includes(`{#${anchor}}`), `The SweetTalk skill cites a missing section: ${page}#${anchor}`);
+}
+for (const line of skill.split('\n')) {
+  const planned = line.match(/planned for (\d+\.\d+\.\d+)/)?.[1];
+  assert(!planned || !reached(planned), `The SweetTalk skill still plans for ${planned} in ${version}: ${line}`);
+}
 console.log(`Checked ${files.length} HTML documents and all local navigation/asset targets.`);

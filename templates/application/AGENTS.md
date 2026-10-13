@@ -10,6 +10,7 @@ Routes: config/routes.cr
 Actions and contracts: app/actions/
 Data: app/models/ and app/changesets/
 Domain: app/domain/ in SweetTalk (enable with frappe make domain NAME CONTEXT --means=TEXT)
+Domain rules: .claude/skills/sweettalk/SKILL.md, which frappe make domain writes
 HTML: app/views/
 Jobs: app/jobs/
 Translations: app/locales/ (enable with frappe make locale CODE)

@@ -14,7 +14,7 @@ if (process.argv.slice(2).some(arg => arg !== '--dry-run')) {
 }
 // gh-pages names the main commit it was built from: only origin's main publishes,
 // with every file build.mjs reads committed.
-const inputs = ['website', 'shard.yml', 'templates/application/AGENTS.md'];
+const inputs = ['website', 'shard.yml', 'templates/application/AGENTS.md', 'templates/skills/sweettalk/SKILL.md'];
 const pending = run('git', ['status', '--porcelain', '--', ...inputs]);
 if (pending) {
   console.error(`The website's sources have uncommitted changes; commit them before publishing:\n${pending}`);

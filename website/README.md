@@ -24,7 +24,8 @@ fails when a command, a framework catalog key, or a Crema metric, environment
 variable or editor preset is missing from its page.
 `markdown.mjs` turns each docs and cookbook page into Markdown, written as `index.md`
 beside its `index.html` and listed in `/docs/X.Y.Z/llms.txt`; it throws on a tag it
-does not convert.
+does not convert. `check.mjs` also fails when the SweetTalk skill
+(`templates/skills/sweettalk/SKILL.md`) cites a section the Markdown edition lacks.
 `source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
 inlines it beside the wordmark in the header and sets it on a dark tile as the
 favicon. `dist` is recreated on every build, so keep authored content under `source`.
@@ -52,8 +53,8 @@ node website/publish.mjs
 ```
 
 The publisher refuses to run unless `HEAD` is the commit on origin's `main` and the
-files the build reads (`website/`, `shard.yml` and `templates/application/AGENTS.md`)
-are committed, so every `gh-pages` commit names a `main` commit that holds its source.
+files the build reads (`website/`, `shard.yml`, `templates/application/AGENTS.md` and
+`templates/skills/sweettalk/SKILL.md`) are committed, so every `gh-pages` commit names a `main` commit that holds its source.
 Publish after the release push. It uses a temporary
 Git index, preserves deployment history, and does not switch the working branch or
 alter the working index. It adds the current edition and keeps every earlier

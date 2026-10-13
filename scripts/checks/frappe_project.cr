@@ -407,7 +407,8 @@ module Caramel::Checks
     def domain : Nil
       made = command([@frappe, "make", "domain", "Shop", "Ordering",
                       "--means=choosing teas and checking out"], chdir: @project)
-      %w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr].each do |path|
+      %w[.claude/skills/sweettalk/SKILL.md app/domain/shop.cr config/application.cr
+        spec/domain/shop_spec.cr].each do |path|
         assert!(made.stdout.includes?("Generated #{path}\n"), made.stdout)
       end
       File.write(File.join(@project, "app/domain/shop.cr"), SHOP_DOMAIN)
