@@ -65,6 +65,18 @@ for (const preset of named(/^\s+"([a-z]+)"\s+=>/gm, editors.slice(editors.indexO
   assert(cremaPage.includes(`<code>${preset}</code>`), `Crema reference omits editor ${preset}`);
 }
 assert(read(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page omits the agent guide');
+assert(read(`docs/${version}/sweettalk`).includes('<h2 id="c-sweettalk-ddd">'), 'The SweetTalk page omits its Domain-Driven Design map');
+// A pattern the guide calls planned must be planned for a later release: an
+// edition never calls its own release, or an earlier one, the future.
+const reached = planned => {
+  const [a, b] = [planned, version].map(v => v.split('.').map(Number));
+  return a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] <= b[2])));
+};
+for (const file of files) {
+  for (const [, planned] of fs.readFileSync(path.join(root, file), 'utf8').matchAll(/data-planned="(\d+\.\d+\.\d+)"/g)) {
+    assert(!reached(planned), `${file}: still planned for ${planned} in the ${version} edition; say what ships instead`);
+  }
+}
 const catalog = fs.readFileSync(new URL('../src/caramel/i18n/catalog.cr', import.meta.url), 'utf8');
 const i18nPage = read(`docs/${version}/internationalization`);
 for (const [, key] of catalog.matchAll(/\{"((?:errors|pages)\.[a-z_]+)", "::/g)) {

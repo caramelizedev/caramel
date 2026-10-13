@@ -156,3 +156,7 @@ html { scroll-padding-top:0 }
   #caramel-site.c-documentation .c-note { padding:18px }
   #caramel-site.c-documentation .c-components { grid-template-columns:1fr }
 }
+/* A pattern map: one row per pattern, its word and the section with its rules. */
+#caramel-site.c-documentation .c-doccontent table.c-map { width:100%; border-collapse:collapse; margin:0 0 24px; font-size:15px; line-height:1.6 }
+#caramel-site.c-documentation .c-doccontent .c-map :is(th,td) { padding:10px 12px 10px 0; border-bottom:1px solid var(--line); text-align:left; vertical-align:top }
+#caramel-site.c-documentation .c-doccontent .c-map th { font-weight:500; color:var(--subtle) }
