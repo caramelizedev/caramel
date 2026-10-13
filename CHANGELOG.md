@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.14.0 - 2026-10-13
+
+### Upgrade notes
+
 - In an application that requires `caramel/sweet_talk`, a `SweetTalk::Refusal` that an action's `handle` does not rescue now answers 422 with its message under `_base`, shaped like a failed contract: `{"errors": {"_base": [message]}}` for JSON clients, `contract_failure_page` for browsers and htmx, and text starting `ERR INVALID:422` for other clients ([ADR 0034](docs/decisions/0034-sweettalk-at-the-web-boundary.md)). A `SweetTalk::Missing` answers 404. Neither is reported to Crema as an error any more. An action that rescues them itself is unchanged, and `SweetTalk::Boundary` still answers 500. Asking an aggregate for its id before `create`, or an event for its subject before it is emitted, now raises `NilAssertionError` instead of `SweetTalk::Missing`.
 - A contract field may take a type that includes `Caramel::FieldValue(W)`, such as a SweetTalk value or an aggregate's id: `field quantity : Ordering::Quantity` binds as an `Int32`, and the value's refusal is the field's error ([ADR 0034](docs/decisions/0034-sweettalk-at-the-web-boundary.md)). `CARAMEL_FIELD_<NAME>` constants gain a sixth element, the declared type; a macro of your own that destructures exactly five elements must take six.
 - `frappe make domain` also writes `.claude/skills/sweettalk/SKILL.md`, a Claude Code skill that lists the SweetTalk rules agents most often break, each linked to its section of the guide, when the application has none; it never replaces an existing one. An application made with 0.13.0 that already has a domain gets it with its next `frappe make domain`, or now, after upgrading, with `mkdir -p .claude/skills/sweettalk && cp lib/caramel/templates/skills/sweettalk/SKILL.md .claude/skills/sweettalk/`. Run the same copy after a later upgrade to refresh it. To point other agents at it, add the line new applications get after `Domain:` in AGENTS.md: `Domain rules: .claude/skills/sweettalk/SKILL.md, which frappe make domain writes`.
@@ -19,6 +23,25 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - `__sweettalk_rows` is no longer callable from outside its aggregate. Code that built aggregates from `Rows` queries outside a domain uses a `finds` with a block instead.
 - SweetTalk: calling another context's service or module method, as in `Catalogue.price_of(tea)`, now counts as naming `Catalogue::` ([ADR 0036](docs/decisions/0036-sweettalk-strategic-design.md)). A context that does not follow Catalogue may make that call only inside `border Catalogue`; elsewhere it no longer compiles, so move the call into the border, or declare `follows: Catalogue`. In a border the call now draws a dependency edge, so two contexts whose borders call each other no longer compile: let one of them react to the other's events instead.
 - SweetTalk: code in a context may name `Caramel::Outbound` or `HTTP::Client` only inside a border with a system outside the program, `border Cards, outside: "the card gateway we charge through" do … end`; elsewhere in a context it no longer compiles, and the error names the context. Move such calls into that border and call it from the context, as in `Cards.charge(…)`. Code outside a context, such as an action or a job, is unchanged. A context can also name its subdomain with `subdomain: :core`, `:supporting` or `:generic`, and list with `publishes` the names other contexts may use; nothing changes until a domain uses them.
+
+### Breaking changes
+
+- **core:** bind SweetTalk values and ids as contract fields (f1ba1c3)
+- **sweettalk:** hold each lifecycle state in a PostgreSQL check (53b6511)
+- **sweettalk:** sort, limit and count queries, with a block escape and projection queries (67fb310)
+- **sweettalk:** publish a language and border outside systems (9118a35)
+
+### Features
+
+- **sweettalk:** answer refusals with 422 and missing aggregates with 404 (57d64b2)
+- **website:** publish a Markdown edition of the guides for agents (6efd6bd)
+- **frappe:** write a SweetTalk skill with frappe make domain (0b6037f)
+- **sweettalk:** name a rule once with specification (3f6ce3a)
+- **sweettalk:** mark a context's subdomain (3e68a84)
+
+### Fixes
+
+- **sweettalk:** store a two-word state as moves spells it (ac75117)
 
 ## 0.13.0 - 2026-10-12
 
