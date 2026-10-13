@@ -15,7 +15,10 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 ## Rules agents most often break
 
 - Give every context, value, aggregate, entity, event, projection, service and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
-- Name another context's types (`Other::`) only in a context that says `follows: Other`, or inside its `border Other`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-contexts
+- Name another context's types (`Other::`) or call its services (`Other.price_of`) only in a context that says `follows: Other`, or inside its `border Other`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-contexts
+- Once a context `publishes`, name and call only what it publishes. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-published
+- Name `Caramel::Outbound` or `HTTP::Client` only inside `border Name, outside: "…"`, call it from a `whenever`, and fake it in specs with `Corretto.stub_wire`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-outside
+- `subdomain: :core`, `:supporting` or `:generic` labels a context for readers and changes no rule. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-subdomains
 - Change one aggregate per command, service, policy or process step. For work across aggregates, write a `process`, or emit an event and react to it with `whenever`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Change state only in the aggregate's commands (`to`), never through `Rows`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
 - `has tea : Catalogue::Tea` stores an id: load the aggregate with `find` when you need it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
@@ -35,7 +38,6 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 Do not write these; the map says what your release has.
 
-- Published language, open-host service, a border on a system outside the program, and subdomain labels: planned for 0.14.0. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Shared kernel, partnership, customer/supplier and an event log: not planned. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 ## Verify
