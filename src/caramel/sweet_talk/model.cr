@@ -53,6 +53,15 @@ module SweetTalk
         end
       {% end %}
 
+      # The state as `moves` spells it, the text its `state` column stores.
+      def __sweettalk_state : String
+        case @state
+        {% for state in states %}
+        in State::{{ state.camelcase.id }} then {{ state }}
+        {% end %}
+        end
+      end
+
       {% for state, predecessors in before %}
         {% allowed = predecessors.map do |predecessor|
              "@state == State::#{predecessor.camelcase.id}"
@@ -60,7 +69,7 @@ module SweetTalk
         private def {{ state.id }}! : Nil
           unless {{ allowed.join(" || ").id }}
             raise ::SweetTalk::Refusal.new(
-              "{{ owner }} cannot become {{ state.id }} while #{@state.to_s.downcase}")
+              "{{ owner }} cannot become {{ state.id }} while #{__sweettalk_state}")
           end
           @state = State::{{ state.camelcase.id }}
         end

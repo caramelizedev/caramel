@@ -343,7 +343,7 @@ module SweetTalk
           {% copies << "@#{attribute[4].id} = fresh.@#{attribute[4].id}" %}
         {% end %}
       {% end %}
-      {% columns << "state: @state.to_s.downcase" if moves %}
+      {% columns << "state: __sweettalk_state" if moves %}
       {% columns << "removed_at: @__sweettalk_removed_at" %}
       {% referring = stored.select { |attribute| %w(reference record).includes?(attribute[2]) } %}
       {% lists = collections.map { |collection| ", #{collection[0].id} : #{collection[3].id}" } %}

@@ -71,7 +71,7 @@ module SweetTalk
         {% columns << "#{attribute[4].id}: @#{attribute[4].id}" unless attribute == key %}
       {% end %}
     {% end %}
-    {% columns << "state: @state.to_s.downcase" if moves %}
+    {% columns << "state: __sweettalk_state" if moves %}
     {% arguments = (["@__sweettalk_row"] + columns).join(", ") %}
     {% outside = "#{short.id}[…] is for whenever blocks; read with #{short.id}.all" %}
     {% locals = key_values.map_with_index { |_, index| "key_#{index}" }.join(", ") %}

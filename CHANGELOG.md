@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- SweetTalk stores a state of two or more words as `moves` spells it: 0.13.0 wrote `awaiting_payment` as `awaitingpayment`, so `finds state: :awaiting_payment` missed those rows. Respell existing rows in a migration, one `UPDATE <table> SET state = '<state>' WHERE state = '<state without underscores>'` per table and such state, such as `UPDATE ordering_payments SET state = 'awaiting_payment' WHERE state = 'awaitingpayment'`, and migrate.
+
 ## 0.13.0 - 2026-10-12
 
 ### Upgrade notes

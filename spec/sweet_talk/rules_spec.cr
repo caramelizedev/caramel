@@ -64,6 +64,18 @@ describe "SweetTalk's rules" do
     end
   end
 
+  it "finds a two-word state after a save" do
+    SweetTalkSpec.rolled_back do
+      first = Rules::Shelf::Tab.create(label: "a")
+      second = Rules::Shelf::Tab.create(label: "b")
+      first.relabel("c")
+      second.pay
+      states = SugarORM.sql("SELECT state FROM shelf_tabs ORDER BY id", as: {state: String})
+      states.map(&.[:state]).should eq(["awaiting_payment", "paid"])
+      Rules::Shelf::Tab.awaiting.map(&.id).should eq([first.id])
+    end
+  end
+
   it "refuses a service that changes a second aggregate, and rolls both back" do
     SweetTalkSpec.rolled_back do
       first, second = RulesSpec.box("first"), RulesSpec.box("second")

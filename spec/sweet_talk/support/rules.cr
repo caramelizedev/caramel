@@ -102,6 +102,21 @@ module Rules
       end
     end
 
+    aggregate Tab, means: "money owed for one box" do
+      has label : String
+      moves awaiting_payment >> paid
+
+      finds awaiting, where: {state: :awaiting_payment}
+
+      to relabel(label : String) do
+        @label = label
+      end
+
+      to pay do
+        paid!
+      end
+    end
+
     process Tally, means: "how much a box was counted, until it goes quiet" do
       key box : Box
       has total : Int32 = 0
