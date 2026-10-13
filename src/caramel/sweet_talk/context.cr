@@ -125,6 +125,7 @@ module SweetTalk
         {% end %}
         struct {{ name }} < ::SweetTalk::Value
           include Comparable({{ name }})
+          include ::Caramel::FieldValue(String)
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = "String"
@@ -148,6 +149,14 @@ module SweetTalk
 
           def self.__sweettalk_from_json(any : JSON::Any) : self
             new(any.as_s)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : String, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
           end
 
           def <=>(other : self)
@@ -190,6 +199,7 @@ module SweetTalk
         {% factors = times.is_a?(TupleLiteral) ? times : [times] unless times.is_a?(NilLiteral) %}
         struct {{ name }} < ::SweetTalk::Value
           include Comparable({{ name }})
+          include ::Caramel::FieldValue({{ wraps }})
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = {{ wraps.stringify }}
@@ -227,6 +237,14 @@ module SweetTalk
 
           def self.__sweettalk_from_json(any : JSON::Any) : self
             new(any.as_i64)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : {{ wraps }}, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
           end
 
           def self.zero : self

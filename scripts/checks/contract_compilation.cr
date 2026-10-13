@@ -25,7 +25,36 @@ cases = {
     "min/max apply only to String, Int32, Int64 and Float64 fields",
     "field active : Bool, min: 1",
   ],
-  "compile_unknown_access" => ["undefined method 'admin'"],
+  "compile_unknown_access"   => ["undefined method 'admin'"],
+  "compile_field_value_wire" => [
+    "Grams includes Caramel::FieldValue(Float32), but a field value binds from String, " \
+    "Int32, Int64, Float64, Bool or Time: weight",
+    "field weight : Grams",
+  ],
+  "compile_field_value_without_from_field" => [
+    "Grams includes Caramel::FieldValue(Int32) but defines no " \
+    "self.from_field(raw : Int32, & : String ->): weight",
+    "field weight : Grams",
+  ],
+  "compile_field_value_bounds" => [
+    "min/max apply only to String, Int32, Int64 and Float64 fields: count",
+    "field count : EvenCount, min: 2",
+  ],
+  "compile_array_field_value_wire" => [
+    "Grams includes Caramel::FieldValue(Float32), but a field value binds from String, " \
+    "Int32, Int64, Float64, Bool or Time: weights",
+    "field weights : Array(Grams), max: 3",
+  ],
+  "compile_array_field_value_without_from_field" => [
+    "Grams includes Caramel::FieldValue(Int32) but defines no " \
+    "self.from_field(raw : Int32, & : String ->): weights",
+    "field weights : Array(Grams), max: 3",
+  ],
+  # The negative control: a type that only defines from_field is not a field value.
+  "compile_duck_typed_value" => [
+    "unsupported Caramel::RequestContract field type: Grams",
+    "field weight : Grams",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/contracts/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)

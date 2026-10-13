@@ -69,10 +69,32 @@ module TeaShopWeb
     end
   end
 
+  # Binds an aggregate's id, values and a list of values as contract fields; ids here
+  # need no row.
+  struct AddLine < PageAction
+    ingress csrf: false, authenticate: :allowed?
+
+    contract do
+      field order : TeaShop::Ordering::Order::Id
+      field quantity : TeaShop::Ordering::Quantity
+      field receipt_to : TeaShop::Ordering::Email?
+      field tags : Array(TeaShop::Ordering::Quantity), max: 3
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      Caramel::Response.new(200, "order=#{contract.order.raw} quantity=#{contract.quantity.raw}")
+    end
+
+    private def allowed? : Bool
+      true
+    end
+  end
+
   Caramel::Router.draw do
     get "/teas/:tea/hold", Hold
     get "/teas/:tea/form", HoldForm
     get "/teas/:tea/claim", HoldOrConflict
     get "/boxes/:box/fill", FillWith
+    post "/orders/:order/lines", AddLine
   end
 end

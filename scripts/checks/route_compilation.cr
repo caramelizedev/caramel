@@ -28,6 +28,10 @@ cases = {
   "compile_defaulted_param" => {[
     "ROUTE CONTRACT TYPE MISMATCH", "without defaults", "Remediation:",
   ], NONE},
+  "compile_nilable_value_param" => {[
+    "ROUTE CONTRACT TYPE MISMATCH", "field 'count : EvenCount?'", "or field values bound from one",
+    "Remediation: declare `field count : EvenCount`",
+  ], NONE},
   "compile_undefined_action" => {[
     "Action 'Missing::Show' is undefined", "compile_undefined_action.cr:",
   ], NONE},

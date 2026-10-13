@@ -358,9 +358,16 @@ module SweetTalk
 
       # This aggregate's typed id.
       struct Id < ::SweetTalk::Identity
+        include ::Caramel::FieldValue(Int64)
+
         getter raw : Int64
 
         def initialize(@raw : Int64)
+        end
+
+        # Builds the id a contract field binds; any Int64 is one.
+        def self.from_field(raw : Int64, & : String ->) : self
+          new(raw)
         end
 
         def to_s(io : IO) : Nil

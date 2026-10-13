@@ -57,6 +57,32 @@ struct FileShow < RouterSpecAction
   end
 end
 
+# A field value (ADR 0034) that refuses an odd number.
+struct RouterSpecEven
+  include Caramel::FieldValue(Int32)
+
+  getter raw : Int32
+
+  def initialize(@raw : Int32)
+  end
+
+  def self.from_field(raw : Int32, & : String ->) : self?
+    return new(raw) if raw.even?
+    yield "must be even"
+    nil
+  end
+end
+
+struct EvenShow < RouterSpecAction
+  contract do
+    field count : RouterSpecEven
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    Caramel::Response.new(body: "even:#{contract.count.raw}")
+  end
+end
+
 module RouterSpecApp
   Caramel::Router.draw do
     get "/teams/new", TeamNew
@@ -64,6 +90,7 @@ module RouterSpecApp
     patch "/teams/:team_id", TeamUpdate
     get "/teams/:team_id/members", TeamMembers
     get "/files/:name", FileShow
+    get "/evens/:count", EvenShow
   end
 end
 
@@ -130,6 +157,16 @@ describe Caramel::Router do
     end
   end
 
+  it "binds a route parameter to a field value and answers 404 when it refuses" do
+    route("GET", "/evens/4").status.should eq(200)
+    route("GET", "/evens/4").body.should eq("even:4")
+    ["3", "x"].each do |count|
+      response = route("GET", "/evens/#{count}")
+      response.status.should eq(404)
+      response.body.should eq("Not found")
+    end
+  end
+
   it "dispatches a POST method override to its route" do
     route("POST", "/teams/7", "_method=PATCH&name=Owls").body.should eq("update:7:Owls")
   end
@@ -181,6 +218,7 @@ describe Caramel::Router do
       Entry.new("PATCH", "/teams/:team_id", "TeamUpdate", "team_id:Int64(min=1) name:String?"),
       Entry.new("GET", "/teams/:team_id/members", "TeamMembers", "team_id:String"),
       Entry.new("GET", "/files/:name", "FileShow", "name:String"),
+      Entry.new("GET", "/evens/:count", "EvenShow", "count:RouterSpecEven(Int32)"),
     ])
   end
 

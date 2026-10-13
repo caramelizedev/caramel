@@ -15,6 +15,12 @@ module WebSpec
     APPLICATION.handle(HTTP::Request.new("GET", path, headers))
   end
 
+  def self.post(path : String, body : String, accept = "*/*") : Caramel::Response
+    headers = HTTP::Headers{"Host" => "teashop.caramel", "Accept" => accept,
+                            "Content-Type" => "application/x-www-form-urlencoded"}
+    APPLICATION.handle(HTTP::Request.new("POST", path, headers, body))
+  end
+
   def self.accepting(type : String) : HTTP::Headers
     HTTP::Headers{"Accept" => type}
   end
@@ -120,5 +126,35 @@ describe "SweetTalk at the web boundary" do
       WebSpec::REPORTS.first.handled?.should be_false
       WebSpec::REPORTS.first.error_class.should eq("SweetTalk::Boundary")
     end
+  end
+
+  it "answers a value's refusal under its field" do
+    response = WebSpec.post("/orders/7/lines", "quantity=11", "application/json")
+    response.status.should eq(422)
+    response.body.should eq(%({"errors":{"quantity":["Quantity must be between 1 and 10"]}}))
+  end
+
+  it "binds an aggregate's id from the route and 404s one that is not an Int64" do
+    response = WebSpec.post("/orders/7/lines", "quantity=3")
+    response.status.should eq(200)
+    response.body.should eq("order=7 quantity=3")
+    WebSpec.post("/orders/abc/lines", "quantity=3").status.should eq(404)
+  end
+
+  it "binds a nilable string value and an array of values" do
+    email = WebSpec.post("/orders/7/lines", "quantity=2&receipt_to=ada")
+    email.status.should eq(422)
+    email.body.should contain("FIELD receipt_to: Email must match /\\A[^@\\s]+@[^@\\s]+\\z/\n")
+    tags = WebSpec.post("/orders/7/lines", "quantity=2&tags=1&tags=11&tags=1")
+    tags.status.should eq(422)
+    tags.body.should contain("FIELD tags[1]: Quantity must be between 1 and 10\n")
+    tags.body.should contain("FIELD tags[2]: repeats an earlier item\n")
+  end
+
+  it "lists value fields with both types" do
+    route = TeaShopWeb::AppRouter.routes.find! { |entry| entry.path == "/orders/:order/lines" }
+    route.contract.should eq("order:Order::Id(Int64) quantity:Ordering::Quantity(Int32) " \
+                             "receipt_to:Ordering::Email(String)? " \
+                             "tags:Array(Ordering::Quantity(Int32))(max=3)")
   end
 end

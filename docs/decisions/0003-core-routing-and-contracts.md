@@ -2,7 +2,7 @@
 
 Date: 2026-09-27
 
-Status: accepted. Decisions 3 and 4 are amended by [ADR 0020](0020-action-ingress-and-json-bodies.md).
+Status: accepted. Decisions 3 and 4 are amended by [ADR 0020](0020-action-ingress-and-json-bodies.md), and decision 1 by [ADR 0034](0034-sweettalk-at-the-web-boundary.md).
 
 ## Context
 
@@ -13,9 +13,9 @@ without allocating.
 
 ## Decision
 
-1. **Contract declarations are compile-time constants.** An Action declares `contract do … end` with lines of the form `field name : Type, min:, max:, default:`. `field name : Array(T), max:, min:` declares a bounded array of one of the scalar types; it cannot bind a route parameter. Each `field` records a `CARAMEL_FIELD_<NAME>` constant holding the name, scalar type, nilability, whether a default exists, and a summary. `Router.draw` reads those constants to verify every route. A route fails to compile when:
+1. **Contract declarations are compile-time constants.** An Action declares `contract do … end` with lines of the form `field name : Type, min:, max:, default:`. `field name : Array(T), max:, min:` declares a bounded array of one of the scalar types or field values; it cannot bind a route parameter. A field value is a type that binds from a scalar type (ADR 0034 decision 3). Each `field` records a `CARAMEL_FIELD_<NAME>` constant holding the name, scalar type, nilability, whether a default exists, a summary and the declared type. `Router.draw` reads those constants to verify every route. A route fails to compile when:
    - its action is undefined, does not inherit from `Caramel::Action`, or has no contract;
-   - it binds a `:param` to a missing field, or to a field that is nilable, defaulted, or not `String`, `Int32` or `Int64`.
+   - it binds a `:param` to a missing field, or to a field that is nilable, defaulted, or not bound from `String`, `Int32` or `Int64`.
 
    Each error names the route's source location and gives a one-line remedy.
 2. **Contracts are parsed, never hydrated.** `Contract.parse(input)` binds each field by name from, in order, the route parameters, the form body and the query. It collects every error. A name sent twice is an error, except for an `Array` field, which takes each occurrence in order. The router calls `handle` only with a valid contract.

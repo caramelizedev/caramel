@@ -139,6 +139,7 @@ PROBLEMS = [
   {"job_alias_taken",
    "Shop::Pantry::Larder::WhenBlendRefilled claims \"Shop::Pantry::Larder::WhenBlendRestocked\" " \
    "in renamed_from, but Shop::Pantry::Larder::WhenBlendRestocked is a job of that name"},
+  {"composite_field", "unsupported Caramel::RequestContract field type: Ordering::Address"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

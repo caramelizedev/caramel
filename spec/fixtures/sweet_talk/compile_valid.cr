@@ -94,5 +94,24 @@ module Shop
   end
 end
 
+# An action whose contract binds an aggregate's id, a value and a list of values.
+struct AddLine < Caramel::Action
+  contract do
+    field order : Shop::Ordering::Order::Id
+    field quantity : Shop::Ordering::Quantity
+    field tags : Array(Shop::Ordering::Quantity), max: 3
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    Caramel::Response.new(body: "#{contract.order} #{contract.quantity.raw} #{contract.tags.size}")
+  end
+end
+
+module Shop
+  Caramel::Router.draw do
+    post "/orders/:order/lines", AddLine
+  end
+end
+
 SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
