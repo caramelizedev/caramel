@@ -23,10 +23,11 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Stop a command with `refuse "message"`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-commands
 - State invariants with `never` and `always`, and move the lifecycle with its movers, such as `placed!`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-lifecycle
 - Use a `factory` when an aggregate must start with an event; it then has no `create`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-factories
-- Read aggregates with `find`, `find?`, `all` and the queries `finds` declares. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-queries
+- Read with `find`, `find?`, `all`, and the `finds` and `counts` an aggregate or a projection declares; sort and limit with `order:` and `first:`. Use a `finds … do |rows|` block only for what `where:` cannot say. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-queries
+- State a rule once with `specification`, then use `name?` in guards and `satisfying:` in queries. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-specifications
 - Rename with `renamed_from:`, so tables, channels and queued jobs keep their stored names. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-renames
 - In a multi-tenant application, name the `tenant` before the first context, and mark a context `central: true` only when every tenant shares its rows. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-tenancy
-- After changing what the domain stores, run `frappe db diff --name NAME`, then `frappe migrate`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
+- After changing what the domain stores, its lifecycle states included, run `frappe db diff`, then `frappe migrate`; a row in a removed state stops the migration. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-lifecycle
 - A contract field may be a value or an aggregate's id: it binds from the type the value wraps, and the value's refusal becomes the field's error. A value with parts is one field per part. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
 - A refusal that an action's `handle` does not rescue answers 422, and `SweetTalk::Missing` answers 404; override `render_refusal` to answer otherwise. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
 
@@ -34,9 +35,6 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 Do not write these; the map says what your release has.
 
-- Specifications: planned for 0.14.0. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
-- Query ordering, limits and counts in `finds`, a query block, and `finds` on projections: planned for 0.14.0. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
-- A database check of lifecycle states: planned for 0.14.0. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Published language, open-host service, a border on a system outside the program, and subdomain labels: planned for 0.14.0. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Shared kernel, partnership, customer/supplier and an event log: not planned. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
