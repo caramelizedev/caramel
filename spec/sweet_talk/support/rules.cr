@@ -129,6 +129,24 @@ module Rules
 
       finds on_sale_labelled(label : String), where: {label: label}, satisfying: OnSale
       finds sold_out_jars, where: {state: :sold_out}
+      finds fullest(count : Int32), order: {count: :desc}, first: count
+      finds by_label, order: {label: :asc}
+      finds on_sale_fullest, satisfying: OnSale, order: {count: :desc, label: :asc}
+      finds wide_newest(count : Int32),
+        where: {size: Size.new(width: Count.new(2), depth: Count.new(2))},
+        order: {id: :desc}, first: count
+      counts on_sale_count, satisfying: OnSale
+      counts gifts, where: {note: "gift"}
+      counts live_jars
+
+      # One transaction stamps every row it creates alike, so id breaks the tie.
+      finds newest(count : Int32) do |jars|
+        jars.order_by(:created_at, :desc).order_by(:id, :desc).limit(count)
+      end
+
+      finds labelled_like(prefix : String) do |jars|
+        jars.where("label LIKE ?", "#{prefix}%").order_by(:label, :asc)
+      end
 
       to sell_out do
         refuse "Only a jar on sale sells out." unless on_sale?

@@ -46,6 +46,8 @@ module TenantShop
       factory open(buyer : String) do
       end
 
+      counts placed_count, where: {state: :placed}
+
       to add(tea : Catalogue::Tea, tins : Int32) do
         @lines << Line.new(tea, tins)
       end

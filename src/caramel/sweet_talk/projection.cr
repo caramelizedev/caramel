@@ -3,6 +3,7 @@ module SweetTalk
   # A read model: a table with one row per key, kept by Cold Brew jobs.
   abstract class Projection < Model
     include Keyed
+    include Queried
 
     # `key tea : Catalogue::Tea` names the attribute that picks a row.
     macro key(decl)
@@ -110,6 +111,18 @@ module SweetTalk
     def self.all : Array(self)
       {{ row }}.query.order_by(:id, :asc).to_a.map { |row| new(stored: row) }
     end
+
+    {% if type < ::SweetTalk::Projection %}
+      # The rows every `finds` and `counts` starts from: all of them.
+      protected def self.__sweettalk_live
+        {{ row }}.query
+      end
+
+      # Builds a projection from each row the query reads. Protected, as an aggregate's is.
+      protected def self.__sweettalk_rows(query) : Array(self)
+        query.to_a.map { |row| new(stored: row) }
+      end
+    {% end %}
 
     # The key as JSON, for a deadline's job, and back.
     def __sweettalk_key_json : String

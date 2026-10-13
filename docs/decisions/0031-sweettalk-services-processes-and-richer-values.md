@@ -3,8 +3,8 @@
 Date: 2026-10-09
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and 6.
-Decision 11 is amended by [ADR 0033](0033-sweettalk-multi-tenancy.md), and decision 11
-by [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md).
+Decision 11 is amended by [ADR 0033](0033-sweettalk-multi-tenancy.md), and decisions 3
+and 11 by [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md).
 
 ## Context
 

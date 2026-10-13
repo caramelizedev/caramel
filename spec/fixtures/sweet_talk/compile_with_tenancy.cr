@@ -34,6 +34,15 @@ module Shop
   context Catalogue, means: "the teas on our shelves" do
     aggregate Tea, means: "one tea we sell" do
       has name : String
+
+      counts named(name : String), where: {name: name}
+    end
+
+    projection Shelf, means: "teas shelved under one name" do
+      key name : String
+      has teas : Int32 = 0
+
+      counts stocked, where: {teas: 1..}
     end
   end
 end

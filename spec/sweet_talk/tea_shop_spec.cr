@@ -522,6 +522,50 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "finds a member's newest orders, counts the placed ones, and finds the orders " \
+     "holding a tea" do
+    SweetTalkSpec.rolled_back do
+      sencha, assam = TeaShopSpec.tea("Sencha"), TeaShopSpec.tea("Assam")
+      ada, bob = TeaShopSpec.account("ada@example.com"), TeaShopSpec.account("bob@example.com")
+      first = TeaShopSpec.order({sencha, 1}, member: ada).tap(&.place)
+      second = TeaShopSpec.order({assam, 1}, member: ada).tap(&.place)
+      third = TeaShopSpec.order({sencha, 1}, member: ada)
+      bobs = TeaShopSpec.order({sencha, 1}, member: bob).tap(&.place)
+
+      Ordering::Order.newest_for(ada, 2).map(&.id).should eq([third.id, second.id])
+      Ordering::Order.placed_count_for(ada).should eq(2)
+      Ordering::Order.holding(assam.id).map(&.id).should eq([second.id])
+      third.cancel
+      third.forget
+      Ordering::Order.holding(sencha.id).map(&.id).sort_by!(&.raw).should eq([first.id, bobs.id])
+    end
+  end
+
+  it "reads the best-selling teas from Sales with finds and counts" do
+    SweetTalkSpec.rolled_back do |connection|
+      teas = %w[Sencha Assam Darjeeling Earl\ Grey Genmaicha].map do |name|
+        TeaShopSpec.tea(name, stock: 100)
+      end
+      ids = teas.map(&.id.raw)
+      TeaShopSpec.order({teas[0], 3}, {teas[1], 4}).place
+      TeaShopSpec.order({teas[0], 2}, {teas[2], 1}).place
+      TeaShopSpec.order({teas[4], 6}).place
+      TeaShopSpec.order({teas[3], 5})
+      TeaShopSpec.drain(connection)
+      sold = ->(rows : Array(Ordering::Sales)) { rows.map { |row| {row.tea.raw, row.sold} } }
+
+      sold.call(Ordering::Sales.best_sellers(2)).should eq([{ids[4], 6}, {ids[0], 5}])
+      sold.call(Ordering::Sales.selling(4)).should eq([{ids[4], 6}, {ids[0], 5}, {ids[1], 4}])
+      Ordering::Sales.of(teas[1]).map(&.sold).should eq([4])
+      Ordering::Sales.of(teas[3]).should be_empty
+      before = SugarORM::Repo.statements_executed
+      Ordering::Sales.sold_any.should eq(4)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      sold.call(Ordering::Sales.of_teas([ids[2], ids[0], ids[3]]))
+        .should eq([{ids[0], 5}, {ids[2], 1}])
+    end
+  end
+
   it "forgets a cancelled order: find, find? and finds skip it, and its row stays" do
     SweetTalkSpec.rolled_back do
       tea = TeaShopSpec.tea("Sencha")

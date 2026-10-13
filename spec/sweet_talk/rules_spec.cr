@@ -264,4 +264,34 @@ describe "SweetTalk's rules" do
     {on_sale.kind, on_sale.name, on_sale.context, on_sale.means}
       .should eq({"specification", "OnSale", "Shelf", "a sealed jar still on the shelf"})
   end
+
+  it "orders, limits and counts in PostgreSQL" do
+    SweetTalkSpec.rolled_back do
+      jars = RulesSpec.jars
+      RulesSpec.places(jars, Rules::Shelf::Jar.fullest(3)).should eq([6, 9, 3])
+      RulesSpec.places(jars, Rules::Shelf::Jar.by_label).should eq((1..10).to_a)
+      RulesSpec.places(jars, Rules::Shelf::Jar.on_sale_fullest).should eq([9, 3, 2, 7, 10])
+      RulesSpec.places(jars, Rules::Shelf::Jar.wide_newest(2)).should eq([10, 8])
+      counts = {
+        -> { Rules::Shelf::Jar.on_sale_count }, -> { Rules::Shelf::Jar.gifts },
+        -> { Rules::Shelf::Jar.live_jars },
+      }.map do |count|
+        before = SugarORM::Repo.statements_executed
+        {count.call, SugarORM::Repo.statements_executed - before}
+      end
+      counts.should eq({ {5_i64, 1}, {3_i64, 1}, {10_i64, 1} })
+    end
+  end
+
+  it "narrows the live rows in a finds block and builds jars from them" do
+    SweetTalkSpec.rolled_back do
+      jars = RulesSpec.jars
+      RulesSpec.places(jars, Rules::Shelf::Jar.newest(3)).should eq([10, 9, 8])
+      RulesSpec.places(jars, Rules::Shelf::Jar.labelled_like("f")).should eq([6])
+      jars[5].forget
+      Rules::Shelf::Jar.labelled_like("f").should be_empty
+      RulesSpec.places(jars, Rules::Shelf::Jar.fullest(3)).should eq([9, 3, 8])
+      Rules::Shelf::Jar.live_jars.should eq(9)
+    end
+  end
 end

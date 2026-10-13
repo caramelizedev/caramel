@@ -17,6 +17,5 @@ module Shop
   end
 end
 
-Shop::Ordering::Order.of([] of Shop::Ordering::Order::Line)
 SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)

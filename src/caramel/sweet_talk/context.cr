@@ -593,6 +593,67 @@ module SweetTalk
       typeof({{ name }}.__sweettalk_condition)
     end
 
+    # Checks every `finds` and `counts` of this context's aggregates and projections when
+    # the context closes, whether or not anything calls them: each key names a stored
+    # attribute or `state:` a declared state, each `order:` key `id` or an attribute stored
+    # in one column, and `satisfying:` a specification on the same aggregate.
+    macro __sweettalk_check_queries
+      {% depth = @type.name.split("::").size + 1 %}
+      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::Projection.all_subclasses %}
+      {% owners = owners.select do |owner|
+           owner.name.starts_with?("#{@type.name}::") && owner.name.split("::").size == depth
+         end %}
+      {% for target in owners %}
+        {% short = target.name.split("::").last %}
+        {% attributes = target.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |constant| target.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+        {% moves = target.has_constant?("SWEETTALK_MOVES") && target.constant("SWEETTALK_MOVES") %}
+        {% names = attributes.reject { |attribute| attribute[2] == "entities" }
+             .map { |attribute| attribute[0] } %}
+        {% names << "state" if moves %}
+        {% for constant in target.constants.select(&.starts_with?("SWEETTALK_QUERY_")) %}
+          {% query = target.constant(constant) %}
+          {% word = "#{query[0].id} #{query[1].id}" %}
+          {% at = "\n  --> #{query[6].id}" %}
+          {% for key in query[2] %}
+            {% attribute = attributes.find { |attribute| attribute[0] == key } %}
+            {% if key == "state" && !moves %}
+              {% raise "#{word.id} filters on state, which #{short.id} does not have; it has " +
+                       "#{names.join(", ").id}" + at %}
+            {% elsif key != "state" && !attribute %}
+              {% raise "#{word.id} filters on #{key.id}, which #{short.id} does not have; it " +
+                       "has #{names.join(", ").id}" + at %}
+            {% elsif attribute && attribute[2] == "entities" %}
+              {% raise "#{word.id} cannot filter on #{key.id}, a list of entities" + at %}
+            {% end %}
+          {% end %}
+          {% for state in query[3] %}
+            {% unless moves.includes?(state) %}
+              {% raise "#{word.id} asks for state #{state.id}, which #{short.id} does not " +
+                       "have; states: #{moves.join(", ").id}" + at %}
+            {% end %}
+          {% end %}
+          {% for key in query[4] %}
+            {% attribute = attributes.find { |attribute| attribute[0] == key } %}
+            {% sortable = key == "id" ||
+                          (attribute && !%w[entities composite].includes?(attribute[2])) %}
+            {% unless sortable %}
+              {% raise "#{word.id} orders by #{key.id}, which #{short.id} cannot sort by: " +
+                       "order by id, or by an attribute stored in one column" + at %}
+            {% end %}
+          {% end %}
+          {% if query[5] %}
+            {% rule = parse_type(query[5]).resolve? %}
+            {% unless rule && rule < ::SweetTalk::Specification &&
+                        rule.constant("SWEETTALK_ON") == target.name.stringify %}
+              {% raise "#{word.id} takes satisfying: a specification on #{short.id}, not " +
+                       "#{query[5].id}" + at %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    end
+
     # `border Other do … end`: the only code in this context that may name `Other::`.
     # Each `whenever` and `compensate` in it carries the border's name, which names its
     # job.
@@ -762,6 +823,8 @@ module SweetTalk
       end
 
       {{ body }}
+
+      __sweettalk_check_queries
     end
   end
 end

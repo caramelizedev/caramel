@@ -39,6 +39,11 @@ module Shop
       end
 
       finds placed_to(receipt_to : Email), where: {receipt_to: receipt_to, state: :placed}
+      finds newest(count : Int32), order: {id: :desc}, first: count
+      counts placed_count, where: {state: :placed}
+      finds holding(tea : Int64) do |orders|
+        orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea = ?)", tea)
+      end
 
       to add(tea : Int64, quantity : Quantity) do
         refuse "Teas can be added only while the order is open." unless open?
@@ -60,6 +65,18 @@ module Shop
 
     specification Settled, on: Order, where: {state: [:placed, :cancelled]},
       means: "an order no longer being filled"
+
+    projection Sales, means: "tins sold of one tea" do
+      key tea : Int64
+      has sold : Int32 = 0
+
+      finds best_sellers(count : Int32), order: {sold: :desc}, first: count
+      counts selling, where: {sold: 1..}
+
+      whenever Order::Placed, each: :lines do |placed, line|
+        Sales[line.tea].sold += line.quantity.raw
+      end
+    end
 
     whenever Order::Opened do |opened|
       opened.receipt_to
