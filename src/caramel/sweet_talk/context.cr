@@ -416,6 +416,183 @@ module SweetTalk
       {% end %}
     end
 
+    # `specification Dispatchable, on: Order, where: {state: :placed}, means: "…"` is a
+    # rule an aggregate declared before it satisfies or not, stated once. `where:` takes
+    # what `finds` takes, or specifications on the same aggregate joined by `&`, `|` and
+    # `!`. It adds `Order#dispatchable?`, read in Crystal, and the same rule as a SugarORM
+    # condition, read by PostgreSQL in `Order.all(satisfying: Dispatchable)` and in
+    # `finds …, satisfying: Dispatchable`. `!` reads as `IS NOT TRUE`, so a NULL column
+    # fails a rule and passes its negation in both readings.
+    macro specification(name, on = nil, where = nil, means = nil, &block)
+      {% context = @type.name.split("::").last %}
+      {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
+                    "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
+      {% if block %}
+        {% name.raise "specification #{name} takes where:, which SweetTalk reads in Crystal " +
+                      "and in PostgreSQL alike, not a block: keep a rule PostgreSQL cannot " +
+                      "read in a never, an always or a method" %}
+      {% end %}
+      {% target = on.is_a?(Path) && on.resolve? %}
+      {% unless target && target < ::SweetTalk::Aggregate &&
+                  target.name.starts_with?("#{@type.name}::") %}
+        {% name.raise "specification #{name} needs on: an aggregate of #{context.id} declared " +
+                      "before it, as in specification Dispatchable, on: Order, where: " +
+                      "{state: :placed}" %}
+      {% end %}
+      {% short = target.name.split("::").last %}
+      {% predicate = "#{name.stringify.underscore.id}?" %}
+      {% if target.has_method?(predicate) %}
+        {% name.raise "specification #{name} would define #{short.id}##{predicate.id}, which " +
+                      "#{short.id} already has: name the rule for what it means" %}
+      {% end %}
+      {% attributes = target.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+           .map { |constant| target.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+      {% moves = target.has_constant?("SWEETTALK_MOVES") && target.constant("SWEETTALK_MOVES") %}
+      {% names = attributes.reject { |attribute| attribute[2] == "entities" }
+           .map { |attribute| attribute[0] } %}
+      {% names << "state" if moves %}
+      {% grammar = "specification #{name} takes where: {attribute: value}, or specifications " +
+                   "on #{short.id} joined by &, | and !, as in where: Dispatchable & !Rushed" %}
+      # Flattens the where: tree breadth first with an explicit list, since a macro cannot
+      # recurse: `kids[i]` holds the positions of node i's operands, 128 nodes at most.
+      {% nodes = [where] %}
+      {% kids = [] of Nil %}
+      {% index = 0 %}
+      {% for step in 0..127 %}
+        {% if index < nodes.size %}
+          {% node = nodes[index] %}
+          {% if node.is_a?(Expressions) && node.expressions.size == 1 %}
+            {% node = node.expressions[0] %}
+            {% nodes[index] = node %}
+          {% end %}
+          {% joins = node.is_a?(Call) && %w[& |].includes?(node.name.stringify) &&
+                     node.args.size == 1 %}
+          {% if joins %}
+            {% kids << [nodes.size, nodes.size + 1] %}
+            {% nodes << node.receiver %}
+            {% nodes << node.args[0] %}
+          {% elsif node.is_a?(Not) %}
+            {% kids << [nodes.size] %}
+            {% nodes << node.exp %}
+          {% else %}
+            {% kids << [] of Nil %}
+          {% end %}
+          {% index = index + 1 %}
+        {% end %}
+      {% end %}
+      # Then reads it leaves first: each node's Crystal predicate and SugarORM condition.
+      {% preds = {} of Nil => Nil %}
+      {% conds = {} of Nil => Nil %}
+      {% row = target.constant("SWEETTALK_ROW").id %}
+      {% typings = [] of Nil %}
+      {% for offset in 0...nodes.size %}
+        {% position = nodes.size - 1 - offset %}
+        {% node = nodes[position] %}
+        {% children = kids[position] %}
+        {% if node.is_a?(Call) && node.name.stringify == "&" %}
+          {% preds[position] = "(#{preds[children[0]].id} && #{preds[children[1]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_all([#{conds[children[0]].id}, " +
+                               "#{conds[children[1]].id}])" %}
+        {% elsif node.is_a?(Call) && node.name.stringify == "|" %}
+          {% preds[position] = "(#{preds[children[0]].id} || #{preds[children[1]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_any([#{conds[children[0]].id}, " +
+                               "#{conds[children[1]].id}])" %}
+        {% elsif node.is_a?(Not) %}
+          {% preds[position] = "!(#{preds[children[0]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_none(#{conds[children[0]].id})" %}
+        {% elsif node.is_a?(Path) %}
+          {% other = node.resolve? %}
+          {% unless other && other < ::SweetTalk::Specification &&
+                      other.constant("SWEETTALK_ON") == target.name.stringify %}
+            {% node.raise "specification #{name} joins #{node}, which is not a specification " +
+                          "on #{short.id} declared before it" %}
+          {% end %}
+          {% preds[position] = "#{other.name.split("::").last.underscore.id}?" %}
+          {% conds[position] = "::#{other}.__sweettalk_condition" %}
+        {% elsif node.is_a?(NamedTupleLiteral) %}
+          {% checks = [] of Nil %}
+          {% wheres = [] of Nil %}
+          {% for key, value in node %}
+            {% if key.stringify == "state" %}
+              {% unless moves %}
+                {% value.raise "specification #{name} filters on state, which #{short.id} does " +
+                               "not have; it has #{names.join(", ").id}" %}
+              {% end %}
+              {% states = value.is_a?(ArrayLiteral) ? value : [value] %}
+              {% for state in states %}
+                {% unless moves.includes?(state.id.stringify) %}
+                  {% state.raise "specification #{name} asks for state #{state.id}, which " +
+                                 "#{short.id} does not have; states: #{moves.join(", ").id}" %}
+                {% end %}
+              {% end %}
+              {% wanted = states.map(&.id.stringify) %}
+              {% wanted = wanted[0] unless value.is_a?(ArrayLiteral) %}
+              {% checks << "::SweetTalk.__sweettalk_holds?(__sweettalk_state, #{wanted})" %}
+              {% wheres << "::SugarORM::Condition.column(\"state\", #{wanted})" %}
+            {% else %}
+              {% attribute = attributes.find { |attribute| attribute[0] == key.stringify } %}
+              {% if !attribute %}
+                {% value.raise "specification #{name} filters on #{key.id}, which #{short.id} " +
+                               "does not have; it has #{names.join(", ").id}" %}
+              {% elsif attribute[2] == "entities" %}
+                {% value.raise "specification #{name} cannot filter on #{key.id}, a list of " +
+                               "entities: PostgreSQL reads one #{short.id} row; keep a rule " +
+                               "over #{key.id} in a never, an always or a method" %}
+              {% elsif attribute[2] == "composite" %}
+                {% for part in attribute[7] %}
+                  {% raw = part[4] == "value" ? ".raw" : "" %}
+                  {% have = "@#{attribute[0].id}.#{part[0].id}#{raw.id}" %}
+                  {% want = "::SweetTalk.column((#{value}).#{part[0].id})" %}
+                  {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
+                  {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% typings << "typeof(#{row}.query.where(#{part[1].id}: #{want.id}))" %}
+                {% end %}
+              {% else %}
+                {% have = "@#{attribute[4].id}" %}
+                {% have = "@#{attribute[0].id}.raw" if attribute[2] == "value" %}
+                {% want = "::SweetTalk.column(#{value})" %}
+                {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
+                {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% typings << "typeof(#{row}.query.where(#{attribute[4].id}: #{want.id}))" %}
+              {% end %}
+            {% end %}
+          {% end %}
+          {% preds[position] = "(#{checks.join(" && ").id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_all([#{wheres.join(", ").id}])" %}
+        {% else %}
+          {% (node.is_a?(Nop) || node.is_a?(NilLiteral) ? name : node).raise grammar %}
+        {% end %}
+      {% end %}
+      struct {{ name }} < ::SweetTalk::Specification
+        SWEETTALK_KIND  = "specification"
+        SWEETTALK_MEANS = {{ means }}
+        SWEETTALK_ON    = {{ target.name.stringify }}
+
+        # Whether *candidate* satisfies this rule, read in Crystal.
+        def self.satisfied_by?(candidate : ::{{ target }}) : Bool
+          candidate.{{ predicate.id }}
+        end
+
+        # The same rule as a SugarORM condition, read by PostgreSQL.
+        def self.__sweettalk_condition : ::SugarORM::Condition
+          # Types each value against its column as finds does, without running a query.
+          {{ typings.join("\n").id }}
+          {{ conds[0].id }}
+        end
+      end
+
+      class ::{{ target }}
+        # Whether this {{ short.id }} satisfies `specification {{ name }}`: {{ means.id }}
+        def {{ predicate.id }} : Bool
+          {{ preds[0].id }}
+        end
+      end
+
+      # Types the condition now, so a value of the wrong type does not compile even when no
+      # query asks for this rule; typeof runs nothing.
+      typeof({{ name }}.__sweettalk_condition)
+    end
+
     # `border Other do … end`: the only code in this context that may name `Other::`.
     # Each `whenever` and `compensate` in it carries the border's name, which names its
     # job.

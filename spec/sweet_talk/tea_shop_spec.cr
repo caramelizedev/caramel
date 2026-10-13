@@ -315,6 +315,10 @@ describe "The tea shop on PostgreSQL" do
       {shelf.stock.raw, shelf.held.raw}.should eq({3, 0})
       TeaShopSpec.holds.should eq([{"Sencha", "taken"}])
       TeaShopSpec.jobs.count(&.[:failed]).should eq(0)
+      Ordering::Order.all(satisfying: Ordering::Astray).map(&.id).should eq([order.id])
+      expect_raises(SweetTalk::Refusal, "An order whose parcel left cannot be forgotten.") do
+        found.forget
+      end
     end
   end
 
@@ -460,7 +464,7 @@ describe "The tea shop on PostgreSQL" do
       {"Catalogue", "a count of tins on the shelf"},
       {"Fulfilment", "tins of one tea packed in a parcel"},
     ])
-    glossary.size.should eq(27)
+    glossary.size.should eq(28)
     terms = glossary.map { |term| {term.kind, term.name, term.context} }
     terms.should contain({"service", "requote", "Ordering"})
     terms.should contain({"process", "Hold", "Ordering"})

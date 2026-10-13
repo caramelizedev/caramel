@@ -136,9 +136,13 @@ module TeaShop
 
       to forget do
         refuse "Only a cancelled order can be forgotten." unless cancelled?
+        refuse "An order whose parcel left cannot be forgotten." if astray?
         remove
       end
     end
+
+    specification Astray, on: Order, where: {state: :cancelled, late_parcel: true},
+      means: "a cancelled order whose parcel left anyway"
 
     service requote(order : Order::Id), returns: Catalogue::Cents,
       means: "what an order would cost at today's prices" do

@@ -58,6 +58,9 @@ module Shop
       end
     end
 
+    specification Settled, on: Order, where: {state: [:placed, :cancelled]},
+      means: "an order no longer being filled"
+
     whenever Order::Opened do |opened|
       opened.receipt_to
     end
@@ -115,3 +118,4 @@ end
 
 SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
+Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)

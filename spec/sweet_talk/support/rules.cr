@@ -2,8 +2,9 @@
 # service, unit-safe multiplication, a branching lifecycle, a factory whose event's
 # policy runs as the actor who made the aggregate, values whose bounds and lengths
 # PostgreSQL checks too, except one that opts out, a process whose steps may overlap and
-# whose deadline a step arms for its own span, a policy whose first delivery fails, and
-# an entity a second aggregate stores again as its own.
+# whose deadline a step arms for its own span, a policy whose first delivery fails, an
+# entity a second aggregate stores again as its own, a two-word state, and a jar that
+# specifications sort.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
@@ -116,6 +117,53 @@ module Rules
         paid!
       end
     end
+
+    aggregate Jar, means: "a jar of loose tea, which specifications sort" do
+      has label : String
+      has count : Count
+      has size : Size
+      has sealed : Bool = false
+      has note : String? = nil
+      moves on_shelf >> sold_out, on_shelf >> scrapped
+      never "A jar on sale needs a label." { on_sale? && label.blank? }
+
+      finds on_sale_labelled(label : String), where: {label: label}, satisfying: OnSale
+      finds sold_out_jars, where: {state: :sold_out}
+
+      to sell_out do
+        refuse "Only a jar on sale sells out." unless on_sale?
+        sold_out!
+      end
+
+      to scrap do
+        scrapped!
+      end
+
+      to relabel(label : String) do
+        @label = label
+      end
+
+      to forget do
+        refuse "Only a scrapped jar can be forgotten." unless scrapped?
+        remove
+      end
+    end
+
+    specification OnSale, on: Jar, where: {state: :on_shelf, sealed: true},
+      means: "a sealed jar still on the shelf"
+    specification Full, on: Jar, where: {count: Count.new(5)..}, means: "a jar of five or more"
+    specification Gift, on: Jar, where: {note: "gift"}, means: "a jar set aside as a gift"
+    specification Plain, on: Jar, where: !Gift, means: "a jar not set aside as a gift"
+    specification Wide, on: Jar, where: {size: Size.new(width: Count.new(2), depth: Count.new(2))},
+      means: "a jar in a two-by-two bin"
+    specification Unnoted, on: Jar, where: {note: nil}, means: "a jar without a note"
+    specification Gone, on: Jar, where: {state: [:sold_out, :scrapped]},
+      means: "a jar no longer on the shelf"
+    # Gift first: the removed jar 6 is full, so it reaches PostgreSQL's last OR operand,
+    # which only the parentheses where_condition adds keep behind removed_at IS NULL.
+    specification Stocked, on: Jar, where: Gift | Full, means: "a jar that is full or a gift"
+    specification Featured, on: Jar, where: OnSale & Stocked,
+      means: "a jar on sale that is full or a gift"
 
     process Tally, means: "how much a box was counted, until it goes quiet" do
       key box : Box

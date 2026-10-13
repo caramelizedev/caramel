@@ -4,7 +4,8 @@ Date: 2026-10-08
 
 Status: accepted. Decisions 2, 4 and 6 are amended by
 [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), and decisions 1 and 6
-by [ADR 0033](0033-sweettalk-multi-tenancy.md).
+by [ADR 0033](0033-sweettalk-multi-tenancy.md), and decision 2
+by [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md).
 
 ## Context
 

@@ -221,14 +221,18 @@ module SweetTalk
     # repository query: the aggregates whose attributes equal the expressions, by id, with
     # their entities, skipping removed ones. A value, an id, an aggregate, a record, a
     # list or a range of them compares by its column; a composite value by each part;
-    # `state:` takes a state or a list of states.
-    macro finds(call, where = nil)
+    # `state:` takes a state or a list of states. `satisfying: Dispatchable` adds a
+    # specification on this aggregate, and then `where:` may be left out.
+    macro finds(call, where = nil, satisfying = nil)
+      {% given = where.is_a?(NamedTupleLiteral) ||
+                 (where.is_a?(NilLiteral) && !satisfying.is_a?(NilLiteral)) %}
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
-                 call.args.all?(&.is_a?(TypeDeclaration)) && where.is_a?(NamedTupleLiteral) %}
+                 call.args.all?(&.is_a?(TypeDeclaration)) && given %}
       {% unless typed %}
         {% call.raise "finds takes a verb, typed arguments and where:, as in finds " +
                       "placed_for(member : Account), where: {member: member, state: :placed}" %}
       {% end %}
+      {% where = {} of Nil => Nil if where.is_a?(NilLiteral) %}
       {% verb = call.name %}
       {% short = @type.name.split("::").last %}
       {% at = "\n  --> #{call.filename.id}:#{call.line_number}:#{call.column_number}" %}
@@ -276,6 +280,15 @@ module SweetTalk
                 query = query.where(\{{ attribute[4].id }}: ::SweetTalk.column({{ value }}))
               \{% end %}
             {% end %}
+          {% end %}
+          {% unless satisfying.is_a?(NilLiteral) %}
+            \{% rule = {{ satisfying }}.resolve? %}
+            \{% unless rule && rule < ::SweetTalk::Specification &&
+                        rule.constant("SWEETTALK_ON") == @type.name.stringify %}
+              \{% raise "finds {{ verb }} takes satisfying: a specification on {{ short.id }}, " +
+                       "not {{ satisfying }}" + {{ at }} %}
+            \{% end %}
+            query = query.where_condition({{ satisfying }}.__sweettalk_condition)
           {% end %}
           __sweettalk_rows(query.order_by(:id, :asc))
         \{% end %}
@@ -430,6 +443,18 @@ module SweetTalk
 
       def self.all : Array(self)
         __sweettalk_rows({{ row }}.query.where(removed_at: nil).order_by(:id, :asc))
+      end
+
+      # The aggregates that satisfy *satisfying*, a specification on this aggregate, by
+      # id: the rule its predicate reads in Crystal, read by PostgreSQL.
+      def self.all(*, satisfying : S.class) : Array(self) forall S
+        \{% unless S < ::SweetTalk::Specification &&
+                    S.constant("SWEETTALK_ON") == {{ @type.name.stringify }} %}
+          \{% raise "{{ short.id }}.all(satisfying: #{S}) takes a specification on " +
+                   "{{ short.id }}" %}
+        \{% end %}
+        query = {{ row }}.query.where(removed_at: nil).where_condition(S.__sweettalk_condition)
+        __sweettalk_rows(query.order_by(:id, :asc))
       end
 
       # Builds an aggregate from each row the query reads, with one more query per

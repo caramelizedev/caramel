@@ -13,6 +13,45 @@ module RulesSpec
   def self.box(label : String) : Rules::Shelf::Box
     Rules::Shelf::Box.create(label: label, count: Rules::Shelf::Count.new(0))
   end
+
+  # Ten jars, the first to the tenth: label, count, size, sealed, note, and a move.
+  JARS = [
+    {"assam", 1, {1, 1}, false, nil, nil},
+    {"bancha", 5, {2, 2}, true, "gift", nil},
+    {"ceylon", 7, {1, 2}, true, nil, nil},
+    {"darjeeling", 2, {2, 2}, true, "gift", "sell_out"},
+    {"earl grey", 3, {1, 1}, false, "", "scrap"},
+    {"fujian", 10, {2, 2}, false, nil, "scrap"},
+    {"genmaicha", 4, {1, 2}, true, nil, nil},
+    {"hojicha", 6, {2, 2}, false, "fragile", nil},
+    {"irish", 9, {1, 1}, true, "gift", nil},
+    {"jasmine", 1, {2, 2}, true, "fragile", nil},
+  ]
+
+  # Creates the ten jars and returns them in order.
+  def self.jars : Array(Rules::Shelf::Jar)
+    JARS.map do |(label, count, (width, depth), sealed, note, move)|
+      size = Rules::Shelf::Size.new(width: Rules::Shelf::Count.new(width),
+        depth: Rules::Shelf::Count.new(depth))
+      jar = Rules::Shelf::Jar.create(label: label, count: Rules::Shelf::Count.new(count),
+        size: size, sealed: sealed, note: note)
+      jar.sell_out if move == "sell_out"
+      jar.scrap if move == "scrap"
+      jar
+    end
+  end
+
+  # Each found jar's place among *jars*, counting from 1, since ids differ between runs.
+  def self.places(jars : Array(Rules::Shelf::Jar), found : Array(Rules::Shelf::Jar))
+    found.map { |jar| jars.map(&.id).index!(jar.id) + 1 }
+  end
+
+  # Where *rule* puts the jars, read by PostgreSQL and then by Crystal over *all*.
+  def self.readings(jars : Array(Rules::Shelf::Jar), all : Array(Rules::Shelf::Jar),
+                    rule : S.class) forall S
+    {places(jars, Rules::Shelf::Jar.all(satisfying: rule)),
+     places(jars, all.select { |jar| rule.satisfied_by?(jar) })}
+  end
 end
 
 describe "SweetTalk's rules" do
@@ -170,5 +209,59 @@ describe "SweetTalk's rules" do
       second = Rules::Shelf::Rack.create(slots: Rules::Shelf::Rack.find(first.id).slots)
       [first, second].map { |rack| Rules::Shelf::Rack.find(rack.id).slots.size }.should eq([1, 1])
     end
+  end
+
+  it "spells a two-word state in a lifecycle refusal as moves does" do
+    SweetTalkSpec.rolled_back do
+      size = Rules::Shelf::Size.new(width: Rules::Shelf::Count.new(1),
+        depth: Rules::Shelf::Count.new(1))
+      jar = Rules::Shelf::Jar.create(label: "keemun", count: Rules::Shelf::Count.new(1),
+        size: size, sealed: true)
+      jar.sell_out
+      expect_raises(SweetTalk::Refusal, "Jar cannot become scrapped while sold_out") { jar.scrap }
+    end
+  end
+
+  it "reads every specification alike in Crystal and in PostgreSQL" do
+    SweetTalkSpec.rolled_back do
+      jars = RulesSpec.jars
+      all = Rules::Shelf::Jar.all
+      {% for rule, expected in {OnSale: [2, 3, 7, 9, 10], Full: [2, 3, 6, 8, 9],
+                                Gift: [2, 4, 9], Plain: [1, 3, 5, 6, 7, 8, 10],
+                                Wide: [2, 4, 6, 8, 10], Unnoted: [1, 3, 6, 7],
+                                Gone: [4, 5, 6], Stocked: [2, 3, 4, 6, 8, 9],
+                                Featured: [2, 3, 9]} %}
+        readings = RulesSpec.readings(jars, all, Rules::Shelf::{{ rule.id }})
+        wanted = {{ expected }}
+        { {{ rule.stringify }}, readings }.should eq({ {{ rule.stringify }}, {wanted, wanted} })
+      {% end %}
+    end
+  end
+
+  it "keeps a forgotten jar out of a specification that joins two with |" do
+    SweetTalkSpec.rolled_back do
+      jars = RulesSpec.jars
+      jars[5].forget
+      found = Rules::Shelf::Jar.all(satisfying: Rules::Shelf::Stocked)
+      RulesSpec.places(jars, found).should eq([2, 3, 4, 8, 9])
+    end
+  end
+
+  it "refuses through a specification in an invariant and a guard" do
+    SweetTalkSpec.rolled_back do
+      jars = RulesSpec.jars
+      expect_raises(SweetTalk::Refusal, "A jar on sale needs a label.") { jars[1].relabel("") }
+      expect_raises(SweetTalk::Refusal, "Only a jar on sale sells out.") { jars[0].sell_out }
+      RulesSpec.places(jars, Rules::Shelf::Jar.on_sale_labelled("ceylon")).should eq([3])
+      Rules::Shelf::Jar.on_sale_labelled("assam").should be_empty
+    end
+  end
+
+  it "lists specifications in the glossary" do
+    terms = SweetTalk.glossary.select { |term| term.kind == "specification" }
+    terms.count(&.context.==("Shelf")).should eq(9)
+    on_sale = terms.find! { |term| term.name == "OnSale" }
+    {on_sale.kind, on_sale.name, on_sale.context, on_sale.means}
+      .should eq({"specification", "OnSale", "Shelf", "a sealed jar still on the shelf"})
   end
 end

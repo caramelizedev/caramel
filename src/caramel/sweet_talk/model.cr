@@ -289,6 +289,11 @@ module SweetTalk
       {% call.raise "service belongs in a context, not in #{owner.id}" %}
     end
 
+    macro specification(name, on = nil, where = nil, means = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% name.raise "specification belongs in a context, after its aggregate, not in #{owner.id}" %}
+    end
+
     macro compensate(event, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% event.raise "compensate belongs beside a whenever in a context, a border or a process, " +

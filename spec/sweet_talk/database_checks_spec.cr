@@ -34,7 +34,8 @@ describe "SweetTalk's database checks" do
         check_fulfilment_parcel_packings_tins check_ordering_order_lines_price
         check_ordering_order_lines_quantity check_ordering_orders_receipt_to_length_3_254
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth
-        check_shelf_bins_size_width check_shelf_boxes_count check_store_teas_stock
+        check_shelf_bins_size_width check_shelf_boxes_count check_shelf_jars_count
+        check_shelf_jars_size_depth check_shelf_jars_size_width check_store_teas_stock
       ])
     end
   end

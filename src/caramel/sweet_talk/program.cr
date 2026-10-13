@@ -159,7 +159,8 @@ module SweetTalk
     {% kinds = [{"value", ::SweetTalk::Value}, {"value", ::SweetTalk::Composite},
                 {"aggregate", ::SweetTalk::Aggregate}, {"entity", ::SweetTalk::Entity},
                 {"event", ::SweetTalk::Event}, {"projection", ::SweetTalk::Projection},
-                {"process", ::SweetTalk::Process}] %}
+                {"process", ::SweetTalk::Process},
+                {"specification", ::SweetTalk::Specification}] %}
     {% for pair in kinds %}
       {% for type in pair[1].all_subclasses %}
         {% if type.has_constant?("SWEETTALK_MEANS") %}

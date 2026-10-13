@@ -140,12 +140,39 @@ PROBLEMS = [
    "Shop::Pantry::Larder::WhenBlendRefilled claims \"Shop::Pantry::Larder::WhenBlendRestocked\" " \
    "in renamed_from, but Shop::Pantry::Larder::WhenBlendRestocked is a job of that name"},
   {"composite_field", "unsupported Caramel::RequestContract field type: Ordering::Address"},
+  {"specification_entities", "specification Empty cannot filter on lines, a list of entities"},
+  {"specification_block",
+   "specification Empty takes where:, which SweetTalk reads in Crystal and in PostgreSQL " \
+   "alike, not a block"},
+  {"specification_derived",
+   "specification Big filters on size, which Order does not have; it has member, state"},
+  {"specification_unknown_state",
+   "specification Gone asks for state shipped, which Order does not have"},
+  {"specification_predicate_taken",
+   "specification Placed would define Order#placed?, which Order already has"},
+  {"specification_joins_unknown",
+   "specification Overdue joins Late, which is not a specification on Order declared before it"},
+  {"specification_without_on",
+   "specification Open needs on: an aggregate of Ordering declared before it"},
+  {"specification_in_aggregate",
+   "specification belongs in a context, after its aggregate, not in aggregate Order"},
+  {"specification_state_without_moves",
+   "specification Dispatchable filters on state, which Order does not have; it has member"},
+  {"specification_without_meaning",
+   "Shop::Ordering::Gone needs a meaning: add means: \"…\", the line its glossary entry shows"},
+  {"specification_not_a_where",
+   "specification Odd takes where: {attribute: value}, or specifications on Order joined by &, " \
+   "| and !"},
+  {"specification_value_type",
+   "no overload matches 'Rules::Shelf::Rows::Jar::QueryOf(NamedTuple())#where', count: String"},
+  {"all_satisfying_other",
+   "Order.all(satisfying: Shop::Ordering::Gone) takes a specification on Order"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
-  compile_job_alias_taken]
+  compile_job_alias_taken compile_all_satisfying_other]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }
