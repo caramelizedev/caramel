@@ -89,7 +89,9 @@ for (const {version, target} of aliases) {
 }
 // Agents build Markdown URLs from shard.lock's version, which may be an alias, so each
 // alias gets copies of its target's llms.txt and index.md files rather than redirects.
+// An edition published before the Markdown edition has none, so neither have its aliases.
 const markdown = file => file === 'llms.txt' || /(^|\/)index\.md$/.test(file);
+const withMarkdown = new Set();
 for (const {version, target} of aliases) {
   for (const section of ['docs', 'cookbook']) {
     const kept = preserved.get(`${section}/${target}`);
@@ -103,6 +105,7 @@ for (const {version, target} of aliases) {
         : fs.readFileSync(path.join(dist, section, target, file));
       fs.mkdirSync(path.dirname(path.join(dist, section, version, file)), {recursive:true});
       fs.writeFileSync(path.join(dist, section, version, file), text);
+      if (section === 'docs' && file === 'llms.txt') withMarkdown.add(version);
     }
   }
 }
@@ -113,7 +116,10 @@ for (const {section, version, commit} of preserved.values()) {
   const first = run('git', ['ls-tree', '-r', '--name-only', commit, `${section}/${version}/`]).split('\n').filter(f => f.endsWith('/index.html')).sort()[0];
   waitFor.push(`/${first.slice(0, -'index.html'.length)}`);
 }
-for (const {version} of aliases) waitFor.push(`/docs/${version}/`, `/docs/${version}/agents/`, `/docs/${version}/llms.txt`, `/cookbook/${version}/`);
+for (const {version} of aliases) {
+  waitFor.push(`/docs/${version}/`, `/docs/${version}/agents/`, `/cookbook/${version}/`);
+  if (withMarkdown.has(version)) waitFor.push(`/docs/${version}/llms.txt`);
+}
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caramel-pages-'));
 try {
   const env = {...process.env, GIT_INDEX_FILE:path.join(dir,'index')};
