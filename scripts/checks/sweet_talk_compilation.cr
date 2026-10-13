@@ -167,6 +167,10 @@ PROBLEMS = [
    "no overload matches 'Rules::Shelf::Rows::Jar::QueryOf(NamedTuple())#where', count: String"},
   {"all_satisfying_other",
    "Order.all(satisfying: Shop::Ordering::Gone) takes a specification on Order"},
+  {"state_check_long",
+   "moves would check RefrigeratedShippingContainer's states as " \
+   "check_warehousing_refrigerated_shipping_containers_state_eb99943a, longer than " \
+   "PostgreSQL's 63 bytes"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

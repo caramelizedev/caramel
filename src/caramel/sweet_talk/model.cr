@@ -37,7 +37,26 @@ module SweetTalk
         {% end %}
       {% end %}
       {% owner = @type.name.split("::").last.id %}
+      # The check that keeps `state` to these states, named by the FNV-1a 32-bit hash of
+      # the states, sorted and joined by commas, so a changed list is a new constraint.
+      {% hash = 2166136261 %}
+      {% for char in states.sort.join(",").chars %}
+        {% hash = ((hash ^ char.ord) * 16777619) % 4294967296 %}
+      {% end %}
+      {% digits = "0123456789abcdef".chars %}
+      {% hex = [28, 24, 20, 16, 12, 8, 4, 0].map { |shift| digits[(hash >> shift) & 15] } %}
+      {% hex = hex.join("") %}
+      {% listed = states.map { |state| "'#{state.id}'" }.join(", ") %}
+      {% check = {"state_#{hex.id}", "\"state\" IN (#{listed.id})"} %}
+      {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{check[0].id}" %}
+      {% if constraint.size > 63 %}
+        {% chains[0].raise "moves would check #{owner}'s states as #{constraint.id}, longer " +
+                           "than PostgreSQL's 63 bytes: shorten the context or the " +
+                           "#{owner} name" %}
+      {% end %}
       SWEETTALK_MOVES = [{{ states.splat }}]
+      # {constraint suffix, expression} of the check that keeps `state` to these states
+      SWEETTALK_STATE_CHECK = {{ check }}
 
       enum State
         {% for state in states %}
