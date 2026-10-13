@@ -86,6 +86,15 @@ module Shop
       Order.find(order).lines.size
     end
 
+    publishes Quantity, Order::Id, lines
+
+    border Mail, outside: "the mail service we send receipts through" do
+      def self.send_receipt(to : String) : Int32
+        url = "https://mail.example/v1/messages"
+        Caramel::Outbound.post(url, HTTP::Headers.new, to).status_code
+      end
+    end
+
     process Hold, means: "tins held on the shelf for one placed order" do
       key order : Int64
       has tins : Int32 = 0

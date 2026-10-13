@@ -656,10 +656,27 @@ module SweetTalk
 
     # `border Other do … end`: the only code in this context that may name `Other::`.
     # Each `whenever` and `compensate` in it carries the border's name, which names its
-    # job.
-    macro border(other, &block)
+    # job. `border Cards, outside: "…" do … end` is the border with a system outside the
+    # program, a module `Cards` in this context: the only code that may name
+    # `Caramel::Outbound` or `HTTP::Client`, a check on the text as written, and that turns
+    # its answers into this context's values.
+    macro border(other, outside = nil, &block)
       {% body = block.body %}
       {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
+      # The context refuses an outside: that is not text, so text is what marks it.
+      {% if outside.is_a?(StringLiteral) %}
+        {% for expression in expressions %}
+          {% if expression.is_a?(Call) &&
+                  %w[whenever compensate].includes?(expression.name.stringify) %}
+            {% expression.raise "#{expression.name} belongs in a border with a context: " +
+                                "#{other} is outside the program and emits no events" %}
+          {% end %}
+        {% end %}
+        module {{ other }}
+          {{ body }}
+        end
+        {% expressions = [] of Nil %}
+      {% end %}
       {% for expression in expressions %}
         {% handler = expression.is_a?(Call) && !expression.block.is_a?(Nop) %}
         {% if handler && expression.name == "whenever" %}
@@ -704,6 +721,29 @@ module SweetTalk
       {% name.raise "deadline belongs in a process, " +
                     "not in context #{@type.name.split("::").last.id}" %}
     end
+
+    # `publishes Cents, Tea::Id, price_of` is this context's published language: the
+    # types and services another context may name. Once a context publishes, every other
+    # context names only those, and the events it reacts to. `context` reads the list;
+    # this checks that each name is declared before it.
+    macro publishes(*names)
+      {% short = @type.name.split("::").last %}
+      {% for name in names %}
+        {% if name.is_a?(Path) %}
+          {% found = name.resolve? %}
+          {% declared = found && found.name.starts_with?("#{@type.name}::") %}
+        {% elsif name.is_a?(Call) && name.receiver.is_a?(Nop) && name.args.empty? %}
+          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") %}
+        {% else %}
+          {% name.raise "publishes takes the context's types and services, as in " +
+                        "publishes Cents, Tea::Id, price_of, not #{name}" %}
+        {% end %}
+        {% unless declared %}
+          {% name.raise "#{short.id} publishes #{name}, which it does not declare: declare " +
+                        "a type or a service of that name before publishes" %}
+        {% end %}
+      {% end %}
+    end
   end
 
   # `tenant App::Account`, before the first context, names the tenant model of a program
@@ -737,6 +777,8 @@ module SweetTalk
   # dependency. In a program that requires caramel/tenancy its rows belong to one tenant,
   # unless it says `central: true`, which shares them between every tenant.
   # `subdomain: :core`, `:supporting` or `:generic` says what part of the domain it is.
+  # `publishes` lists the names other contexts may use, and `border X, outside: "…"`
+  # faces a system outside the program.
   macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil,
                 subdomain = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
@@ -764,7 +806,103 @@ module SweetTalk
     {% followed = [] of Nil %}
     {% followed = [follows] unless follows.is_a?(NilLiteral) %}
     {% followed = follows if follows.is_a?(TupleLiteral) %}
-    {% borders = expressions.select { |node| node.is_a?(Call) && node.name == "border" } %}
+    # A border is outside when its outside: is text, as in the border macro; any other
+    # outside:, nil included, is refused at the border's line.
+    {% for node in expressions %}
+      {% if node.is_a?(Call) && node.name == "border" %}
+        {% said = (node.named_args || [] of Nil).find { |arg| arg.name.stringify == "outside" } %}
+        {% if said && !said.value.is_a?(StringLiteral) %}
+          {% node.raise "border #{node.args[0]} takes outside: \"…\", what the system is to " +
+                        "this context, the line its glossary entry shows" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% outsides = expressions.select do |node|
+         node.is_a?(Call) && node.name == "border" &&
+           (node.named_args || [] of Nil).any? do |arg|
+             arg.name.stringify == "outside" && arg.value.is_a?(StringLiteral)
+           end
+       end %}
+    {% borders = expressions.select do |node|
+         node.is_a?(Call) && node.name == "border" && !outsides.includes?(node)
+       end %}
+    {% published = nil %}
+    {% for node in expressions %}
+      {% if node.is_a?(Call) && node.name == "publishes" %}
+        {% published = [] of Nil unless published %}
+        {% for argument in node.args %}
+          {% published << argument.stringify %}
+        {% end %}
+      {% end %}
+    {% end %}
+    # {statement, its text, in an outside border?} for each statement a check may refuse,
+    # so the refusal names its line; a handler's text leaves out the event it reacts to.
+    {% handlers = %w[whenever compensate] %}
+    {% checks = [] of Nil %}
+    {% for node in expressions %}
+      {% block = node.is_a?(Call) && !node.block.is_a?(Nop) %}
+      {% outside = outsides.includes?(node) %}
+      {% if block && handlers.includes?(node.name.stringify) %}
+        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+        {% checks << {node, node.block.body.stringify + "\n" + extra, false} %}
+      {% elsif block %}
+        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+        {% checks << {node, node.args.map(&.stringify).join("\n") + "\n" + extra, false} %}
+        {% inner = node.block.body %}
+        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+          {% nested = step.is_a?(Call) && !step.block.is_a?(Nop) &&
+                      handlers.includes?(step.name.stringify) %}
+          {% if nested %}
+            {% extra = (step.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+            {% checks << {step, step.block.body.stringify + "\n" + extra, outside} %}
+          {% else %}
+            {% checks << {step, step.stringify, outside} %}
+          {% end %}
+        {% end %}
+      {% else %}
+        {% checks << {node, node.stringify, false} %}
+      {% end %}
+    {% end %}
+    # The published languages of the contexts of this domain declared before this one.
+    {% for up in ::SweetTalk::BoundedContext.includers %}
+      {% upname = up.name.split("::").last %}
+      {% offers = up.constant("SWEETTALK_PUBLISHES") %}
+      {% if offers && up.name.stringify == prefix + upname && upname != name.stringify %}
+        {% offered = offers.join(", ") %}
+        {% for check in checks %}
+          {% for piece in check[1].split(upname + "::")[1..-1] %}
+            {% path = piece.gsub(/\A([A-Z]\w*(?:::[A-Z]\w*)*)[\s\S]*\z/, "\\1") %}
+            {% found = parse_type(up.name.stringify + "::" + path).resolve? %}
+            {% open = offers.any? { |offer| path == offer || path.starts_with?(offer + "::") } ||
+                      (found && found < ::SweetTalk::Event) %}
+            {% unless open %}
+              {% check[0].raise "#{prefix.id}#{name} names #{upname.id}::#{path.id}, which " +
+                                "#{upname.id} does not publish; it publishes #{offered.id}: use " +
+                                "one of those, or publish #{path.id} in #{upname.id}" %}
+            {% end %}
+          {% end %}
+          {% for piece in check[1].split(upname + ".")[1..-1] %}
+            {% call = piece =~ /\A[a-z_]/ && piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
+            {% if call && !offers.includes?(call) %}
+              {% check[0].raise "#{prefix.id}#{name} calls #{upname.id}.#{call.id}, which " +
+                                "#{upname.id} does not publish; it publishes #{offered.id}: " +
+                                "use one of those, or publish #{call.id} in #{upname.id}" %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    # HTTP leaves the program only through a border with an outside system.
+    {% for check in checks %}
+      {% reached = nil %}
+      {% reached = "Caramel::Outbound" if check[1].includes?("Caramel::Outbound") %}
+      {% reached = "HTTP::Client" if check[1].includes?("HTTP::Client") %}
+      {% if reached && !check[2] %}
+        {% check[0].raise "#{prefix.id}#{name} reaches #{reached.id} outside a border with an " +
+                          "outside system: move that call into the border with the system it " +
+                          "reaches, as in border Cards, outside: \"…\" do … end" %}
+      {% end %}
+    {% end %}
     {% kinds = %w[value aggregate projection process] %}
     {% own = expressions.select do |node|
          node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?
@@ -772,7 +910,7 @@ module SweetTalk
     {% reacts = [] of Nil %}
     {% pieces = [] of Nil %}
     {% for node in expressions %}
-      {% if node.is_a?(Call) && node.name == "border" %}
+      {% if borders.includes?(node) %}
       {% elsif node.is_a?(Call) && node.name == "process" && !node.block.is_a?(Nop) %}
         {% inner = node.block.body %}
         {% steps = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
@@ -798,6 +936,7 @@ module SweetTalk
       {% end %}
     {% end %}
     {% listed = reacts.map { |react| "{#{react[0]}, #{react[1]}}" } %}
+    {% offering = published ? "[#{published.map(&.stringify).join(", ").id}] of String" : "nil" %}
     module {{ name }}
       include ::SweetTalk::BoundedContext
 
@@ -812,6 +951,14 @@ module SweetTalk
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
+      # The names other contexts may use, or nil when every name is open to a follower
+      SWEETTALK_PUBLISHES = {{ offering.id }}
+      {% for border in outsides %}
+        {% system = border.args[0].names.last %}
+        {% said = border.named_args.find { |argument| argument.name.stringify == "outside" } %}
+        # {outside system, what it is to this context}
+        SWEETTALK_OUTSIDE_{{ system.upcase }} = { {{ system.stringify }}, {{ said.value }} }
+      {% end %}
       {% for border in borders %}
         {% inner = border.block.body %}
         {% parts = inner.is_a?(Expressions) ? inner.expressions : [inner] %}

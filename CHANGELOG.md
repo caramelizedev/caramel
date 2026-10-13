@@ -17,6 +17,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - SweetTalk queries can sort, limit and count: `finds verb(args), where: {…}, order: {attribute: :desc}, first: count`, with `where:` optional, and `counts verb(args), where: {…}`. A `finds` with a block narrows the live rows with SugarORM's `where`, `where_null`, `order_by`, `limit` and `offset` for a query `where:` cannot say. A projection declares `finds` and `counts` too, over its own attributes. This is additive: existing queries keep their SQL.
 - A `finds` that names an unknown attribute or state, or a list of entities, now fails to compile even when nothing calls it; 0.13.0 waited for the first call. Fix such a query or remove it.
 - `__sweettalk_rows` is no longer callable from outside its aggregate. Code that built aggregates from `Rows` queries outside a domain uses a `finds` with a block instead.
+- SweetTalk: calling another context's service or module method, as in `Catalogue.price_of(tea)`, now counts as naming `Catalogue::`. A context that does not follow Catalogue may make that call only inside `border Catalogue`; elsewhere it no longer compiles, so move the call into the border, or declare `follows: Catalogue`. In a border the call now draws a dependency edge, so two contexts whose borders call each other no longer compile: let one of them react to the other's events instead.
 
 ## 0.13.0 - 2026-10-12
 

@@ -232,13 +232,46 @@ PROBLEMS = [
    "it reads Sales rows and writes nothing, not count"},
   {"subdomain_unknown",
    "context Catalogue takes subdomain: :core, :supporting or :generic, not subdomain: :main"},
+  {"unpublished_name",
+   "Shop::Ordering names Catalogue::Tea, which Catalogue does not publish; it publishes Cents, " \
+   "Tea::Id, price_of: use one of those, or publish Tea in Catalogue"},
+  {"unpublished_call",
+   "Shop::Ordering calls Catalogue.teas_on_shelf, which Catalogue does not publish"},
+  {"unpublished_in_border",
+   "Shop::Fulfilment names Catalogue::Tea, which Catalogue does not publish"},
+  {"published_after_use",
+   "Shop::Reporting names Catalogue::Tea, which Catalogue does not publish"},
+  {"publishes_unknown",
+   "Catalogue publishes Teas, which it does not declare: declare a type or a service of that " \
+   "name before publishes"},
+  {"publishes_expression",
+   "publishes takes the context's types and services, as in publishes Cents, Tea::Id, " \
+   "price_of, not price_of(1)"},
+  {"call_outside_border",
+   "Shop::Reporting calls Catalogue.teas_on_shelf outside a border: move that call into " \
+   "border Catalogue do … end, or declare follows: Catalogue"},
+  {"outbound_outside_border",
+   "Shop::Billing reaches Caramel::Outbound outside a border with an outside system"},
+  {"client_in_context_border",
+   "Shop::Billing reaches HTTP::Client outside a border with an outside system"},
+  {"outside_is_a_context",
+   "Shop::Billing has a border with Catalogue, outside: \"…\", but Catalogue is a context"},
+  {"outside_not_text",
+   "border Cards takes outside: \"…\", what the system is to this context"},
+  {"outside_nil",
+   "border Cards takes outside: \"…\", what the system is to this context, the line its " \
+   "glossary entry shows"},
+  {"whenever_outside",
+   "whenever belongs in a border with a context: Cards is outside the program and emits no " \
+   "events"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
   compile_job_alias_taken compile_all_satisfying_other compile_finds_value_type
-  compile_loader_outside]
+  compile_loader_outside compile_published_after_use compile_call_outside_border
+  compile_outside_is_a_context]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }
