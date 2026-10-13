@@ -47,7 +47,53 @@ describe Caramel::Frappe::DomainGenerator do
   it "writes the domain, its spec and the require lines" do
     domain_project do |project, generator|
       written = generator.generate(project, "Shop", "Ordering", MEANS)
-      written.should eq(%w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr])
+      written.should eq([".claude/skills/sweettalk/SKILL.md", "app/domain/shop.cr",
+                         "config/application.cr", "spec/domain/shop_spec.cr"])
+    end
+  end
+
+  it "writes the SweetTalk skill from the template" do
+    domain_project do |project, generator, package|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      template = File.read(File.join(package, "templates/skills/sweettalk/SKILL.md"))
+      read(project, ".claude/skills/sweettalk/SKILL.md").should eq(template)
+    end
+  end
+
+  it "keeps an edited skill" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      skill = File.join(project.root, ".claude/skills/sweettalk/SKILL.md")
+      File.write(skill, "\n- Our own rule.\n", mode: "a")
+      edited = File.read(skill)
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should eq(%w[app/domain/ledger.cr spec/domain/ledger_spec.cr])
+      File.read(skill).should eq(edited)
+    end
+  end
+
+  it "adds the skill to an application with a domain but no skill" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      FileUtils.rm_rf(File.join(project.root, ".claude"))
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should eq([".claude/skills/sweettalk/SKILL.md", "app/domain/ledger.cr",
+                         "spec/domain/ledger_spec.cr"])
+    end
+  end
+
+  it "leaves a symlinked .claude alone" do
+    domain_project do |project, generator|
+      target = File.tempname("caramel-claude-")
+      Dir.mkdir(target)
+      begin
+        File.symlink(target, File.join(project.root, ".claude"))
+        written = generator.generate(project, "Shop", "Ordering", MEANS)
+        written.should eq(%w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr])
+        Dir.children(target).should be_empty
+      ensure
+        FileUtils.rm_rf(target)
+      end
     end
   end
 

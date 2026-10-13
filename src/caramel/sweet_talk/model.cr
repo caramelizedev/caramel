@@ -37,7 +37,26 @@ module SweetTalk
         {% end %}
       {% end %}
       {% owner = @type.name.split("::").last.id %}
+      # The check that keeps `state` to these states, named by the FNV-1a 32-bit hash of
+      # the states, sorted and joined by commas, so a changed list is a new constraint.
+      {% hash = 2166136261 %}
+      {% for char in states.sort.join(",").chars %}
+        {% hash = ((hash ^ char.ord) * 16777619) % 4294967296 %}
+      {% end %}
+      {% digits = "0123456789abcdef".chars %}
+      {% hex = [28, 24, 20, 16, 12, 8, 4, 0].map { |shift| digits[(hash >> shift) & 15] } %}
+      {% hex = hex.join("") %}
+      {% listed = states.map { |state| "'#{state.id}'" }.join(", ") %}
+      {% check = {"state_#{hex.id}", "\"state\" IN (#{listed.id})"} %}
+      {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{check[0].id}" %}
+      {% if constraint.size > 63 %}
+        {% chains[0].raise "moves would check #{owner}'s states as #{constraint.id}, longer " +
+                           "than PostgreSQL's 63 bytes: shorten the context or the " +
+                           "#{owner} name" %}
+      {% end %}
       SWEETTALK_MOVES = [{{ states.splat }}]
+      # {constraint suffix, expression} of the check that keeps `state` to these states
+      SWEETTALK_STATE_CHECK = {{ check }}
 
       enum State
         {% for state in states %}
@@ -53,6 +72,15 @@ module SweetTalk
         end
       {% end %}
 
+      # The state as `moves` spells it, the text its `state` column stores.
+      def __sweettalk_state : String
+        case @state
+        {% for state in states %}
+        in State::{{ state.camelcase.id }} then {{ state }}
+        {% end %}
+        end
+      end
+
       {% for state, predecessors in before %}
         {% allowed = predecessors.map do |predecessor|
              "@state == State::#{predecessor.camelcase.id}"
@@ -60,7 +88,7 @@ module SweetTalk
         private def {{ state.id }}! : Nil
           unless {{ allowed.join(" || ").id }}
             raise ::SweetTalk::Refusal.new(
-              "{{ owner }} cannot become {{ state.id }} while #{@state.to_s.downcase}")
+              "{{ owner }} cannot become {{ state.id }} while #{__sweettalk_state}")
           end
           @state = State::{{ state.camelcase.id }}
         end
@@ -278,6 +306,11 @@ module SweetTalk
     macro service(call, returns = nil, means = nil, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% call.raise "service belongs in a context, not in #{owner.id}" %}
+    end
+
+    macro specification(name, on = nil, where = nil, means = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% name.raise "specification belongs in a context, after its aggregate, not in #{owner.id}" %}
     end
 
     macro compensate(event, &block)

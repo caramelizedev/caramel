@@ -407,7 +407,8 @@ module Caramel::Checks
     def domain : Nil
       made = command([@frappe, "make", "domain", "Shop", "Ordering",
                       "--means=choosing teas and checking out"], chdir: @project)
-      %w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr].each do |path|
+      %w[.claude/skills/sweettalk/SKILL.md app/domain/shop.cr config/application.cr
+        spec/domain/shop_spec.cr].each do |path|
         assert!(made.stdout.includes?("Generated #{path}\n"), made.stdout)
       end
       File.write(File.join(@project, "app/domain/shop.cr"), SHOP_DOMAIN)
@@ -449,6 +450,8 @@ module Caramel::Checks
       manifest = listing.stdout.lines
       assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
       assert!(manifest[1]? == "VERSION: #{Caramel::VERSION}", manifest[1]?.to_s)
+      guides = "GUIDES: #{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/llms.txt"
+      assert!(manifest[3]? == guides, manifest[3]?.to_s)
       Caramel::Frappe::Commands::TABLE.each do |entry|
         line = "frappe #{entry.syntax}  # #{entry.summary}"
         assert!(manifest.includes?(line), "manifest lacks frappe #{entry.syntax}")

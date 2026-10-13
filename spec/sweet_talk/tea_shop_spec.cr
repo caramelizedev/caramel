@@ -101,6 +101,11 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "raises NilAssertionError for an aggregate's id before create" do
+    tea = Catalogue::Tea.new("Sencha", Catalogue::Cents.new(100), Catalogue::Tins.new(3))
+    expect_raises(NilAssertionError, "Tea has no id until it is created") { tea.id }
+  end
+
   it "refuses a value out of bounds before anything is written" do
     SweetTalkSpec.rolled_back do
       expect_raises(SweetTalk::Refusal, "Tins must be at least 0") { Catalogue::Tins.new(-1) }
@@ -310,6 +315,10 @@ describe "The tea shop on PostgreSQL" do
       {shelf.stock.raw, shelf.held.raw}.should eq({3, 0})
       TeaShopSpec.holds.should eq([{"Sencha", "taken"}])
       TeaShopSpec.jobs.count(&.[:failed]).should eq(0)
+      Ordering::Order.all(satisfying: Ordering::Astray).map(&.id).should eq([order.id])
+      expect_raises(SweetTalk::Refusal, "An order whose parcel left cannot be forgotten.") do
+        found.forget
+      end
     end
   end
 
@@ -455,12 +464,16 @@ describe "The tea shop on PostgreSQL" do
       {"Catalogue", "a count of tins on the shelf"},
       {"Fulfilment", "tins of one tea packed in a parcel"},
     ])
-    glossary.size.should eq(27)
+    glossary.size.should eq(28)
     terms = glossary.map { |term| {term.kind, term.name, term.context} }
     terms.should contain({"service", "requote", "Ordering"})
     terms.should contain({"process", "Hold", "Ordering"})
     SweetTalk.context_map.sort.should eq([
+      {"Billing", "Cards", "outside"},
+      {"Billing", "Pricing", "dependency"},
       {"Fulfilment", "Ordering", "event"},
+      {"Insurance", "Pricing", "dependency"},
+      {"Insurance", "Pricing", "event"},
       {"Ordering", "Catalogue", "dependency"},
       {"Ordering", "Fulfilment", "event"},
     ])
@@ -510,6 +523,50 @@ describe "The tea shop on PostgreSQL" do
       (SugarORM::Repo.statements_executed - before).should eq(2)
       found.map(&.id).should eq([first.id, second.id])
       found.map(&.lines.size).should eq([1, 1])
+    end
+  end
+
+  it "finds a member's newest orders, counts the placed ones, and finds the orders " \
+     "holding a tea" do
+    SweetTalkSpec.rolled_back do
+      sencha, assam = TeaShopSpec.tea("Sencha"), TeaShopSpec.tea("Assam")
+      ada, bob = TeaShopSpec.account("ada@example.com"), TeaShopSpec.account("bob@example.com")
+      first = TeaShopSpec.order({sencha, 1}, member: ada).tap(&.place)
+      second = TeaShopSpec.order({assam, 1}, member: ada).tap(&.place)
+      third = TeaShopSpec.order({sencha, 1}, member: ada)
+      bobs = TeaShopSpec.order({sencha, 1}, member: bob).tap(&.place)
+
+      Ordering::Order.newest_for(ada, 2).map(&.id).should eq([third.id, second.id])
+      Ordering::Order.placed_count_for(ada).should eq(2)
+      Ordering::Order.holding(assam.id).map(&.id).should eq([second.id])
+      third.cancel
+      third.forget
+      Ordering::Order.holding(sencha.id).map(&.id).sort_by!(&.raw).should eq([first.id, bobs.id])
+    end
+  end
+
+  it "reads the best-selling teas from Sales with finds and counts" do
+    SweetTalkSpec.rolled_back do |connection|
+      teas = %w[Sencha Assam Darjeeling Earl\ Grey Genmaicha].map do |name|
+        TeaShopSpec.tea(name, stock: 100)
+      end
+      ids = teas.map(&.id.raw)
+      TeaShopSpec.order({teas[0], 3}, {teas[1], 4}).place
+      TeaShopSpec.order({teas[0], 2}, {teas[2], 1}).place
+      TeaShopSpec.order({teas[4], 6}).place
+      TeaShopSpec.order({teas[3], 5})
+      TeaShopSpec.drain(connection)
+      sold = ->(rows : Array(Ordering::Sales)) { rows.map { |row| {row.tea.raw, row.sold} } }
+
+      sold.call(Ordering::Sales.best_sellers(2)).should eq([{ids[4], 6}, {ids[0], 5}])
+      sold.call(Ordering::Sales.selling(4)).should eq([{ids[4], 6}, {ids[0], 5}, {ids[1], 4}])
+      Ordering::Sales.of(teas[1]).map(&.sold).should eq([4])
+      Ordering::Sales.of(teas[3]).should be_empty
+      before = SugarORM::Repo.statements_executed
+      Ordering::Sales.sold_any.should eq(4)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      sold.call(Ordering::Sales.of_teas([ids[2], ids[0], ids[3]]))
+        .should eq([{ids[0], 5}, {ids[2], 1}])
     end
   end
 

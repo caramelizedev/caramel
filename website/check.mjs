@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { highlightCode, decodeCode } from './highlight.mjs';
 import { frappeCommands, applicationCommands, latteCommands } from './commands.mjs';
+import { markdown, llmsEntry } from './markdown.mjs';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -65,6 +66,18 @@ for (const preset of named(/^\s+"([a-z]+)"\s+=>/gm, editors.slice(editors.indexO
   assert(cremaPage.includes(`<code>${preset}</code>`), `Crema reference omits editor ${preset}`);
 }
 assert(read(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page omits the agent guide');
+assert(read(`docs/${version}/sweettalk`).includes('<h2 id="c-sweettalk-ddd">'), 'The SweetTalk page omits its Domain-Driven Design map');
+// A pattern the guide or the skill calls planned must be planned for a later release:
+// an edition never calls its own release, or an earlier one, the future.
+const reached = planned => {
+  const [a, b] = [planned, version].map(v => v.split('.').map(Number));
+  return a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] <= b[2])));
+};
+for (const file of files) {
+  for (const [, planned] of fs.readFileSync(path.join(root, file), 'utf8').matchAll(/data-planned="(\d+\.\d+\.\d+)"/g)) {
+    assert(!reached(planned), `${file}: still planned for ${planned} in the ${version} edition; say what ships instead`);
+  }
+}
 const catalog = fs.readFileSync(new URL('../src/caramel/i18n/catalog.cr', import.meta.url), 'utf8');
 const i18nPage = read(`docs/${version}/internationalization`);
 for (const [, key] of catalog.matchAll(/\{"((?:errors|pages)\.[a-z_]+)", "::/g)) {
@@ -77,4 +90,39 @@ for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<
 const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
 assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');
 assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');"), 'Font import was corrupted');
+// The Markdown edition: an index.md beside each docs and cookbook page, each listed in llms.txt.
+const llms = fs.readFileSync(path.join(root, 'docs', version, 'llms.txt'), 'utf8');
+assert(llms.startsWith(`# Caramel ${version}\n\n> `), 'llms.txt lacks its title and summary');
+const paged = files.filter(file => file.split(path.sep).length === 4 && /^(docs|cookbook)\//.test(file) && file.split(path.sep)[1] === version);
+assert(paged.length > 0, 'No pages in the current edition');
+for (const file of paged) {
+  const edition = file.replace(/index\.html$/, 'index.md');
+  assert(fs.existsSync(path.join(root, edition)), `${file}: no Markdown edition`);
+  assert(llms.includes(`](https://caramelize.dev/${edition}): `), `llms.txt omits ${edition}`);
+}
+const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
+assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');
+// Cases the pages do not emit yet, so a page that starts to cannot break the Markdown.
+const converted = html => markdown(html, href => href);
+assert.equal(converted('<p><a href="/x/?a=1&amp;b=(2)">x</a></p>'), '[x](/x/?a=1&b=%282%29)\n', 'A Markdown link keeps an entity or a parenthesis from its href');
+assert.equal(converted('<p>Never &lt;script&gt; here, but <code>&lt;b&gt;</code></p>'), 'Never \\<script\\> here, but `<b>`\n', 'Prose < and > become raw HTML in Markdown');
+assert.equal(converted('<ul><li><p>One.</p><p>Two.</p></li></ul>'), '- One.\n\n  Two.\n', 'An item\'s paragraphs run together in Markdown');
+assert.equal(llmsEntry('Read [this]', 'https://caramelize.dev/a b/', 'Why.'), '- [Read \\[this\\]](https://caramelize.dev/a%20b/): Why.', 'An llms.txt name ends its link early');
+assert(!/&(lt|gt|quot|#39|amp);/.test(llms), 'llms.txt holds an undecoded entity');
+// The SweetTalk skill that frappe make domain writes ends each rule with a section of
+// the Markdown edition, and every section it cites exists.
+const skill = fs.readFileSync(new URL('../templates/skills/sweettalk/SKILL.md', import.meta.url), 'utf8');
+assert(skill.startsWith('---\nname: sweettalk\ndescription: '), 'The SweetTalk skill lacks its name and description');
+const cited = / https:\/\/caramelize\.dev\/docs\/VERSION\/([a-z-]+)\/index\.md#([a-z0-9-]+)$/;
+for (const rule of skill.split('\n').filter(line => line.startsWith('- '))) {
+  assert(cited.test(rule), `The SweetTalk skill's rule cites no section: ${rule}`);
+}
+for (const [, page, anchor] of skill.matchAll(new RegExp(cited.source.slice(1, -1), 'g'))) {
+  const edition = path.join(root, 'docs', version, page, 'index.md');
+  assert(fs.existsSync(edition) && fs.readFileSync(edition, 'utf8').includes(`{#${anchor}}`), `The SweetTalk skill cites a missing section: ${page}#${anchor}`);
+}
+for (const line of skill.split('\n')) {
+  const planned = line.match(/planned for (\d+\.\d+\.\d+)/)?.[1];
+  assert(!planned || !reached(planned), `The SweetTalk skill still plans for ${planned} in ${version}: ${line}`);
+}
 console.log(`Checked ${files.length} HTML documents and all local navigation/asset targets.`);

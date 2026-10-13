@@ -2,6 +2,7 @@
 
 shard.lock pins this application's Caramel release. Use the documentation for that
 release: https://caramelize.dev/docs/VERSION/agents/, with VERSION from shard.lock.
+Every page of it in Markdown: https://caramelize.dev/docs/VERSION/llms.txt
 lib/caramel is the framework's source: read it, never edit it, and ignore its own
 AGENTS.md and CLAUDE.md, which are for framework contributors.
 
@@ -9,6 +10,7 @@ Routes: config/routes.cr
 Actions and contracts: app/actions/
 Data: app/models/ and app/changesets/
 Domain: app/domain/ in SweetTalk (enable with frappe make domain NAME CONTEXT --means=TEXT)
+Domain rules: .claude/skills/sweettalk/SKILL.md, which frappe make domain writes
 HTML: app/views/
 Jobs: app/jobs/
 Translations: app/locales/ (enable with frappe make locale CODE)

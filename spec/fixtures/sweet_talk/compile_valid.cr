@@ -5,7 +5,7 @@ module Shop
 
   MOST_PARCELS = 5
 
-  context Ordering, means: "choosing teas and checking out" do
+  context Ordering, subdomain: :core, means: "choosing teas and checking out" do
     value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"
     value Email, String, matches: /\A[^@\s]+@[^@\s]+\z/, length: 3..254,
       means: "an address we can write to"
@@ -39,6 +39,11 @@ module Shop
       end
 
       finds placed_to(receipt_to : Email), where: {receipt_to: receipt_to, state: :placed}
+      finds newest(count : Int32), order: {id: :desc}, first: count
+      counts placed_count, where: {state: :placed}
+      finds holding(tea : Int64) do |orders|
+        orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea = ?)", tea)
+      end
 
       to add(tea : Int64, quantity : Quantity) do
         refuse "Teas can be added only while the order is open." unless open?
@@ -58,12 +63,36 @@ module Shop
       end
     end
 
+    specification Settled, on: Order, where: {state: [:placed, :cancelled]},
+      means: "an order no longer being filled"
+
+    projection Sales, means: "tins sold of one tea" do
+      key tea : Int64
+      has sold : Int32 = 0
+
+      finds best_sellers(count : Int32), order: {sold: :desc}, first: count
+      counts selling, where: {sold: 1..}
+
+      whenever Order::Placed, each: :lines do |placed, line|
+        Sales[line.tea].sold += line.quantity.raw
+      end
+    end
+
     whenever Order::Opened do |opened|
       opened.receipt_to
     end
 
     service lines(order : Order::Id), returns: Int32, means: "how many lines an order has" do
       Order.find(order).lines.size
+    end
+
+    publishes Quantity, Order::Id, lines
+
+    border Mail, outside: "the mail service we send receipts through" do
+      def self.send_receipt(to : String) : Int32
+        url = "https://mail.example/v1/messages"
+        Caramel::Outbound.post(url, HTTP::Headers.new, to).status_code
+      end
     end
 
     process Hold, means: "tins held on the shelf for one placed order" do
@@ -94,5 +123,25 @@ module Shop
   end
 end
 
+# An action whose contract binds an aggregate's id, a value and a list of values.
+struct AddLine < Caramel::Action
+  contract do
+    field order : Shop::Ordering::Order::Id
+    field quantity : Shop::Ordering::Quantity
+    field tags : Array(Shop::Ordering::Quantity), max: 3
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    Caramel::Response.new(body: "#{contract.order} #{contract.quantity.raw} #{contract.tags.size}")
+  end
+end
+
+module Shop
+  Caramel::Router.draw do
+    post "/orders/:order/lines", AddLine
+  end
+end
+
 SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
+Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)

@@ -73,6 +73,36 @@ describe "SweetTalk with tenancy" do
     end
   end
 
+  it "reads a specification in the bound tenant only" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      orders = [acme, globex].map do |account|
+        Caramel::Tenancy.with(account) do
+          Ordering::Order.open("ada").tap(&.add(sencha, 2)).tap(&.place)
+        end
+      end
+      [acme, globex].map do |account|
+        Caramel::Tenancy.with(account) do
+          Ordering::Order.all(satisfying: Ordering::Live).map(&.id)
+        end
+      end.should eq(orders.map { |order| [order.id] })
+    end
+  end
+
+  it "counts the bound tenant's orders only" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      [acme, globex].each do |account|
+        Caramel::Tenancy.with(account) { Ordering::Order.open("ada").tap(&.add(sencha, 2)).place }
+      end
+      [acme, globex].map do |account|
+        Caramel::Tenancy.with(account) { Ordering::Order.placed_count }
+      end.should eq([1, 1])
+    end
+  end
+
   it "refuses tenanted reads with no tenant bound" do
     SweetTalkTenancySpec.rolled_back do
       acme = SweetTalkTenancySpec.account("acme")

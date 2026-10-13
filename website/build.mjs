@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { highlightCode } from './highlight.mjs';
 import { commandRows } from './commands.mjs';
+import { markdown, llmsEntry } from './markdown.mjs';
 
 // The approved prototype is the design/content source. Export real documents,
 // normal page scrolling, and shared assets without a client framework.
@@ -125,6 +126,9 @@ const sidebar = template.match(/<aside class="c-sidebar"[\s\S]*?<\/aside>/)[0]
 const docNavigation = `<details class="c-docnav" open><summary>Browse documentation <span aria-hidden="true">+</span></summary>${sidebar}</details>`;
 
 const escapeAttr = str => str.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+// The text of a heading or lede, without tags or entities, for llms.txt.
+const content = html => html.replace(/<[^>]*>/g, '').replace(/&(lt|gt|quot|#39|amp);/g, (_, e) => ({lt: '<', gt: '>', quot: '"', '#39': "'", amp: '&'}[e]));
+const llms = {};
 for (const [key, route] of Object.entries(routes)) {
   generatedRoutes.push(route);
   let body = template;
@@ -165,11 +169,28 @@ for (const [key, route] of Object.entries(routes)) {
     return navSection ? nav.replace(`data-page="${navSection}"`, `data-page="${navSection}" aria-current="${key === navSection ? 'page' : 'true'}"`) : nav;
   });
   const canonical = `https://caramelize.dev${route}`;
-  const docsAssets = key === 'home' ? '' : '<link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script>';
+  const docsAssets = key === 'home' ? '' : '<link rel="stylesheet" href="/assets/docs.css"><script src="/assets/docs.js" defer></script>' +
+    (current.pages[key] ? `<link rel="alternate" type="text/markdown" href="${route}index.md">` : '');
   const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><meta name="description" content="${escapeAttr(description)}"><link rel="canonical" href="${canonical}"><meta property="og:title" content="${escapeAttr(title)}"><meta property="og:description" content="${escapeAttr(description)}"><meta property="og:url" content="${canonical}"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script></head><body data-page="${key}">${body}</body></html>\n`;
   const dest = new URL('.' + route + 'index.html', out);
   fs.mkdirSync(path.dirname(dest.pathname), {recursive:true});
   fs.writeFileSync(dest, html.replace('</head>', `${docsAssets}</head>`));
+  // The Markdown edition: the same page for agents, beside its index.html.
+  if (current.pages[key]) {
+    const pageFor = Object.fromEntries(Object.entries(routes).map(([page, at]) => [at, page]));
+    const link = href => {
+      if (!href.startsWith('/')) return href;
+      const [at, anchor] = href.split('#');
+      const target = current.pages[pageFor[at]] ? `${at}index.md` : at;
+      return `https://caramelize.dev${target}${anchor ? `#${anchor}` : ''}`;
+    };
+    const page = markdown(links(current.pages[key], routes), link) + `\nCaramel ${version} · https://caramelize.dev${route}\n`;
+    fs.writeFileSync(new URL('.' + route + 'index.md', out), page);
+    const eyebrow = current.pages[key].match(/<div class="c-eyebrow">(.*?)<\/div>/)[1].split(' / ');
+    const heading = route.startsWith('/cookbook/') ? 'Cookbook' : content(eyebrow[0]);
+    const name = route.startsWith('/cookbook/') ? content(current.pages[key].match(/<h1>(.*?)<\/h1>/)[1]).replace(/\.$/, '') : content(eyebrow[1]);
+    (llms[heading] ??= []).push(llmsEntry(name, `https://caramelize.dev${route}index.md`, content(description)));
+  }
 }
 for (const asset of ['docs.css', 'docs.js']) {
   fs.copyFileSync(new URL(`./source/${asset}`, import.meta.url), new URL(`assets/${asset}`, out));
@@ -189,4 +210,9 @@ fs.writeFileSync(new URL('.nojekyll', out), '');
 fs.writeFileSync(new URL('CNAME', out), 'caramelize.dev\n');
 fs.writeFileSync(new URL('sitemap.xml', out), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${generatedRoutes.map(r=>`<url><loc>https://caramelize.dev${r}</loc></url>`).join('')}</urlset>`);
 fs.writeFileSync(new URL('404.html', out), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found · Caramel</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><body style="background:#201d18;color:#eee8dd;font:18px/1.6 system-ui;padding:10vw"><h1>This page has moved on.</h1><p><a style="color:#e9a278" href="/">Back to Caramel</a></p></body></html>');
+// llms.txt (https://llmstxt.org) indexes this edition's Markdown pages for agents.
+fs.writeFileSync(new URL(`docs/${version}/llms.txt`, out), `# Caramel ${version}\n\n` +
+  `> Caramel is a Crystal web framework with PostgreSQL, typed HTML, and a clear place for every change. ` +
+  `These are the Markdown editions of the ${version} guides, references and recipes; each page's HTML is the same URL without index.md.\n\n` +
+  Object.entries(llms).map(([heading, pages]) => `## ${heading}\n\n${pages.join('\n')}\n`).join('\n'));
 console.log(`Built ${generatedRoutes.length} pages for ${version} in dist.`);

@@ -40,8 +40,9 @@ describe Caramel::Frappe::CLI do
     lines = output.to_s.lines
     lines.first.should eq("CARAMEL CLI INTERFACE (STRICT TOKENS)")
     docs = "DOCS: https://github.com/caramelizedev/caramel/tree/v#{Caramel::VERSION}"
-    lines[1, 2].should eq(["VERSION: #{Caramel::VERSION}", docs])
-    commands = lines[3...lines.index!("")]
+    guides = "GUIDES: https://caramelize.dev/docs/#{Caramel::VERSION}/llms.txt"
+    lines[1, 3].should eq(["VERSION: #{Caramel::VERSION}", docs, guides])
+    commands = lines[4...lines.index!("")]
     table = Caramel::Frappe::Commands::TABLE.map do |command|
       "frappe #{command.syntax}  # #{command.summary}"
     end

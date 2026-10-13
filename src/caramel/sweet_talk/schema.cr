@@ -31,7 +31,9 @@ module SweetTalk
           {{ attribute[5].id }}
         {% end %}
         {% if moves %}
+          {% check = type.constant("SWEETTALK_STATE_CHECK") %}
           field state : String = {{ moves[0] }}
+          check :{{ check[0].id }}, {{ check[1] }}
         {% end %}
         {% if aggregate %}
           field removed_at : Time?

@@ -125,6 +125,7 @@ module SweetTalk
         {% end %}
         struct {{ name }} < ::SweetTalk::Value
           include Comparable({{ name }})
+          include ::Caramel::FieldValue(String)
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = "String"
@@ -148,6 +149,14 @@ module SweetTalk
 
           def self.__sweettalk_from_json(any : JSON::Any) : self
             new(any.as_s)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : String, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
           end
 
           def <=>(other : self)
@@ -190,6 +199,7 @@ module SweetTalk
         {% factors = times.is_a?(TupleLiteral) ? times : [times] unless times.is_a?(NilLiteral) %}
         struct {{ name }} < ::SweetTalk::Value
           include Comparable({{ name }})
+          include ::Caramel::FieldValue({{ wraps }})
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = {{ wraps.stringify }}
@@ -227,6 +237,14 @@ module SweetTalk
 
           def self.__sweettalk_from_json(any : JSON::Any) : self
             new(any.as_i64)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : {{ wraps }}, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
           end
 
           def self.zero : self
@@ -398,12 +416,267 @@ module SweetTalk
       {% end %}
     end
 
+    # `specification Dispatchable, on: Order, where: {state: :placed}, means: "…"` is a
+    # rule an aggregate declared before it satisfies or not, stated once. `where:` takes
+    # what `finds` takes, or specifications on the same aggregate joined by `&`, `|` and
+    # `!`. It adds `Order#dispatchable?`, read in Crystal, and the same rule as a SugarORM
+    # condition, read by PostgreSQL in `Order.all(satisfying: Dispatchable)` and in
+    # `finds …, satisfying: Dispatchable`. `!` reads as `IS NOT TRUE`, so a NULL column
+    # fails a rule and passes its negation in both readings.
+    macro specification(name, on = nil, where = nil, means = nil, &block)
+      {% context = @type.name.split("::").last %}
+      {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
+                    "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
+      {% if block %}
+        {% name.raise "specification #{name} takes where:, which SweetTalk reads in Crystal " +
+                      "and in PostgreSQL alike, not a block: keep a rule PostgreSQL cannot " +
+                      "read in a never, an always or a method" %}
+      {% end %}
+      {% target = on.is_a?(Path) && on.resolve? %}
+      {% unless target && target < ::SweetTalk::Aggregate &&
+                  target.name.starts_with?("#{@type.name}::") %}
+        {% name.raise "specification #{name} needs on: an aggregate of #{context.id} declared " +
+                      "before it, as in specification Dispatchable, on: Order, where: " +
+                      "{state: :placed}" %}
+      {% end %}
+      {% short = target.name.split("::").last %}
+      {% predicate = "#{name.stringify.underscore.id}?" %}
+      {% if target.has_method?(predicate) %}
+        {% name.raise "specification #{name} would define #{short.id}##{predicate.id}, which " +
+                      "#{short.id} already has: name the rule for what it means" %}
+      {% end %}
+      {% attributes = target.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+           .map { |constant| target.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+      {% moves = target.has_constant?("SWEETTALK_MOVES") && target.constant("SWEETTALK_MOVES") %}
+      {% names = attributes.reject { |attribute| attribute[2] == "entities" }
+           .map { |attribute| attribute[0] } %}
+      {% names << "state" if moves %}
+      {% grammar = "specification #{name} takes where: {attribute: value}, or specifications " +
+                   "on #{short.id} joined by &, | and !, as in where: Dispatchable & !Rushed" %}
+      # Flattens the where: tree breadth first with an explicit list, since a macro cannot
+      # recurse: `kids[i]` holds the positions of node i's operands, 128 nodes at most.
+      {% nodes = [where] %}
+      {% kids = [] of Nil %}
+      {% index = 0 %}
+      {% for step in 0..127 %}
+        {% if index < nodes.size %}
+          {% node = nodes[index] %}
+          {% if node.is_a?(Expressions) && node.expressions.size == 1 %}
+            {% node = node.expressions[0] %}
+            {% nodes[index] = node %}
+          {% end %}
+          {% joins = node.is_a?(Call) && %w[& |].includes?(node.name.stringify) &&
+                     node.args.size == 1 %}
+          {% if joins %}
+            {% kids << [nodes.size, nodes.size + 1] %}
+            {% nodes << node.receiver %}
+            {% nodes << node.args[0] %}
+          {% elsif node.is_a?(Not) %}
+            {% kids << [nodes.size] %}
+            {% nodes << node.exp %}
+          {% else %}
+            {% kids << [] of Nil %}
+          {% end %}
+          {% index = index + 1 %}
+        {% end %}
+      {% end %}
+      # Then reads it leaves first: each node's Crystal predicate and SugarORM condition.
+      {% preds = {} of Nil => Nil %}
+      {% conds = {} of Nil => Nil %}
+      {% row = target.constant("SWEETTALK_ROW").id %}
+      {% typings = [] of Nil %}
+      {% for offset in 0...nodes.size %}
+        {% position = nodes.size - 1 - offset %}
+        {% node = nodes[position] %}
+        {% children = kids[position] %}
+        {% if node.is_a?(Call) && node.name.stringify == "&" %}
+          {% preds[position] = "(#{preds[children[0]].id} && #{preds[children[1]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_all([#{conds[children[0]].id}, " +
+                               "#{conds[children[1]].id}])" %}
+        {% elsif node.is_a?(Call) && node.name.stringify == "|" %}
+          {% preds[position] = "(#{preds[children[0]].id} || #{preds[children[1]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_any([#{conds[children[0]].id}, " +
+                               "#{conds[children[1]].id}])" %}
+        {% elsif node.is_a?(Not) %}
+          {% preds[position] = "!(#{preds[children[0]].id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_none(#{conds[children[0]].id})" %}
+        {% elsif node.is_a?(Path) %}
+          {% other = node.resolve? %}
+          {% unless other && other < ::SweetTalk::Specification &&
+                      other.constant("SWEETTALK_ON") == target.name.stringify %}
+            {% node.raise "specification #{name} joins #{node}, which is not a specification " +
+                          "on #{short.id} declared before it" %}
+          {% end %}
+          {% preds[position] = "#{other.name.split("::").last.underscore.id}?" %}
+          {% conds[position] = "::#{other}.__sweettalk_condition" %}
+        {% elsif node.is_a?(NamedTupleLiteral) %}
+          {% checks = [] of Nil %}
+          {% wheres = [] of Nil %}
+          {% for key, value in node %}
+            {% if key.stringify == "state" %}
+              {% unless moves %}
+                {% value.raise "specification #{name} filters on state, which #{short.id} does " +
+                               "not have; it has #{names.join(", ").id}" %}
+              {% end %}
+              {% states = value.is_a?(ArrayLiteral) ? value : [value] %}
+              {% for state in states %}
+                {% unless moves.includes?(state.id.stringify) %}
+                  {% state.raise "specification #{name} asks for state #{state.id}, which " +
+                                 "#{short.id} does not have; states: #{moves.join(", ").id}" %}
+                {% end %}
+              {% end %}
+              {% wanted = states.map(&.id.stringify) %}
+              {% wanted = wanted[0] unless value.is_a?(ArrayLiteral) %}
+              {% checks << "::SweetTalk.__sweettalk_holds?(__sweettalk_state, #{wanted})" %}
+              {% wheres << "::SugarORM::Condition.column(\"state\", #{wanted})" %}
+            {% else %}
+              {% attribute = attributes.find { |attribute| attribute[0] == key.stringify } %}
+              {% if !attribute %}
+                {% value.raise "specification #{name} filters on #{key.id}, which #{short.id} " +
+                               "does not have; it has #{names.join(", ").id}" %}
+              {% elsif attribute[2] == "entities" %}
+                {% value.raise "specification #{name} cannot filter on #{key.id}, a list of " +
+                               "entities: PostgreSQL reads one #{short.id} row; keep a rule " +
+                               "over #{key.id} in a never, an always or a method" %}
+              {% elsif attribute[2] == "composite" %}
+                {% for part in attribute[7] %}
+                  {% raw = part[4] == "value" ? ".raw" : "" %}
+                  {% have = "@#{attribute[0].id}.#{part[0].id}#{raw.id}" %}
+                  {% want = "::SweetTalk.column((#{value}).#{part[0].id})" %}
+                  {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
+                  {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% typings << "typeof(#{row}.query.where(#{part[1].id}: #{want.id}))" %}
+                {% end %}
+              {% else %}
+                {% have = "@#{attribute[4].id}" %}
+                {% have = "@#{attribute[0].id}.raw" if attribute[2] == "value" %}
+                {% want = "::SweetTalk.column(#{value})" %}
+                {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
+                {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% typings << "typeof(#{row}.query.where(#{attribute[4].id}: #{want.id}))" %}
+              {% end %}
+            {% end %}
+          {% end %}
+          {% preds[position] = "(#{checks.join(" && ").id})" %}
+          {% conds[position] = "::SweetTalk.__sweettalk_all([#{wheres.join(", ").id}])" %}
+        {% else %}
+          {% (node.is_a?(Nop) || node.is_a?(NilLiteral) ? name : node).raise grammar %}
+        {% end %}
+      {% end %}
+      struct {{ name }} < ::SweetTalk::Specification
+        SWEETTALK_KIND  = "specification"
+        SWEETTALK_MEANS = {{ means }}
+        SWEETTALK_ON    = {{ target.name.stringify }}
+
+        # Whether *candidate* satisfies this rule, read in Crystal.
+        def self.satisfied_by?(candidate : ::{{ target }}) : Bool
+          candidate.{{ predicate.id }}
+        end
+
+        # The same rule as a SugarORM condition, read by PostgreSQL.
+        def self.__sweettalk_condition : ::SugarORM::Condition
+          # Types each value against its column as finds does, without running a query.
+          {{ typings.join("\n").id }}
+          {{ conds[0].id }}
+        end
+      end
+
+      class ::{{ target }}
+        # Whether this {{ short.id }} satisfies `specification {{ name }}`: {{ means.id }}
+        def {{ predicate.id }} : Bool
+          {{ preds[0].id }}
+        end
+      end
+
+      # Types the condition now, so a value of the wrong type does not compile even when no
+      # query asks for this rule; typeof runs nothing.
+      typeof({{ name }}.__sweettalk_condition)
+    end
+
+    # Checks every `finds` and `counts` of this context's aggregates and projections when
+    # the context closes, whether or not anything calls them: each key names a stored
+    # attribute or `state:` a declared state, each `order:` key `id` or an attribute stored
+    # in one column, and `satisfying:` a specification on the same aggregate.
+    macro __sweettalk_check_queries
+      {% depth = @type.name.split("::").size + 1 %}
+      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::Projection.all_subclasses %}
+      {% owners = owners.select do |owner|
+           owner.name.starts_with?("#{@type.name}::") && owner.name.split("::").size == depth
+         end %}
+      {% for target in owners %}
+        {% short = target.name.split("::").last %}
+        {% attributes = target.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |constant| target.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+        {% moves = target.has_constant?("SWEETTALK_MOVES") && target.constant("SWEETTALK_MOVES") %}
+        {% names = attributes.reject { |attribute| attribute[2] == "entities" }
+             .map { |attribute| attribute[0] } %}
+        {% names << "state" if moves %}
+        {% for constant in target.constants.select(&.starts_with?("SWEETTALK_QUERY_")) %}
+          {% query = target.constant(constant) %}
+          {% word = "#{query[0].id} #{query[1].id}" %}
+          {% at = "\n  --> #{query[6].id}" %}
+          {% for key in query[2] %}
+            {% attribute = attributes.find { |attribute| attribute[0] == key } %}
+            {% if key == "state" && !moves %}
+              {% raise "#{word.id} filters on state, which #{short.id} does not have; it has " +
+                       "#{names.join(", ").id}" + at %}
+            {% elsif key != "state" && !attribute %}
+              {% raise "#{word.id} filters on #{key.id}, which #{short.id} does not have; it " +
+                       "has #{names.join(", ").id}" + at %}
+            {% elsif attribute && attribute[2] == "entities" %}
+              {% raise "#{word.id} cannot filter on #{key.id}, a list of entities" + at %}
+            {% end %}
+          {% end %}
+          {% for state in query[3] %}
+            {% unless moves.includes?(state) %}
+              {% raise "#{word.id} asks for state #{state.id}, which #{short.id} does not " +
+                       "have; states: #{moves.join(", ").id}" + at %}
+            {% end %}
+          {% end %}
+          {% for key in query[4] %}
+            {% attribute = attributes.find { |attribute| attribute[0] == key } %}
+            {% sortable = key == "id" ||
+                          (attribute && !%w[entities composite].includes?(attribute[2])) %}
+            {% unless sortable %}
+              {% raise "#{word.id} orders by #{key.id}, which #{short.id} cannot sort by: " +
+                       "order by id, or by an attribute stored in one column" + at %}
+            {% end %}
+          {% end %}
+          {% if query[5] %}
+            {% rule = parse_type(query[5]).resolve? %}
+            {% unless rule && rule < ::SweetTalk::Specification &&
+                        rule.constant("SWEETTALK_ON") == target.name.stringify %}
+              {% raise "#{word.id} takes satisfying: a specification on #{short.id}, not " +
+                       "#{query[5].id}" + at %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    end
+
     # `border Other do … end`: the only code in this context that may name `Other::`.
     # Each `whenever` and `compensate` in it carries the border's name, which names its
-    # job.
-    macro border(other, &block)
+    # job. `border Cards, outside: "…" do … end` is the border with a system outside the
+    # program, a module `Cards` in this context: the only code that may name
+    # `Caramel::Outbound` or `HTTP::Client`, a check on the text as written, and that turns
+    # its answers into this context's values.
+    macro border(other, outside = nil, &block)
       {% body = block.body %}
       {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
+      # The context refuses an outside: that is not text, so text is what marks it.
+      {% if outside.is_a?(StringLiteral) %}
+        {% for expression in expressions %}
+          {% if expression.is_a?(Call) &&
+                  %w[whenever compensate].includes?(expression.name.stringify) %}
+            {% expression.raise "#{expression.name} belongs in a border with a context: " +
+                                "#{other} is outside the program and emits no events" %}
+          {% end %}
+        {% end %}
+        module {{ other }}
+          {{ body }}
+        end
+        {% expressions = [] of Nil %}
+      {% end %}
       {% for expression in expressions %}
         {% handler = expression.is_a?(Call) && !expression.block.is_a?(Nop) %}
         {% if handler && expression.name == "whenever" %}
@@ -448,6 +721,29 @@ module SweetTalk
       {% name.raise "deadline belongs in a process, " +
                     "not in context #{@type.name.split("::").last.id}" %}
     end
+
+    # `publishes Cents, Tea::Id, price_of` is this context's published language: the
+    # types and services another context may name. Once a context publishes, every other
+    # context names only those, and the events it reacts to. `context` reads the list;
+    # this checks that each name is declared before it.
+    macro publishes(*names)
+      {% short = @type.name.split("::").last %}
+      {% for name in names %}
+        {% if name.is_a?(Path) %}
+          {% found = name.resolve? %}
+          {% declared = found && found.name.starts_with?("#{@type.name}::") %}
+        {% elsif name.is_a?(Call) && name.receiver.is_a?(Nop) && name.args.empty? %}
+          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") %}
+        {% else %}
+          {% name.raise "publishes takes the context's types and services, as in " +
+                        "publishes Cents, Tea::Id, price_of, not #{name}" %}
+        {% end %}
+        {% unless declared %}
+          {% name.raise "#{short.id} publishes #{name}, which it does not declare: declare " +
+                        "a type or a service of that name before publishes" %}
+        {% end %}
+      {% end %}
+    end
   end
 
   # `tenant App::Account`, before the first context, names the tenant model of a program
@@ -480,7 +776,11 @@ module SweetTalk
   # text apart from the events its `whenever`s name, so reacting to an event is not a
   # dependency. In a program that requires caramel/tenancy its rows belong to one tenant,
   # unless it says `central: true`, which shares them between every tenant.
-  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil, &block)
+  # `subdomain: :core`, `:supporting` or `:generic` says what part of the domain it is.
+  # `publishes` lists the names other contexts may use, and `border X, outside: "…"`
+  # faces a system outside the program.
+  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil,
+                subdomain = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -492,6 +792,12 @@ module SweetTalk
       {% central.raise "context #{name} takes central: true only in a program that requires " +
                        "caramel/tenancy" %}
     {% end %}
+    {% subdomains = %w[core supporting generic] %}
+    {% unless subdomain.is_a?(NilLiteral) ||
+                (subdomain.is_a?(SymbolLiteral) && subdomains.includes?(subdomain.id.stringify)) %}
+      {% subdomain.raise "context #{name} takes subdomain: :core, :supporting or :generic, " +
+                         "not subdomain: #{subdomain}" %}
+    {% end %}
     {% tenant = @type.has_constant?("SWEETTALK_TENANT") && !central &&
                 @type.constant("SWEETTALK_TENANT") %}
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
@@ -500,7 +806,103 @@ module SweetTalk
     {% followed = [] of Nil %}
     {% followed = [follows] unless follows.is_a?(NilLiteral) %}
     {% followed = follows if follows.is_a?(TupleLiteral) %}
-    {% borders = expressions.select { |node| node.is_a?(Call) && node.name == "border" } %}
+    # A border is outside when its outside: is text, as in the border macro; any other
+    # outside:, nil included, is refused at the border's line.
+    {% for node in expressions %}
+      {% if node.is_a?(Call) && node.name == "border" %}
+        {% said = (node.named_args || [] of Nil).find { |arg| arg.name.stringify == "outside" } %}
+        {% if said && !said.value.is_a?(StringLiteral) %}
+          {% node.raise "border #{node.args[0]} takes outside: \"…\", what the system is to " +
+                        "this context, the line its glossary entry shows" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% outsides = expressions.select do |node|
+         node.is_a?(Call) && node.name == "border" &&
+           (node.named_args || [] of Nil).any? do |arg|
+             arg.name.stringify == "outside" && arg.value.is_a?(StringLiteral)
+           end
+       end %}
+    {% borders = expressions.select do |node|
+         node.is_a?(Call) && node.name == "border" && !outsides.includes?(node)
+       end %}
+    {% published = nil %}
+    {% for node in expressions %}
+      {% if node.is_a?(Call) && node.name == "publishes" %}
+        {% published = [] of Nil unless published %}
+        {% for argument in node.args %}
+          {% published << argument.stringify %}
+        {% end %}
+      {% end %}
+    {% end %}
+    # {statement, its text, in an outside border?} for each statement a check may refuse,
+    # so the refusal names its line; a handler's text leaves out the event it reacts to.
+    {% handlers = %w[whenever compensate] %}
+    {% checks = [] of Nil %}
+    {% for node in expressions %}
+      {% block = node.is_a?(Call) && !node.block.is_a?(Nop) %}
+      {% outside = outsides.includes?(node) %}
+      {% if block && handlers.includes?(node.name.stringify) %}
+        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+        {% checks << {node, node.block.body.stringify + "\n" + extra, false} %}
+      {% elsif block %}
+        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+        {% checks << {node, node.args.map(&.stringify).join("\n") + "\n" + extra, false} %}
+        {% inner = node.block.body %}
+        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+          {% nested = step.is_a?(Call) && !step.block.is_a?(Nop) &&
+                      handlers.includes?(step.name.stringify) %}
+          {% if nested %}
+            {% extra = (step.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+            {% checks << {step, step.block.body.stringify + "\n" + extra, outside} %}
+          {% else %}
+            {% checks << {step, step.stringify, outside} %}
+          {% end %}
+        {% end %}
+      {% else %}
+        {% checks << {node, node.stringify, false} %}
+      {% end %}
+    {% end %}
+    # The published languages of the contexts of this domain declared before this one.
+    {% for up in ::SweetTalk::BoundedContext.includers %}
+      {% upname = up.name.split("::").last %}
+      {% offers = up.constant("SWEETTALK_PUBLISHES") %}
+      {% if offers && up.name.stringify == prefix + upname && upname != name.stringify %}
+        {% offered = offers.join(", ") %}
+        {% for check in checks %}
+          {% for piece in check[1].split(upname + "::")[1..-1] %}
+            {% path = piece.gsub(/\A([A-Z]\w*(?:::[A-Z]\w*)*)[\s\S]*\z/, "\\1") %}
+            {% found = parse_type(up.name.stringify + "::" + path).resolve? %}
+            {% open = offers.any? { |offer| path == offer || path.starts_with?(offer + "::") } ||
+                      (found && found < ::SweetTalk::Event) %}
+            {% unless open %}
+              {% check[0].raise "#{prefix.id}#{name} names #{upname.id}::#{path.id}, which " +
+                                "#{upname.id} does not publish; it publishes #{offered.id}: use " +
+                                "one of those, or publish #{path.id} in #{upname.id}" %}
+            {% end %}
+          {% end %}
+          {% for piece in check[1].split(upname + ".")[1..-1] %}
+            {% call = piece =~ /\A[a-z_]/ && piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
+            {% if call && !offers.includes?(call) %}
+              {% check[0].raise "#{prefix.id}#{name} calls #{upname.id}.#{call.id}, which " +
+                                "#{upname.id} does not publish; it publishes #{offered.id}: " +
+                                "use one of those, or publish #{call.id} in #{upname.id}" %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    # HTTP leaves the program only through a border with an outside system.
+    {% for check in checks %}
+      {% reached = nil %}
+      {% reached = "Caramel::Outbound" if check[1].includes?("Caramel::Outbound") %}
+      {% reached = "HTTP::Client" if check[1].includes?("HTTP::Client") %}
+      {% if reached && !check[2] %}
+        {% check[0].raise "#{prefix.id}#{name} reaches #{reached.id} outside a border with an " +
+                          "outside system: move that call into the border with the system it " +
+                          "reaches, as in border Cards, outside: \"…\" do … end" %}
+      {% end %}
+    {% end %}
     {% kinds = %w[value aggregate projection process] %}
     {% own = expressions.select do |node|
          node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?
@@ -508,7 +910,7 @@ module SweetTalk
     {% reacts = [] of Nil %}
     {% pieces = [] of Nil %}
     {% for node in expressions %}
-      {% if node.is_a?(Call) && node.name == "border" %}
+      {% if borders.includes?(node) %}
       {% elsif node.is_a?(Call) && node.name == "process" && !node.block.is_a?(Nop) %}
         {% inner = node.block.body %}
         {% steps = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
@@ -534,6 +936,7 @@ module SweetTalk
       {% end %}
     {% end %}
     {% listed = reacts.map { |react| "{#{react[0]}, #{react[1]}}" } %}
+    {% offering = published ? "[#{published.map(&.stringify).join(", ").id}] of String" : "nil" %}
     module {{ name }}
       include ::SweetTalk::BoundedContext
 
@@ -543,10 +946,19 @@ module SweetTalk
       # {tenant model, attribute} when this context's rows belong to one tenant
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
+      SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
+      # The names other contexts may use, or nil when every name is open to a follower
+      SWEETTALK_PUBLISHES = {{ offering.id }}
+      {% for border in outsides %}
+        {% system = border.args[0].names.last %}
+        {% said = border.named_args.find { |argument| argument.name.stringify == "outside" } %}
+        # {outside system, what it is to this context}
+        SWEETTALK_OUTSIDE_{{ system.upcase }} = { {{ system.stringify }}, {{ said.value }} }
+      {% end %}
       {% for border in borders %}
         {% inner = border.block.body %}
         {% parts = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
@@ -567,6 +979,8 @@ module SweetTalk
       end
 
       {{ body }}
+
+      __sweettalk_check_queries
     end
   end
 end

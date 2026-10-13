@@ -105,6 +105,12 @@ module TeaShop
       end
 
       finds placed_for(member : Account), where: {member: member, state: :placed}
+      finds newest_for(member : Account, count : Int32), where: {member: member},
+        order: {id: :desc}, first: count
+      counts placed_count_for(member : Account), where: {member: member, state: :placed}
+      finds holding(tea : Catalogue::Tea::Id) do |orders|
+        orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea_id = ?)", tea.raw)
+      end
 
       to add(tea : Catalogue::Tea, quantity : Quantity) do
         refuse "Teas can be added only while the order is open." unless open?
@@ -136,9 +142,13 @@ module TeaShop
 
       to forget do
         refuse "Only a cancelled order can be forgotten." unless cancelled?
+        refuse "An order whose parcel left cannot be forgotten." if astray?
         remove
       end
     end
+
+    specification Astray, on: Order, where: {state: :cancelled, late_parcel: true},
+      means: "a cancelled order whose parcel left anyway"
 
     service requote(order : Order::Id), returns: Catalogue::Cents,
       means: "what an order would cost at today's prices" do
@@ -150,6 +160,14 @@ module TeaShop
     projection Sales, means: "tins sold of one tea" do
       key tea : Catalogue::Tea
       has sold : Int32 = 0
+      finds best_sellers(count : Int32), order: {sold: :desc}, first: count
+      finds selling(least : Int32), where: {sold: least..}, order: {sold: :desc}
+      finds of(tea : Catalogue::Tea), where: {tea: tea}
+      counts sold_any, where: {sold: 1..}
+
+      finds of_teas(teas : Array(Int64)) do |rows|
+        rows.where(tea_id: teas).order_by(:tea_id, :asc)
+      end
 
       whenever Order::Placed, each: :lines do |placed, line|
         Sales[line.tea].sold += line.quantity.to_i

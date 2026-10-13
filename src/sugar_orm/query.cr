@@ -78,6 +78,14 @@ module SugarORM
       __sugar_where([::SugarORM::Condition.new("(#{fragment})", values)])
     end
 
+    # A predicate built as a `Condition`, such as a SweetTalk specification's. Its `?`
+    # binds take its values in order, and it is parenthesized, as a fragment is, so an
+    # `OR` inside it cannot reach the conditions beside it. It is not an overload of
+    # `where`, which would turn "no parameter named" into "no overload matches".
+    def where_condition(condition : ::SugarORM::Condition) : self
+      __sugar_where([::SugarORM::Condition.new("(#{condition.sql})", condition.values)])
+    end
+
     # `field` is checked at compile time through the generated `T::Field` enum.
     # `direction` stays a Symbol so an unknown field is reported on the field:
     # Crystal misattributes the failure when two symbol arguments autocast.

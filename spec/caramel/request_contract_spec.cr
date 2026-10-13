@@ -28,6 +28,29 @@ struct ArrayContract < Caramel::RequestContract
   field tags : Array(String), max: 2
 end
 
+# A field value (ADR 0034): bound from an Int32, refusing an odd one.
+struct EvenCount
+  include Caramel::FieldValue(Int32)
+
+  getter raw : Int32
+
+  def initialize(@raw : Int32)
+  end
+
+  def self.from_field(raw : Int32, & : String ->) : self?
+    return new(raw) if raw.even?
+    yield "must be even"
+    nil
+  end
+end
+
+struct EvenContract < Caramel::RequestContract
+  field count : EvenCount
+  field maybe : EvenCount?
+  field size : EvenCount, default: EvenCount.new(2)
+  field counts : Array(EvenCount), max: 3
+end
+
 private def input(body : String,
                   method = "POST",
                   path = "/teams",
@@ -196,6 +219,29 @@ describe Caramel::RequestContract do
     json.tags.should be_empty
 
     ArrayContract.parse(input("ids=1")).tags.should be_empty
+  end
+
+  it "binds a field value through its wire type and reports what from_field yields" do
+    even = EvenContract.parse(input("count=4"))
+    even.errors.should be_empty
+    even.count.raw.should eq(4)
+    even.maybe.should be_nil
+    even.size.raw.should eq(2)
+    EvenContract.parse(input("count=3")).errors.should eq({"count" => ["must be even"]})
+    EvenContract.parse(input("count=x")).errors.should eq({"count" => ["must be a valid Int32"]})
+    EvenContract.parse(json_input(%({"count": "4"}))).errors
+      .should eq({"count" => ["must be a JSON number"]})
+  end
+
+  it "binds arrays of field values item by item" do
+    EvenContract.parse(input("count=2&counts=2&counts=3&counts=2")).errors.should eq({
+      "counts[1]" => ["must be even"], "counts[2]" => ["repeats an earlier item"],
+    })
+  end
+
+  it "summarizes a field value with both types" do
+    EvenContract::CARAMEL_FIELD_COUNT
+      .should eq({"count", "Int32", false, false, "count:EvenCount(Int32)", "EvenCount"})
   end
 
   it "reports array bounds, items and sources" do

@@ -114,8 +114,8 @@ module Caramel::Frappe
       Command.new("help", "Print every command with its description.", project: false),
       Command.new("version", "Print the Frappé version.", project: false),
       Command.new("agent-manifest",
-        "Print this strict command list and the MRDP diagnostic grammar " \
-        "for coding agents.",
+        "Print the release's version and the addresses of its documentation and guides, " \
+        "this strict command list and the MRDP diagnostic grammar for coding agents.",
         project: false),
       Command.new("new NAME",
         "Create the application ./NAME, install its locked dependencies " \
@@ -167,8 +167,10 @@ module Caramel::Frappe
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
         "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
         "require \"caramel/sweet_talk\" and require \"../app/domain/*\" in " \
-        "config/application.cr. In a multi-tenant application the domain names the " \
-        "tenant, and --central makes the context one every tenant shares."),
+        "config/application.cr. When the application has no SweetTalk skill for agents, " \
+        "it also writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application " \
+        "the domain names the tenant, and --central makes the context one every tenant " \
+        "shares."),
       Command.new("translations",
         "List the keys each locale still takes from the default locale; " \
         "exits 1 while any is missing."),

@@ -1,5 +1,6 @@
 require "../http/request_input"
 require "../wording"
+require "./field_value"
 
 module Caramel
   # The explicit, typed input of one action. Fields bind by name from route
@@ -114,9 +115,13 @@ module Caramel
                        "#{decl.type}#{where.id}" %}
       {% type = decl.type.resolve %}
       {% element_types = ["String", "Int32", "Int64", "Float64", "Bool", "Time"] %}
-      {% if !type.union? && type.name(generic_args: false).stringify == "Array" &&
-              type.type_vars.size == 1 &&
-              element_types.includes?(type.type_vars.first.id.stringify) %}
+      {% listed = !type.union? && type.name(generic_args: false).stringify == "Array" &&
+                  type.type_vars.size == 1 %}
+      {% item = listed ? type.type_vars.first : nil %}
+      {% item_value = item && item.ancestors.find do |ancestor|
+           ancestor.name(generic_args: false).stringify == "Caramel::FieldValue"
+         end %}
+      {% if listed && (element_types.includes?(item.id.stringify) || item_value) %}
         __caramel_array_field({{ decl }}, {{ min }}, {{ max }}, {{ default }}, {{ where }})
       {% else %}
       {% scalar = type %}
@@ -129,22 +134,38 @@ module Caramel
         {% scalar = members.first %}
         {% nilable = true %}
       {% end %}
-      {% full = scalar.id.stringify %}
+      {% bound = scalar.ancestors.find do |ancestor|
+           ancestor.name(generic_args: false).stringify == "Caramel::FieldValue"
+         end %}
+      {% wire = bound ? bound.type_vars.first : scalar %}
+      {% full = wire.id.stringify %}
+      {% if bound && !element_types.includes?(full) %}
+        {% decl.raise "#{scalar} includes Caramel::FieldValue(#{wire}), but a field value " +
+                      "binds from String, Int32, Int64, Float64, Bool or Time: " +
+                      "#{name}#{where.id}" %}
+      {% end %}
+      {% if bound && !scalar.class.has_method?("from_field") %}
+        {% decl.raise "#{scalar} includes Caramel::FieldValue(#{wire}) but defines no " +
+                      "self.from_field(raw : #{wire}, & : String ->): #{name}#{where.id}" %}
+      {% end %}
       {% supported = ["String", "Int32", "Int64", "Float64", "Bool", "Time",
                       "Caramel::UploadedFile"] %}
-      {% unless supported.includes?(full) %}
+      {% unless supported.includes?(full) && !(bound && full == "Caramel::UploadedFile") %}
         {% decl.raise unsupported %}
       {% end %}
       {% short = full.split("::").last %}
       {% bounded = ["String", "Int32", "Int64", "Float64"] %}
-      {% if (has_min || has_max) && !bounded.includes?(full) %}
+      {% if (has_min || has_max) && (bound || !bounded.includes?(full)) %}
         {% decl.raise "min/max apply only to String, Int32, Int64 and Float64 fields: " +
                       "#{name}#{where.id}" %}
       {% end %}
       {% if has_default && full == "Caramel::UploadedFile" %}
         {% decl.raise "UploadedFile fields cannot declare defaults: #{name}#{where.id}" %}
       {% end %}
-      {% summary = "#{name}:#{short.id}#{nilable ? "?".id : "".id}" %}
+      {% path = scalar.id.stringify.split("::") %}
+      {% path = path.size > 1 ? path[-2..-1] : path %}
+      {% named = bound ? "#{path.join("::").id}(#{short.id})" : short %}
+      {% summary = "#{name}:#{named.id}#{nilable ? "?".id : "".id}" %}
       {% if has_min && has_max %}
         {% summary = summary + "(min=#{min},max=#{max})" %}
       {% elsif has_min %}
@@ -155,6 +176,7 @@ module Caramel
 
       CARAMEL_FIELD_{{ name.upcase }} = {
         {{ name.stringify }}, {{ short }}, {{ nilable }}, {{ has_default }}, {{ summary }},
+        {{ scalar.id.stringify }},
       }
 
       @{{ name }} : {{ scalar }}? = nil
@@ -202,11 +224,17 @@ module Caramel
             {% end %}
             return
           end
-          value = ::Caramel::RequestContract.convert(raw, {{ scalar }})
+          value = ::Caramel::RequestContract.convert(raw, {{ wire }})
           if value.nil?
             add_error({{ name.stringify }}, ::Caramel::Wording.invalid_value({{ short }}))
             return
           end
+          {% if bound %}
+            built = {{ scalar }}.from_field(value) do |message|
+              add_error({{ name.stringify }}, message)
+            end
+            @{{ name }} = built if built
+          {% else %}
           {% measure = full == "String" ? "value.size".id : "value".id %}
           {% at_least = full == "String" ? "at_least_characters".id : "at_least".id %}
           {% at_most = full == "String" ? "at_most_characters".id : "at_most".id %}
@@ -223,6 +251,7 @@ module Caramel
             end
           {% end %}
           @{{ name }} = value
+          {% end %}
         {% end %}
       end
       {% end %}
@@ -235,7 +264,24 @@ module Caramel
       {% has_min = !min.is_a?(NilLiteral) %}
       {% has_max = !max.is_a?(NilLiteral) %}
       {% element = decl.type.resolve.type_vars.first %}
-      {% full = element.id.stringify %}
+      {% bound = element.ancestors.find do |ancestor|
+           ancestor.name(generic_args: false).stringify == "Caramel::FieldValue"
+         end %}
+      {% wire = bound ? bound.type_vars.first : element %}
+      {% full = wire.id.stringify %}
+      {% element_types = ["String", "Int32", "Int64", "Float64", "Bool", "Time"] %}
+      {% if bound && !element_types.includes?(full) %}
+        {% decl.raise "#{element} includes Caramel::FieldValue(#{wire}), but a field value " +
+                      "binds from String, Int32, Int64, Float64, Bool or Time: " +
+                      "#{name}#{where.id}" %}
+      {% end %}
+      {% if bound && !element.class.has_method?("from_field") %}
+        {% decl.raise "#{element} includes Caramel::FieldValue(#{wire}) but defines no " +
+                      "self.from_field(raw : #{wire}, & : String ->): #{name}#{where.id}" %}
+      {% end %}
+      {% path = element.id.stringify.split("::") %}
+      {% path = path.size > 1 ? path[-2..-1] : path %}
+      {% named = bound ? "#{path.join("::").id}(#{full.split("::").last.id})" : full %}
       {% unless has_max %}
         {% decl.raise "array fields must declare max:, the most items they accept: " +
                       "#{name}#{where.id}" %}
@@ -258,7 +304,7 @@ module Caramel
 
       CARAMEL_FIELD_{{ name.upcase }} = {
         {{ name.stringify }}, {{ "Array(#{full.id})" }}, false, false,
-        {{ "#{name}:Array(#{full.id})(#{bounds.id})" }},
+        {{ "#{name}:Array(#{named.id})(#{bounds.id})" }}, {{ "Array(#{element.id})" }},
       }
 
       @{{ name }} : Array({{ element }})? = nil
@@ -309,12 +355,21 @@ module Caramel
             failed = true
             next
           end
-          value = ::Caramel::RequestContract.convert(text, {{ element }})
-          if value.nil?
+          raw = ::Caramel::RequestContract.convert(text, {{ wire }})
+          if raw.nil?
             add_error(key, ::Caramel::Wording.invalid_value({{ full.split("::").last }}))
             failed = true
             next
           end
+          {% if bound %}
+            value = {{ element }}.from_field(raw) { |message| add_error(key, message) }
+            unless value
+              failed = true
+              next
+            end
+          {% else %}
+            value = raw
+          {% end %}
           unless seen.add?(value)
             add_error(key, ::Caramel::Wording.duplicate_item)
             failed = true

@@ -11,19 +11,21 @@ module Caramel::Checks::Prose
     /\Adocs\/decisions\/\d{4}-[a-z0-9-]+\.md\z/,
     /\Awebsite\/README\.md\z/,
     /\Atemplates\/application\/(README|AGENTS|CLAUDE)\.md\z/,
+    /\Atemplates\/skills\/sweettalk\/SKILL\.md\z/,
     /\A(website\/)?vendor\//,
   ]
 
   CAPS = {
-    "README.md"                       => 3_000,
-    "AGENTS.md"                       => 3_000,
-    "CLAUDE.md"                       => 200,
-    "CONTRIBUTING.md"                 => 12_000,
-    "SECURITY.md"                     => 2_000,
-    "website/README.md"               => 5_000,
-    "templates/application/README.md" => 3_000,
-    "templates/application/AGENTS.md" => 2_000,
-    "templates/application/CLAUDE.md" => 200,
+    "README.md"                           => 3_000,
+    "AGENTS.md"                           => 3_000,
+    "CLAUDE.md"                           => 200,
+    "CONTRIBUTING.md"                     => 12_000,
+    "SECURITY.md"                         => 2_000,
+    "website/README.md"                   => 6_000,
+    "templates/application/README.md"     => 3_000,
+    "templates/application/AGENTS.md"     => 2_000,
+    "templates/application/CLAUDE.md"     => 200,
+    "templates/skills/sweettalk/SKILL.md" => 5_000,
   }
   ADR_CAP = 12_000
 

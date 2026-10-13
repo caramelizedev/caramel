@@ -1,8 +1,9 @@
-# What PostgreSQL checks of SweetTalk's values: every integer bound and string length
-# is a CHECK constraint on each column that stores it, so a write that goes around the
-# domain is refused too; a pattern, and a value with database_check: false, are checked
-# in Crystal only. And the tables as PostgreSQL holds them match the declared ones, so
-# `frappe db diff` derives no further migration.
+# What PostgreSQL checks of SweetTalk's values and lifecycles: every integer bound and
+# string length is a CHECK constraint on each column that stores it, and every lifecycle
+# one on its state column, so a write that goes around the domain is refused too; a
+# pattern, and a value with database_check: false, are checked in Crystal only. And the
+# tables as PostgreSQL holds them match the declared ones, so `frappe db diff` derives no
+# further migration.
 require "./support/app"
 
 module DatabaseChecksSpec
@@ -23,18 +24,24 @@ module DatabaseChecksSpec
 end
 
 describe "SweetTalk's database checks" do
-  it "creates a check for every bounded value it stores, and none for a pattern or an opt-out" do
+  it "creates a check for every bounded value it stores, every lifecycle, and none for a " \
+     "pattern or an opt-out" do
     SweetTalkSpec.rolled_back do
       checks = SugarORM.sql(<<-SQL, as: {name: String})
         SELECT conname AS name FROM pg_constraint
         WHERE contype = 'c' AND conname LIKE 'check\\_%' ORDER BY conname
         SQL
       checks.map(&.[:name]).should eq(%w[
+        check_billing_bills_amount check_billing_bills_state_16e92b19
         check_catalogue_teas_held check_catalogue_teas_price check_catalogue_teas_stock
-        check_fulfilment_parcel_packings_tins check_ordering_order_lines_price
+        check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
+        check_ordering_holds_state_a8664243 check_ordering_order_lines_price
         check_ordering_order_lines_quantity check_ordering_orders_receipt_to_length_3_254
-        check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth
-        check_shelf_bins_size_width check_shelf_boxes_count check_store_teas_stock
+        check_ordering_orders_state_ef9524ce check_pricing_teas_price
+        check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
+        check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
+        check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8
+        check_shelf_tabs_state_d74ee900 check_store_teas_stock
       ])
     end
   end
@@ -57,6 +64,15 @@ describe "SweetTalk's database checks" do
       DatabaseChecksSpec.broken("UPDATE shelf_bins SET code = 'ABCDE' WHERE id = $1", bin.id.raw)
         .should eq("check_shelf_bins_code_length_2_4")
       Rules::Shelf::Bin.find(bin.id).code.raw.should eq("AB")
+    end
+  end
+
+  it "refuses a state written around the domain" do
+    SweetTalkSpec.rolled_back do
+      box = Rules::Shelf::Box.create(label: "boxed", count: Rules::Shelf::Count.new(0))
+      DatabaseChecksSpec.broken("UPDATE shelf_boxes SET state = 'bogus' WHERE id = $1", box.id.raw)
+        .should eq("check_shelf_boxes_state_2ac5fa1a")
+      Rules::Shelf::Box.find(box.id).draft?.should be_true
     end
   end
 

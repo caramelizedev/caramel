@@ -5,6 +5,7 @@ module SweetTalk
   abstract class Aggregate < Model
     include Guarded
     include Lifecycle
+    include Queried
 
     @__sweettalk_id : Int64? = nil
     @__sweettalk_removed_at : Time? = nil
@@ -217,71 +218,6 @@ module SweetTalk
       end
     end
 
-    # `finds placed_for(member : Account), where: {member: member, state: :placed}` is a
-    # repository query: the aggregates whose attributes equal the expressions, by id, with
-    # their entities, skipping removed ones. A value, an id, an aggregate, a record, a
-    # list or a range of them compares by its column; a composite value by each part;
-    # `state:` takes a state or a list of states.
-    macro finds(call, where = nil)
-      {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
-                 call.args.all?(&.is_a?(TypeDeclaration)) && where.is_a?(NamedTupleLiteral) %}
-      {% unless typed %}
-        {% call.raise "finds takes a verb, typed arguments and where:, as in finds " +
-                      "placed_for(member : Account), where: {member: member, state: :placed}" %}
-      {% end %}
-      {% verb = call.name %}
-      {% short = @type.name.split("::").last %}
-      {% at = "\n  --> #{call.filename.id}:#{call.line_number}:#{call.column_number}" %}
-      def self.{{ verb }}({{ call.args.splat }}) : Array(self)
-        \{% begin %}
-          query = {{ @type.constant("SWEETTALK_ROW").id }}.query.where(removed_at: nil)
-          \{% attributes = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
-               .map { |constant| @type.constant(constant) }.sort_by { |attribute| attribute[1] } %}
-          \{% moves = @type.has_constant?("SWEETTALK_MOVES") && @type.constant("SWEETTALK_MOVES") %}
-          \{% names = attributes.reject { |attribute| attribute[2] == "entities" }
-               .map { |attribute| attribute[0] } %}
-          \{% names << "state" if moves %}
-          {% for key, value in where %}
-            {% if key.stringify == "state" %}
-              \{% unless moves %}
-                \{% raise "finds {{ verb }} filters on state, which {{ short.id }} does not " +
-                         "have; it has #{names.join(", ").id}" + {{ at }} %}
-              \{% end %}
-              {% states = value.is_a?(ArrayLiteral) ? value : [value] %}
-              {% for state in states %}
-                \{% unless moves.includes?({{ state.id.stringify }}) %}
-                  \{% raise "finds {{ verb }} asks for state {{ state.id }}, which " +
-                           "{{ short.id }} does not have; states: #{moves.join(", ").id}" +
-                           {{ at }} %}
-                \{% end %}
-              {% end %}
-              {% wanted = states.map(&.id.stringify) %}
-              {% wanted = wanted[0] unless value.is_a?(ArrayLiteral) %}
-              query = query.where(state: {{ wanted }})
-            {% else %}
-              \{% attribute = attributes.find { |attribute| attribute[0] == {{ key.stringify }} } %}
-              \{% if !attribute %}
-                \{% raise "finds {{ verb }} filters on {{ key.id }}, which {{ short.id }} " +
-                         "does not have; it has #{names.join(", ").id}" + {{ at }} %}
-              \{% elsif attribute[2] == "entities" %}
-                \{% raise "finds {{ verb }} cannot filter on {{ key.id }}, a list of entities" +
-                         {{ at }} %}
-              \{% elsif attribute[2] == "composite" %}
-                composite_{{ key.id }} = ({{ value }})
-                \{% parts = attribute[7].map do |part|
-                     "#{part[1].id}: ::SweetTalk.column(composite_{{ key.id }}.#{part[0].id})"
-                   end %}
-                query = query.where(\{{ parts.join(", ").id }})
-              \{% else %}
-                query = query.where(\{{ attribute[4].id }}: ::SweetTalk.column({{ value }}))
-              \{% end %}
-            {% end %}
-          {% end %}
-          __sweettalk_rows(query.order_by(:id, :asc))
-        \{% end %}
-      end
-    end
-
     # The id, constructors, repository, saving and the command transaction, from the
     # attributes declared so far; then the tables, the root's first.
     macro __sweettalk_storage
@@ -343,7 +279,7 @@ module SweetTalk
           {% copies << "@#{attribute[4].id} = fresh.@#{attribute[4].id}" %}
         {% end %}
       {% end %}
-      {% columns << "state: @state.to_s.downcase" if moves %}
+      {% columns << "state: __sweettalk_state" if moves %}
       {% columns << "removed_at: @__sweettalk_removed_at" %}
       {% referring = stored.select { |attribute| %w(reference record).includes?(attribute[2]) } %}
       {% lists = collections.map { |collection| ", #{collection[0].id} : #{collection[3].id}" } %}
@@ -358,9 +294,16 @@ module SweetTalk
 
       # This aggregate's typed id.
       struct Id < ::SweetTalk::Identity
+        include ::Caramel::FieldValue(Int64)
+
         getter raw : Int64
 
         def initialize(@raw : Int64)
+        end
+
+        # Builds the id a contract field binds; any Int64 is one.
+        def self.from_field(raw : Int64, & : String ->) : self
+          new(raw)
         end
 
         def to_s(io : IO) : Nil
@@ -422,12 +365,30 @@ module SweetTalk
       end
 
       def self.all : Array(self)
-        __sweettalk_rows({{ row }}.query.where(removed_at: nil).order_by(:id, :asc))
+        __sweettalk_rows(__sweettalk_live.order_by(:id, :asc))
+      end
+
+      # The rows every `finds` and `counts` starts from: those not removed.
+      protected def self.__sweettalk_live
+        {{ row }}.query.where(removed_at: nil)
+      end
+
+      # The aggregates that satisfy *satisfying*, a specification on this aggregate, by
+      # id: the rule its predicate reads in Crystal, read by PostgreSQL.
+      def self.all(*, satisfying : S.class) : Array(self) forall S
+        \{% unless S < ::SweetTalk::Specification &&
+                    S.constant("SWEETTALK_ON") == {{ @type.name.stringify }} %}
+          \{% raise "{{ short.id }}.all(satisfying: #{S}) takes a specification on " +
+                   "{{ short.id }}" %}
+        \{% end %}
+        query = __sweettalk_live.where_condition(S.__sweettalk_condition)
+        __sweettalk_rows(query.order_by(:id, :asc))
       end
 
       # Builds an aggregate from each row the query reads, with one more query per
-      # collection of entities.
-      def self.__sweettalk_rows(query) : Array(self)
+      # collection of entities. Protected: only this aggregate's own repository builds
+      # aggregates from rows.
+      protected def self.__sweettalk_rows(query) : Array(self)
         {% if collections.empty? %}
           query.to_a.map { |row| new(stored: row) }
         {% else %}
@@ -510,7 +471,7 @@ module SweetTalk
 
     def __sweettalk_raw_id : Int64
       short = self.class.name.split("::").last
-      @__sweettalk_id || raise ::SweetTalk::Missing.new("#{short} has no id until it is created")
+      @__sweettalk_id || raise NilAssertionError.new("#{short} has no id until it is created")
     end
 
     def __sweettalk_same?(other : ::SweetTalk::Aggregate) : Bool

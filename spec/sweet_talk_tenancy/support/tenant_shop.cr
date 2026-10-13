@@ -46,6 +46,8 @@ module TenantShop
       factory open(buyer : String) do
       end
 
+      counts placed_count, where: {state: :placed}
+
       to add(tea : Catalogue::Tea, tins : Int32) do
         @lines << Line.new(tea, tins)
       end
@@ -62,6 +64,9 @@ module TenantShop
         end
       end
     end
+
+    specification Live, on: Order, where: {state: [:open, :placed]},
+      means: "an order not given up"
 
     projection Sales, means: "tins sold of one tea" do
       key tea : Catalogue::Tea

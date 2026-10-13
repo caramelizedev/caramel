@@ -1,8 +1,8 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031 and 0033). Each declaration mistake fails to compile
-# with a fixed problem text, naming its file where the mistake has a line; a valid
-# domain compiles, with and without caramel/tenancy; and an application that does not
+# caramel/sweet_talk (ADRs 0030, 0031, 0033 and 0034 to 0036). Each declaration mistake
+# fails to compile with a fixed problem text, naming its file where the mistake has a line;
+# a valid domain compiles, with and without caramel/tenancy; and an application that does not
 # require caramel/sweet_talk holds none of its code. spec/sweet_talk and
 # spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
 
@@ -139,12 +139,139 @@ PROBLEMS = [
   {"job_alias_taken",
    "Shop::Pantry::Larder::WhenBlendRefilled claims \"Shop::Pantry::Larder::WhenBlendRestocked\" " \
    "in renamed_from, but Shop::Pantry::Larder::WhenBlendRestocked is a job of that name"},
+  {"composite_field", "unsupported Caramel::RequestContract field type: Ordering::Address"},
+  {"specification_entities", "specification Empty cannot filter on lines, a list of entities"},
+  {"specification_block",
+   "specification Empty takes where:, which SweetTalk reads in Crystal and in PostgreSQL " \
+   "alike, not a block"},
+  {"specification_derived",
+   "specification Big filters on size, which Order does not have; it has member, state"},
+  {"specification_unknown_state",
+   "specification Gone asks for state shipped, which Order does not have"},
+  {"specification_predicate_taken",
+   "specification Placed would define Order#placed?, which Order already has"},
+  {"specification_joins_unknown",
+   "specification Overdue joins Late, which is not a specification on Order declared before it"},
+  {"specification_without_on",
+   "specification Open needs on: an aggregate of Ordering declared before it"},
+  {"specification_in_aggregate",
+   "specification belongs in a context, after its aggregate, not in aggregate Order"},
+  {"specification_state_without_moves",
+   "specification Dispatchable filters on state, which Order does not have; it has member"},
+  {"specification_without_meaning",
+   "Shop::Ordering::Gone needs a meaning: add means: \"…\", the line its glossary entry shows"},
+  {"specification_not_a_where",
+   "specification Odd takes where: {attribute: value}, or specifications on Order joined by &, " \
+   "| and !"},
+  {"specification_value_type",
+   "no overload matches 'Rules::Shelf::Rows::Jar::QueryOf(NamedTuple())#where', count: String"},
+  {"all_satisfying_other",
+   "Order.all(satisfying: Shop::Ordering::Gone) takes a specification on Order"},
+  {"state_check_long",
+   "moves would check RefrigeratedShippingContainer's states as " \
+   "check_warehousing_refrigerated_shipping_containers_state_eb99943a, longer than " \
+   "PostgreSQL's 63 bytes"},
+  {"finds_block_count",
+   "finds how_many narrows jars with where, where_null, order_by, limit and offset only, so " \
+   "it reads Jar rows and writes nothing, not count"},
+  {"finds_block_delete",
+   "finds purge narrows jars with where, where_null, order_by, limit and offset only, so it " \
+   "reads Jar rows and writes nothing, not delete_all"},
+  {"finds_block_rows", "Rules::Shelf names Rows, SweetTalk's storage"},
+  {"finds_block_sql",
+   "finds wiped reads only the rows it is given, so it names neither SugarORM nor its Repo"},
+  {"finds_block_and_where",
+   "finds newest takes a block, or where:, satisfying:, order: and first:, not both"},
+  {"finds_block_two",
+   "finds newest takes a block of one expression that narrows the rows it is given"},
+  {"finds_unknown_argument",
+   "finds first_ten takes where:, satisfying:, order: and first:, or a block, not limit:"},
+  {"finds_nothing",
+   "finds everything adds nothing to Jar.all: give where:, satisfying:, order: or first:"},
+  {"finds_order_unknown",
+   "finds newest orders by created, which Jar cannot sort by: order by id, or by an " \
+   "attribute stored in one column"},
+  {"finds_order_entities", "finds by_slots orders by slots, which Jar cannot sort by"},
+  {"finds_order_direction", "finds by_label orders label by :sideways: take :asc or :desc"},
+  {"counts_with_order", "counts fullest takes where: and satisfying:, not order:"},
+  {"counts_with_block", "counts big takes where: and satisfying:, not a block"},
+  {"query_name_taken",
+   "Jar already has a query named gifts: give each finds and counts its own name"},
+  {"finds_named_all", "finds all would replace Jar.all: name it for what it finds"},
+  {"counts_named_all", "counts all would replace Jar.all: name it for what it counts"},
+  {"finds_name_taken",
+   "Jar already has a query named gifts: give each finds and counts its own name"},
+  {"finds_where_not_tuple",
+   "finds labelled takes where: {attribute: value}, as in where: {member: member, state: " \
+   ":placed}"},
+  {"counts_where_not_tuple",
+   "counts labelled takes where: {attribute: value}, as in where: {member: member, state: " \
+   ":placed}"},
+  {"finds_order_not_tuple",
+   "finds by_label takes order: {attribute: :asc or :desc}, as in order: {id: :desc}"},
+  {"finds_satisfying_value", "finds big takes satisfying: a specification on Jar, not Count"},
+  {"finds_value_type",
+   "no overload matches 'Rules::Shelf::Rows::Jar::QueryOf(NamedTuple())#where', count: String"},
+  {"finds_uncalled_unknown_key",
+   "finds by_colour filters on colour, which Jar does not have; it has label, count, state"},
+  {"loader_outside", "protected method '__sweettalk_rows' called for Rules::Shelf::Jar.class"},
+  {"projection_finds_satisfying",
+   "finds placed_teas takes satisfying: only in an aggregate: a specification is a rule on " \
+   "an aggregate, and Sales is a projection"},
+  {"projection_counts_satisfying",
+   "counts placed_count takes satisfying: only in an aggregate: a specification is a rule on " \
+   "an aggregate, and Sales is a projection"},
+  {"projection_finds_state",
+   "finds open_teas filters on state, which Sales does not have; it has tea, sold"},
+  {"projection_finds_named_all", "finds all would replace Sales.all: name it for what it finds"},
+  {"projection_finds_order_unknown",
+   "finds newest orders by created, which Sales cannot sort by: order by id, or by an " \
+   "attribute stored in one column"},
+  {"projection_finds_block_count",
+   "finds how_many narrows rows with where, where_null, order_by, limit and offset only, so " \
+   "it reads Sales rows and writes nothing, not count"},
+  {"subdomain_unknown",
+   "context Catalogue takes subdomain: :core, :supporting or :generic, not subdomain: :main"},
+  {"unpublished_name",
+   "Shop::Ordering names Catalogue::Tea, which Catalogue does not publish; it publishes Cents, " \
+   "Tea::Id, price_of: use one of those, or publish Tea in Catalogue"},
+  {"unpublished_call",
+   "Shop::Ordering calls Catalogue.teas_on_shelf, which Catalogue does not publish"},
+  {"unpublished_in_border",
+   "Shop::Fulfilment names Catalogue::Tea, which Catalogue does not publish"},
+  {"published_after_use",
+   "Shop::Reporting names Catalogue::Tea, which Catalogue does not publish"},
+  {"publishes_unknown",
+   "Catalogue publishes Teas, which it does not declare: declare a type or a service of that " \
+   "name before publishes"},
+  {"publishes_expression",
+   "publishes takes the context's types and services, as in publishes Cents, Tea::Id, " \
+   "price_of, not price_of(1)"},
+  {"call_outside_border",
+   "Shop::Reporting calls Catalogue.teas_on_shelf outside a border: move that call into " \
+   "border Catalogue do … end, or declare follows: Catalogue"},
+  {"outbound_outside_border",
+   "Shop::Billing reaches Caramel::Outbound outside a border with an outside system"},
+  {"client_in_context_border",
+   "Shop::Billing reaches HTTP::Client outside a border with an outside system"},
+  {"outside_is_a_context",
+   "Shop::Billing has a border with Catalogue, outside: \"…\", but Catalogue is a context"},
+  {"outside_not_text",
+   "border Cards takes outside: \"…\", what the system is to this context"},
+  {"outside_nil",
+   "border Cards takes outside: \"…\", what the system is to this context, the line its " \
+   "glossary entry shows"},
+  {"whenever_outside",
+   "whenever belongs in a border with a context: Cards is outside the program and emits no " \
+   "events"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
-  compile_job_alias_taken]
+  compile_job_alias_taken compile_all_satisfying_other compile_finds_value_type
+  compile_loader_outside compile_published_after_use compile_call_outside_border
+  compile_outside_is_a_context]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

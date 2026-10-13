@@ -3,8 +3,10 @@
 Date: 2026-10-08
 
 Status: accepted. Decisions 2, 4 and 6 are amended by
-[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), and decisions 1 and 6
-by [ADR 0033](0033-sweettalk-multi-tenancy.md).
+[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), decisions 1 and 6 by
+[ADR 0033](0033-sweettalk-multi-tenancy.md), decision 2 by
+[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), and decisions 2 and 3
+by [ADR 0036](0036-sweettalk-strategic-design.md).
 
 ## Context
 
@@ -49,10 +51,11 @@ or a policy, and nothing stops one context from reaching into another's types.
    one without it does not compile. `SweetTalk.glossary` lists them with kind and context.
 3. **The context map is checked at compile time.** In context A, `follows: B` draws a
    dependency edge to B, and so does code in `border B` other than the event a `whenever`
-   names; a `whenever` for one of B's events draws an event edge. A names `B::` anywhere if
-   it follows B, and only inside `border B` otherwise. An edge to an unknown context, a
-   foreign name elsewhere, or a cycle of dependency edges does not compile, so two
-   contexts may react to each other's events. `SweetTalk.context_map` returns the edges.
+   names; a `whenever` for one of B's events draws an event edge. A names `B::` or calls
+   `B.verb` anywhere if it follows B, and only inside `border B` otherwise. An edge to an
+   unknown context, a foreign name elsewhere, or a cycle of dependency edges does not
+   compile, so two contexts may react to each other's events. `SweetTalk.context_map`
+   returns the edges.
 4. **Aggregates, entities and projections are SugarORM schemas.** Each generates a schema
    in `<Context>::Rows`, its table (`<context>_<name>` with an `s` added; an entity's is
    `<context>_<aggregate>_<entity>`), and a changeset with a `param` per column. Every

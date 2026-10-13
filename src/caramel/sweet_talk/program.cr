@@ -52,9 +52,10 @@ module SweetTalk
     glossary
   end
 
-  # The context map as {from, to, kind} edges, kind "dependency" or "event". Refuses
-  # unknown contexts, foreign names outside a border, `Rows` named in a context, and
-  # cycles of dependency edges.
+  # The context map as {from, to, kind} edges, kind "dependency", "event" or "outside".
+  # Refuses unknown contexts, foreign names and calls outside a border, names a context
+  # does not publish, `Rows` named in a context, outside borders named like a context,
+  # and cycles of dependency edges.
   def self.context_map : Array({String, String, String})
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
@@ -80,7 +81,8 @@ module SweetTalk
           {% raise "#{context.name} has a border with #{border[0].id}, but there is no context " +
                    "#{border[0].id}; contexts: #{names.join(", ").id}" %}
         {% end %}
-        {% if border[2].includes?(border[0] + "::") %}
+        {% calls = border[2].split(border[0] + ".")[1..-1].any? { |piece| piece =~ /\A[a-z_]/ } %}
+        {% if border[2].includes?(border[0] + "::") || calls %}
           {% edge = {short, border[0], "dependency"} %}
           {% edges << edge unless edges.includes?(edge) %}
         {% end %}
@@ -94,6 +96,16 @@ module SweetTalk
         {% if names.includes?(react[0]) && react[0] != short && !edges.includes?(edge) %}
           {% edges << edge %}
         {% end %}
+      {% end %}
+      {% for constant in context.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
+        {% system = context.constant(constant)[0] %}
+        {% if names.includes?(system) %}
+          {% raise "#{context.name} has a border with #{system.id}, outside: \"…\", but " +
+                   "#{system.id} is a context: drop outside:, or name the system after " +
+                   "what it is" %}
+        {% end %}
+        {% edge = {short, system, "outside"} %}
+        {% edges << edge unless edges.includes?(edge) %}
       {% end %}
     {% end %}
     {% for context in contexts %}
@@ -114,6 +126,47 @@ module SweetTalk
           {% if foreign %}
             {% raise "#{context.name} names #{other.id}:: outside a border: move that code into " +
                      "border #{other.id} do … end, or declare follows: #{other.id}" %}
+          {% end %}
+          {% texts = [text] %}
+          {% for border in borders[short] %}
+            {% texts << border[2] if border[0] != other %}
+          {% end %}
+          {% for piece_text in texts %}
+            {% for piece in piece_text.split(other + ".")[1..-1] %}
+              {% if piece =~ /\A[a-z_]/ %}
+                {% call = piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
+                {% raise "#{context.name} calls #{other.id}.#{call.id} outside a border: move " +
+                         "that call into border #{other.id} do … end, or declare follows: " +
+                         "#{other.id}" %}
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% upstream = contexts.find { |candidate| candidate.name.split("::").last == other } %}
+        {% offers = other != short && upstream.constant("SWEETTALK_PUBLISHES") %}
+        {% if offers %}
+          {% offered = offers.join(", ") %}
+          {% texts = [text] + borders[short].map(&.[2]) %}
+          {% for piece_text in texts %}
+            {% for piece in piece_text.split(other + "::")[1..-1] %}
+              {% path = piece.gsub(/\A([A-Z]\w*(?:::[A-Z]\w*)*)[\s\S]*\z/, "\\1") %}
+              {% found = parse_type(upstream.name.stringify + "::" + path).resolve? %}
+              {% open = offers.any? { |offer| path == offer || path.starts_with?(offer + "::") } ||
+                        (found && found < ::SweetTalk::Event) %}
+              {% unless open %}
+                {% raise "#{context.name} names #{other.id}::#{path.id}, which #{other.id} does " +
+                         "not publish; it publishes #{offered.id}: use one of those, or publish " +
+                         "#{path.id} in #{other.id}" %}
+              {% end %}
+            {% end %}
+            {% for piece in piece_text.split(other + ".")[1..-1] %}
+              {% call = piece =~ /\A[a-z_]/ && piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
+              {% if call && !offers.includes?(call) %}
+                {% raise "#{context.name} calls #{other.id}.#{call.id}, which #{other.id} does " +
+                         "not publish; it publishes #{offered.id}: use one of those, or publish " +
+                         "#{call.id} in #{other.id}" %}
+              {% end %}
+            {% end %}
           {% end %}
         {% end %}
       {% end %}
@@ -141,25 +194,34 @@ module SweetTalk
     {% end %}
   end
 
-  # The ubiquitous language: every context, service, value, aggregate, entity, event,
-  # projection and process with its meaning.
+  # The ubiquitous language: every context, service, outside system, value, aggregate,
+  # entity, event, projection, specification and process with its meaning, and its
+  # context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
     terms = [] of ::SweetTalk::Term
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
+      {% part = context.constant("SWEETTALK_SUBDOMAIN") %}
       terms << ::SweetTalk::Term.new("context", {{ short }}, {{ short }},
-        {{ context.constant("SWEETTALK_MEANS") }})
+        {{ context.constant("SWEETTALK_MEANS") }}, {{ part }})
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_SERVICE_")) %}
         {% service = context.constant(constant) %}
-        terms << ::SweetTalk::Term.new("service", {{ service[0] }}, {{ short }}, {{ service[1] }})
+        terms << ::SweetTalk::Term.new("service", {{ service[0] }}, {{ short }}, {{ service[1] }},
+          {{ part }})
+      {% end %}
+      {% for constant in context.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
+        {% system = context.constant(constant) %}
+        terms << ::SweetTalk::Term.new("outside", {{ system[0] }}, {{ short }}, {{ system[1] }},
+          {{ part }})
       {% end %}
     {% end %}
     {% kinds = [{"value", ::SweetTalk::Value}, {"value", ::SweetTalk::Composite},
                 {"aggregate", ::SweetTalk::Aggregate}, {"entity", ::SweetTalk::Entity},
                 {"event", ::SweetTalk::Event}, {"projection", ::SweetTalk::Projection},
-                {"process", ::SweetTalk::Process}] %}
+                {"process", ::SweetTalk::Process},
+                {"specification", ::SweetTalk::Specification}] %}
     {% for pair in kinds %}
       {% for type in pair[1].all_subclasses %}
         {% if type.has_constant?("SWEETTALK_MEANS") %}
@@ -167,8 +229,9 @@ module SweetTalk
           {% full = type.name.stringify %}
           {% name = home ? full[home.name.stringify.size + 2..] : full %}
           {% within = home ? home.name.split("::").last : "" %}
+          {% part = home ? home.constant("SWEETTALK_SUBDOMAIN") : nil %}
           terms << ::SweetTalk::Term.new({{ pair[0] }}, {{ name }}, {{ within }},
-            {{ type.constant("SWEETTALK_MEANS") }})
+            {{ type.constant("SWEETTALK_MEANS") }}, {{ part }})
         {% end %}
       {% end %}
     {% end %}

@@ -547,12 +547,14 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
       {% end %}
       {% scalar = field[1] %}
       {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
-        {% declared = "#{t.id} : #{scalar.id}#{field[2] ? "?".id : "".id}" %}
+        {% declared = "#{t.id} : #{field[5].id}#{field[2] ? "?".id : "".id}" %}
+        {% valued = ["String", "Int32", "Int64"].includes?(scalar) && field[5] != scalar %}
+        {% suggest = valued ? field[5] : suggest %}
         {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\n" +
                  "Route: '#{path.id}' parameter ':#{t.id}' binds to " +
                  "'#{action.id}::Contract' field '#{declared.id}'\n" +
-                 "Path parameters must be non-nilable String, Int32 or Int64 fields " +
-                 "without defaults\n" +
+                 "Path parameters must be non-nilable String, Int32 or Int64 fields, " +
+                 "or field values bound from one, without defaults\n" +
                  where + contract_where +
                  "Remediation: declare `field #{t.id} : #{suggest.id}` " +
                  "(String, Int32 or Int64; no `?` and no `default:`).\n" %}
@@ -666,7 +668,7 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
           end
         {% end %}
         return action.render_contract_failure(contract) unless contract.valid?
-        action.respond(action.handle(contract))
+        action.__caramel_answer(contract) { action.respond(action.handle(contract)) }
       end
     {% end %}
   end
