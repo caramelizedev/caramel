@@ -9,4 +9,7 @@ module Caramel
 
   # Each release is the tag v<VERSION> here, with its documentation.
   REPOSITORY = "https://github.com/caramelizedev/caramel"
+
+  # The guides, one edition per release at /docs/<VERSION>/ (ADR 0026 decision 1).
+  WEBSITE = "https://caramelize.dev"
 end

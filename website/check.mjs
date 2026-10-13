@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { highlightCode, decodeCode } from './highlight.mjs';
 import { frappeCommands, applicationCommands, latteCommands } from './commands.mjs';
+import { markdown, llmsEntry } from './markdown.mjs';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -89,4 +90,23 @@ for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<
 const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
 assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');
 assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');"), 'Font import was corrupted');
+// The Markdown edition: an index.md beside each docs and cookbook page, each listed in llms.txt.
+const llms = fs.readFileSync(path.join(root, 'docs', version, 'llms.txt'), 'utf8');
+assert(llms.startsWith(`# Caramel ${version}\n\n> `), 'llms.txt lacks its title and summary');
+const paged = files.filter(file => file.split(path.sep).length === 4 && /^(docs|cookbook)\//.test(file) && file.split(path.sep)[1] === version);
+assert(paged.length > 0, 'No pages in the current edition');
+for (const file of paged) {
+  const edition = file.replace(/index\.html$/, 'index.md');
+  assert(fs.existsSync(path.join(root, edition)), `${file}: no Markdown edition`);
+  assert(llms.includes(`](https://caramelize.dev/${edition}): `), `llms.txt omits ${edition}`);
+}
+const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
+assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');
+// Cases the pages do not emit yet, so a page that starts to cannot break the Markdown.
+const converted = html => markdown(html, href => href);
+assert.equal(converted('<p><a href="/x/?a=1&amp;b=(2)">x</a></p>'), '[x](/x/?a=1&b=%282%29)\n', 'A Markdown link keeps an entity or a parenthesis from its href');
+assert.equal(converted('<p>Never &lt;script&gt; here, but <code>&lt;b&gt;</code></p>'), 'Never \\<script\\> here, but `<b>`\n', 'Prose < and > become raw HTML in Markdown');
+assert.equal(converted('<ul><li><p>One.</p><p>Two.</p></li></ul>'), '- One.\n\n  Two.\n', 'An item\'s paragraphs run together in Markdown');
+assert.equal(llmsEntry('Read [this]', 'https://caramelize.dev/a b/', 'Why.'), '- [Read \\[this\\]](https://caramelize.dev/a%20b/): Why.', 'An llms.txt name ends its link early');
+assert(!/&(lt|gt|quot|#39|amp);/.test(llms), 'llms.txt holds an undecoded entity');
 console.log(`Checked ${files.length} HTML documents and all local navigation/asset targets.`);

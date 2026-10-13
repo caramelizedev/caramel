@@ -237,6 +237,7 @@ module Caramel::Frappe
       @output.puts("CARAMEL CLI INTERFACE (STRICT TOKENS)")
       @output.puts("VERSION: #{Caramel::VERSION}")
       @output.puts("DOCS: #{Caramel::REPOSITORY}/tree/v#{Caramel::VERSION}")
+      @output.puts("GUIDES: #{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/llms.txt")
       Commands::TABLE.each do |command|
         @output.puts("frappe #{command.syntax}  # #{command.summary}")
       end

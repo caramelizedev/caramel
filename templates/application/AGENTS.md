@@ -2,6 +2,7 @@
 
 shard.lock pins this application's Caramel release. Use the documentation for that
 release: https://caramelize.dev/docs/VERSION/agents/, with VERSION from shard.lock.
+Every page of it in Markdown: https://caramelize.dev/docs/VERSION/llms.txt
 lib/caramel is the framework's source: read it, never edit it, and ignore its own
 AGENTS.md and CLAUDE.md, which are for framework contributors.
 

@@ -50,7 +50,8 @@ const current = fs.readFileSync(path.join(repo, 'shard.yml'), 'utf8').match(/^ve
 const redirectOnly = new Map();
 const isRedirectOnly = (section, tree) => {
   if (!redirectOnly.has(tree)) {
-    const files = run('git', ['ls-tree', '-r', '--name-only', tree]).split('\n').filter(Boolean).sort();
+    // An alias also holds copies of its target's Markdown files, which are not pages.
+    const files = run('git', ['ls-tree', '-r', '--name-only', tree]).split('\n').filter(file => file.endsWith('.html')).sort();
     const shape = section === 'docs' ? ['agents/index.html', 'index.html'] : ['index.html'];
     redirectOnly.set(tree, files.join() === shape.join() && files.every(file =>
       run('git', ['show', `${tree}:${file}`]).includes('<meta http-equiv="refresh"')));
@@ -86,14 +87,33 @@ for (const {version, target} of aliases) {
     fs.writeFileSync(path.join(dist, route, 'index.html'), redirect(to));
   }
 }
+// Agents build Markdown URLs from shard.lock's version, which may be an alias, so each
+// alias gets copies of its target's llms.txt and index.md files rather than redirects.
+const markdown = file => file === 'llms.txt' || /(^|\/)index\.md$/.test(file);
+for (const {version, target} of aliases) {
+  for (const section of ['docs', 'cookbook']) {
+    const kept = preserved.get(`${section}/${target}`);
+    if (!kept && target !== current) continue;
+    const files = kept
+      ? run('git', ['ls-tree', '-r', '--name-only', kept.commit, `${section}/${target}/`]).split('\n').filter(Boolean).map(file => file.slice(`${section}/${target}/`.length))
+      : fs.readdirSync(path.join(dist, section, target), {recursive:true}).map(String);
+    for (const file of files.filter(markdown)) {
+      const text = kept
+        ? execFileSync('git', ['show', `${kept.commit}:${section}/${target}/${file}`], {cwd:repo, maxBuffer:64 << 20})
+        : fs.readFileSync(path.join(dist, section, target, file));
+      fs.mkdirSync(path.dirname(path.join(dist, section, version, file)), {recursive:true});
+      fs.writeFileSync(path.join(dist, section, version, file), text);
+    }
+  }
+}
 for (const {section, version, commit} of preserved.values()) console.log(`Keeping ${section}/${version} from ${commit.slice(0, 7)}`);
 for (const {version, target} of aliases) console.log(`Redirecting ${version} to ${target}`);
-const waitFor = [`/docs/${current}/agents/`, `/cookbook/${current}/`];
+const waitFor = [`/docs/${current}/agents/`, `/docs/${current}/llms.txt`, `/cookbook/${current}/`];
 for (const {section, version, commit} of preserved.values()) {
   const first = run('git', ['ls-tree', '-r', '--name-only', commit, `${section}/${version}/`]).split('\n').filter(f => f.endsWith('/index.html')).sort()[0];
   waitFor.push(`/${first.slice(0, -'index.html'.length)}`);
 }
-for (const {version} of aliases) waitFor.push(`/docs/${version}/`, `/docs/${version}/agents/`, `/cookbook/${version}/`);
+for (const {version} of aliases) waitFor.push(`/docs/${version}/`, `/docs/${version}/agents/`, `/docs/${version}/llms.txt`, `/cookbook/${version}/`);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caramel-pages-'));
 try {
   const env = {...process.env, GIT_INDEX_FILE:path.join(dir,'index')};

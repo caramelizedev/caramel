@@ -22,6 +22,9 @@ reads the command lists from `src/frappe/commands.cr`,
 build time, and `check.mjs`
 fails when a command, a framework catalog key, or a Crema metric, environment
 variable or editor preset is missing from its page.
+`markdown.mjs` turns each docs and cookbook page into Markdown, written as `index.md`
+beside its `index.html` and listed in `/docs/X.Y.Z/llms.txt`; it throws on a tag it
+does not convert.
 `source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
 inlines it beside the wordmark in the header and sets it on a dark tile as the
 favicon. `dist` is recreated on every build, so keep authored content under `source`.

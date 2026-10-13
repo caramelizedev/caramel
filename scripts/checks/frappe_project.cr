@@ -449,6 +449,8 @@ module Caramel::Checks
       manifest = listing.stdout.lines
       assert!(manifest.first? == "CARAMEL CLI INTERFACE (STRICT TOKENS)", manifest.first?.to_s)
       assert!(manifest[1]? == "VERSION: #{Caramel::VERSION}", manifest[1]?.to_s)
+      guides = "GUIDES: #{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/llms.txt"
+      assert!(manifest[3]? == guides, manifest[3]?.to_s)
       Caramel::Frappe::Commands::TABLE.each do |entry|
         line = "frappe #{entry.syntax}  # #{entry.summary}"
         assert!(manifest.includes?(line), "manifest lacks frappe #{entry.syntax}")

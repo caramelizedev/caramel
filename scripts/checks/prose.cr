@@ -20,7 +20,7 @@ module Caramel::Checks::Prose
     "CLAUDE.md"                       => 200,
     "CONTRIBUTING.md"                 => 12_000,
     "SECURITY.md"                     => 2_000,
-    "website/README.md"               => 5_000,
+    "website/README.md"               => 6_000,
     "templates/application/README.md" => 3_000,
     "templates/application/AGENTS.md" => 2_000,
     "templates/application/CLAUDE.md" => 200,

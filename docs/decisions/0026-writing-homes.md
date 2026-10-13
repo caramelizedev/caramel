@@ -16,6 +16,10 @@ half of the repository's markdown and most of what a repository-wide grep return
    per release (each release's edition stays at `/docs/X.Y.Z/` and `/cookbook/X.Y.Z/`:
    publishing adds the current edition and keeps every earlier one, and a release tag
    without an edition redirects to the newest edition of its minor); API detail is in doc comments at the code.
+   Each page of an edition also has a Markdown edition for agents, `index.md` beside its
+   `index.html`, which the website build converts from the same page and lists in
+   `/docs/X.Y.Z/llms.txt`. A release tag without an edition gets copies of its target's
+   `llms.txt` and `index.md` files, since agents build those URLs from `shard.lock`.
 2. Contributors' contract is `CONTRIBUTING.md`. `AGENTS.md` (which `CLAUDE.md` imports)
    holds only what an agent needs beyond it.
 3. How to report a vulnerability, and which releases get security fixes, is
@@ -36,8 +40,10 @@ half of the repository's markdown and most of what a repository-wide grep return
 ## Reasons
 
 - Every byte in the tagged tree reaches every application and every repository search.
-- A rule stated once cannot drift.
+- A rule stated once cannot drift. A Markdown edition generated from the pages adds no
+  second source.
 - Rejected: moving all documentation to another repository, because contracts must change
   in the same commit as the code, and the website's checks read the source at that commit.
 - Rejected: hiding prose from search with ignore files, because it would still ship in
   applications and still drift.
+- Rejected: Markdown pages written by hand beside the site, which would drift from it.
