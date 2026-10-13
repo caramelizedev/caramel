@@ -1,0 +1,43 @@
+# Caramel 0.14.0
+
+> Caramel is a Crystal web framework with PostgreSQL, typed HTML, and a clear place for every change. These are the Markdown editions of the 0.14.0 guides, references and recipes; each page's HTML is the same URL without index.md.
+
+## Learn
+
+- [The Bookshelf path](https://caramelize.dev/docs/0.14.0/getting-started/index.md): Install Caramel 0.14.0, create a bookshelf, and check the generated feature with real application tests.
+
+## Guides
+
+- [Project structure](https://caramelize.dev/docs/0.14.0/project-map/index.md): Start with your intention. Caramel’s conventions give it a home, and its tools help you check the result.
+- [Working with an agent](https://caramelize.dev/docs/0.14.0/agents/index.md): The same conventions, release context, and proof commands that make Caramel easier for a person to learn.
+- [Internationalization](https://caramelize.dev/docs/0.14.0/internationalization/index.md): Add typed translations, choose a language for each request, and localize numbers, dates, and validation messages in Caramel 0.14.0.
+- [Multi-tenancy](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md): Give each account its own address and its own rows, with queries that refuse to run outside a tenant.
+- [Observability](https://caramelize.dev/docs/0.14.0/observability/index.md): Every request and job gets a stable id, one log line and, when something fails, a report that stays out of your logs.
+- [Corretto](https://caramelize.dev/docs/0.14.0/testing-html/index.md): Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state.
+- [Current release](https://caramelize.dev/docs/0.14.0/releases/index.md): The supported APIs, development requirements, and current limits of Caramel 0.14.0.
+- [Production](https://caramelize.dev/docs/0.14.0/deployment/index.md): What a compiled application promises any deploy tool: the release artifact, its process roles, readiness, shutdown and database setup.
+- [SweetTalk](https://caramelize.dev/docs/0.14.0/sweettalk/index.md): SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into SugarORM schemas and changesets and Cold Brew jobs, so the domain keeps its own vocabulary and Caramel keeps one way to store and run it.
+- [Best practices](https://caramelize.dev/docs/0.14.0/best-practices/index.md): The conventions that keep a Caramel application typed, safe, and easy to change, and the checks that hold it to them.
+
+## Cookbook
+
+- [Create a resource](https://caramelize.dev/cookbook/0.14.0/create-a-resource/index.md): Generate a book catalog, then make the model, actions, views, and request specs your own.
+- [Read and write JSON](https://caramelize.dev/cookbook/0.14.0/return-json/index.md): Use a generated Book resource for browser HTML, JSON responses, and typed JSON input through the same action contracts.
+- [Upload and keep a file](https://caramelize.dev/cookbook/0.14.0/uploads/index.md): Multipart parsing exists. A dependable recipe also needs to show where the file lives after the request ends.
+- [Mount a third-party component](https://caramelize.dev/cookbook/0.14.0/third-party-components/index.md): Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it.
+- [Give a task its own time](https://caramelize.dev/cookbook/0.14.0/background-jobs/index.md): Enqueue typed jobs with your data, inspect their status, and run Cold Brew workers with or without a web server.
+- [Receive a signed webhook](https://caramelize.dev/cookbook/0.14.0/webhooks/index.md): Use action ingress for the exact signed bytes, a bounded body, and provider authentication before the contract binds.
+- [Sign users in with revocable sessions](https://caramelize.dev/cookbook/0.14.0/revocable-sessions/index.md): The signed cookie carries a random token. PostgreSQL holds its digest, expiry and revocation, and every request rechecks them.
+
+## Reference
+
+- [Routes and contracts](https://caramelize.dev/docs/0.14.0/routes-and-contracts/index.md): Map each method and path to one action, and declare the typed fields that action accepts.
+- [Actions and responses](https://caramelize.dev/docs/0.14.0/actions-and-responses/index.md): How an action turns a valid contract into a page, a fragment, a redirect, a stream or JSON in Caramel 0.14.0.
+- [Views](https://caramelize.dev/docs/0.14.0/views/index.md): A view is a Crystal class whose methods write HTML, and everything it writes is escaped unless you mark it as trusted.
+- [SugarORM](https://caramelize.dev/docs/0.14.0/sugarorm/index.md): Declare each table as a typed schema, query it with checked names, guard writes with changesets, and derive migrations from the declaration.
+- [Cold Brew](https://caramelize.dev/docs/0.14.0/cold-brew/index.md): Define typed jobs, run workers and schedules, publish notifications, and cache strings in your application’s PostgreSQL database.
+- [Corretto](https://caramelize.dev/docs/0.14.0/corretto/index.md): Corretto runs request specs in-process against a real PostgreSQL database, rolls back every example, and fakes third parties at the wire.
+- [Crema](https://caramelize.dev/docs/0.14.0/crema/index.md): Crema is Caramel’s observability: request ids, one log line for every request, job and schedule run, error reports, an owner-only ops socket, an opt-in recorder and exporter, and the development tools. This page lists every name, field, variable and limit.
+- [Security defaults](https://caramelize.dev/docs/0.14.0/security/index.md): What Caramel checks on every request, and what your application must keep doing.
+- [Commands](https://caramelize.dev/docs/0.14.0/commands/index.md): Frappé, your application’s binary, and Latte, listed from the source of Caramel 0.14.0.
+- [Local environment](https://caramelize.dev/docs/0.14.0/local-environment/index.md): Latte runs PostgreSQL, DNS, and HTTPS on your Mac, and Frappé builds, serves, and checks each application at its own named origin.
