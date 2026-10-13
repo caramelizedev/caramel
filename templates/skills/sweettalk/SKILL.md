@@ -14,7 +14,7 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 ## Rules agents most often break
 
-- Give every context, value, aggregate, entity, event, projection, service and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
+- Give every context, value, aggregate, entity, event, projection, specification, service and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
 - Name another context's types (`Other::`) or call its services (`Other.price_of`) only in a context that says `follows: Other`, or inside its `border Other`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-contexts
 - Once a context `publishes`, name and call only what it publishes. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-published
 - Name `Caramel::Outbound` or `HTTP::Client` only inside `border Name, outside: "…"`, call it from a `whenever`, and fake it in specs with `Corretto.stub_wire`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-outside

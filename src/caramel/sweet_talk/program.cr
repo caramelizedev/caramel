@@ -195,7 +195,8 @@ module SweetTalk
   end
 
   # The ubiquitous language: every context, service, outside system, value, aggregate,
-  # entity, event, projection and process with its meaning, and its context's subdomain.
+  # entity, event, projection, specification and process with its meaning, and its
+  # context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
     terms = [] of ::SweetTalk::Term
     {% begin %}

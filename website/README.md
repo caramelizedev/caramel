@@ -25,7 +25,9 @@ variable or editor preset is missing from its page.
 `markdown.mjs` turns each docs and cookbook page into Markdown, written as `index.md`
 beside its `index.html` and listed in `/docs/X.Y.Z/llms.txt`; it throws on a tag it
 does not convert. `check.mjs` also fails when the SweetTalk skill
-(`templates/skills/sweettalk/SKILL.md`) cites a section the Markdown edition lacks.
+(`templates/skills/sweettalk/SKILL.md`) cites a section the Markdown edition lacks, and
+when the guide or the skill still calls something planned for a release the edition
+has reached.
 `source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
 inlines it beside the wordmark in the header and sets it on a dark tile as the
 favicon. `dist` is recreated on every build, so keep authored content under `source`.
@@ -54,16 +56,17 @@ node website/publish.mjs
 
 The publisher refuses to run unless `HEAD` is the commit on origin's `main` and the
 files the build reads (`website/`, `shard.yml`, `templates/application/AGENTS.md` and
-`templates/skills/sweettalk/SKILL.md`) are committed, so every `gh-pages` commit names a `main` commit that holds its source.
-Publish after the release push. It uses a temporary
+`templates/skills/sweettalk/SKILL.md`) are committed, so every `gh-pages` commit names
+a `main` commit that holds its source. Publish after the release push. It uses a temporary
 Git index, preserves deployment history, and does not switch the working branch or
 alter the working index. It adds the current edition and keeps every earlier
 `/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` from `gh-pages` history. Redirect pages are
 not editions: each run drops them and rewrites one for every release tag with no
-edition, pointing at the newest edition of its minor. `--dry-run` prints what it
-keeps and the tree, and publishes nothing. After pushing without force it waits up
-to 15 minutes until every edition answers 200; republishing a live version answers
-at once. Generated output is ignored on `main`.
+edition, pointing at the newest edition of its minor, beside copies of that edition's
+`llms.txt` and `index.md` files ([ADR 0026](../docs/decisions/0026-writing-homes.md)
+decision 1). `--dry-run` prints what it keeps and the tree, and publishes nothing.
+After pushing without force it waits up to 15 minutes until every edition answers 200;
+republishing a live version answers at once. Generated output is ignored on `main`.
 
 `templates/github-pages.workflow.yml` is an optional GitHub Actions workflow for
 automatic builds on main. It deploys only `website/dist`, the current edition, so it

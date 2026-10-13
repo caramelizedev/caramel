@@ -1,11 +1,12 @@
-# SweetTalk, an opt-in language for Domain-Driven Design (ADRs 0030 and 0031).
+# SweetTalk, an opt-in language for Domain-Driven Design (ADRs 0030, 0031 and 0033 to 0036).
 #
 # Each word is a macro. An aggregate expands into a SugarORM schema and changeset plus a
 # domain class over them; a command runs in `Repo.transaction` on one aggregate; an event
 # records its facts and becomes Cold Brew jobs, enqueued in that transaction, for the
 # policies, projections and processes that follow it, and a PubSub notification for live
 # pages. Whole-program checks are `{% %}` inside method bodies, which expand once the top
-# level is complete.
+# level is complete. Requiring SweetTalk also redefines how an action answers its refusals
+# (`sweet_talk/action.cr`).
 require "../caramel"
 require "uuid"
 require "./sweet_talk/errors"
