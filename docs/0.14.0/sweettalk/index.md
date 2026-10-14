@@ -4,15 +4,82 @@ Guides / SweetTalk
 
 SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into SugarORM schemas and changesets and Cold Brew jobs, so the domain keeps its own vocabulary and Caramel keeps one way to store and run it.
 
-Accepted · ADRs 0030, 0031, 0033 and 0034 to 0036 · Experimental · New in 0.13.0
+| Contract | Value |
+| --- | --- |
+| Needs | A Caramel application that requires `caramel/sweet_talk`, and PostgreSQL for its specs |
+| You will have | A domain in `app/domain/` with its own words |
+| Status | Experimental: new in 0.13.0, until an application has run it in production |
+| Proved by | `frappe check` · `frappe db diff` · `frappe corretto` |
 
-> **Experimental**
+> Experimental **A minor release may change the names it stores.**
 >
-> SweetTalk is new in Caramel 0.13.0. Until an application has run it in production, it is experimental: a minor release may change the names it stores, and its upgrade notes say how to move them. The examples are the tea shop that its specs run against PostgreSQL.
+> SweetTalk is new in Caramel 0.13.0. Until an application has run it in production, it is experimental, and its upgrade notes say how to move the names. The examples are the tea shop that its specs run against PostgreSQL. Accepted in ADRs 0030, 0031, 0033 and 0034 to 0036.
+
+## The guide in seven stages {#c-sweettalk-map}
+
+25 sections · read in order the first time
+
+- **1 · Start**
+
+  - [Opt in](#c-sweettalk-enable)
+  - [Find the DDD patterns](#c-sweettalk-ddd)
+  - [Give every noun a meaning](#c-sweettalk-meaning)
+- **2 · Draw boundaries**
+
+  - [Draw the contexts](#c-sweettalk-contexts)
+  - [Mark the core domain](#c-sweettalk-subdomains)
+  - [Publish a language](#c-sweettalk-published)
+  - [Translate outside systems](#c-sweettalk-outside)
+- **3 · Model**
+
+  - [Name the values](#c-sweettalk-values)
+  - [Values with parts](#c-sweettalk-richer-values)
+  - [Aggregates and entities](#c-sweettalk-aggregates)
+  - [Guard the lifecycle](#c-sweettalk-lifecycle)
+  - [Change state with commands](#c-sweettalk-commands)
+  - [Make aggregates with factories](#c-sweettalk-factories)
+- **4 · Query and decide**
+
+  - [Find, count and retire](#c-sweettalk-queries)
+  - [Name rules with specifications](#c-sweettalk-specifications)
+  - [Name operations with services](#c-sweettalk-services)
+- **5 · React**
+
+  - [Follow events with policies](#c-sweettalk-events)
+  - [Record who acted](#c-sweettalk-metadata)
+  - [Keep read models](#c-sweettalk-projections)
+  - [Run processes](#c-sweettalk-processes)
+- **6 · Operate**
+
+  - [Rename without moving data](#c-sweettalk-renames)
+  - [Share a domain between tenants](#c-sweettalk-tenancy)
+  - [Call the domain from actions](#c-sweettalk-actions)
+- **7 · Limits**
+
+  - [What does not compile](#c-sweettalk-refusals)
+  - [Not covered yet](#c-sweettalk-limits)
+
+Stage 1 · Start
 
 ## Opt in {#c-sweettalk-enable}
 
-Require SweetTalk after Caramel. A plain application compiles none of it.
+Let Frappé start a domain. It adds `require "caramel/sweet_talk"` after `require "caramel"` and `require "../app/domain/*"` to `config/application.cr`, writes `app/domain/shop.cr` with that context, and a spec in `spec/domain/`. A plain application compiles none of SweetTalk.
+
+**Terminal · inside your application**
+
+```bash
+frappe make domain Shop Ordering --means="choosing teas and checking out"
+```
+
+**Expect:** Prints `Generated app/domain/shop.cr` and `Generated spec/domain/shop_spec.cr`. It also prints `Generated config/application.cr` when it adds the requires, and `Generated .claude/skills/sweettalk/SKILL.md` when the application has no SweetTalk skill.
+
+> Agents
+>
+> The skill lists the rules agents most often break. Each ends with a link to its section here, so the guide stays the one source. An existing skill, edited or not, is left alone.
+
+In a multi-tenant application the domain names the tenant, and `--central` makes the context one every tenant shares.
+
+By hand, require SweetTalk after Caramel:
 
 **config/application.cr · excerpt**
 
@@ -20,8 +87,6 @@ Require SweetTalk after Caramel. A plain application compiles none of it.
 require "caramel"
 require "caramel/sweet_talk"
 ```
-
-Or let Frappé start one: `frappe make domain Shop Ordering --means="choosing teas and checking out"` adds both requires, writes `app/domain/shop.cr` with that context, and a spec in `spec/domain/`. When the application has no SweetTalk skill, it also writes `.claude/skills/sweettalk/SKILL.md`: the rules agents most often break, each ending with a link to its section here. An existing skill, edited or not, is left alone. In a multi-tenant application the domain names the tenant, and `--central` makes the context one every tenant shares.
 
 Then include `SweetTalk` in the module that holds your domain. The words exist only there: a `context` or `has` anywhere else is an ordinary call.
 
@@ -82,7 +147,16 @@ Specs run the domain against real PostgreSQL. Each Corretto example rolls back, 
 
 ## Give every noun a meaning {#c-sweettalk-meaning}
 
-Every context, value, aggregate, entity, event, projection, specification, service and process carries `means:`. A noun without one does not compile, and `SweetTalk.glossary` lists every entry with its kind, its context and that context’s subdomain, so the ubiquitous language is part of the program. The same word may mean different things in two contexts: Catalogue’s `Tins` is “a count of tins on the shelf”, and Fulfilment’s is “tins of one tea packed in a parcel”.
+Every context, value, aggregate, entity, event, projection, specification, service and process carries `means:`. A noun without one does not compile, and `SweetTalk.glossary` lists every entry with its kind, its context and that context’s subdomain, so the ubiquitous language is part of the program.
+
+The same word may mean different things in two contexts:
+
+| Noun | Means |
+| --- | --- |
+| `Catalogue::Tins` | “a count of tins on the shelf” |
+| `Fulfilment::Tins` | “tins of one tea packed in a parcel” |
+
+Stage 2 · Draw boundaries
 
 ## Draw the contexts {#c-sweettalk-contexts}
 
@@ -121,11 +195,35 @@ context Fulfilment, means: "packing and dispatching parcels" do
 end
 ```
 
-The context map is checked when the program compiles. `follows: B` draws a dependency edge to B, and so does anything in `border B` other than the event a `whenever` names; reacting to one of B’s events draws an event edge. A context names `B::`, or calls `B.price_of`, anywhere when it follows B, and only inside `border B` otherwise; a call in a border draws a dependency edge too. A foreign name anywhere else, an edge to an unknown context, or a cycle of dependency edges stops the build, for example with “Shop::Ordering names Catalogue:: outside a border: move that code into border Catalogue do … end, or declare follows: Catalogue”. So Ordering and Fulfilment may react to each other’s events, but may not follow each other. `SweetTalk.context_map` returns the edges.
+The context map is checked when the program compiles:
+
+| Condition | Outcome |
+| --- | --- |
+| `follows: B` | draws a dependency edge to B |
+| Anything in `border B` other than the event a `whenever` names | draws a dependency edge to B |
+| A `whenever` that reacts to one of B’s events | draws an event edge |
+| Naming `B::`, or calling `B.price_of`, in a context that follows B | allowed anywhere |
+| Naming `B::`, or calling `B.price_of`, inside `border B` | allowed; a call draws a dependency edge too |
+| A foreign name or call anywhere else | fails compilation |
+| An edge to an unknown context | fails compilation |
+| A cycle of dependency edges, such as Ordering and Fulfilment following each other | fails compilation |
+| Ordering and Fulfilment reacting to each other’s events | allowed |
+
+For example, a foreign name outside a border stops the build with “Shop::Ordering names Catalogue:: outside a border: move that code into border Catalogue do … end, or declare follows: Catalogue”.
+
+`SweetTalk.context_map` returns the edges.
 
 ## Mark the core domain {#c-sweettalk-subdomains}
 
-`subdomain:` on a context says which part of the business it serves: `:core` for what sets the business apart, `:supporting` for what the core needs but could be built by anyone, and `:generic` for a problem many businesses share. It is optional and changes no rule, because no check can measure how carefully a core is modelled. Every glossary term carries its context’s subdomain, so `SweetTalk.glossary.select { |term| term.subdomain == "core" }` lists the core domain’s language. Any other value does not compile.
+`subdomain:` on a context says which part of the business it serves:
+
+| Value | Use for |
+| --- | --- |
+| `:core` | what sets the business apart |
+| `:supporting` | what the core needs but could be built by anyone |
+| `:generic` | a problem many businesses share |
+
+It is optional and changes no rule, because no check can measure how carefully a core is modelled. Every glossary term carries its context’s subdomain, so `SweetTalk.glossary.select { |term| term.subdomain == "core" }` lists the core domain’s language. Any other value does not compile.
 
 **tea_house.cr · subdomains**
 
@@ -142,7 +240,7 @@ end
 
 ## Publish a language {#c-sweettalk-published}
 
-An upstream context can promise less than all of its model. `publishes` lists the types and services other contexts may name: its published language, and, in one binary, its open-host service. Naming a type publishes what it contains, so publishing `Tea` would publish `Tea::Id` and its commands too. Once a context publishes, every other context names only those, whether it follows the context or reads it in a border; its events stay open to every context that may name it, because a follower reacts to them and a reaction depends on an event’s fields. `publishes` comes after the names it lists. A context that does not publish keeps the rules above.
+An upstream context can promise less than all of its model. `publishes` lists the types and services other contexts may name: its published language, and, in one binary, its open-host service. Naming a type publishes what it contains, so publishing `Tea` would publish `Tea::Id` and its commands too. `publishes` comes after the names it lists.
 
 **tea_house.cr · a published language**
 
@@ -170,11 +268,33 @@ context Billing, follows: Pricing, subdomain: :core,
 end
 ```
 
-A name the publisher leaves out stops the build at the line that names it, for example with “TeaHouse::Insurance names Pricing::Tea, which Pricing does not publish; it publishes Cents, Tea::Id, price_of: use one of those, or publish Tea in Pricing”. When the publisher is declared after the context that names it, the program’s checks find the name instead, without a line.
+| Condition | Outcome |
+| --- | --- |
+| A context names a type or service the publisher does not list, whether it follows the publisher or reads it in a border | fails compilation at the line that names it |
+| `publishes` lists a name the context does not declare | fails compilation |
+| The publisher is declared after the context that names it | fails compilation; the program’s checks find the name, without a line |
+| A context reacts to an event of a publishing context | allowed: events stay open to every context that may name them, because a follower reacts to them and a reaction depends on an event’s fields |
+| A context does not publish | keeps the rules above |
+
+For example, “TeaHouse::Insurance names Pricing::Tea, which Pricing does not publish; it publishes Cents, Tea::Id, price_of: use one of those, or publish Tea in Pricing”.
 
 ## Translate outside systems at a border {#c-sweettalk-outside}
 
-A payment gateway or a carrier has a model of its own. `border Cards, outside: "…"` declares a module `Cards` in the context: the only code in it that may name `Caramel::Outbound` or `HTTP::Client`, and the place that turns the system’s answers into the context’s values and refusals. The check reads the code as written, as the `Rows::` and `Other::` checks do, so an alias or a method defined outside the context escapes it. `outside:` is the line its glossary entry shows, and the context map gains an `outside` edge. An outside system emits no events, so the border holds no `whenever`; a webhook arrives through an action, which runs a command. Call the system from a `whenever`, after the command that needs it commits, so that a slow answer never holds an aggregate’s row lock. Specs fake it at the wire with `Corretto.stub_wire`, as the Corretto guide’s “Fake third parties at the wire” shows.
+A payment gateway or a carrier has a model of its own. `border Cards, outside: "…"` declares a module `Cards` in the context: the only code in it that may name `Caramel::Outbound` or `HTTP::Client`, and the place that turns the system’s answers into the context’s values and refusals.
+
+The check reads the code as written, as the `Rows::` and `Other::` checks do, so an alias or a method defined outside the context escapes it. `outside:` is the line its glossary entry shows, and the context map gains an `outside` edge.
+
+An outside system emits no events; a webhook arrives through an action, which runs a command.
+
+Call the system from a `whenever`, after the command that needs it commits, so that a slow answer never holds an aggregate’s row lock.
+
+Specs fake it at the wire with `Corretto.stub_wire`, as the Corretto guide’s “Fake third parties at the wire” shows.
+
+| Condition | Outcome |
+| --- | --- |
+| `Caramel::Outbound` or `HTTP::Client` named outside a `border …, outside:` | fails compilation |
+| An `outside:` border named like a context | fails compilation |
+| An `outside:` border holding a `whenever` | fails compilation |
 
 **tea_house.cr · an outside system**
 
@@ -204,6 +324,8 @@ border Cards, outside: "the card gateway we charge through" do
 end
 ```
 
+Stage 3 · Model
+
 ## Name the values {#c-sweettalk-values}
 
 **tea_shop.cr · values**
@@ -214,9 +336,15 @@ value Cents, Int64, at_least: 0, means: "an amount of money"
 value Quantity, Int32, within: 1..10, means: "tins of one tea in one order"
 ```
 
-A value wraps an `Int32`, an `Int64` or a `String`, or has parts. An integer value takes `at_least:`, `at_most:`, `within:` and `times:`. It is validated when it is built and by every arithmetic result, so `@stock -= tins` refuses to go below zero with “Tins must be at least 0”. `+` and `-` take the same value or an integer, and `*` takes an integer: tins plus cents does not compile. `times: Quantity` on `Cents` would let `*` take a quantity. A value is stored as a column of its raw type and rebuilt, and so validated again, when it is loaded.
+A value wraps an `Int32`, an `Int64` or a `String`, or has parts. An integer value takes `at_least:`, `at_most:`, `within:` and `times:`. It is validated when it is built and by every arithmetic result. `+` and `-` take the same value or an integer, and `*` takes an integer. `times: Quantity` on `Cents` would let `*` take a quantity. A value is stored as a column of its raw type and rebuilt, and so validated again, when it is loaded.
 
 PostgreSQL checks the bounds too. Every column that stores `Tins` gets a `CHECK` constraint, such as `check_catalogue_teas_stock`, so a write that goes around SweetTalk, through SQL or another service, is refused when it is written. Bounds are therefore integer literals. `database_check: false` keeps a value’s bounds in Crystal only, where they may name a constant.
+
+| Condition | Outcome |
+| --- | --- |
+| A build or arithmetic result outside the bounds, such as `@stock -= tins` below zero | refuses with “Tins must be at least 0” |
+| `+` or `-` of tins and cents | fails compilation |
+| `*` of `Cents` by a `Quantity` without `times: Quantity` | fails compilation |
 
 ## Name strings and values with parts {#c-sweettalk-richer-values}
 
@@ -236,7 +364,12 @@ value Address, means: "where a parcel goes" do
 end
 ```
 
-A string value takes `matches:` and `length:`, and has no arithmetic. `Email.new("ada")` refuses with “Email must match /\A[^@\s]+@[^@\s]+\z/” before anything is written. It is stored as a text column. Its length is a `CHECK` constraint too, `check_ordering_orders_receipt_to_length_3_254`; its pattern is checked in Crystal only, because PostgreSQL reads regular expressions differently.
+A string value takes `matches:` and `length:`, and has no arithmetic. It is stored as a text column. Its pattern is checked in Crystal only, because PostgreSQL reads regular expressions differently.
+
+| Condition | Outcome |
+| --- | --- |
+| `Email.new("ada")`, a string that does not match the pattern | refuses with “Email must match /\A[^@\s]+@[^@\s]+\z/” before anything is written |
+| A write around SweetTalk with a length outside 3..254 | refuses, by the CHECK `check_ordering_orders_receipt_to_length_3_254` |
 
 A value with parts is built with one keyword per part, as in `Address.new(street: "1 Leaf Lane", city: "Camellia", postcode: Postcode.new("CA1 1TE"))`. It checks its `never` and `always` when it is built, and equals another address with the same parts. A part is a column type or a value that wraps one. `has deliver_to : Address` stores one column per part: `deliver_to_street`, `deliver_to_city` and `deliver_to_postcode`. A part’s value brings its constraints to its column.
 
@@ -283,20 +416,34 @@ end
 
 Each aggregate, entity, projection and process is a SugarORM schema with its own changeset, and every write goes through that changeset. `has` chooses the storage from the type:
 
-- `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` is a column.
-- A value that wraps a number or a string is a column of its raw type.
-- A value with parts is one column per part.
-- Another aggregate is a foreign key, and its getter returns that aggregate’s id: `line.tea` is a `Catalogue::Tea::Id`. Load the tea with `Catalogue::Tea.find` when you need it.
-- One of the application’s own SugarORM schemas, as in `has member : Account`, is a foreign key too. Its getter returns a `SweetTalk::RecordId(Account)`, and `order.member.load` reads the account.
-- An `Array` of the aggregate’s own entity is a child table, loaded with `preload`.
+| `has` type | Stored as |
+| --- | --- |
+| `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` | A column |
+| A value that wraps a number or a string | A column of its raw type |
+| A value with parts | One column per part |
+| Another aggregate | A foreign key; its getter returns that aggregate’s id: `line.tea` is a `Catalogue::Tea::Id`. Load the tea with `Catalogue::Tea.find` when you need it. |
+| One of the application’s own SugarORM schemas, as in `has member : Account` | A foreign key; its getter returns a `SweetTalk::RecordId(Account)`, and `order.member.load` reads the account |
+| An `Array` of the aggregate’s own entity | A child table, loaded with `preload` |
 
 `has name : Type = expression` gives an attribute a default, as in `has held : Tins = Tins.zero`. The column gets a SQL default when the expression is a literal, as in `has late_parcel : Bool = false`.
 
-Any other type does not compile; a `Hash` is refused with a pointer to the entity form. The schemas live in each context’s `Rows` module, and a context that names `Rows` does not compile, so every change goes through a command. Table names take English plurals. The tea shop’s tables are `catalogue_teas`, `ordering_orders`, `ordering_order_lines`, `ordering_sales`, `ordering_holds`, `fulfilment_parcels` and `fulfilment_parcel_packings`. They are ordinary schemas, so `frappe db diff` derives their migrations.
+| Condition | Outcome |
+| --- | --- |
+| A `has` with any other type | fails compilation |
+| A `has` of a `Hash` | fails compilation, with a pointer to the entity form |
+| A context that names `Rows` | fails compilation |
+
+The schemas live in each context’s `Rows` module, so every change goes through a command. Table names take English plurals. The tea shop’s tables are `catalogue_teas`, `ordering_orders`, `ordering_order_lines`, `ordering_sales`, `ordering_holds`, `fulfilment_parcels` and `fulfilment_parcel_packings`. They are ordinary schemas, so `frappe db diff` derives their migrations.
 
 ## Guard the lifecycle and the invariants {#c-sweettalk-lifecycle}
 
-`moves` lists one or more chains of states, and the first state is the initial one. `moves open >> placed >> shipped, open >> cancelled, placed >> cancelled` stores the state and adds `open?`, `placed?`, `shipped?` and `cancelled?`, and the private movers `placed!`, `shipped!` and `cancelled!`. A mover refuses unless the current state comes just before it in a chain: “Order cannot become shipped while cancelled”. `never` refuses a command that leaves its condition true, and `always` one that leaves it false. `the` is a derived value, computed on every read and never stored.
+`moves` lists one or more chains of states, and the first state is the initial one. `moves open >> placed >> shipped, open >> cancelled, placed >> cancelled` stores the state and adds `open?`, `placed?`, `shipped?` and `cancelled?`, and the private movers `placed!`, `shipped!` and `cancelled!`. `the` is a derived value, computed on every read and never stored.
+
+| Condition | Outcome |
+| --- | --- |
+| A mover such as `shipped!` is called when the current state does not come just before it in a chain | refuses with “Order cannot become shipped while cancelled” |
+| A command leaves a `never` condition true | refuses |
+| A command leaves an `always` condition false | refuses |
 
 PostgreSQL holds the lifecycle too. The `state` column stores each state as `moves` spells it, such as `out_for_delivery`, and a `CHECK` constraint such as `check_ordering_orders_state_ef9524ce` refuses any other text, so a write around SweetTalk cannot leave a row no state names. The eight hex digits change with the list of states, so `frappe db diff` replaces the constraint when you add or remove one, and `frappe migrate` stops, naming the constraint, while a row still holds a state you removed.
 
@@ -310,9 +457,14 @@ PostgreSQL holds the lifecycle too. The `state` column stores each state as `mov
 4. save the root through its changeset, then its entities;
 5. dispatch the queued events.
 
-`refuse "message"` raises `SweetTalk::Refusal`. The transaction rolls back and the aggregate reloads what is stored, so neither the table nor the object keeps half a change. `create` and a factory check the invariants before they insert. Each command, factory and service is a `domain` span in its trace, named like `Ordering::Order#place`; a refused one is marked failed.
+| Condition | Outcome |
+| --- | --- |
+| `refuse "message"` | raises `SweetTalk::Refusal`; the transaction rolls back and the aggregate reloads what is stored, so neither the table nor the object keeps half a change |
+| Another aggregate’s command, a `create` or a factory runs while a command runs | raises `SweetTalk::Boundary` and rolls the command back |
 
-A command changes one aggregate. Running another aggregate’s command, a `create` or a factory while a command runs raises `SweetTalk::Boundary` and rolls the command back. A command may read another aggregate it is given: `add` copies the tea’s price into the line, so repricing the tea later does not change the order.
+`create` and a factory check the invariants before they insert. Each command, factory and service is a `domain` span in its trace, named like `Ordering::Order#place`; a refused one is marked failed.
+
+A command changes one aggregate. A command may read another aggregate it is given: `add` copies the tea’s price into the line, so repricing the tea later does not change the order.
 
 ## Make aggregates with factories {#c-sweettalk-factories}
 
@@ -326,7 +478,15 @@ factory open(member : Account, receipt_to : Email, deliver_to : Address) do
 end
 ```
 
-`Ordering::Order.open(account, Email.new("ada@example.com"), address)` opens an order. An aggregate with a factory has no `create`, so every order starts with `Opened`. A factory that leaves an attribute unset, when no default covers it, does not compile, and neither does one named like a repository method, such as `factory find`.
+`Ordering::Order.open(account, Email.new("ada@example.com"), address)` opens an order.
+
+| Condition | Outcome |
+| --- | --- |
+| A factory leaves an attribute unset and no default covers it | fails compilation |
+| A factory named like a repository method, such as `factory find` | fails compilation |
+| An aggregate with a factory | has no `create`, so every order starts with `Opened` |
+
+Stage 4 · Query and decide
 
 ## Find, count and retire aggregates {#c-sweettalk-queries}
 
@@ -344,11 +504,22 @@ to forget do
 end
 ```
 
-The aggregate is its own repository: `find`, `find?`, `all`, `create` or its factory, and the queries it declares. `finds` defines a query that returns aggregates. `where:` keeps the ones whose columns equal the expressions: a list matches any of its members and a range its span, and `state:` takes a state or a list of states. `satisfying:` adds a specification. `order: {placed_on: :desc}` sorts by `id` or by attributes stored in one column, and id breaks ties; `first:` returns at most that many. Each part is optional, but a `finds` gives at least one. `counts` takes `where:` and `satisfying:` and returns how many, in one statement, without loading them.
+The aggregate is its own repository: `find`, `find?`, `all`, `create` or its factory, and the queries it declares. `finds` defines a query that returns aggregates.
 
-A context checks every query when it closes, whether or not anything calls it: a key, a state or an order the aggregate lacks, a list of entities, a value of the wrong type or an argument `finds` does not take does not compile.
+| Option | Meaning |
+| --- | --- |
+| `where:` | Keeps the aggregates whose columns equal the expressions: a list matches any of its members and a range its span. |
+| `state:` | Takes a state or a list of states. |
+| `satisfying:` | Adds a specification. |
+| `order:` | `order: {placed_on: :desc}` sorts by `id` or by attributes stored in one column, and id breaks ties. |
+| `first:` | Returns at most that many. |
+| `counts` | Takes `where:` and `satisfying:` and returns how many, in one statement, without loading them. |
 
-When a query needs more than that, give `finds` a block instead. It gets the aggregate’s live rows, with removed ones and other tenants’ already left out, and narrows them with SugarORM’s `where`, `where_null`, `order_by`, `limit` and `offset`; the aggregates are built from what it returns, so a caller cannot tell the two kinds apart. It is the one place a column name or a SQL fragment appears in a domain, so keep it for what `where:` cannot say. It reads only: it cannot count, lock, delete or name `Rows` or SugarORM.
+Each part is optional, but a `finds` gives at least one.
+
+A context checks every query when it closes, whether or not anything calls it.
+
+When a query needs more than that, give `finds` a block instead. It gets the aggregate’s live rows, with removed ones and other tenants’ already left out, and narrows them with SugarORM’s `where`, `where_null`, `order_by`, `limit` and `offset`; the aggregates are built from what it returns, so a caller cannot tell the two kinds apart. It is the one place a column name or a SQL fragment appears in a domain, so keep it for what `where:` cannot say.
 
 **tea_shop.cr · a query with a block**
 
@@ -360,7 +531,16 @@ end
 
 `find`, `find?`, `all` and every `finds` read one statement per table: the roots, then each list of entities through `preload`. So `placed_for` runs two queries however many orders it returns. Code outside the domain, such as an action, reads through these queries too, and does not name `Rows`.
 
-`remove` in a command retires the aggregate. Its row stays with `removed_at` set, so the lines and projection rows that name it stay valid. `find`, `find?`, `all`, every query and the command’s row lock skip it: `find` raises “There is no Order 7.”.
+`remove` in a command retires the aggregate. Its row stays with `removed_at` set, so the lines and projection rows that name it stay valid. `find`, `find?`, `all`, every query and the command’s row lock skip it.
+
+| Condition | Outcome |
+| --- | --- |
+| A query names a key, state or order the aggregate lacks | fails compilation |
+| A query filters on a list of entities | fails compilation |
+| A query passes a value of the wrong type | fails compilation |
+| A query passes an argument `finds` does not take | fails compilation |
+| A `finds` block does more than narrow its rows: it counts, locks, deletes or names `Rows` or SugarORM | fails compilation |
+| `find` of a removed or missing aggregate | raises “There is no Order 7.” |
 
 ## Name rules with specifications {#c-sweettalk-specifications}
 
@@ -379,7 +559,16 @@ to forget do
 end
 ```
 
-`Astray` adds `order.astray?`, for `never`, `always`, guards and methods, and `Ordering::Astray.satisfied_by?(order)`. `Order.all(satisfying: Astray)` reads the same rule in one query, and so does `satisfying: Astray` on a `finds` or a `counts`. `where:` takes what `finds` takes, or earlier specifications on the same aggregate joined by `&`, `|` and `!`, as in `where: Dispatchable & !Astray`. In PostgreSQL `!` reads as `IS NOT TRUE`, so an order whose column is NULL fails a rule and passes its negation in both.
+`Astray` is read in four ways:
+
+| Call | Reads the rule |
+| --- | --- |
+| `order.astray?` | In Crystal, for `never`, `always`, guards and methods |
+| `Ordering::Astray.satisfied_by?(order)` | In Crystal, on an aggregate in memory |
+| `Order.all(satisfying: Astray)` | The same rule in one query |
+| `satisfying: Astray` on a `finds` or a `counts` | The same rule in one query |
+
+`where:` takes what `finds` takes, or earlier specifications on the same aggregate joined by `&`, `|` and `!`, as in `where: Dispatchable & !Astray`. In PostgreSQL `!` reads as `IS NOT TRUE`, so an order whose column is NULL fails a rule and passes its negation in both.
 
 A rule PostgreSQL cannot read stays a `never`, an `always` or a method: one over a list of entities, such as `lines.empty?`, or over a derived value made with `the`. A specification takes no arguments; a `finds` takes them, and adds a specification with `satisfying:`.
 
@@ -398,7 +587,15 @@ service requote(order : Order::Id), returns: Catalogue::Cents,
 end
 ```
 
-Call it on its context: `Ordering.requote(order.id)`. `returns:` defaults to `Nil`. A service runs in one transaction and changes at most one aggregate: a second raises `SweetTalk::Boundary` and rolls both back. To change two, emit an event and react to it in a `whenever`. A `service` anywhere but a context does not compile.
+Call it on its context: `Ordering.requote(order.id)`. To change two aggregates, emit an event and react to it in a `whenever`.
+
+| Condition | Outcome |
+| --- | --- |
+| A service changes a second aggregate | raises `SweetTalk::Boundary` and rolls both back |
+| A `service` anywhere but a context | fails compilation |
+| `returns:` omitted | defaults to `Nil` |
+
+Stage 5 · React
 
 ## Follow events with policies {#c-sweettalk-events}
 
@@ -406,10 +603,17 @@ Call it on its context: `Ordering.requote(order.id)`. `returns:` defaults to `Ni
 
 `whenever` in a context or a border is a policy, run as a Cold Brew job. The command enqueues one job per policy in its own transaction, so a job is never lost and never sent for a rolled-back change. A handler changes one aggregate too. With `each:` it runs once per element of a list in the event, each in its own job: the `Sales` projection below counts one order line per job.
 
-- A job carries the event as JSON. When one line’s job fails, the other lines’ jobs still run.
-- A job is named after its owner (a context and its border, a projection or a process) and the event, never after a line, because `caramel_jobs` stores the name. Two `whenever` blocks for one event in one owner do not compile. Nor does a rename whose old job name another job has or claims.
-- A refusal, or a handler that changes a second aggregate, fails its job at the first attempt, unless a `compensate` answers the refusal; other errors follow Cold Brew’s retry rules. The command that emitted the event stays committed.
+- A job carries the event as JSON.
+- A job is named after its owner (a context and its border, a projection or a process) and the event, never after a line, because `caramel_jobs` stores the name.
 - The command also publishes `{"subject": id}` on `sweettalk.CONTEXT.AGGREGATE.EVENT` for live pages, delivered on commit and at most once.
+
+| Condition | Outcome |
+| --- | --- |
+| One line’s job fails | the other lines’ jobs still run |
+| Two `whenever` blocks for one event in one owner | fails compilation |
+| A rename whose old job name another job has or claims | fails compilation |
+| A refusal, or a handler that changes a second aggregate | fails its job at the first attempt, unless a `compensate` answers the refusal; the command that emitted the event stays committed |
+| Any other handler error | follows Cold Brew’s retry rules |
 
 ## Record who acted {#c-sweettalk-metadata}
 
@@ -421,7 +625,7 @@ Every event records `event_id`, a UUID, `occurred_at`, `actor`, a `String?`, `ca
 SweetTalk.acting("member:7") { order.place }
 ```
 
-Each policy, compensation and process step runs as its event’s actor, so the `Cancelled` event a refused hold leads to still names `member:7`. A deadline acts as `deadline Hold.lapse`. A field named `event_id`, `occurred_at`, `actor`, `cause_id`, `flow_id` or like the subject’s id does not compile.
+Each policy, compensation and process step runs as its event’s actor, so the `Cancelled` event a refused hold leads to still names `member:7`. A deadline acts as `deadline Hold.lapse`.
 
 A field may be nilable. `cancel` without a reason sends `reason` as JSON null:
 
@@ -439,7 +643,10 @@ to cancel(reason : String? = nil) do
 end
 ```
 
-A union of other types, such as `String | Int32`, does not compile.
+| Condition | Outcome |
+| --- | --- |
+| An event field named `event_id`, `occurred_at`, `actor`, `cause_id`, `flow_id` or like the subject’s id | fails compilation |
+| An event field typed as a union of other types, such as `String \| Int32` | fails compilation |
 
 A retried job carries the same `event_id`. A handler that sends mail or calls an API can key that side effect on it, so a retry can tell the side effect already happened.
 
@@ -507,12 +714,16 @@ process Hold, means: "tins of one tea held on the shelf for one placed order" do
 end
 ```
 
-- `whenever Event, key: expression` is a step. Its job inserts the row when it is missing, locks it and runs the block on it. A step changes at most one aggregate; its own row does not count. Attributes other than the key are nilable or have a literal default, because a row starts from its key alone.
-- A process may react to another context’s events outside a border. `Hold` follows `Fulfilment::Parcel::Dispatched`, which draws an event edge from Ordering to Fulfilment.
-- `compensate` runs when its `whenever` is refused. The handler’s work has already rolled back; the compensation gets the same arguments and the refusal, and runs in its own transaction. Here a tea that cannot be held cancels its order with “Only 1 tins of Gyokuro free.”. A refusal in the compensation fails the job. A context or a border may compensate its own `whenever` too: Ordering’s border notes a parcel that left after its order was cancelled.
-- `arm lapse` sets `lapse_due` and enqueues a job for that time, and `disarm lapse` clears it. Cold Brew cannot cancel a job, so every arm and disarm counts up an arming counter: a stale deadline job finds a newer arming and does nothing.
+| Word | What it does |
+| --- | --- |
+| `whenever Event, key: expression` | A step. Its job inserts the row when it is missing, locks it and runs the block on it. A step changes at most one aggregate; its own row does not count. Attributes other than the key are nilable or have a literal default, because a row starts from its key alone. |
+| `compensate` | Runs when its `whenever` is refused. The handler’s work has already rolled back; the compensation gets the same arguments and the refusal, and runs in its own transaction. Here a tea that cannot be held cancels its order with “Only 1 tins of Gyokuro free.”. A refusal in the compensation fails the job. A context or a border may compensate its own `whenever` too: Ordering’s border notes a parcel that left after its order was cancelled. |
+| `arm lapse`, `disarm lapse` | `arm lapse` sets `lapse_due` and enqueues a job for that time, and `disarm lapse` clears it. Cold Brew cannot cancel a job, so every arm and disarm counts up an arming counter: a stale deadline job finds a newer arming and does nothing. |
+| `arm lapse, after: 2.days` | Arms the deadline for another span than its own. |
 
-`arm lapse, after: 2.days` arms the deadline for another span than its own.
+A process may react to another context’s events outside a border. `Hold` follows `Fulfilment::Parcel::Dispatched`, which draws an event edge from Ordering to Fulfilment.
+
+Stage 6 · Operate
 
 ## Rename without moving data {#c-sweettalk-renames}
 
@@ -528,7 +739,16 @@ end
 
 A job’s name follows its owner and the event’s path as written. When a rename changes it, SweetTalk declares Cold Brew’s `renamed_from` on the job with the old name, so jobs queued before the rename keep running.
 
-These are the names SweetTalk stores, which a deployed application depends on: tables such as `ordering_orders` and `ordering_order_lines`, with their `check_…`, `index_…` and `fk_…` names; job class names such as `TeaShop::Ordering::Sales::WhenOrderPlaced` and `TeaShop::Ordering::Hold::LapseDeadline`; channels `sweettalk.<context>.<aggregate>.<event>`, behind a tenant’s `t<id>:` prefix; and the event metadata keys `id`, `at`, `by`, `cause` and `flow`. `renamed_from:` keeps a table, a channel and queued jobs across a rename. While SweetTalk is experimental, a minor release may still change any of these names.
+These are the names SweetTalk stores, which a deployed application depends on:
+
+| Stored name | Form |
+| --- | --- |
+| Tables | `ordering_orders` and `ordering_order_lines`, with their `check_…`, `index_…` and `fk_…` names |
+| Job class names | `TeaShop::Ordering::Sales::WhenOrderPlaced` and `TeaShop::Ordering::Hold::LapseDeadline` |
+| Channels | `sweettalk.<context>.<aggregate>.<event>`, behind a tenant’s `t<id>:` prefix |
+| Event metadata keys | `id`, `at`, `by`, `cause` and `flow` |
+
+`renamed_from:` keeps a table, a channel and queued jobs across a rename. While SweetTalk is experimental, a minor release may still change any of these names.
 
 ## Share a domain between tenants {#c-sweettalk-tenancy}
 
@@ -556,14 +776,17 @@ end
 
 Every context belongs to the tenant unless it says `central: true`. Its aggregates, entities, projections and processes get a column named after the model, `account_id` here, and SugarORM scopes their reads, locks, keys and upserts by the bound tenant, so a projection or a process keeps one row per tenant per key. A policy, projection or process step runs in the tenant its event was emitted in, a deadline in the tenant that armed it, and a notification goes out on the tenant’s channel. A central context’s rows are shared by every tenant.
 
-A tenanted aggregate may reference a central one, as an order line names a shared tea. The rest of these do not compile:
+A tenanted aggregate may reference a central one, as an order line names a shared tea.
 
-- a domain without `tenant` in a program that requires `caramel/tenancy`, or `tenant` without that require, after a context, twice, or naming anything but a SugarORM schema;
-- `central:` with anything but `true`, or without `caramel/tenancy`;
-- a `has` in a central context that points at a tenanted aggregate or a tenanted schema of the application, whose rows every tenant would then see;
-- a `whenever` in a tenanted context for a central context’s event, which carries no tenant; a central context may follow a tenanted one’s events, and its handler runs in the event’s tenant;
-- an event channel over 42 characters, which leaves 21 for a tenant’s `t<id>:` prefix, or a tenant index name over PostgreSQL’s 63 bytes;
-- a `has` that would store `account_id`, or an entity of an aggregate named like the tenant model.
+| Condition | Outcome |
+| --- | --- |
+| A tenanted aggregate references a central one | allowed |
+| A domain without `tenant` in a program that requires `caramel/tenancy`, or `tenant` without that require, after a context, twice, or naming anything but a SugarORM schema | fails compilation |
+| `central:` with anything but `true`, or without `caramel/tenancy` | fails compilation |
+| A `has` in a central context that points at a tenanted aggregate or a tenanted schema of the application, whose rows every tenant would then see | fails compilation |
+| A `whenever` in a tenanted context for a central context’s event, which carries no tenant (a central context may follow a tenanted one’s events, and its handler runs in the event’s tenant) | fails compilation |
+| An event channel over 42 characters, which leaves 21 for a tenant’s `t<id>:` prefix, or a tenant index name over PostgreSQL’s 63 bytes | fails compilation |
+| A `has` that would store `account_id`, or an entity of an aggregate named like the tenant model | fails compilation |
 
 A domain that already holds data follows Add tenancy to existing data in the multi-tenancy guide; `frappe db diff` names every SweetTalk table it halts on. [Read the multi-tenancy guide](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md)
 
@@ -589,49 +812,87 @@ struct AddLine < App::ApplicationAction
 end
 ```
 
-With the route `post "/orders/:order/lines", AddLine`, `quantity=11` answers 422 with `quantity: Quantity must be between 1 and 10` before `handle` runs. An id binds from an `Int64` and may bind a route parameter, as `:order` does; `/orders/abc/lines` answers 404. A value with parts is not a field: declare one field per part and build the value in `handle`. The contract reference says what else a field value may take.
+An id binds from an `Int64` and may bind a route parameter, as `:order` does. A value with parts is not a field: declare one field per part and build the value in `handle`. The contract reference says what else a field value may take.
 
-A refusal that `handle` does not rescue answers 422 the way a failed contract does, with its message under `_base`. A JSON client gets `{"errors": {"_base": ["Teas can be added only while the order is open."]}}`. A browser or an htmx request gets `contract_failure_page(contract)`, so a form that re-renders itself on a failed contract shows the refusal too. Any other client gets plain text that starts with `ERR INVALID:422`. Override `render_refusal(contract, refusal)` to answer otherwise. `SweetTalk::Missing`, which `find` raises for an id that names no aggregate, answers 404. Neither is reported to Crema as an error. `SweetTalk::Boundary` is a mistake in the code, and answers 500.
+| Condition | Outcome |
+| --- | --- |
+| The route `post "/orders/:order/lines", AddLine` with `quantity=11` | answers 422 with `quantity: Quantity must be between 1 and 10`, before `handle` runs |
+| `/orders/abc/lines`, since an id binds from an `Int64` | answers 404 |
+| A refusal that `handle` does not rescue | answers 422 the way a failed contract does, with its message under `_base` |
+| `SweetTalk::Missing`, which `find` raises for an id that names no aggregate | answers 404 |
+| `SweetTalk::Boundary`, a mistake in the code | answers 500 |
+
+A refusal answers each client as follows:
+
+| Client | Gets |
+| --- | --- |
+| JSON client | `{"errors": {"_base": ["Teas can be added only while the order is open."]}}` |
+| Browser or htmx request | `contract_failure_page(contract)`, so a form that re-renders itself on a failed contract shows the refusal too |
+| Any other client | Plain text that starts with `ERR INVALID:422` |
+
+Override `render_refusal(contract, refusal)` to answer otherwise. Neither a refusal nor `SweetTalk::Missing` is reported to Crema as an error.
 
 [Read the contract reference →](https://caramelize.dev/docs/0.14.0/routes-and-contracts/index.md)
+
+Stage 7 · Limits
 
 ## What does not compile {#c-sweettalk-refusals}
 
 Each mistake below stops the build with a message that names the sentence and its fix:
 
-- a noun without `means:`;
-- a `subdomain:` other than `:core`, `:supporting` or `:generic`;
-- a foreign name or call outside a border, a border or `follows:` to an unknown context, or a cycle of dependency edges;
-- a name or call another context does not publish, or a `publishes` of a name the context does not declare;
-- `Caramel::Outbound` or `HTTP::Client` outside a border with an outside system, or such a border named like a context or holding a `whenever`;
-- `emit` of another aggregate’s event;
-- a mover the lifecycle does not declare;
-- a lifecycle whose check name would pass PostgreSQL’s 63 bytes;
-- `the` without a type;
-- a value that wraps anything but `Int32`, `Int64` or `String`, or has no parts;
-- a bound that is not an integer literal, unless the value takes `database_check: false`;
-- two different values mixed in arithmetic without `times:`;
-- `whenever` inside an aggregate;
-- `has` with a type that cannot be stored, or whose constraint or index name would pass PostgreSQL’s 63 bytes;
-- an event whose channel would pass PostgreSQL’s 63 characters;
-- two declarations whose names give one table;
-- a context that names `Rows`;
-- a projection or a process without `key`, or a process step without `key:`;
-- two `whenever` blocks for one event in one place;
-- a factory that leaves an attribute unset;
-- a query on an unknown attribute, state or order, with an argument `finds` does not take, or whose block does more than narrow its rows;
-- a specification on an unknown attribute or state, on a list of entities or a derived value, with a block, outside a context, or whose predicate the aggregate already has;
-- a `compensate` without its `whenever`;
-- a `deadline` outside a process;
-- an event field named like its metadata;
-- with `caramel/tenancy`, the mistakes listed under Share a domain between tenants.
+| Condition | Outcome |
+| --- | --- |
+| A noun without `means:` | fails compilation |
+| A `subdomain:` other than `:core`, `:supporting` or `:generic` | fails compilation |
+| A foreign name or call outside a border, a border or `follows:` to an unknown context, or a cycle of dependency edges | fails compilation |
+| A name or call another context does not publish, or a `publishes` of a name the context does not declare | fails compilation |
+| `Caramel::Outbound` or `HTTP::Client` outside a border with an outside system, or such a border named like a context or holding a `whenever` | fails compilation |
+| `emit` of another aggregate’s event | fails compilation |
+| A mover the lifecycle does not declare | fails compilation |
+| A lifecycle whose check name would pass PostgreSQL’s 63 bytes | fails compilation |
+| `the` without a type | fails compilation |
+| A value that wraps anything but `Int32`, `Int64` or `String`, or has no parts | fails compilation |
+| A bound that is not an integer literal, unless the value takes `database_check: false` | fails compilation |
+| Two different values mixed in arithmetic without `times:` | fails compilation |
+| `whenever` inside an aggregate | fails compilation |
+| `has` with a type that cannot be stored, or whose constraint or index name would pass PostgreSQL’s 63 bytes | fails compilation |
+| An event whose channel would pass PostgreSQL’s 63 characters | fails compilation |
+| Two declarations whose names give one table | fails compilation |
+| A context that names `Rows` | fails compilation |
+| A projection or a process without `key`, or a process step without `key:` | fails compilation |
+| Two `whenever` blocks for one event in one place | fails compilation |
+| A factory that leaves an attribute unset | fails compilation |
+| A query on an unknown attribute, state or order, with an argument `finds` does not take, or whose block does more than narrow its rows | fails compilation |
+| A specification on an unknown attribute or state, on a list of entities or a derived value, with a block, outside a context, or whose predicate the aggregate already has | fails compilation |
+| A `compensate` without its `whenever` | fails compilation |
+| A `deadline` outside a process | fails compilation |
+| An event field named like its metadata | fails compilation |
+| With `caramel/tenancy`, the mistakes listed under [Share a domain between tenants](#c-sweettalk-tenancy) | fails compilation |
 
 ## Not covered yet {#c-sweettalk-limits}
 
-SweetTalk covers the domain. Resources, representations and guards for the web are not part of it. String patterns and the `never` rules of values and aggregates are checked in Crystal only. Refusal messages are the domain’s English, even with `caramel/i18n`.
+SweetTalk covers the domain.
 
-There is no event log: a projection keeps its rows, not the events that built them, so a projection added later starts empty and cannot be rebuilt from past events. A process’s rows are never removed, so its table grows with every key it has seen.
+- Resources, representations and guards for the web are not part of SweetTalk.
+- String patterns and the `never` rules of values and aggregates are checked in Crystal only.
+- Refusal messages are the domain’s English, even with `caramel/i18n`.
+- There is no event log: a projection keeps its rows, not the events that built them, so a projection added later starts empty and cannot be rebuilt from past events.
+- A process’s rows are never removed, so its table grows with every key it has seen.
 
-[Read the Cold Brew reference →](https://caramelize.dev/docs/0.14.0/cold-brew/index.md)
+Prove it
+
+## Check the domain before it touches data. {#c-sweettalk-prove}
+
+**Terminal · inside your application**
+
+```bash
+frappe check
+frappe db diff --name create_shop
+frappe corretto
+```
+
+**Passing:** The domain compiles, the migration `frappe db diff` derives is the one you reviewed, and the specs, `spec/domain/` included, pass against PostgreSQL.
+
+[← Multi-tenancy](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.14.0/cold-brew/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/sweettalk/

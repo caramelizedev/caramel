@@ -4,6 +4,43 @@ Guides / Current release
 
 The supported APIs, development requirements, and current limits of Caramel 0.14.0.
 
+| Contract | Value |
+| --- | --- |
+| Release | 0.14.0 |
+| Covers | Upgrade notes from 0.8.0 to 0.14.0, supported APIs, development requirements and current limits |
+| Needs | Apple Silicon macOS with Apple Command Line Tools |
+| Proved by | `frappe check` · `frappe corretto` · `frappe lint` |
+
+## The guide in three stages {#c-releases-map}
+
+17 sections · read in order the first time
+
+- **1 · Upgrade notes**
+
+  - [Upgrading to 0.14.0](#c-release-upgrade-0140)
+  - [Upgrading to 0.13.0](#c-release-upgrade-0130)
+  - [Upgrading to 0.12.0](#c-release-upgrade-0120)
+  - [Upgrading to 0.11.0](#c-release-upgrade-0110)
+  - [Upgrading to 0.10.0](#c-release-upgrade-0100)
+  - [Upgrading to 0.9.0](#c-release-upgrade-090)
+  - [Upgrading to 0.8.0](#c-release-upgrade)
+- **2 · Supported today**
+
+  - [Internationalization](#c-release-i18n)
+  - [Runtime and local tools](#c-release-tools)
+  - [Requests and responses](#c-release-requests)
+  - [Data and resource generation](#c-release-data)
+  - [Background work](#c-release-work)
+  - [Development and testing](#c-release-checks)
+  - [Multi-tenancy](#c-release-tenancy)
+  - [Domain-Driven Design](#c-release-sweettalk)
+  - [Observability](#c-release-observability)
+- **3 · Limits**
+
+  - [Current limits](#c-release-limits)
+
+Upgrade notes
+
 ## Upgrading to 0.14.0 {#c-release-upgrade-0140}
 
 Upgrade Caramel and Frappé together. There are no framework migrations; these changes can need an edit.
@@ -58,7 +95,7 @@ Upgrade Caramel and Frappé together. There are no migrations and no breaking ch
 
 ## Upgrading to 0.8.0 {#c-release-upgrade}
 
-Upgrade Caramel and Frappé together: the schema document `frappe db diff` reads is now version 2, and `SugarORM::Catalog::ForeignKey` holds `columns` and `references_columns` so a key can span several columns.
+Upgrade Caramel and Frappé together. The schema document `frappe db diff` reads is now version 2, and `SugarORM::Catalog::ForeignKey` holds `columns` and `references_columns` so a key can span several columns.
 
 - Run `frappe migrate`. Two framework migrations add `caramel_jobs.context` and `caramel_metrics`.
 - Run `latte stop` once if Latte is running, so the next command starts the new one. Frappé, Corretto and Latte.app now use Latte’s control API 2. The managed PostgreSQL restarts once to preload its statistics modules.
@@ -66,6 +103,8 @@ Upgrade Caramel and Frappé together: the schema document `frappe db diff` reads
 - Logging now sets itself up: JSON in production, text in development and test. The old `error_type` log line is gone; the `error` line carries `error_class` and `fingerprint`.
 
 [What Crema adds →](https://caramelize.dev/docs/0.14.0/observability/index.md)
+
+Supported today
 
 ## Internationalization {#c-release-i18n}
 
@@ -80,6 +119,8 @@ Contract and changeset errors, JSON error messages, and framework pages use the 
 Caramel is a source-built Crystal framework. Its managed toolchain pins Crystal 1.21.1 and PostgreSQL 18. The local development workflow targets Apple Silicon macOS with Apple Command Line Tools. Frappé creates projects, generates resources, and supervises builds; Latte supplies managed services and named HTTPS.
 
 Install from `v0.14.0` with the getting-started guide. An application’s `shard.lock` selects its framework release, and Frappé dispatches to the matching installation.
+
+[Caramel 0.14.0 source release ↗](https://github.com/caramelizedev/caramel/releases/tag/v0.14.0)
 
 ## Requests and responses {#c-release-requests}
 
@@ -103,14 +144,6 @@ Corretto drives in-process application requests against isolated test databases.
 
 Generated applications pin Lexbor 3.6.4 under development dependencies. Development installs need cc, ar, and network access for the verified native parser source. Production installs omit the parser. Put application-owned test settings in committed `.env.test`; development `.env` does not reach specs.
 
-**Terminal · application checks**
-
-```bash
-frappe check
-frappe corretto
-frappe lint
-```
-
 ## Multi-tenancy {#c-release-tenancy}
 
 An application can be multi-tenant. `frappe make tenancy MODEL` adds the tenant schema, sign-up and home pages, and a `tenant` block in the routes; resources generated afterwards belong to the tenant, and `--central` makes one every tenant shares.
@@ -129,12 +162,33 @@ Every routed request, job and schedule run gets a request id, a trace and one ca
 
 [Read the observability guide →](https://caramelize.dev/docs/0.14.0/observability/index.md)
 
+Limits
+
 ## Current limits {#c-release-limits}
 
-File upload parsing is available, but the cookbook still needs a complete storage and cleanup example. A complete production deployment recipe, optional authentication generator, smaller individual generators, a Frappé extension point for custom commands, and a consumer installer remain unfinished. An application can add commands to its own binary with `Caramel::Crema.command`. Draft recipes identify application examples that still need end-to-end validation.
+- File upload parsing is available, but the cookbook still needs a complete storage and cleanup example.
+- A complete production deployment recipe remains unfinished.
+- An optional authentication generator remains unfinished.
+- Smaller individual generators remain unfinished.
+- A Frappé extension point for custom commands remains unfinished.
+- A consumer installer remains unfinished.
+- An application can add commands to its own binary with `Caramel::Crema.command`.
+- Draft recipes identify application examples that still need end-to-end validation.
 
-[Caramel 0.14.0 source release ↗](https://github.com/caramelizedev/caramel/releases/tag/v0.14.0)
+Prove it
 
-[← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Build your first application →](https://caramelize.dev/docs/0.14.0/getting-started/index.md)
+## Check an upgraded application {#c-release-prove}
+
+**Terminal · application checks**
+
+```bash
+frappe check
+frappe corretto
+frappe lint
+```
+
+**Passing:** `frappe check` prints `✓ Type check passed`, `frappe corretto` ends with `Corretto: N of N workers passed` and `frappe lint` exits 0.
+
+[Build your first application →](https://caramelize.dev/docs/0.14.0/getting-started/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/releases/

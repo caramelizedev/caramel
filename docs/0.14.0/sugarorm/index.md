@@ -4,7 +4,25 @@ Reference / SugarORM
 
 Declare each table as a typed schema, query it with checked names, guard writes with changesets, and derive migrations from the declaration.
 
-## Declare the schema {#c-sugarorm-schemas}
+| Contract | Value |
+| --- | --- |
+| Release | 0.14.0 |
+| Needs | A Caramel application and its development database |
+| Covers | Schemas, codecs, queries, preloads, changesets, migrations, branches |
+| Proved by | `frappe check` and `frappe migrate` |
+
+Learning it for the first time? The recipe [Create a resource](https://caramelize.dev/cookbook/0.14.0/create-a-resource/index.md) generates a model, a changeset and a migration. This page lists every rule and limit.
+
+## Limits at a glance {#c-sugarorm-limits}
+
+| Limit | Value |
+| --- | --- |
+| `primary: true` fields per schema | 1 |
+| Extra queries per `preload` | 1 |
+| Starting value of a `version: true` column | 0 |
+| Branch name after its first lowercase letter: lowercase letters, digits, underscores | up to 30 |
+
+## A model declares its table once {#c-sugarorm-schemas}
 
 A model is a struct that extends `SugarORM::Schema` and declares its table once. The schema block defines the record type, its queries and its migrations. `frappe make resource` writes one for you.
 
@@ -34,7 +52,21 @@ module App
 end
 ```
 
-Fields take `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, or any type through `codec:`; add `?` for a nullable column. A default must be a literal, because it becomes the column’s SQL default; `Time` fields take none. The one `primary: true` field is a non-nilable `Int64` without a default, stored as an identity column. `timestamps` adds `created_at` and `updated_at`; an update that changes a field also sets `updated_at`.
+Fields take `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, or any type through `codec:`; add `?` for a nullable column.
+
+| Condition | Outcome |
+| --- | --- |
+| An unsupported field type | fails compilation |
+| A default that is not a literal (it becomes the column’s SQL default), or any default on a `Time` field | fails compilation |
+| A `primary: true` field that is nilable, not `Int64`, or has a default | fails compilation |
+| The one `primary: true` field | is a non-nilable `Int64` without a default, stored as an identity column |
+| `timestamps` | adds `created_at` and `updated_at` |
+| An update that changes a field | also sets `updated_at` |
+| A `has_many` or `has_one` whose foreign key the target lacks | fails compilation |
+| A duplicate column | fails compilation |
+| Two schemas that name one table | fails compilation |
+| A reserved name such as `query` or `update` | fails compilation |
+| A record | is immutable: `book.with(title: "Dune Messiah")` returns a changed copy and never persists it |
 
 - `belongs_to author : Author`: Adds the author_id Int64 column, its foreign key and its index. Author? makes it nullable.
 - `has_many books : Book`: Reads the Book rows whose author_id points at this record.
@@ -45,13 +77,17 @@ Fields take `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, or any type
 - `renamed_from: :code`: Renames the old column instead of dropping it.
 - `drop_column :shelf`: Records the decision to drop a column and its data.
 
-`has_many` and `has_one` expect a foreign key named after the owner, such as `author_id`; pass `foreign_key: :column` when it differs. Unsupported types, non-literal defaults, missing foreign keys, duplicate columns, two schemas that name one table and reserved names such as `query` or `update` fail compilation at the declaration.
+`has_many` and `has_one` expect a foreign key named after the owner, such as `author_id`; pass `foreign_key: :column` when it differs.
 
-Records are immutable. `book.with(title: "Dune Messiah")` returns a changed copy and never persists it.
+## Codecs map other types to text {#c-sugarorm-codecs}
 
-## Store other types through a codec {#c-sugarorm-codecs}
+A field of any other type names a codec: `field name : Type, codec: Codec`. The codec maps the type to text. Rows read a codec column as text and writes bind the encoded text, so no value passes through a float.
 
-A field of any other type names a codec: `field name : Type, codec: Codec`. The codec maps the type to text. `Codec.sql_type` is the column type, one of `numeric`, `numeric(P,S)`, `jsonb` or `text`. `Codec.encode(value)` returns the text to store, and `Codec.decode(text)` builds the value back. Rows read a codec column as text and writes bind the encoded text, so no value passes through a float.
+| Codec method | Returns |
+| --- | --- |
+| `Codec.sql_type` | The column type, one of `numeric`, `numeric(P,S)`, `jsonb` or `text` |
+| `Codec.encode(value)` | The text to store |
+| `Codec.decode(text)` | Builds the value back |
 
 `SugarORM::JSONB(T)` is a codec for any `JSON::Serializable` type, `JSON::Any`, or an Array or Hash of those. It stores the value in a `jsonb` column.
 
@@ -110,11 +146,38 @@ module App
 end
 ```
 
-A codec field takes no default; set it in a changeset. In `where` it takes a value or `nil`, never an Array or a Range. A changeset `param` uses the field’s type, such as `Rate`, and the number validators do not apply because the stored value is text; `validate_inclusion` takes values of the field’s type. In raw SQL, select the column as text, as in `SELECT rate::text AS rate FROM prices`. `frappe db diff` derives the column from `sql_type`. Adding a required codec field to an existing table halts, because it has no default: add it nilable, backfill, then make it required. `BigDecimal` needs libgmp, which managed builds do not link, so keep decimals behind a codec of your own.
+| Condition | Outcome |
+| --- | --- |
+| A codec field with a default | fails compilation |
+| A changeset `param` on a codec field | uses the field’s type, such as `Rate` |
+| The number validators on a codec field | do not apply, because the stored value is text |
+| `validate_inclusion` on a codec field | takes values of the field’s type |
+| Raw SQL reading a codec column | selects it as text, as in `SELECT rate::text AS rate FROM prices` |
+| `frappe db diff` on a codec field | derives the column from `sql_type` |
+| Adding a required codec field to an existing table | halts the diff, because it has no default: add it nilable, backfill, then make it required |
 
-## Query with checked names {#c-sugarorm-queries}
+In `where` a codec field takes a value or `nil`, never an Array or a Range. `BigDecimal` needs libgmp, which managed builds do not link, so keep decimals behind a codec of your own.
 
-`Book.query` starts an immutable query, and each clause returns a new one. Keyword `where` accepts only the schema’s columns, with their types. A value compares with `=`, an Array matches any element, a Range bounds a number or time column, and the literal `nil` finds NULL in a nullable column, as `where_null(:isbn)` does. A value that may be nil, such as an optional contract field, does not compile, because it would match the NULL rows whenever it was nil: narrow it first (`if isbn = contract.isbn`) or use `where_null`. A string fragment binds one value to each `?`, and `where_condition(SugarORM::Condition.new(sql, values))` adds a fragment built elsewhere with its values; both go in parentheses.
+## Queries check names and types {#c-sugarorm-queries}
+
+`Book.query` starts an immutable query, and each clause returns a new one. Keyword `where` accepts only the schema’s columns, with their types.
+
+| where value | Matches |
+| --- | --- |
+| A value | Compares with `=` |
+| An Array | Matches any element |
+| A Range | Bounds a number or time column |
+| The literal `nil` | Finds NULL in a nullable column, as `where_null(:isbn)` does |
+| A string fragment | Binds one value to each `?`, in parentheses |
+| `where_condition(SugarORM::Condition.new(sql, values))` | Adds a fragment built elsewhere with its values, in parentheses |
+
+| Condition | Outcome |
+| --- | --- |
+| Keyword `where` with a name that is not a column, or a value of the wrong type | fails compilation |
+| `where` with a value that may be nil, such as an optional contract field (it would match the NULL rows) | fails compilation; narrow it first (`if isbn = contract.isbn`) or use `where_null` |
+| `order_by` with a name that is not a field, or a direction other than `:asc` or `:desc` | fails compilation |
+| `find` and `first` when nothing matches | return nil |
+| `find!` and `first!` when nothing matches | raise `SugarORM::NotFound` |
 
 **Inside an action · author is a loaded App::Author**
 
@@ -130,9 +193,24 @@ App::Book.query.find(id)
 App::Book.query.where(isbn: nil).first!
 ```
 
-`order_by` takes a field and `:asc` or `:desc`. Queries also have `offset`, `first`, `count`, `exists?`, `each` and `delete_all`. `find` and `first` return nil when nothing matches; `find!` and `first!` raise `SugarORM::NotFound`. A `scope` becomes a chainable query method. `to_sql` shows the statement.
+| Call | Result |
+| --- | --- |
+| `order_by(:title, :desc)` | Orders by a field, `:asc` or `:desc` |
+| `offset`, `first`, `count`, `exists?`, `each`, `delete_all` | Also available on a query |
+| `scope name { … }` | Becomes a chainable query method |
+| `to_sql` | Shows the statement |
 
-`lock` adds `FOR UPDATE`: the rows the query returns stay locked until the transaction ends, and a competing transaction waits for them. A tenanted model keeps its tenant scope. A locking query outside a transaction raises, because the lock would end with the statement, and `count`, `exists?` and `delete_all` refuse it. Lock several rows in one order, as in `order_by(:id).lock`, so two transactions cannot wait on each other. Preloaded associations are not locked, and a lock does not replace a permission check.
+`lock` adds `FOR UPDATE`.
+
+| Condition | Outcome |
+| --- | --- |
+| `lock` | adds `FOR UPDATE`: the rows the query returns stay locked until the transaction ends, and a competing transaction waits for them |
+| A locking query outside a transaction | raises, because the lock would end with the statement |
+| `count`, `exists?` or `delete_all` on a locking query | refuses |
+| A tenanted model with `lock` | keeps its tenant scope |
+| Preloaded associations under `lock` | are not locked |
+
+Lock several rows in one order, as in `order_by(:id).lock`, so two transactions cannot wait on each other. A lock does not replace a permission check.
 
 **Inside an action**
 
@@ -143,9 +221,9 @@ SugarORM::Repo.transaction do
 end
 ```
 
-## Preload associations {#c-sugarorm-preload}
+## Associations load only when preloaded {#c-sugarorm-preload}
 
-An association stays unloaded until its query preloads it. Each `preload` adds one query that loads the association for every record in the result, so a list never runs one query per row.
+An association stays unloaded until its query preloads it.
 
 **Inside an action**
 
@@ -154,11 +232,15 @@ authors = App::Author.query.preload(:books).order_by(:name).to_a
 authors.each { |loaded| puts "#{loaded.name}: #{loaded.books.size}" }
 ```
 
-A preloaded result wraps each record and still answers its fields. Using an association that was not preloaded is a compile error, not a hidden query. `frappe check` reports it as `N_PLUS_ONE`: `Association 'books' of App::Author was not preloaded.` Its remediation names `.preload(:books)`.
+| Condition | Outcome |
+| --- | --- |
+| A `preload` | adds one query that loads the association for every record in the result, so a list never runs one query per row |
+| A preloaded result | wraps each record and still answers its fields |
+| An association that was not preloaded | fails compilation, not a hidden query: `frappe check` reports `N_PLUS_ONE` (`Association 'books' of App::Author was not preloaded.`) and its remediation names `.preload(:books)` |
 
-## Write SQL by hand {#c-sugarorm-sql}
+## SugarORM.sql reads rows as named tuples {#c-sugarorm-sql}
 
-For CTEs, window functions and aggregates, `SugarORM.sql` runs a query with `$1` binds and reads each row as a named tuple. The result columns must equal the `as:` keys in order, or it raises `SugarORM::ShapeError`. `SugarORM.sql_exec` runs a statement and returns the number of rows affected. Both use the current connection, including an open transaction.
+For CTEs, window functions and aggregates, `SugarORM.sql` runs a query with `$1` binds and reads each row as a named tuple.
 
 **Inside an action**
 
@@ -170,11 +252,16 @@ totals.each { |row| puts "#{row[:author_id]}: #{row[:total]}" }
 SugarORM.sql_exec("UPDATE books SET archived = true WHERE copies < $1", 1)
 ```
 
-Raw SQL is not tenant-scoped, so add the tenant predicate yourself, or use `App::Book.query.lock` to lock a scoped row.
+| Condition | Outcome |
+| --- | --- |
+| Result columns that differ from the `as:` keys, in order | raises `SugarORM::ShapeError` |
+| `SugarORM.sql_exec` | returns the number of rows affected |
+| `SugarORM.sql` and `SugarORM.sql_exec` | use the current connection, including an open transaction |
+| Raw SQL on a tenanted model | is not tenant-scoped; add the tenant predicate yourself, or use `App::Book.query.lock` to lock a scoped row |
 
-## Check every write with a changeset {#c-sugarorm-changesets}
+## Every write goes through a changeset {#c-sugarorm-changesets}
 
-A changeset lists the fields a write may set with `param`, and its rules in `validate(cs)`. Each param must name a field of the schema with a compatible type. The primary key and timestamps cannot be params. Validations run when the changeset is built.
+A changeset lists the fields a write may set with `param`, and its rules in `validate(cs)`.
 
 **app/changesets/book.cr**
 
@@ -200,28 +287,43 @@ module App
 end
 ```
 
-Before your rules run, SugarORM checks NOT NULL columns. An insert must supply every one that has no default, and no write may set one to nil. Each miss reads `is required`. These are the validators and their default messages:
+Before your rules run, SugarORM checks NOT NULL columns.
 
-- `validate_required(:title, :isbn)`: is required. Checks the current value: nil or a blank string fails.
-- `validate_presence(:title)`: can't be blank. Checks a changed value only.
-- `validate_length(:title, min: 2, max: 200)`: should be at least 2 character(s), or should be at most 200 character(s).
-- `validate_greater_than(:copies, 0)`: must be greater than 0
-- `validate_less_than(:copies, 100)`: must be less than 100
-- `validate_format(:isbn, /\A[0-9-]+\z/)`: has invalid format
-- `validate_inclusion(:copies, in: [1, 2, 3])`: is invalid
-- `validate_url(:website)`: must be an absolute http or https URL. Caramel adds this validator.
-- `unique_constraint(:isbn)`: has already been taken. Maps a unique violation of the index that starts with isbn.
-- `check_constraint(:copies)`: must be at least 0, or must be at most N. Maps a violation of the field’s range check; an expression check takes on: :field and reads is invalid.
+| Condition | Outcome |
+| --- | --- |
+| A `param` that names no schema field, or has an incompatible type | fails compilation |
+| The primary key or a timestamp as a `param` | fails compilation |
+| An insert that omits a NOT NULL column without a default | adds the error `is required` |
+| A write that sets a NOT NULL column to nil | adds the error `is required` |
+| Validations | run when the changeset is built |
+| Every validator except `validate_length` | takes `message:` to replace its default |
+| The number, length, format, inclusion and URL validators | skip values that did not change and nil values |
+| `cs.add_error(:title, "is checked out")` | adds your own error |
 
-Every validator except `validate_length` takes `message:` to replace its default. The number, length, format, inclusion and URL validators skip values that did not change and nil values. `cs.add_error(:title, "is checked out")` adds your own error. `errors` maps each field name to its messages, and `"_base"` holds errors about the whole record.
+These are the validators and their default messages:
+
+| Validator | Default message |
+| --- | --- |
+| `validate_required(:title, :isbn)` | is required. Checks the current value: nil or a blank string fails. |
+| `validate_presence(:title)` | can't be blank. Checks a changed value only. |
+| `validate_length(:title, min: 2, max: 200)` | should be at least 2 character(s), or should be at most 200 character(s). |
+| `validate_greater_than(:copies, 0)` | must be greater than 0 |
+| `validate_less_than(:copies, 100)` | must be less than 100 |
+| `validate_format(:isbn, /\A[0-9-]+\z/)` | has invalid format |
+| `validate_inclusion(:copies, in: [1, 2, 3])` | is invalid |
+| `validate_url(:website)` | must be an absolute http or https URL. Caramel adds this validator. |
+| `unique_constraint(:isbn)` | has already been taken. Maps a unique violation of the index that starts with isbn. |
+| `check_constraint(:copies)` | must be at least 0, or must be at most N. Maps a violation of the field’s range check; an expression check takes on: :field and reads is invalid. |
+
+`errors` maps each field name to its messages, and `"_base"` holds errors about the whole record.
 
 Translated applications replace these messages through the catalogs’ `caramel.errors` section.
 
 [Translate framework messages →](https://caramelize.dev/docs/0.14.0/internationalization/index.md)
 
-## Save through the model {#c-sugarorm-saving}
+## Saves return a changeset {#c-sugarorm-saving}
 
-Each schema generates `create` and `update`. They use `CreateChangeset` and `UpdateChangeset` when the model defines them, as generated resources do. Otherwise they use a default changeset that permits every field except the primary key and timestamps, and maps each unique index and range check. Their keywords are the changeset’s params, so an unknown or mistyped keyword fails at the call.
+Each schema generates `create` and `update`. Their keywords are the changeset’s params.
 
 **Inside an action · author is a loaded App::Author**
 
@@ -243,11 +345,31 @@ SugarORM::Repo.transaction do
 end
 ```
 
-`create` and `update` return the changeset. `saved?` says whether the write happened, `valid?` whether validation passed, and `record` holds the stored row. `create!` and `update!` return the stored record or raise `SugarORM::Invalid` with the error messages. Updating a row that no longer exists adds `Record no longer exists` under `_base`. `delete` returns false when the row was already gone.
+| Condition | Outcome |
+| --- | --- |
+| `create` and `update` | use `CreateChangeset` and `UpdateChangeset` when the model defines them, as generated resources do; otherwise a default changeset that permits every field except the primary key and timestamps, and maps each unique index and range check |
+| An unknown or mistyped keyword | fails compilation at the call |
+| `create` and `update` | return the changeset: `saved?` says whether the write happened, `valid?` whether validation passed, and `record` holds the stored row |
+| `create!` and `update!` | return the stored record or raise `SugarORM::Invalid` with the error messages |
+| Updating a row that no longer exists | adds `Record no longer exists` under `_base` |
+| `delete` on a row already gone | returns false |
+| `SugarORM::Repo.transaction` | commits when its block returns and rolls back when it raises |
+| A nested transaction | becomes a savepoint; `SugarORM::Repo.rollback` undoes the innermost block |
+| A unique violation mapped by `unique_constraint` | leaves the transaction usable |
 
-`SugarORM::Repo.transaction` commits when its block returns and rolls back when it raises. A nested transaction becomes a savepoint, and `SugarORM::Repo.rollback` undoes the innermost block. A unique violation mapped by `unique_constraint` leaves the transaction usable.
+A changeset can say what to do when a row with the same key exists.
 
-A changeset can say what to do when a row with the same key exists. `upsert on: :tea_id, update: [:sold]` makes its insert `INSERT … ON CONFLICT` on that unique index. The index must be one the schema declares, or the program does not compile; on a tenanted schema it includes the tenant. Defaults, validations and the tenant stamp still apply. The `update:` fields the changeset writes are set from the new row, along with `updated_at` and the version. With none, the existing row stays as it is. Either way `record` is the stored row, and concurrent inserts of one key leave one row. The key and `update:` fields must be params of the changeset.
+| Condition | Outcome |
+| --- | --- |
+| `upsert on: :tea_id, update: [:sold]` | makes the insert `INSERT … ON CONFLICT` on that unique index |
+| An index the schema does not declare | fails compilation |
+| A key or `update:` field that is not a param of the changeset | fails compilation |
+| A tenanted schema | includes the tenant in the index |
+| Defaults, validations and the tenant stamp | still apply |
+| The `update:` fields the changeset writes | are set from the new row, along with `updated_at` and the version |
+| No `update:` fields | leave the existing row as it is |
+| `record` | is the stored row either way |
+| Concurrent inserts of one key | leave one row |
 
 **app/changesets/sale.cr**
 
@@ -261,7 +383,20 @@ module App
 end
 ```
 
-A version field stops two people from overwriting each other. `field lock_version : Int32, version: true` takes an Int32 or Int64 with no default; the column starts at 0, and `frappe db diff` adds it as `integer NOT NULL DEFAULT 0`. Every changeset update checks the version it loaded and adds one. When the row changed, nothing is written: the changeset adds `Record changed since you loaded it` under `_base`, and `stale?` is true. A changeset given `lock_version:` checks that version instead, so a form carries the version it was rendered from. Deletes do not check it, and an insert cannot name one.
+A version field stops two people from overwriting each other.
+
+| Condition | Outcome |
+| --- | --- |
+| `field lock_version : Int32, version: true` that is nilable, not Int32 or Int64, or has a default | fails compilation |
+| The version column | starts at 0; `frappe db diff` adds it as `integer NOT NULL DEFAULT 0` |
+| Every changeset update | checks the version it loaded and adds one |
+| A row that changed since you loaded it | writes nothing and adds `Record changed since you loaded it` under `_base`; `stale?` is true |
+| A changeset given `lock_version:` | checks that version instead, so a form carries the version it was rendered from |
+| An insert that names a version | raises ArgumentError |
+| A delete | does not check the version |
+| A stale form at the update action | answers 409, re-rendering the form with the errors |
+| An `If-Match` header that names another version | answers 412 |
+| The show action | sends the version as `self.etag` |
 
 **app/models/book.cr · schema excerpt**
 
@@ -281,7 +416,7 @@ input type: "hidden", name: "_csrf", value: @csrf_token
 input type: "hidden", name: "lock_version", value: @values["lock_version"]? || ""
 ```
 
-The update action declares `field lock_version : Int32` in its contract and answers a stale form with 409, re-rendering the form with the errors. It answers 412 when an `If-Match` header names another version. The show action sends the version as `self.etag`.
+The update action declares `field lock_version : Int32` in its contract.
 
 **app/actions/books/update.cr**
 
@@ -315,16 +450,25 @@ self.etag = book.lock_version
 book
 ```
 
-## Derive migrations {#c-sugarorm-migrations}
+## Migrations derive from the schema {#c-sugarorm-migrations}
 
-Change the schema first, then derive the SQL. `frappe db diff` clones the development database into a scratch branch and applies pending migrations there. It compares the result with the declared schema and writes the difference to `db/migrations/`. It then migrates the branch with the new files and compares again; if anything still differs, it removes them. The scratch branch is always dropped.
+Change the schema first, then derive the SQL.
 
 **Terminal · inside the application**
 
 ```bash
 frappe db diff --name add_copies
+```
+
+**Expect:** Prints `Wrote PATH` for each migration file it derives under `db/migrations/`; if the declared schema already matches, nothing is written.
+
+**Terminal · inside the application**
+
+```bash
 frappe migrate
 ```
+
+**Expect:** Lints every pending migration, then prints `Applied N migrations.` and reports schema drift without changing anything; `The database matches the declared schema.` when there is none.
 
 Review each file before you apply it. Adding `copies` with a default and a unique `isbn` index to an existing `books` table writes this migration:
 
@@ -339,22 +483,40 @@ App::MIGRATIONS << SugarORM::Migration.new(20261002120000_i64, "add_copies", [
 ])
 ```
 
-The index goes in a second file, `…_add_copies_concurrently.cr`, as `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS`. It builds without blocking writes, so it runs outside a transaction.
+| Condition | Outcome |
+| --- | --- |
+| `frappe db diff` | clones the development database into a scratch branch, applies pending migrations there, compares with the declared schema, writes the difference to `db/migrations/`, migrates the branch with the new files and compares again, removing them if anything still differs; the scratch branch is always dropped |
+| An index on an existing table | goes in a second file, `…_add_copies_concurrently.cr`, as `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS`; it builds without blocking writes and runs outside a transaction |
+| A check on an existing table | splits in two: the transactional file adds it `NOT VALID`, which refuses new rows that break it, and the `_concurrently` file validates it |
+| Existing rows that break the check | stop `frappe migrate`, which names the constraint; it stays `NOT VALID` until you fix or delete those rows and migrate again |
+| A `check_…` constraint that no schema declares | is dropped |
+| Every other CHECK | stays in place with a note |
+| `frappe migrate` | lints every pending migration before it runs any statement, applies them, then reports schema drift without changing anything |
+| An applied migration that changed | stops the next run |
 
-A check added to an existing table is also split in two. The transactional file adds it `NOT VALID`, so it refuses new rows that break it, and the `_concurrently` file validates it. If existing rows break the check, `frappe migrate` stops and names the constraint; it stays `NOT VALID` until you fix or delete those rows and migrate again. SugarORM owns the checks named `check_…`: it drops one that no schema declares, and leaves every other CHECK in place with a note.
+`frappe make resource` renders its `create_` migration the same way a diff would. The linter checks these rules:
 
-`frappe migrate` lints every pending migration before it runs any statement, applies them, then reports schema drift without changing anything. An applied migration must not change; a changed one stops the next run. `frappe make resource` renders its `create_` migration the same way a diff would.
+| Lint rule | What it refuses |
+| --- | --- |
+| `concurrent-index` | CREATE INDEX on an existing table blocks its writes. Use CONCURRENTLY in a migration of its own. |
+| `not-null-default` | ADD COLUMN … NOT NULL without a DEFAULT fails on a populated table. |
+| `destructive-column` | DROP or RENAME COLUMN needs drop_column or renamed_from. Hand-written SQL needs a -- caramel:allow-drop or allow-rename table.column line. |
+| `mixed-concurrency` | CONCURRENTLY statements cannot share a migration with statements that need a transaction. |
 
-- `concurrent-index`: CREATE INDEX on an existing table blocks its writes. Use CONCURRENTLY in a migration of its own.
-- `not-null-default`: ADD COLUMN … NOT NULL without a DEFAULT fails on a populated table.
-- `destructive-column`: DROP or RENAME COLUMN needs drop_column or renamed_from. Hand-written SQL needs a -- caramel:allow-drop or allow-rename table.column line.
-- `mixed-concurrency`: CONCURRENTLY statements cannot share a migration with statements that need a transaction.
+Tables created in the same migration are exempt from the first two rules.
 
-Tables created in the same migration are exempt from the first two rules. The diff also halts instead of writing risky SQL: a NOT NULL column without a default on an existing table, a column that no field declares, a type change or a new NOT NULL constraint. Each halt prints its remediation. Primary key changes are never derived.
+| Condition | Outcome |
+| --- | --- |
+| A NOT NULL column without a default on an existing table | halts the diff and prints its remediation |
+| A column that no field declares | halts the diff |
+| A type change | halts the diff |
+| A new NOT NULL constraint | halts the diff |
+| A primary key change | is never derived |
+| `frappe db diff --dev-override` | derives those changes anyway |
+| `frappe migrate --dev-override` | turns lint violations into warnings |
+| `frappe migrate --dev-override` outside `CARAMEL_ENV=development` | refuses (test and production always refuse) |
 
-In development, `frappe db diff --dev-override` derives those changes anyway, and `frappe migrate --dev-override` turns lint violations into warnings. The migrate override applies only when `CARAMEL_ENV=development`; test and production always refuse.
-
-## Try changes on a branch {#c-sugarorm-branches}
+## A branch is a full copy of the database {#c-sugarorm-branches}
 
 A database branch is a full copy of the development database. Use one to try a migration or a data change without touching your development records.
 
@@ -362,17 +524,48 @@ A database branch is a full copy of the development database. Use one to try a m
 
 ```bash
 frappe db branch create try_isbn
+```
+
+**Expect:** Prints the branch’s connection URL.
+
+**Terminal · inside the application**
+
+```bash
 frappe dev --branch try_isbn
+```
+
+**Expect:** Serves the application against the branch; a branch that does not exist is refused.
+
+**Terminal · inside the application**
+
+```bash
 frappe db branch list
 frappe db branch delete try_isbn
 ```
 
-`create` prints the branch’s connection URL. A branch name starts with a lowercase letter, followed by up to 30 lowercase letters, digits or underscores. While the copy is made, Latte closes other connections to the development database. `frappe dev --branch` serves the application against the branch and refuses a branch that does not exist.
+| Condition | Outcome |
+| --- | --- |
+| A branch name that does not start with a lowercase letter, or is followed by more than 30 lowercase letters, digits or underscores | refuses |
+| While the copy is made | Latte closes other connections to the development database |
+| `frappe dev --branch` with a branch that does not exist | refuses |
 
 Branches are for experiments. To keep a backup, use `frappe db dump` and `frappe db restore`.
 
 [Back up the development database →](https://caramelize.dev/docs/0.14.0/local-environment/index.md)
 
-[← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Move work to the background →](https://caramelize.dev/docs/0.14.0/cold-brew/index.md)
+Prove it
+
+## Check the schema against the database {#c-sugarorm-test}
+
+**Terminal · inside the application**
+
+```bash
+frappe check
+frappe migrate
+```
+
+**Passing:** `frappe check` reports no compile error and no `N_PLUS_ONE`, and `frappe migrate` ends with `The database matches the declared schema.`
+
+[← Views](https://caramelize.dev/docs/0.14.0/views/index.md) · [Move work to the background →](https://caramelize.dev/docs/0.14.0/cold-brew/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/sugarorm/

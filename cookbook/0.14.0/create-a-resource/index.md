@@ -6,6 +6,12 @@ Generate a book catalog, then make the model, actions, views, and request specs 
 
 Draft recipe · Target: 0.14.0 · Not yet recipe-tested
 
+| Contract | Value |
+| --- | --- |
+| Needs | A configured application |
+| You will have | A Book model, changeset, actions, views and request spec |
+| Proved by | `frappe corretto spec/requests/books_spec.cr` |
+
 ## Where the change goes {#c-crud-files}
 
 - `app/models/book.cr`: The stored shape
@@ -14,35 +20,63 @@ Draft recipe · Target: 0.14.0 · Not yet recipe-tested
 - `app/views/books/`: Browser presentation
 - `spec/requests/books_spec.cr`: Behavior checks
 
+## Decide before you generate {#c-crud-before}
+
+Two choices change what the generator writes. Make them first.
+
+- **A multi-tenant application** The resource belongs to the tenant unless you pass `--central`. [Set up multi-tenancy →](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md)
+- **A translated application** Run `frappe make locale CODE` before resource generation. Frappé then adds typed message calls and default catalog entries. [Set up internationalization →](https://caramelize.dev/docs/0.14.0/internationalization/index.md)
+
 ## Generate the feature {#c-crud-build}
 
 Run inside a configured application. Review the generated files and migration before applying it.
 
-**Terminal**
+1. **Generate the resource**
 
-```bash
-frappe make resource Book title:string author:string
-frappe migrate
-```
+   **Terminal · inside the application**
 
-In a multi-tenant application, the resource belongs to the tenant unless you pass `--central`. [Set up multi-tenancy →](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md)
+   ```bash
+   frappe make resource Book title:string author:string
+   ```
 
-For translated resources, run `frappe make locale CODE` before resource generation. Frappé then adds typed message calls and default catalog entries. [Set up internationalization →](https://caramelize.dev/docs/0.14.0/internationalization/index.md)
+   **Expect:** Prints a `Generated PATH` line for each file: the five files above, and a migration. Review both before applying anything.
+2. **Apply the reviewed migration**
+
+   **Terminal · inside the application**
+
+   ```bash
+   frappe migrate
+   ```
+
+   **Expect:** Applies the reviewed migration and prints `Applied N migrations.`
 
 ## Choose the generated surface {#c-crud-options}
 
-`original_url:string:url` adds URL validation, a URL input, and valid request-spec samples. Use `--only=create,show` for a smaller resource; create and show are required, and edit needs new and update. Use `:server` for fields set by the action and `:unique` for a unique index and constraint checks.
+| Pass | To get |
+| --- | --- |
+| `original_url:string:url` | URL validation, a URL input, and valid request-spec samples |
+| `--only=create,show` | A smaller resource; create and show are required, and edit needs new and update |
+| `:server` | A field the action sets |
+| `:unique` | A unique index and constraint checks |
+
+Prove it
 
 ## Prove the behavior {#c-crud-check}
 
-**Terminal**
+**Terminal · inside the application**
 
 ```bash
 frappe check
 frappe corretto spec/requests/books_spec.cr
 ```
 
-The generated request spec exercises create, read, update, delete, and rejection of invalid requests. Extend it with your own validation rule and an example that fails that rule.
+**Passing:** The generated request spec exercises create, read, update, delete, and rejection of invalid requests.
+
+Extend it with your own validation rule and an example that fails that rule.
+
+> Draft **Written for 0.14.0, not yet run end to end.**
+>
+> The recipe keeps its Draft label until it has been run from a new application to a passing spec.
 
 [← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Return the same data as JSON →](https://caramelize.dev/cookbook/0.14.0/return-json/index.md)
 

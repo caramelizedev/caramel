@@ -4,9 +4,24 @@ Reference / Commands
 
 Frappé, your application’s binary, and Latte, listed from the source of Caramel 0.14.0.
 
-## Frappé {#c-commands-frappe}
+| Contract | Value |
+| --- | --- |
+| Release | 0.14.0 |
+| Needs | An application folder, except commands marked as working anywhere |
+| Covers | Frappé, your application’s binary, Latte |
+| Proved by | `frappe COMMAND --help` |
 
-Run Frappé inside an application folder; a command marked so also works anywhere. An application’s `shard.lock` pins its Caramel release, and Frappé runs that release’s commands for it. `frappe COMMAND --help` prints one command’s syntax, and `frappe agent-manifest` prints the whole list with the diagnostic grammar for agents.
+Learning it for the first time? [Your first application](https://caramelize.dev/docs/0.14.0/getting-started/index.md) runs the everyday commands in order. This page lists every command.
+
+## Frappé runs the release your application pins {#c-commands-frappe}
+
+| Condition | Outcome |
+| --- | --- |
+| A command marked “Works outside an application” | works anywhere |
+| Every other command | runs inside an application folder |
+| An application whose `shard.lock` pins a Caramel release | Frappé runs that release’s commands for it |
+| `frappe COMMAND --help` | prints one command’s syntax |
+| `frappe agent-manifest` | prints the whole list with the diagnostic grammar for agents |
 
 - `frappe help`: Print every command with its description. Works outside an application.
 - `frappe version`: Print the Frappé version. Works outside an application.
@@ -51,13 +66,18 @@ Run Frappé inside an application folder; a command marked so also works anywher
 - `frappe lsp crystalline|ameba-ls [SERVER_ARGS...]`: Run a pinned language server for this project on stdio.
 - `frappe lsp install`: Build the pinned language servers. Works outside an application.
 
-## Output for people and agents {#c-commands-output}
+## Diagnostics follow where stdout goes {#c-commands-output}
 
-`check`, `lint`, `migrate` and `db diff` print MRDP diagnostics for agents unless stdout is a terminal; `--agent` or `--human` chooses explicitly. A mistyped command or option exits 1 with the intended command’s exact syntax and a suggestion.
+| Condition | Outcome |
+| --- | --- |
+| `check`, `lint`, `migrate` or `db diff` when stdout is not a terminal | prints MRDP diagnostics |
+| `--agent` | prints MRDP diagnostics |
+| `--human` | prints the terminal layout |
+| A mistyped command or option | exits 1 with the intended command’s exact syntax and a suggestion |
 
 [Read diagnostics as an agent →](https://caramelize.dev/docs/0.14.0/agents/index.md)
 
-## Your application binary {#c-commands-app}
+## The application binary takes its own commands {#c-commands-app}
 
 Each application compiles to one binary whose main is `Caramel.run(App)`; below, `APP` stands for it. Frappé runs these commands for you: `frappe dev` serves, and `frappe routes`, `frappe seed`, `frappe migrate` and `frappe translations` run the commands of the same name. `serve` and `work` are the two process roles. `ops`, `jobs`, `db diagnose` and `insights` belong to Crema, which also lets your application add commands of its own.
 
@@ -75,9 +95,9 @@ Each application compiles to one binary whose main is `Caramel.run(App)`; below,
 - `APP db diagnose|roles DATABASE MIGRATION_ROLE RUNTIME_ROLE`: diagnose reports database health: connections, locks, cache hits, unused indexes and the slowest statements, and needs the database, not a running application. roles prints the psql script that creates an application’s migration and runtime roles and its database.
 - `APP insights [--since=DURATION] [--kind=request|job|schedule|sql|outbound]`: Show the recorder’s per-minute latency history for routes, jobs, schedules, SQL or outbound hosts. Needs require "caramel/crema/recorder".
 
-## Latte {#c-commands-latte}
+## Frappé starts Latte when a command needs it {#c-commands-latte}
 
-Frappé starts Latte when a command needs it, so you rarely call Latte yourself. `frappe services` starts and stops the services Latte runs.
+You rarely call Latte yourself. `frappe services` starts and stops the services Latte runs.
 
 - `latte daemon`: Run Latte in this terminal.
 - `latte daemon --detach`: Run Latte in its own session, logging to logs/latte.log. Frappé starts Latte this way when it is not running.
@@ -86,6 +106,20 @@ Frappé starts Latte when a command needs it, so you rarely call Latte yourself.
 - `latte service uninstall`: Remove that login item; the Latte it started stops.
 - `latte version`: Print this Latte's release and the control API versions it serves.
 
-[← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Set up the local environment →](https://caramelize.dev/docs/0.14.0/local-environment/index.md)
+Prove it
+
+## Ask for the syntax {#c-commands-prove}
+
+**Terminal · inside the application**
+
+```bash
+frappe check --help
+frappe agent-manifest
+frappe migrte
+```
+
+**Passing:** `--help` prints the command’s syntax. `agent-manifest` prints every command with the diagnostic grammar. The mistyped `migrte` exits 1 with the syntax of `migrate` and a suggestion.
+
+[← Security defaults](https://caramelize.dev/docs/0.14.0/security/index.md) · [Set up the local environment →](https://caramelize.dev/docs/0.14.0/local-environment/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/commands/

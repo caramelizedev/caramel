@@ -37,7 +37,7 @@
 - [SugarORM](https://caramelize.dev/docs/0.14.0/sugarorm/index.md): Declare each table as a typed schema, query it with checked names, guard writes with changesets, and derive migrations from the declaration.
 - [Cold Brew](https://caramelize.dev/docs/0.14.0/cold-brew/index.md): Define typed jobs, run workers and schedules, publish notifications, and cache strings in your application’s PostgreSQL database.
 - [Corretto](https://caramelize.dev/docs/0.14.0/corretto/index.md): Corretto runs request specs in-process against a real PostgreSQL database, rolls back every example, and fakes third parties at the wire.
-- [Crema](https://caramelize.dev/docs/0.14.0/crema/index.md): Crema is Caramel’s observability: request ids, one log line for every request, job and schedule run, error reports, an owner-only ops socket, an opt-in recorder and exporter, and the development tools. This page lists every name, field, variable and limit.
+- [Crema](https://caramelize.dev/docs/0.14.0/crema/index.md): Crema is Caramel’s observability: request ids, one log line for every request, job and schedule run, error reports, an owner-only ops socket, an opt-in recorder and exporter, and the development tools.
 - [Security defaults](https://caramelize.dev/docs/0.14.0/security/index.md): What Caramel checks on every request, and what your application must keep doing.
 - [Commands](https://caramelize.dev/docs/0.14.0/commands/index.md): Frappé, your application’s binary, and Latte, listed from the source of Caramel 0.14.0.
 - [Local environment](https://caramelize.dev/docs/0.14.0/local-environment/index.md): Latte runs PostgreSQL, DNS, and HTTPS on your Mac, and Frappé builds, serves, and checks each application at its own named origin.

@@ -4,6 +4,43 @@ Guides / Internationalization
 
 Add typed translations, choose a language for each request, and localize numbers, dates, and validation messages in Caramel 0.14.0.
 
+| Contract | Value |
+| --- | --- |
+| Release | 0.14.0 |
+| Needs | An application whose `config/application.cr` `frappe make locale` can wire |
+| You will have | Typed messages, a language for each request, and localized numbers, dates and validation messages |
+| Proved by | `frappe check` · `frappe translations` · `frappe corretto` |
+
+## The guide in six stages {#c-i18n-map}
+
+11 sections · read in order the first time
+
+- **1 · Start**
+
+  - [Enable translations](#c-i18n-enable)
+- **2 · Write**
+
+  - [Write Crystal catalogs](#c-i18n-catalogs)
+  - [Call typed messages](#c-i18n-messages)
+- **3 · Choose**
+
+  - [Choose the request language](#c-i18n-language)
+  - [Add a language switcher](#c-i18n-switcher)
+- **4 · Localize**
+
+  - [Format numbers and dates](#c-i18n-formats)
+  - [Translate errors and keep text safe](#c-i18n-errors)
+  - [Carry language into background work](#c-i18n-jobs)
+- **5 · Look up**
+
+  - [Look up catalog keys](#c-i18n-reference)
+- **6 · Limits**
+
+  - [What does not compile](#c-i18n-refusals)
+  - [Not covered yet](#c-i18n-limits)
+
+Stage 1 · Start
+
 ## Enable translations {#c-i18n-enable}
 
 Internationalization is opt-in. Inside your application, add a locale before generating the resources you want translated. A plain application does not compile the i18n implementation.
@@ -15,9 +52,13 @@ frappe make locale fr
 frappe check
 ```
 
-The first command creates `app/locales/en.cr` and `app/locales/fr.cr` and wires `config/application.cr`. New resource generation then writes `t.` calls and adds messages to the default catalog. Existing resource views keep their text until you replace it with message calls.
+**Expect:** Creates `app/locales/en.cr` and `app/locales/fr.cr` and wires `config/application.cr`, printing a `Generated` line for each file.
+
+New resource generation then writes `t.` calls and adds messages to the default catalog. Existing resource views keep their text until you replace it with message calls.
 
 The configuration requires `caramel/i18n` after `caramel`, loads the locale files, then calls `Caramel.locales default: "en"` once, before loading views. If your configuration has been customized, follow the generator’s instructions to add that wiring by hand.
+
+Stage 2 · Write
 
 ## Write Crystal catalogs {#c-i18n-catalogs}
 
@@ -57,7 +98,7 @@ Caramel.locale "fr", {
 }
 ```
 
-The default locale defines application keys and their placeholders. Other locales may omit keys and use the default text, but cannot add unknown application keys or change a message’s placeholders or kind. Use lowercase identifiers for keys; reserved words and malformed catalogs produce compiler errors at their source.
+The default locale defines application keys and their placeholders. Other locales may omit keys and use the default text. Use lowercase identifiers for keys.
 
 ## Call typed messages {#c-i18n-messages}
 
@@ -72,9 +113,11 @@ p { l(1234.5, 2) }
 p { l(Time.utc(2026, 10, 2), :date) }
 ```
 
-In French, these calls produce `Bonjour, Ann !`, `3 livres`, `1 234,50`, and `02/10/2026`. Misspelled message names and missing arguments fail compilation. Use `%{name}` placeholders in catalog text rather than Crystal string interpolation.
+In French, these calls produce `Bonjour, Ann !`, `3 livres`, `1 234,50`, and `02/10/2026`.
 
-Plurals follow CLDR cardinal rules for whole numbers. English requires `one` and `other`; French also requires `many`. Optional exact forms such as `"=0"` take priority. Each locale must supply its required categories, and `%{count}` uses its number separators.
+Plurals follow CLDR cardinal rules for whole numbers. English requires `one` and `other`; French also requires `many`. Optional exact forms such as `"=0"` take priority, and `%{count}` uses its number separators.
+
+Stage 3 · Choose
 
 ## Choose the request language {#c-i18n-language}
 
@@ -113,11 +156,13 @@ end
 
 The layout’s `html` element should use `lang: Caramel.language`; generated applications already do. Add `dir: locale.dir` when supporting right-to-left languages, and check your styles in both directions.
 
+Stage 4 · Localize
+
 ## Format numbers and dates {#c-i18n-formats}
 
 `l(number, decimals)` uses `caramel.number.separator` and `delimiter`. `l(time, :date)` chooses a named time pattern; built-in names include `:date`, `:time`, `:datetime`, and `:short_date`. The default catalog can add more named formats.
 
-Supply translated month and day names under `caramel.time` when your patterns use them. Formatting data falls back from the selected locale to the default locale, then to English. A time keeps its own location; formatting does not convert timezones. Unsupported directives and malformed formatting data fail compilation.
+Supply translated month and day names under `caramel.time` when your patterns use them. Formatting data falls back from the selected locale to the default locale, then to English. A time keeps its own location; formatting does not convert timezones.
 
 ## Translate errors and keep text safe {#c-i18n-errors}
 
@@ -142,17 +187,96 @@ Caramel::I18n.with(target) do
 end
 ```
 
+Stage 5 · Look up
+
+## Look up catalog keys {#c-i18n-reference}
+
+The reserved `caramel` section takes only these keys. A locale that leaves one out uses the default locale’s, then English.
+
+| Key | Meaning |
+| --- | --- |
+| `language` | The language’s own name, such as Français |
+| `number.separator`, `number.delimiter` | One character each; English uses . and , |
+| `time.months`, `time.abbr_months` | 12 names, January first |
+| `time.days`, `time.abbr_days` | 7 names, Sunday first |
+| `time.am`, `time.pm` | The text for %p |
+| `time.formats.NAME` | A pattern; date, time, datetime and short_date are built in |
+
+A pattern uses only `%Y %m %-m %d %-d %H %-H %I %-I %M %S %p %B %b %A %a %%`. `%I` is the 12-hour clock, and `%-` drops the leading zero.
+
+The `errors` and `pages` keys translate Caramel’s own messages:
+
+| Key | English text |
+| --- | --- |
+| `errors.required` | is required |
+| `errors.must_be_file` | must be a file |
+| `errors.json_type` | must be a JSON %{type} |
+| `errors.invalid_value` | must be a valid %{type} |
+| `errors.at_least` | must be at least %{min} |
+| `errors.at_least_characters` | must be at least %{min} characters |
+| `errors.at_most` | must be at most %{max} |
+| `errors.at_most_characters` | must be at most %{max} characters |
+| `errors.at_least_items` | must have at least %{min} item(s) |
+| `errors.at_most_items` | must have at most %{max} item(s) |
+| `errors.duplicate_item` | repeats an earlier item |
+| `errors.duplicate_field` | Duplicate field: %{name} |
+| `errors.unknown_field` | Unknown field: %{name} |
+| `errors.expected_json_object` | Expected a JSON object |
+| `errors.url` | must be an absolute http or https URL |
+| `errors.blank` | can't be blank |
+| `errors.greater_than` | must be greater than %{than} |
+| `errors.less_than` | must be less than %{than} |
+| `errors.too_short` | should be at least %{min} character(s) |
+| `errors.too_long` | should be at most %{max} character(s) |
+| `errors.invalid_format` | has invalid format |
+| `errors.invalid` | is invalid |
+| `errors.taken` | has already been taken |
+| `errors.record_gone` | Record no longer exists |
+| `errors.record_stale` | Record changed since you loaded it |
+| `pages.check_request` | Check your request |
+| `pages.not_found` | Not found |
+| `pages.expired_form` | This form has expired or came from another site. Reload the page and try again. |
+
+Plural rules are built in for `af am ar as ast az be bg bn bs ca cs cy da de el en es et eu fa fi fo fr fy ga gl gu he hi hr hu id is it ja ka kk km kn ko ky lb lo lt lv mk ml mn mr ms my nb ne nl nn no pl pt pt-PT ro ru sk sl so sq sr sv sw ta te th tr uk ur uz vi yue zh zu`. A tag with a region or script uses its language’s rules, so `pt-BR` uses `pt`’s. For any other language, name one with the same rules: `Caramel.locale "eo", {…}, plural: "en"`. `locale.dir` is `rtl` for `ar he fa ur ps sd ug yi dv ckb`.
+
+Stage 6 · Limits
+
+## What does not compile {#c-i18n-refusals}
+
+Each mistake below stops the build at the line that causes it.
+
+| Condition | Outcome |
+| --- | --- |
+| A misspelled message name or a missing argument in a `t.` call | fails compilation |
+| Crystal string interpolation in catalog text instead of `%{name}` placeholders | fails compilation |
+| A key that is not a lowercase identifier, a reserved word, or a malformed catalog | fails compilation |
+| A non-default locale that defines an application key the default locale lacks | fails compilation |
+| A non-default locale that changes a message’s placeholders or kind | fails compilation |
+| A locale that omits a required plural category | fails compilation |
+| A framework `errors` or `pages` key that changes the placeholders of its English text | fails compilation |
+| A time pattern that uses a directive outside the listed set, or malformed `caramel.time` or `caramel.number` data | fails compilation |
+| A non-default locale that adds a time format name | fails compilation |
+| A language without built-in plural rules and no `plural:` | fails compilation |
+
+## Not covered yet {#c-i18n-limits}
+
+Caramel supports typed text messages, whole-number plurals, number and time formatting, and request-local language selection. These are not implemented:
+
+- Select and gender messages.
+- Currency formatting.
+- Relative time formatting.
+- Translated URL segments.
+- Database-backed catalogs.
+- Automatic job locale propagation.
+- An unused-key report.
+
+[Read the internationalization design and API details ↗](https://github.com/caramelizedev/caramel/blob/v0.14.0/docs/decisions/0024-internationalization.md)
+
+Prove it
+
 ## Check translations and requests {#c-i18n-check}
 
 Use the completeness report alongside the compiler and request specs. `frappe translations` prints `MISSING code key file` and exits 1 while translations are missing. It includes framework wording and formatting data, so a newly generated locale has more to fill in than application text. Missing keys can still compile and fall back intentionally.
-
-**Terminal · application checks**
-
-```bash
-frappe check
-frappe translations
-frappe corretto
-```
 
 Use a fresh Corretto session to test browser language negotiation without a remembered locale. With a Book resource and a layout using `Caramel.language`:
 
@@ -169,58 +293,16 @@ end
 
 Also assert translated text, fallback behavior, validation messages in HTML and JSON, switch redirects, and form submissions under a locale prefix.
 
-## Catalog reference {#c-i18n-reference}
+**Terminal · application checks**
 
-The reserved `caramel` section takes only these keys. A locale that leaves one out uses the default locale’s, then English.
+```bash
+frappe check
+frappe translations
+frappe corretto
+```
 
-- `language`: The language’s own name, such as Français
-- `number.separator, number.delimiter`: One character each; English uses . and ,
-- `time.months, time.abbr_months`: 12 names, January first
-- `time.days, time.abbr_days`: 7 names, Sunday first
-- `time.am, time.pm`: The text for %p
-- `time.formats.NAME`: A pattern; date, time, datetime and short_date are built in
+**Passing:** `frappe check` compiles the catalogs. `frappe translations` prints OK with the locale and key counts and exits 0, or lists only `MISSING` keys you leave on the fallback on purpose. The Corretto example sees `Content-Language: fr`.
 
-A pattern uses only `%Y %m %-m %d %-d %H %-H %I %-I %M %S %p %B %b %A %a %%`. `%I` is the 12-hour clock, and `%-` drops the leading zero. Only the default locale may add format names.
-
-The `errors` and `pages` keys translate Caramel’s own messages. Each must keep exactly the placeholders its English text shows:
-
-- `errors.required`: is required
-- `errors.must_be_file`: must be a file
-- `errors.json_type`: must be a JSON %{type}
-- `errors.invalid_value`: must be a valid %{type}
-- `errors.at_least`: must be at least %{min}
-- `errors.at_least_characters`: must be at least %{min} characters
-- `errors.at_most`: must be at most %{max}
-- `errors.at_most_characters`: must be at most %{max} characters
-- `errors.at_least_items`: must have at least %{min} item(s)
-- `errors.at_most_items`: must have at most %{max} item(s)
-- `errors.duplicate_item`: repeats an earlier item
-- `errors.duplicate_field`: Duplicate field: %{name}
-- `errors.unknown_field`: Unknown field: %{name}
-- `errors.expected_json_object`: Expected a JSON object
-- `errors.url`: must be an absolute http or https URL
-- `errors.blank`: can't be blank
-- `errors.greater_than`: must be greater than %{than}
-- `errors.less_than`: must be less than %{than}
-- `errors.too_short`: should be at least %{min} character(s)
-- `errors.too_long`: should be at most %{max} character(s)
-- `errors.invalid_format`: has invalid format
-- `errors.invalid`: is invalid
-- `errors.taken`: has already been taken
-- `errors.record_gone`: Record no longer exists
-- `errors.record_stale`: Record changed since you loaded it
-- `pages.check_request`: Check your request
-- `pages.not_found`: Not found
-- `pages.expired_form`: This form has expired or came from another site. Reload the page and try again.
-
-Plural rules are built in for `af am ar as ast az be bg bn bs ca cs cy da de el en es et eu fa fi fo fr fy ga gl gu he hi hr hu id is it ja ka kk km kn ko ky lb lo lt lv mk ml mn mr ms my nb ne nl nn no pl pt pt-PT ro ru sk sl so sq sr sv sw ta te th tr uk ur uz vi yue zh zu`. A tag with a region or script uses its language’s rules, so `pt-BR` uses `pt`’s. For any other language, name one with the same rules: `Caramel.locale "eo", {…}, plural: "en"`. `locale.dir` is `rtl` for `ar he fa ur ps sd ug yi dv ckb`.
-
-## Current scope {#c-i18n-limits}
-
-Caramel supports typed text messages, whole-number plurals, number and time formatting, and request-local language selection. Select/gender messages, currency and relative time formatting, translated URL segments, database-backed catalogs, automatic job locale propagation, and an unused-key report are not implemented.
-
-[Read the internationalization design and API details ↗](https://github.com/caramelizedev/caramel/blob/v0.14.0/docs/decisions/0024-internationalization.md)
-
-[← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.14.0/testing-html/index.md)
+[← Mount a component](https://caramelize.dev/cookbook/0.14.0/third-party-components/index.md) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.14.0/testing-html/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/internationalization/

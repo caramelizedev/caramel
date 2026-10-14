@@ -6,6 +6,29 @@ The signed cookie carries a random token. PostgreSQL holds its digest, expiry an
 
 Draft recipe · Target: 0.14.0 · Not yet recipe-tested
 
+| Contract | Value |
+| --- | --- |
+| Needs | A multi-tenant application with an `App::Account` tenant ([Multi-tenancy](https://caramelize.dev/docs/0.14.0/multi-tenancy/index.md)) |
+| You will have | Login and logout over a revocable token row, per-request `current_session`, `current_user` and `current_membership` readers, and a membership guard on tenant pages |
+| Covers | Expiry, revocation, deactivation, removed membership, replayed cookies and 72-byte passwords |
+| Proved by | `frappe corretto spec/requests/sessions_spec.cr` |
+
+## Where the change goes {#c-session-files}
+
+- `app/models/user.cr`: Email, digest, active flag
+- `app/models/user_session.cr`: Revocable token row
+- `app/models/membership.cr`: User-to-account join
+- `db/migrations/`: Tables from the diff
+- `app/actions/sessions/login.cr`: Create the session
+- `app/actions/sessions/logout.cr`: Revoke the session
+- `app/actions/application_action.cr`: Memoized session readers
+- `app/actions/accounts/home.cr`: Member-only home
+- `app/actions/accounts/create.cr`: Creator becomes member
+- `app/views/sessions/new.cr`: Sign-in form
+- `app/views/layouts/application.cr`: Sign-out form in header
+- `config/routes.cr`: Login and logout routes
+- `spec/requests/sessions_spec.cr`: Lifecycle examples
+
 ## Keep the revocable part in PostgreSQL {#c-session-split}
 
 A cookie that holds `user_id` cannot be revoked: `Caramel::Session` is a signed cookie with no server-side expiry (see [Security](https://caramelize.dev/docs/0.14.0/security/index.md)), so a copy of it stays valid until the browser drops it. Put a random token in the cookie instead and keep its SHA-256 digest, an expiry and a revocation time in a table. Each request looks the digest up, so ending the row ends the session.
@@ -47,20 +70,41 @@ module App
 end
 ```
 
-**Terminal**
+1. **Derive the migration**
 
-```bash
-frappe db diff --name create_user_sessions
-frappe migrate
-```
+   **Terminal**
 
-The diff writes one migration for every table the schemas declare that the database lacks, so a first run also creates `users` and the `memberships` table below. The digest is unique, so one lookup finds one row.
+   ```bash
+   frappe db diff --name create_user_sessions
+   ```
+
+   **Expect:** Writes one migration for every table the schemas declare that the database lacks, so a first run also creates `users` and `memberships`.
+2. **Apply the migration**
+
+   **Terminal**
+
+   ```bash
+   frappe migrate
+   ```
+
+   **Expect:** Applies the migration and prints `Applied N migrations.`
+
+The digest is unique, so one lookup finds one row.
 
 ## Create the session at login, revoke it at logout {#c-session-login}
 
-Login is `POST /login` with an `email` and a `password`. An unknown email, an inactive user, a wrong password and an over-long password all get the same 422 page, and every attempt runs exactly one bcrypt comparison: a missing user is checked against a fixed dummy digest. That keeps the answer and the work comparable, so the response does not say which emails exist; it does not make the timing identical.
+Login is `POST /login` with an `email` and a `password`. Every attempt runs exactly one bcrypt comparison: a missing user is checked against a fixed dummy digest. That keeps the answer and the work comparable, so the response does not say which emails exist; it does not make the timing identical.
 
-Crystal’s bcrypt reads at most 71 bytes of a password and `verify` raises `Crypto::Bcrypt::Error` from 72 bytes up. A contract `max:` counts characters, not bytes, so the action tests `bytesize` itself; without that test a long password would answer 500 only for an email that exists. On success the action revokes the row behind any token the cookie already holds, because `session.clear` would otherwise orphan a row that stays valid for anyone who copied the old cookie. It then clears the session and creates the new token. Only the token’s digest reaches the database.
+| Condition | Outcome |
+| --- | --- |
+| Unknown email | answers 422, the same page |
+| Inactive user | answers 422, the same page |
+| Wrong password | answers 422, the same page |
+| Password of 72 bytes or more, with the action’s `bytesize` test | answers 422, the same page |
+| Password of 72 bytes or more, without that test | raises `Crypto::Bcrypt::Error` and answers 500 only for an email that exists |
+| Valid password for an active user | revokes the row behind any token the cookie holds, clears the session, creates a new token and redirects to `/` |
+
+Crystal’s bcrypt reads at most 71 bytes of a password and `verify` raises `Crypto::Bcrypt::Error` from 72 bytes up. A contract `max:` counts characters, not bytes, so the action tests `bytesize` itself. The success path revokes the old row because `session.clear` would otherwise orphan a row that stays valid for anyone who copied the old cookie. Only the token’s digest reaches the database.
 
 **app/actions/sessions/login.cr**
 
@@ -238,11 +282,31 @@ module App
 end
 ```
 
-`current_session` matches the digest with `revoked_at: nil` and `expires_at` from now on. `current_user` requires `active`. `current_membership` matches the user and the tenant’s id. One action instance serves one request, so the next request queries again: that is why revocation, expiry, deactivation and a removed membership take effect on the next request. The memo lives on the action struct, so pass values, not the action, to helpers and views.
+| Reader | Matches |
+| --- | --- |
+| `current_session` | The token digest, with `revoked_at: nil` and `expires_at` from now on |
+| `current_user` | The session’s user, who must be `active` |
+| `current_membership` | The user and the tenant’s id |
+
+| Condition | Outcome |
+| --- | --- |
+| A session is revoked or expires | takes effect on the next request |
+| A user is deactivated or a membership removed | takes effect on the next request |
+| The next request | queries again, because one action instance serves one request |
+
+The memo lives on the action struct, so pass values, not the action, to helpers and views.
 
 ## Guard tenant pages with ingress {#c-session-guard}
 
-A tenant action names an authenticator. An anonymous or non-member request answers 401 before the contract binds. The membership is a central table that joins a user to an account, unique per pair. Nothing else creates one, so the action that creates an account must make its creator the first member, or the guard locks every new account out.
+A tenant action names an authenticator. The membership is a central table that joins a user to an account, unique per pair. Nothing else creates one, so the action that creates an account must make its creator the first member, or the guard locks every new account out.
+
+| Condition | Outcome |
+| --- | --- |
+| Anonymous request to a tenant action with an authenticator | answers 401 before the contract binds |
+| Non-member request to such an action | answers 401 before the contract binds |
+| Anonymous request to `Accounts::Create` | answers 401 before the contract binds |
+| Signed-in user creates an account | saves it, then writes the membership and redirects to `/SLUG` |
+| The account fails to save | re-renders the form with 422 and writes no membership |
 
 **app/models/membership.cr**
 
@@ -284,7 +348,7 @@ end
 
 Ingress is covered in [the webhook recipe](https://caramelize.dev/cookbook/0.14.0/webhooks/index.md). The tenant’s routes still sit in the `tenant` block.
 
-The generated `Accounts::Create` redirects to the new account without a membership. Replace it so that only a signed-in user creates an account and becomes its member. The membership is written after the account is saved; a failed account re-renders the form and writes nothing. The signed-in check runs before the contract binds, so an anonymous request answers 401. The generated spec that created an account anonymously no longer applies; the spec below covers sign-up.
+The generated `Accounts::Create` redirects to the new account without a membership. Replace it so that only a signed-in user creates an account and becomes its member. The generated spec that created an account anonymously no longer applies; the spec below covers sign-up.
 
 **app/actions/accounts/create.cr**
 
@@ -323,7 +387,14 @@ end
 
 ## Test the lifecycle in Corretto {#c-session-tests}
 
-Log in through the real route and follow its redirect. `client.sign_in(user)` writes only `user_id`, so on its own it gets 401 on a member page. Move `expires_at` into the past with `update!` to test expiry. To test a replay, save the cookie before logout and restore it into `client.cookies` afterwards; the same trick proves that a second login revokes the first session. A 72-byte password must get the same page as a wrong one, and creating an account must make its creator a member.
+| To test | Do this |
+| --- | --- |
+| Login | Log in through the real route and follow its redirect |
+| `client.sign_in(user)` alone | It writes only `user_id`, so a member page answers 401 |
+| Expiry | Move `expires_at` into the past with `update!` |
+| Replay | Save the cookie before logout and restore it into `client.cookies` afterwards; the same trick proves that a second login revokes the first session |
+| 72-byte password | It must get the same page as a wrong one |
+| Account creation | It must make its creator a member |
 
 **spec/requests/sessions_spec.cr**
 
@@ -454,6 +525,22 @@ end
 > **Corretto’s sign_in stores user_id**
 >
 > `client.sign_in(user)` writes `user_id` into the session cookie. An application whose guard reads a session token ignores it, so tests of such an application log in through `/login`. The specs create their users directly, so the recipe’s own sign-up has no seeded user; add a registration action, or insert users with a script, before real people can sign in.
+
+Prove it
+
+## Prove the session lifecycle {#c-session-prove}
+
+**Terminal · inside the application**
+
+```bash
+frappe corretto spec/requests/sessions_spec.cr
+```
+
+**Passing:** All ten examples pass: sign in and out, a wrong password, a 72-byte password, `sign_in` alone refused, an expired session, a deactivated user, a deleted membership, a replayed cookie, a second login revoking the first, and account creation making its creator a member.
+
+> Draft **Written for 0.14.0, not yet run end to end.**
+>
+> The commands are the release’s own. The recipe keeps its Draft label until it has been run from a new application to a passing spec.
 
 [← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.14.0/testing-html/index.md)
 

@@ -4,7 +4,24 @@ Reference / Actions and responses
 
 How an action turns a valid contract into a page, a fragment, a redirect, a stream or JSON in Caramel 0.14.0.
 
-## Write an action {#c-actions-shape}
+| Contract | Value |
+| --- | --- |
+| Release | 0.14.0 |
+| Needs | An action with a contract (see [Routes and contracts](https://caramelize.dev/docs/0.14.0/routes-and-contracts/index.md)) |
+| Covers | Pages, fragments, redirects, streams, JSON, errors and the session |
+| Proved by | `frappe check` · a Corretto request spec |
+
+Learning it for the first time? The recipe [Read and write JSON](https://caramelize.dev/cookbook/0.14.0/return-json/index.md) shows one action answering a browser and a JSON client. This page lists every response and limit.
+
+## Limits at a glance {#c-actions-limits}
+
+| Limit | Value |
+| --- | --- |
+| `q` weight in `Accept`, clamped | 0–1 |
+| Partial target length | 1–256 bytes |
+| Default `redirect_external` status | 302 |
+
+## An action answers one request {#c-actions-shape}
 
 An action is a struct that answers one request. It subclasses your application’s `App::ApplicationAction`, which subclasses `Caramel::Action`. `contract do … end` declares the request’s typed fields. `handle(contract : Contract)` runs only when the contract is valid.
 
@@ -30,9 +47,15 @@ module App::Books
 end
 ```
 
-`handle` returns a `Caramel::Response` or a result. A response passes through unchanged. Any other result goes to a JSON client as JSON, and to `render(result)` for everyone else. A result without a `render` fails compilation.
-
-`status` starts at 200. Setting it in `handle` changes the JSON status and the default status of `page`, `morph`, `partials` and `stream`. Redirects keep their own status.
+| Condition | Outcome |
+| --- | --- |
+| `handle` returns a `Caramel::Response` | passes through unchanged |
+| Any other result, JSON client | answers as JSON |
+| Any other result, everyone else | goes to `render(result)` |
+| A result without a `render` | fails compilation |
+| `status` before `handle` sets it | is 200 |
+| `status` set in `handle` | changes the JSON status and the default status of `page`, `morph`, `partials` and `stream` |
+| Redirects | keep their own status |
 
 **app/actions/books/create.cr · handle and render**
 
@@ -53,21 +76,26 @@ A JSON client gets 201 and the record. A browser gets a 303 to the new book.
 
 [Declare routes and contracts →](https://caramelize.dev/docs/0.14.0/routes-and-contracts/index.md)
 
-## Know which client is asking {#c-actions-negotiation}
+## Accept and HX-Request choose the client {#c-actions-negotiation}
 
-Caramel weighs only `application/json` and `text/html` in `Accept`. A `q` value is clamped to 0 through 1; one that is not a finite number weighs 0.
+Caramel weighs only `application/json` and `text/html` in `Accept`.
 
-- **JSON client:** rates `application/json` above `text/html` and does not send `HX-Request: true`.
-- **Browser:** sends `HX-Request: true`, gives `text/html` a weight above 0, or sends no `Accept` at all.
-- **Neither:** such as `Accept: */*` alone. Results still go to `render`; errors answer as plain text.
-
-htmx always asks for HTML, so an htmx request never receives JSON. Pages, fragments, JSON and streams carry `Vary: Accept, HX-Request, HX-Request-Type` and `Cache-Control: no-store`. Pages and fragments also set the CSRF cookie; JSON does not.
+| Condition | Outcome |
+| --- | --- |
+| `Accept` rates `application/json` above `text/html`, and no `HX-Request: true` | is a JSON client |
+| `HX-Request: true`, a `text/html` weight above 0, or no `Accept` at all | is a browser |
+| Neither, such as `Accept: */*` alone | sends results to `render` and answers errors as plain text |
+| A `q` outside 0 through 1 | is clamped |
+| A `q` that is not a finite number | weighs 0 |
+| An htmx request | never receives JSON; htmx always asks for HTML |
+| Pages, fragments, JSON and streams | carry `Vary: Accept, HX-Request, HX-Request-Type` and `Cache-Control: no-store` |
+| Pages and fragments | set the CSRF cookie; JSON does not |
 
 [Read and write JSON →](https://caramelize.dev/cookbook/0.14.0/return-json/index.md)
 
-## Render pages {#c-actions-pages}
+## Pages render inside the layout {#c-actions-pages}
 
-`page(title, body, status)` takes a `String`, a view, or `markup { … }`. A `String` body is trusted HTML and is not escaped. `markup` escapes like a view, and the action’s own methods stay available inside it.
+`page(title, body, status)` takes a `String`, a view, or `markup { … }`.
 
 **Inside an action**
 
@@ -77,7 +105,13 @@ def handle(contract : Contract)
 end
 ```
 
-A request with `HX-Request-Type: partial` receives only a `<title>` and the body; htmx removes the title before swapping. Every other request receives `layout(page)`, the full document. `HX-Request: true` alone still gets the full document, so history restores, body swaps and `hx-select` keep the layout.
+| Condition | Outcome |
+| --- | --- |
+| A `String` body | is trusted HTML and is not escaped |
+| A view or `markup { … }` body | is escaped; the action’s own methods stay available inside `markup` |
+| `HX-Request-Type: partial` | answers only a `<title>` and the body; htmx removes the title before swapping |
+| Any other request | answers `layout(page)`, the full document |
+| `HX-Request: true` alone | still gets the full document, so history restores, body swaps and `hx-select` keep the layout |
 
 `Caramel::Action` has a minimal default layout with an escaped title. The generated base action replaces it with your layout view and suffixes every title.
 
@@ -99,7 +133,7 @@ module App
 end
 ```
 
-## Update regions with htmx {#c-actions-regions}
+## morph and partials update regions {#c-actions-regions}
 
 `morph(target, with: html, swap: "innerMorph")` replaces one target’s content. `partials` sends several `Caramel::Partial` records in one response. Each becomes an `<hx-partial>` element that htmx 4 swaps into its own target.
 
@@ -124,17 +158,28 @@ def handle(contract : Contract)
 end
 ```
 
-A partial’s `html` is trusted. Its swap defaults to `innerMorph` and must be one of `innerHTML`, `outerHTML`, `innerMorph`, `outerMorph`, `beforebegin`, `afterbegin`, `beforeend`, `afterend`, `delete` or `none`. A target holds 1 to 256 bytes. Anything else raises `ArgumentError`.
+| Condition | Outcome |
+| --- | --- |
+| A partial’s `html` | is trusted |
+| A partial with no swap | uses `innerMorph` |
+| A swap other than `innerHTML`, `outerHTML`, `innerMorph`, `outerMorph`, `beforebegin`, `afterbegin`, `beforeend`, `afterend`, `delete`, `none` | raises ArgumentError |
+| A target outside 1 to 256 bytes | raises ArgumentError |
 
 [Write the HTML →](https://caramelize.dev/docs/0.14.0/views/index.md)
 
-## Redirect or answer not found {#c-actions-redirects}
+## Redirects check their target {#c-actions-redirects}
 
-- `redirect_to(path)` answers 303 with `Location`, or 200 with `HX-Location` for htmx. The path starts with `/`, not `//`, and holds no backslash or control character.
-- `redirect_external(url, status = 302)` sends the browser to another site. The status is 301, 302, 303, 307 or 308. The URL is absolute http or https with a host, and has no credentials, whitespace, control characters or backslashes. htmx gets 200 with `HX-Redirect`, so it navigates instead of fetching.
-- `not_found(message = "Not found")` answers 404 with the message as its body.
-
-A path or URL that breaks these rules raises `ArgumentError`. Redirects carry `Vary: HX-Request` and `Cache-Control: no-store`.
+| Condition | Outcome |
+| --- | --- |
+| `redirect_to(path)` | answers 303 with `Location` |
+| `redirect_to(path)` from htmx | answers 200 with `HX-Location` |
+| A `redirect_to` path that does not start with `/`, starts with `//`, or holds a backslash or control character | raises ArgumentError |
+| `redirect_external(url, status = 302)` | sends the browser to another site |
+| `redirect_external` from htmx | answers 200 with `HX-Redirect`, so it navigates instead of fetching |
+| A `redirect_external` status other than 301, 302, 303, 307 or 308 | raises ArgumentError |
+| A URL that is not absolute http or https with a host, or has credentials, whitespace, control characters or backslashes | raises ArgumentError |
+| `not_found(message = "Not found")` | answers 404 with the message as its body |
+| Redirects | carry `Vary: HX-Request` and `Cache-Control: no-store` |
 
 **Inside an action**
 
@@ -144,11 +189,11 @@ def handle(contract : Contract)
 end
 ```
 
-## Stream a body {#c-actions-stream}
+## A stream writes its body from a block {#c-actions-stream}
 
-`stream(content_type, status)` writes the body from its block. Uploaded files are already deleted when the block runs. A HEAD request gets the headers without running it.
+`stream(content_type, status)` writes the body from its block.
 
-`Caramel::SSE.write(io, data, event)` writes one server-sent event and flushes it. Each line of `data` becomes its own `data:` field, so the browser receives the text unchanged. An event name with a line break raises `ArgumentError`.
+`Caramel::SSE.write(io, data, event)` writes one server-sent event and flushes it.
 
 **Inside an action**
 
@@ -160,13 +205,29 @@ def handle(contract : Contract)
 end
 ```
 
-A client that disconnects ends the stream quietly. Any other error in the block comes after the status line, so Caramel can only log it.
+| Condition | Outcome |
+| --- | --- |
+| Uploaded files | are already deleted when the block runs |
+| A HEAD request | gets the headers without running the block |
+| Each line of `data` | becomes its own `data:` field, so the browser receives the text unchanged |
+| An event name with a line break | raises ArgumentError |
+| A client that disconnects | ends the stream quietly |
+| Any other error in the block (it comes after the status line) | is only logged |
 
 [Publish updates with Cold Brew →](https://caramelize.dev/docs/0.14.0/cold-brew/index.md)
 
-## Answer errors {#c-actions-errors}
+## Invalid input answers 422 {#c-actions-errors}
 
-An invalid contract never reaches `handle`. A JSON client gets 422 with `{"errors": {…}}`, an array of messages per field. A browser gets a 422 page titled `Check your request` that lists each field and message. Any other client gets plain text:
+An invalid contract never reaches `handle`.
+
+| Condition | Outcome |
+| --- | --- |
+| Invalid contract, JSON client | answers 422 with `{"errors": {…}}`, an array of messages per field |
+| Invalid contract, browser | answers a 422 page titled `Check your request` that lists each field and message |
+| Invalid contract, any other client | answers 422 as plain text |
+| `render_errors(errors, status = 422)` for errors found after the contract, such as a changeset’s | answers each client the same way with your status; its text starts with `ERR INVALID:` and the status |
+| A SweetTalk refusal that `handle` does not rescue (with `caramel/sweet_talk`) | answers 422 with its message under `_base`, by `render_refusal(contract, refusal)` |
+| Override of `contract_failure_page(contract)` | changes the browser page |
 
 **POST /items with seats=0&extra=1 · Accept: */***
 
@@ -176,11 +237,7 @@ FIELD seats: must be at least 1
 FIELD _base: Unknown field: extra
 ```
 
-For errors found after the contract, such as a changeset’s, return `render_errors(errors, status = 422)`. It answers each client the same way, with your status; its text starts with `ERR INVALID:` and the status.
-
-In an application that requires `caramel/sweet_talk`, a refusal that `handle` does not rescue is answered the same way, with status 422 and its message under `_base`, by `render_refusal(contract, refusal)`; [Call the domain from actions](https://caramelize.dev/docs/0.14.0/sweettalk/index.md) says what each client gets.
-
-Override `contract_failure_page(contract)` to change the browser page. A generated resource with a form re-renders it with the submitted values and every error:
+[Call the domain from actions](https://caramelize.dev/docs/0.14.0/sweettalk/index.md) says what each client gets for a refusal. A generated resource with a form re-renders it with the submitted values and every error:
 
 **app/actions/books.cr · generated, inside module Form**
 
@@ -190,12 +247,14 @@ def contract_failure_page(contract : Caramel::RequestContract) : Caramel::Respon
 end
 ```
 
-## Read the request and the session {#c-actions-request}
+## The session is a signed cookie {#c-actions-request}
 
-- `request`: The HTTP::Request being answered
-- `csrf_token`: The token for forms the action renders
-- `session`: The signed session, a Hash(String, String)
-- `sign_out`: Clears the session
+| Call | Returns |
+| --- | --- |
+| `request` | The HTTP::Request being answered |
+| `csrf_token` | The token for forms the action renders |
+| `session` | The signed session, a Hash(String, String) |
+| `sign_out` | Clears the session |
 
 **Inside an action · the contract declares field user_id : String**
 
@@ -206,10 +265,27 @@ def handle(contract : Contract)
 end
 ```
 
-The session lives in the `__Host-caramel_session` cookie, signed with HMAC-SHA256. It has no server-side expiry and lasts until the browser session ends or the application clears it. Caramel saves it only when it changed; an empty session deletes the cookie. A session whose cookie would pass 4096 bytes raises `Caramel::Session::Overflow`, so keep ids there, not records. A route whose ingress sets `csrf: false` reads an empty session and never saves it.
+The session is a signed cookie. Security defaults lists its cookie, signature, lifetime, `Caramel::Session::Overflow` limit and the `csrf: false` case.
 
-[Receive a signed webhook →](https://caramelize.dev/cookbook/0.14.0/webhooks/index.md)
+[Review the security defaults →](https://caramelize.dev/docs/0.14.0/security/index.md)[Receive a signed webhook →](https://caramelize.dev/cookbook/0.14.0/webhooks/index.md)
 
-[← All recipes](https://caramelize.dev/cookbook/0.14.0/) · [Write the HTML →](https://caramelize.dev/docs/0.14.0/views/index.md)
+Prove it
+
+## Check the answers with Corretto {#c-actions-test}
+
+**Terminal · inside the application**
+
+```bash
+frappe check
+frappe corretto spec/requests/books_spec.cr
+```
+
+**Expect:** `frappe check` passes when every result that is not a `Caramel::Response` has a `render`; a result without one fails compilation.
+
+**Passing:** `frappe check` passes and the request spec is green: a JSON client gets 201 and the record, a browser gets a 303 to the new book, and an invalid contract gets 422 for every client.
+
+[Test requests with Corretto →](https://caramelize.dev/docs/0.14.0/corretto/index.md)
+
+[← Routes and contracts](https://caramelize.dev/docs/0.14.0/routes-and-contracts/index.md) · [Write the HTML →](https://caramelize.dev/docs/0.14.0/views/index.md)
 
 Caramel 0.14.0 · https://caramelize.dev/docs/0.14.0/actions-and-responses/
