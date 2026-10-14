@@ -48,7 +48,8 @@ module Caramel::Crema
       WHERE id = $1
       SQL
 
-    # `attempts` stays, so a job past its retry rule gets exactly one more run.
+    # `attempts` and `releases` stay, so a job past its retry rule gets exactly one
+    # more run, and an abandoned job's retry rule counts only the runs that raised.
     RETRY_ID = <<-SQL
       UPDATE caramel_jobs
       SET failed_at = NULL, locked_at = NULL, locked_by = NULL, run_at = now()

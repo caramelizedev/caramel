@@ -958,6 +958,11 @@ describe Caramel::ColdBrew::Maintenance do
     row[:failed_at].should be_nil
     row[:locked_at].should be_nil
     row[:releases].should eq(2)
+
+    again = Brew::Maintenance.new(ColdBrewSpec.runtime).run_once
+    again.failed.should eq(0)
+    ColdBrewSpec.seen.count { |event| event.kind == "failed" }.should eq(1)
+    ColdBrewSpec.job(third)[:releases].should eq(3)
   end
 
   it "runs its passes from a fiber until stopped" do
