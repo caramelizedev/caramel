@@ -1,6 +1,6 @@
 ---
 name: caramel-docs
-description: How Caramel's documentation pages are shaped and worded. Use when adding, changing or reviewing a guide, reference page, cookbook recipe, learning step or upgrade note in website/source/site.html.
+description: How Caramel's documentation is shaped and worded. Use whenever writing, adding, changing or reviewing Caramel documentation, such as a guide, reference page, cookbook recipe, learning step or upgrade note in website/source/site.html.
 ---
 
 # Writing a page in website/source/site.html

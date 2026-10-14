@@ -7,6 +7,10 @@ These instructions are for changing the framework. In an application this file s
 under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
 
 - Read `CONTRIBUTING.md` before changing code: checks, style, writing, commits and releases.
+- Before writing, changing or reviewing documentation (a guide, reference page, recipe,
+  learning step or upgrade note in `website/source/site.html`), read
+  `.claude/skills/caramel-docs/SKILL.md` and follow it. Claude Code loads it by its
+  description; other agents must open it.
 - Decisions live in `docs/decisions`. Read the one that governs a change; a change that
   alters a decision edits that ADR in the same commit.
 - Status, measurements, investigations and history never go in this repository
