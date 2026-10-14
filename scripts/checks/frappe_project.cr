@@ -231,7 +231,7 @@ module Caramel::Checks
 
     # ADR 0032: frappe build refuses uncommitted changes, then compiles the
     # committed tree in a container into an artifact whose binary runs on a
-    # stock Ubuntu.
+    # stock Ubuntu, then boots that artifact against PostgreSQL over TLS.
     private def release_build : Nil
       docker = Process.find_executable("docker") || "/usr/local/bin/docker"
       engine = File.executable?(docker) && attempt([docker, "info"], timeout: 60.seconds).success?
@@ -269,6 +269,7 @@ module Caramel::Checks
       health = routes.success? && routes.stdout.lines.any?(&.matches?(/^GET\s+\/health\s/))
       assert!(health, routes.stdout + routes.stderr)
       puts "PASS: frappe build writes a static linux/amd64 artifact that runs on Ubuntu"
+      ProductionArtifact.new(self, docker, unpacked).check
     end
 
     # Runs the binary as a server would: on a socket of its own, serving public
@@ -1097,6 +1098,7 @@ end
 
 require "./frappe_project/dev"
 require "./frappe_project/benchmark"
+require "./frappe_project/production_artifact"
 
 begin
   Caramel::Checks::FrappeProject.new.execute(ARGV)
