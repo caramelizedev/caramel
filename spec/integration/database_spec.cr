@@ -67,6 +67,16 @@ describe "PostgreSQL integration" do
     end
   end
 
+  it "waits past IO_TIMEOUT while a statement is within its statement timeout" do
+    limits = Caramel::Database::Limits.new(statement_timeout: 8.seconds, lock_timeout: 1.second)
+    db = Caramel::Database.open(url, 1, limits: limits)
+    begin
+      db.exec("SELECT pg_sleep(6)")
+    ensure
+      db.close
+    end
+  end
+
   it "ends a lock wait at the lock timeout" do
     holder = Caramel::Database.open(url, 1)
     waiter_limits = Caramel::Database::Limits.new(statement_timeout: 10.seconds,
