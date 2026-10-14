@@ -62,7 +62,8 @@ module Caramel::Checks
         assert_tls
         assert_drained
       ensure
-        @fixture.attempt([@docker, "rm", "--force", @app, @postgres])
+        # --volumes: the PostgreSQL image declares an anonymous data volume.
+        @fixture.attempt([@docker, "rm", "--force", "--volumes", @app, @postgres])
         @fixture.attempt([@docker, "network", "rm", @network])
       end
       puts "PASS: the linux/amd64 artifact creates its roles, migrates and serves over " \
@@ -199,8 +200,9 @@ module Caramel::Checks
       result = @fixture.attempt([@docker, "exec", @app, "perl", "-e", HTTP_GET, SOCKET, path, HOST],
         timeout: 30.seconds)
       return unless result.success?
-      HTTP::Client::Response.from_io(IO::Memory.new(result.stdout))
-    rescue IO::Error | ArgumentError
+      HTTP::Client::Response.from_io?(IO::Memory.new(result.stdout))
+    rescue
+      # A server that closes or truncates a response during startup is not up yet.
       nil
     end
 
