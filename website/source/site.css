@@ -119,8 +119,8 @@ table:is(.c-contract, .c-limits, .c-rules) thead { position: absolute; width: 1p
 
 /* Contract, limits, rules and lookups */
 table.c-contract { display: block; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-table.c-contract tbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1px; background: var(--line2); }
-table.c-contract tr { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; background: var(--panel); }
+table.c-contract tbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); background: var(--panel); }
+table.c-contract tr { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; background: var(--panel); box-shadow: 1px 1px 0 var(--line2); }
 table.c-contract th { text-align: left; font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; color: var(--subtle); }
 table.c-contract td { font-size: 16px; line-height: 1.45; color: var(--ink); }
 table.c-limits { display: block; }
@@ -175,8 +175,8 @@ table.c-map td { padding: 12px; border-bottom: 1px solid var(--line2); font-size
 .c-steps > li::before { content: counter(step, decimal-leading-zero); grid-column: 1; grid-row: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-family: var(--mono); font-size: 13px; }
 .c-steps > li > strong { font-size: 19px; line-height: 34px; }
 .c-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
-.c-choices > li { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; font-size: 15px; line-height: 1.6; }
-.c-choices > li > strong { font-size: 17px; }
+.c-choices > li { padding: 18px; border: 1px solid var(--line); border-radius: 12px; font-size: 15px; line-height: 1.6; }
+.c-choices > li > strong { display: block; margin-bottom: 8px; font-size: 17px; }
 .c-note { display: grid; gap: 4px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
 .c-note:has(small) { grid-template-columns: auto 1fr; column-gap: 14px; }
 .c-note small { grid-column: 1; grid-row: 1 / span 2; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); }
