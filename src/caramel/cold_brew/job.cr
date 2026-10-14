@@ -14,13 +14,27 @@ module Caramel::ColdBrew
     end
   end
 
+  # What maintenance records when a job's process died during
+  # Maintenance::RELEASE_LIMIT of its runs.
+  class AbandonedJob < Exception
+    def initialize(releases : Int32)
+      super(<<-TEXT)
+        Its process died or lost its database connection during #{releases} of its runs, \
+        so it will not run again.
+        Remediation: find what ended those runs (memory, a crash, a kill) in the process \
+        logs, fix it, then run `jobs retry`.
+        TEXT
+    end
+  end
+
   enum Backoff
     Exponential
     Linear
   end
 
   # How often a failing job runs again. `attempts` counts every run, the
-  # first included; after the last one the job is marked failed.
+  # first included, except runs maintenance released after their process
+  # died; after the last one the job is marked failed.
   struct RetryRule
     getter attempts : Int32
     getter backoff : Backoff

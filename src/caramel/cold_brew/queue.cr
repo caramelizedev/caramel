@@ -4,16 +4,24 @@ require "./job"
 require "./hooks"
 
 module Caramel::ColdBrew
-  # A job row a worker has locked for one run; `attempts` includes this run.
+  # A job row a worker has locked for one run. `attempts` includes this run;
+  # `releases` counts earlier runs that maintenance released after their
+  # process died.
   record Claim,
     id : Int64,
     enqueued_at : Time,
     class_name : String,
     payload : String,
     attempts : Int32,
+    releases : Int32,
     queue : String,
     run_at : Time,
-    context : String?
+    context : String? do
+    # The runs the retry rule counts: every run but the released ones.
+    def counted_attempts : Int32
+      attempts - releases
+    end
+  end
 
   # :nodoc:
   # The SQL shared by workers and drains. Every statement runs on
@@ -45,7 +53,7 @@ module Caramel::ColdBrew
         FROM selected
         WHERE jobs.id = selected.id AND jobs.enqueued_at = selected.enqueued_at
         RETURNING jobs.id, jobs.enqueued_at, jobs.class_name, \
-                  jobs.payload::text AS payload, jobs.attempts, \
+                  jobs.payload::text AS payload, jobs.attempts, jobs.releases, \
                   jobs.queue, jobs.run_at, jobs.context::text AS context
         SQL
     end
@@ -81,7 +89,7 @@ module Caramel::ColdBrew
 
     CLAIMED = {
       id: Int64, enqueued_at: Time, class_name: String, payload: String, attempts: Int32,
-      queue: String, run_at: Time, context: String?,
+      releases: Int32, queue: String, run_at: Time, context: String?,
     }
 
     # What a retry or a failure returns about the row it wrote.
@@ -153,10 +161,11 @@ module Caramel::ColdBrew
     # durable once this returns outside a transaction. Nil when the row is gone.
     def self.record_failure(job : Claim, error : Exception) : Transition?
       rule = Retry.rule_for(Job.__cold_brew_lineage(job.class_name), error)
-      if error.is_a?(UnknownJob) || job.attempts >= rule.attempts
+      counted = job.counted_attempts
+      if error.is_a?(UnknownJob) || counted >= rule.attempts
         give_up(job, error)
       else
-        reschedule(job, error, after: rule.delay(job.attempts))
+        reschedule(job, error, after: rule.delay(counted))
       end
     end
 

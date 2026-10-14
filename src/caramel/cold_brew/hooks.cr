@@ -46,7 +46,8 @@ module Caramel::ColdBrew
   # hook's writes and is logged by class. Hooks run on the worker's fiber, so
   # keep them short. Under `drain_queue!` on a spec's connection, hooks run
   # inside the example's transaction. A job released after its process died
-  # was never recorded as failed, so it fires no hook.
+  # fires no hook, until its `Maintenance::RELEASE_LIMIT`th release, when
+  # maintenance fails it with `AbandonedJob` and calls the `on_failed` hooks.
   def self.on_retry_scheduled(&hook : RetryScheduled ->) : Nil
     @@retry_hooks << hook
   end

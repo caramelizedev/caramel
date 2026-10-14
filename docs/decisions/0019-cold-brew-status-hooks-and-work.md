@@ -32,7 +32,7 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
    - Under a worker the transition has committed by then. Each hook runs in its own transaction, so its `publish` is delivered and its `enqueue` committed when it returns.
    - A raising hook rolls back only its own writes and is logged by class.
    - Under `drain_queue!` on a spec's connection, the transition and the hook run inside the example's transaction, as savepoints.
-   - A job released by maintenance after its process died was never recorded as failed and fires no hook.
+   - A job released by maintenance after its process died fires no hook, and that run does not count against its retry rule's `attempts:`; `caramel_jobs.releases` counts it. On its third release (`Maintenance::RELEASE_LIMIT`) maintenance fails it with `Caramel::ColdBrew::AbandonedJob` instead and calls the `on_failed` hooks, as `Queue.run` does.
 3. **Worker-only process.** The application binary's `work [--queues=NAMES] [--concurrency=N] [--no-scheduler]` runs `ColdBrew.start` without an HTTP server.
    - The flags replace `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`, which `start` still validates.
    - `ColdBrew.start(url, env, scheduler: false)` leaves `every` schedules to other processes. Maintenance always runs, because it is idempotent.
@@ -54,3 +54,4 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
 - A row stores a name, not a reference, so the name must outlive the class that wrote it. Declaring the old name on the class that replaced it keeps the queue valid across a deploy without a data migration, and a compile error stops two jobs from silently sharing one.
 - Reporting rather than refusing keeps `work` and `migrate` from blocking a deploy over rows that a rollback or a later alias fixes; the report is an API, so a deploy script can fail on it.
 - The worker-only process reuses `serve`'s startup and shutdown instead of a second entry point, so a deployment runs one binary in two roles.
+- **Released runs are counted apart from attempts.** A process can die for reasons outside the job, such as a deploy's SIGKILL or another job exhausting memory, so a released run does not spend the retry rule's attempts. A job that ends its process on every run must still stop: its third release fails it, at least 45 minutes after its first run at the 15-minute release floor.

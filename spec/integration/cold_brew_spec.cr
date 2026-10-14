@@ -296,6 +296,7 @@ module ColdBrewSpec
   def self.job(id : Int64)
     columns = {
       attempts:    Int32,
+      releases:    Int32,
       locked_at:   Time?,
       locked_by:   String?,
       failed_at:   Time?,
@@ -304,7 +305,7 @@ module ColdBrewSpec
       delay:       Float64,
     }
     SugarORM.sql(owner, <<-SQL, id, as: columns).first
-      SELECT attempts, locked_at, locked_by, failed_at, finished_at, last_error, \
+      SELECT attempts, releases, locked_at, locked_by, failed_at, finished_at, last_error, \
       EXTRACT(EPOCH FROM run_at - now())::float8 AS delay
       FROM caramel_jobs WHERE id = $1
       SQL
@@ -559,6 +560,19 @@ describe "Caramel::ColdBrew retries" do
     row[:failed_at].should_not be_nil
     row[:last_error].not_nil!.should start_with("ColdBrewSpec::Flaky: boom first")
     Brew.drain_queue(ColdBrewSpec.runtime, "fragile", include_scheduled: true).should eq(0)
+  end
+
+  it "does not count runs maintenance released against retry_on attempts" do
+    ColdBrewSpec.reset
+    insert = "INSERT INTO caramel_jobs (queue, class_name, payload, attempts, releases) " \
+             "VALUES ('fragile', 'ColdBrewSpec::Fragile', " \
+             "jsonb_build_object('label', 'released twice'), 2, 2) RETURNING id AS value"
+    id = ColdBrewSpec.scalar(insert, as: Int64)
+    Brew.drain_queue(ColdBrewSpec.runtime, "fragile").should eq(1)
+    row = ColdBrewSpec.job(id)
+    row[:attempts].should eq(3)
+    row[:failed_at].should be_nil
+    row[:delay].should be_close(30.0, 1.0)
   end
 
   it "falls back to the global retry_on, then to 3 exponential attempts from 1 second" do
@@ -911,6 +925,39 @@ describe Caramel::ColdBrew::Maintenance do
       Brew.drain_queue(ColdBrewSpec.runtime).should eq(1)
       ColdBrewSpec.labels.should eq(["crashed"])
     end
+  end
+
+  it "fails a job on its third release and calls on_failed" do
+    ColdBrewSpec.reset
+    insert = "INSERT INTO caramel_jobs " \
+             "(class_name, payload, attempts, releases, locked_at, locked_by) " \
+             "VALUES ('ColdBrewSpec::Record', jsonb_build_object('label', $1::text), " \
+             "$2, $3, now() - interval '20 minutes', '0') RETURNING id AS value"
+    second = ColdBrewSpec.scalar(insert, "second", 2, 1, as: Int64)
+    third = ColdBrewSpec.scalar(insert, "third", 3, 2, as: Int64)
+
+    report = Brew::Maintenance.new(ColdBrewSpec.runtime).run_once
+    report.released.should eq(1)
+    report.failed.should eq(1)
+
+    row = ColdBrewSpec.job(third)
+    row[:failed_at].should_not be_nil
+    row[:locked_at].should be_nil
+    row[:releases].should eq(3)
+    row[:last_error].not_nil!.should start_with("Caramel::ColdBrew::AbandonedJob: ")
+
+    failure = ColdBrewSpec.seen("failed")
+    failure.id.should eq(third)
+    failure.attempts.should eq(3)
+    failure.error_class.should eq("Caramel::ColdBrew::AbandonedJob")
+    failure.committed.should be_true
+    status = Caramel::ColdBrew.status(ColdBrewSpec.runtime, third).not_nil!
+    status.error_class.should eq("Caramel::ColdBrew::AbandonedJob")
+
+    row = ColdBrewSpec.job(second)
+    row[:failed_at].should be_nil
+    row[:locked_at].should be_nil
+    row[:releases].should eq(2)
   end
 
   it "runs its passes from a fiber until stopped" do

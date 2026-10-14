@@ -16,7 +16,7 @@ Jobs, schedules, notifications and cache run on the PostgreSQL that holds domain
 
 ## Decision
 
-1. **System tables are framework migrations** (`Caramel::ColdBrew::MIGRATIONS`, versions `20260927000001`–`…03`). Generated applications start their migration list with them. The SugarORM differ ignores `caramel_*` tables.
+1. **System tables are framework migrations** (`Caramel::ColdBrew::MIGRATIONS`, versions `20260927000001`–`…06`). Generated applications start their migration list with them. The SugarORM differ ignores `caramel_*` tables.
    - `caramel_jobs` has the columns that `Caramel::ColdBrew::MIGRATIONS` defines, including `enqueued_at` and `finished_at`. It is `PARTITION BY RANGE (enqueued_at)` with daily `caramel_jobs_pYYYY_MM_DD` partitions and a default partition. The primary key is `(id, enqueued_at)`.
    - The fetch index also excludes finished rows, because finished jobs stay in their partition until the partition is dropped.
    - Partition DDL runs through two `SECURITY DEFINER` functions owned by the migration role. The runtime role can then maintain partitions without schema privileges, with a 2-second `lock_timeout`.
@@ -30,7 +30,7 @@ Jobs, schedules, notifications and cache run on the PostgreSQL that holds domain
 4. **Maintenance** runs every 60 s:
    - creates partitions for today through today + 7;
    - drops partitions older than the retention window whose rows are all finished or failed;
-   - releases stale locks whose backend is gone;
+   - releases stale locks whose backend is gone, failing a job on its third release ([ADR 0019](0019-cold-brew-status-hooks-and-work.md));
    - vacuums expired cache rows.
 5. **Scheduler.** `Caramel::ColdBrew.every(1.hour, "name") { … }` takes a lease per period with `pg_try_advisory_xact_lock` and a `caramel_schedules` row, so exactly one process runs each tick.
 6. **PubSub.**
