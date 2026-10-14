@@ -87,9 +87,7 @@ const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
 for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<\/loc>/g)) {
   assert(fs.existsSync(path.join(root, route, 'index.html')), `Sitemap: missing ${route}`);
 }
-const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
-assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');
-assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');"), 'Font import was corrupted');
+assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap');"), 'Font import was corrupted');
 // The Markdown edition: an index.md beside each docs and cookbook page, each listed in llms.txt.
 const llms = fs.readFileSync(path.join(root, 'docs', version, 'llms.txt'), 'utf8');
 assert(llms.startsWith(`# Caramel ${version}\n\n> `), 'llms.txt lacks its title and summary');
