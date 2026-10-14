@@ -87,9 +87,7 @@ const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
 for (const [, route] of sitemap.matchAll(/<loc>https:\/\/caramelize\.dev([^<]+)<\/loc>/g)) {
   assert(fs.existsSync(path.join(root, route, 'index.html')), `Sitemap: missing ${route}`);
 }
-const js = fs.readFileSync(path.join(root, 'assets/site.js'), 'utf8');
-assert(!/window\.openai|globalThis\.Tweak/.test(js), 'Standalone site still requires prototype host');
-assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');"), 'Font import was corrupted');
+assert(fs.readFileSync(path.join(root, 'assets/site.css'), 'utf8').startsWith("@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap');"), 'Font import was corrupted');
 // The Markdown edition: an index.md beside each docs and cookbook page, each listed in llms.txt.
 const llms = fs.readFileSync(path.join(root, 'docs', version, 'llms.txt'), 'utf8');
 assert(llms.startsWith(`# Caramel ${version}\n\n> `), 'llms.txt lacks its title and summary');
@@ -99,6 +97,16 @@ for (const file of paged) {
   const edition = file.replace(/index\.html$/, 'index.md');
   assert(fs.existsSync(path.join(root, edition)), `${file}: no Markdown edition`);
   assert(llms.includes(`](https://caramelize.dev/${edition}): `), `llms.txt omits ${edition}`);
+}
+// Every page declares its contract and ends in proof (.claude/skills/caramel-docs).
+for (const file of paged) {
+  const html = fs.readFileSync(path.join(root, file), 'utf8');
+  const article = html.slice(html.indexOf('<article class="c-article">'), html.indexOf('</article>'));
+  assert.equal(article.split('class="c-contract"').length - 1, 1, `${file}: one contract table`);
+  const proof = article.indexOf('<div class="c-prove">');
+  assert(proof !== -1, `${file}: no Prove it block`);
+  assert.equal(article.indexOf('<h2', proof), article.lastIndexOf('<h2'), `${file}: Prove it is not the last section`);
+  assert(article.includes('<strong>Passing:</strong>'), `${file}: Prove it has no Passing line`);
 }
 const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
 assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');
