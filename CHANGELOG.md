@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Every database connection now sets `statement_timeout` and `lock_timeout` when it opens, and the client's read timeout follows the statement timeout. `serve`, `work`, `seed`, `lint` and `drift` default to 30 s and 5 s; `migrate` defaults to no statement timeout and 5 s. A statement that ran longer than 30 s now fails with `canceling statement due to statement timeout`; raise `CARAMEL_STATEMENT_TIMEOUT` (whole seconds, 0 to 86400, 0 for none) for a process that needs longer, and `CARAMEL_MIGRATION_STATEMENT_TIMEOUT` or `CARAMEL_MIGRATION_LOCK_TIMEOUT` for `migrate` ([ADR 0032](docs/decisions/0032-application-production-contract.md)).
+
 ## 0.14.0 - 2026-10-13
 
 ### Upgrade notes

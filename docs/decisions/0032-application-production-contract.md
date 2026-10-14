@@ -43,6 +43,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - One database is owned by a migration role. A runtime role gets DML through default privileges.
    - The application needs no superuser and no extensions.
    - `APP db roles DATABASE MIGRATION_ROLE RUNTIME_ROLE` prints, without passwords, a psql script that creates those roles and that database with the grants Latte gives them; Latte builds its statements from the same code. The script grants both roles to the role that runs it, so a managed server's administrator that is not a superuser can run it.
+   - Each pooled connection sets `statement_timeout` and `lock_timeout` when it opens. `serve`, `work`, `seed`, `lint` and `drift` read `CARAMEL_STATEMENT_TIMEOUT` (default 30) and `CARAMEL_LOCK_TIMEOUT` (default 5); `migrate` reads `CARAMEL_MIGRATION_STATEMENT_TIMEOUT` (default 0) and `CARAMEL_MIGRATION_LOCK_TIMEOUT` (default 5). Each is whole seconds from 0 to 86400, and 0 means none. A connection's reads time out 5 s after its statement timeout, so PostgreSQL ends a slow statement and reports it before the client gives up. With no statement timeout the client waits, and TCP keepalive finds a lost server in about a minute.
 9. **Deploy rules.**
    - (a) The new binary runs `migrate` while the old one serves. The zero-lock linter keeps migrations from blocking writes ([ADR 0008](0008-branch-and-diff-migrations.md)); keeping them compatible with the binary still serving is the migration author's job.
    - (b) The new binary's `jobs unknown` passes before cutover.
@@ -62,6 +63,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
 - **Workers stop before cutover.** A row whose class the running binary lacks fails without retry ([ADR 0019](0019-cold-brew-status-hooks-and-work.md) §4).
 - **Transaction-mode poolers ruled out.** LISTEN, `migrate`'s session advisory lock and `locked_by = pg_backend_pid()` need a session.
 - **`CARAMEL_SOCKET_GROUP`.** A proxy that terminates TLS holds keys the application must not read, and the application holds secrets the proxy must not. A group that may enter one directory and connect to one socket grants nothing else.
+- **Server-side timeouts.** A client timeout that only closes its socket leaves the statement running, so an `UPDATE` can commit after the application reported a failure, and a migration queued for a lock holds every query behind it. PostgreSQL's own timeouts end the statement and roll it back. No cancel request follows a client read timeout: that fires only when the server or network stopped answering, when a cancel could not arrive either, and crystal-pg 0.31.0 discards the backend key a cancel needs. The limits come from the environment, not `ALTER ROLE … SET`, because the client must know the statement timeout to wait past it, and not from URL options, which psql refuses. `migrate` has no statement timeout so that `CREATE INDEX CONCURRENTLY` on a large table can finish.
 - **Rejected:**
   - a deploy command in Frappé;
   - `SO_REUSEPORT` handover on one socket path;

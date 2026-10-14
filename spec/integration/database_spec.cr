@@ -41,4 +41,51 @@ describe "PostgreSQL integration" do
       end
     end
   end
+
+  it "lets PostgreSQL end a statement at its statement timeout and keeps the connection" do
+    limits = Caramel::Database::Limits.new(statement_timeout: 1.second, lock_timeout: 1.second)
+    db = Caramel::Database.open(url, 1, limits: limits)
+    begin
+      db.query_one("SHOW statement_timeout", as: String).should eq("1s")
+      pid = db.query_one("SELECT pg_backend_pid()", as: Int32)
+      expect_raises(PQ::PQError, /statement timeout/) do
+        db.exec("SELECT pg_sleep(3)")
+      end
+      db.query_one("SELECT pg_backend_pid()", as: Int32).should eq(pid)
+    ensure
+      db.close
+    end
+  end
+
+  it "waits past IO_TIMEOUT when there is no statement timeout" do
+    limits = Caramel::Database::Limits.new(Time::Span.zero, Time::Span.zero)
+    db = Caramel::Database.open(url, 1, limits: limits)
+    begin
+      db.exec("SELECT pg_sleep(6)")
+    ensure
+      db.close
+    end
+  end
+
+  it "ends a lock wait at the lock timeout" do
+    holder = Caramel::Database.open(url, 1)
+    waiter_limits = Caramel::Database::Limits.new(statement_timeout: 10.seconds,
+      lock_timeout: 1.second)
+    waiter = Caramel::Database.open(url, 1, limits: waiter_limits)
+    begin
+      holder.using_connection do |connection|
+        connection.exec("SELECT pg_advisory_lock(8118)")
+        begin
+          expect_raises(PQ::PQError, /lock timeout/) do
+            waiter.exec("SELECT pg_advisory_lock(8118)")
+          end
+        ensure
+          connection.exec("SELECT pg_advisory_unlock(8118)")
+        end
+      end
+    ensure
+      waiter.close
+      holder.close
+    end
+  end
 end

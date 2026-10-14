@@ -11,17 +11,29 @@ require "uri"
 module Caramel
   # Creates a bounded PostgreSQL pool with an explicit transport policy.
   class Database
-    # A missing or invalid CARAMEL_ENV or database URL variable
+    # A missing or invalid CARAMEL_ENV, database URL or database timeout variable
     class ConfigurationError < Exception
     end
 
-    # These are per-operation limits. Crystal currently applies the DNS portion
-    # only on Windows; the connect portion is per resolved address, and the
-    # read/write values bound inactivity after a socket is established. They
-    # are not a hard end-to-end startup deadline, and Unix sockets have no
-    # connect-timeout argument in the Crystal API.
+    # CONNECT_TIMEOUT_SECONDS bounds each connect attempt; Crystal applies its
+    # DNS portion only on Windows, and Unix sockets take no connect timeout.
+    # IO_TIMEOUT bounds the handshake, session setup and every write, and each
+    # read waits that long past the connection's statement timeout (Limits).
     CONNECT_TIMEOUT_SECONDS = 5.0
     IO_TIMEOUT              = 5.seconds
+
+    # TCP keepalive finds a server that vanished without a reset in about a
+    # minute, which matters for reads with no timeout.
+    KEEPALIVE_IDLE_SECONDS     = 30
+    KEEPALIVE_INTERVAL_SECONDS = 10
+    KEEPALIVE_PROBES           =  3
+
+    # Run once on each new connection: UTC, then the Limits in milliseconds.
+    SESSION_SETUP = <<-SQL
+      SELECT set_config('TimeZone', 'UTC', false),
+             set_config('statement_timeout', $1::text, false),
+             set_config('lock_timeout', $2::text, false)
+      SQL
 
     # A connection's transport: a Unix socket, or TLS over TCP.
     private alias Transport = UNIXSocket | OpenSSL::SSL::Socket::Client
@@ -236,6 +248,47 @@ module Caramel
       end
     end
 
+    # The timeouts PostgreSQL enforces on each pooled connection. Zero means none.
+    record Limits, statement_timeout : Time::Span, lock_timeout : Time::Span do
+      MAX_SECONDS = 86_400
+      RUNTIME     = new(statement_timeout: 30.seconds, lock_timeout: 5.seconds)
+      MIGRATION   = new(statement_timeout: Time::Span.zero, lock_timeout: 5.seconds)
+
+      # The runtime pools' limits from CARAMEL_STATEMENT_TIMEOUT and
+      # CARAMEL_LOCK_TIMEOUT, or `migrate`'s from CARAMEL_MIGRATION_STATEMENT_TIMEOUT
+      # and CARAMEL_MIGRATION_LOCK_TIMEOUT: whole seconds, defaulting to RUNTIME
+      # or MIGRATION.
+      def self.from_env(migration : Bool, env = ENV) : self
+        defaults = migration ? MIGRATION : RUNTIME
+        prefix = migration ? "CARAMEL_MIGRATION_" : "CARAMEL_"
+        new(
+          statement_timeout: seconds(env, "#{prefix}STATEMENT_TIMEOUT", defaults.statement_timeout),
+          lock_timeout: seconds(env, "#{prefix}LOCK_TIMEOUT", defaults.lock_timeout),
+        )
+      end
+
+      # Past the statement timeout, so PostgreSQL ends a slow statement and
+      # reports it first; nil with no statement timeout.
+      def read_timeout : Time::Span?
+        statement_timeout.zero? ? nil : statement_timeout + IO_TIMEOUT
+      end
+
+      # SESSION_SETUP's binds: milliseconds, as PostgreSQL reads a bare number.
+      def setting_values : {String, String}
+        {statement_timeout, lock_timeout}.map(&.total_milliseconds.to_i64.to_s)
+      end
+
+      private def self.seconds(env, key : String, default : Time::Span) : Time::Span
+        value = env[key]? || return default
+        seconds = value.to_i?
+        unless seconds && (0..MAX_SECONDS).includes?(seconds)
+          raise ConfigurationError.new(
+            "#{key} must be a whole number of seconds from 0 to #{MAX_SECONDS}")
+        end
+        seconds.seconds
+      end
+    end
+
     # The connection for CARAMEL_ENV, production unless set. Frappé and Latte
     # provide DATABASE_URL and MIGRATION_DATABASE_URL, and for specs
     # SPEC_DATABASE_URL and SPEC_MIGRATION_DATABASE_URL.
@@ -251,13 +304,15 @@ module Caramel
     end
 
     # *application_name* labels the pool's backends in `pg_stat_activity`.
+    # *limits* are the timeouts each connection sets (Limits).
     def self.open(url : String,
                   pool_size : Int = Config::DEFAULT_POOL_SIZE,
-                  application_name : String = "caramel") : DB::Database
+                  application_name : String = "caramel",
+                  limits : Limits = Limits::RUNTIME) : DB::Database
       config = Config.parse(url, pool_size, application_name)
       connection_options = config.connection_options
       DB::Database.new(connection_options, config.pool_options) do
-        build_connection(config, connection_options)
+        build_connection(config, connection_options, limits)
       end
     end
 
@@ -286,11 +341,12 @@ module Caramel
     end
 
     private def self.build_connection(config : Config,
-                                      options : DB::Connection::Options) : PG::Connection
+                                      options : DB::Connection::Options,
+                                      limits : Limits) : PG::Connection
       if config.unix_socket?
-        connection_from(unix_socket(config), config, options)
+        connection_from(unix_socket(config), config, options, limits)
       else
-        connection_from(open_tls_socket(config), config, options)
+        connection_from(open_tls_socket(config), config, options, limits)
       end
     end
 
@@ -304,12 +360,14 @@ module Caramel
 
     private def self.connection_from(socket : Transport,
                                      config : Config,
-                                     options : DB::Connection::Options) : PG::Connection
+                                     options : DB::Connection::Options,
+                                     limits : Limits) : PG::Connection
       connection : PG::Connection? = nil
       begin
         pq = PQ::Connection.new(socket, config.conninfo)
         connection = PG::Connection.new(options, pq)
-        connection.exec("SET TIME ZONE 'UTC'")
+        connection.exec(SESSION_SETUP, *limits.setting_values)
+        socket.read_timeout = limits.read_timeout
         connection
       rescue ex
         close_failed_connection(connection, socket)
@@ -341,6 +399,10 @@ module Caramel
       socket.sync = false
       socket.read_timeout = IO_TIMEOUT
       socket.write_timeout = IO_TIMEOUT
+      socket.keepalive = true
+      socket.tcp_keepalive_idle = KEEPALIVE_IDLE_SECONDS
+      socket.tcp_keepalive_interval = KEEPALIVE_INTERVAL_SECONDS
+      socket.tcp_keepalive_count = KEEPALIVE_PROBES
       begin
         send_ssl_request(socket)
 

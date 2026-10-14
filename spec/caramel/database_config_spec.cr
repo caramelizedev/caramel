@@ -161,3 +161,31 @@ describe Caramel::Database::Config do
     end
   end
 end
+
+describe Caramel::Database::Limits do
+  it "reads runtime and migration timeouts from their own variables" do
+    env = {"CARAMEL_STATEMENT_TIMEOUT" => "12", "CARAMEL_MIGRATION_LOCK_TIMEOUT" => "2"}
+
+    runtime = Caramel::Database::Limits.from_env(false, env)
+    runtime.statement_timeout.should eq(12.seconds)
+    runtime.lock_timeout.should eq(5.seconds)
+    runtime.read_timeout.should eq(17.seconds)
+
+    migration = Caramel::Database::Limits.from_env(true, env)
+    migration.statement_timeout.should eq(Time::Span.zero)
+    migration.lock_timeout.should eq(2.seconds)
+    migration.read_timeout.should be_nil
+  end
+
+  it "accepts 0 to 86400 seconds and names a variable it refuses" do
+    %w[0 86400].each do |value|
+      Caramel::Database::Limits.from_env(false, {"CARAMEL_LOCK_TIMEOUT" => value})
+    end
+    %w[86401 -1 5s].each do |value|
+      message = "CARAMEL_LOCK_TIMEOUT must be a whole number of seconds from 0 to 86400"
+      expect_raises(Caramel::Database::ConfigurationError, message) do
+        Caramel::Database::Limits.from_env(false, {"CARAMEL_LOCK_TIMEOUT" => value})
+      end
+    end
+  end
+end
