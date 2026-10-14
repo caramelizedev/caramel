@@ -1,12 +1,12 @@
 # caramelize.dev
 
 Static marketing site and preview documentation for Caramel 0.14.0.
-The approved design lives in `source/site.html`. `build.mjs` exports that design
-to crawlable HTML pages with native links and ordinary window scrolling.
-The full-window documentation shell uses `source/docs.css` and `source/docs.js`,
-with sticky desktop navigation, a section outline, and a collapsible mobile menu.
-Recipes retain their draft and framework-gap labels; publishing the site does
-not mean the framework examples have been tested.
+`source/site.html` holds the pages: the landing and catalog templates, the page helpers
+and every page's content. `build.mjs` renders them through `shell.mjs` (header, rail,
+outline) into crawlable HTML pages with native links and ordinary window scrolling.
+`source/site.css` is the look, and `source/site.js` the behaviour: theme toggle, search,
+recipe finder and section outline. Recipes keep their Draft and Needs validation labels;
+publishing the site does not mean the framework examples have been tested.
 
 `source/site.html` documents the current release. Its routes and metadata follow
 `shard.yml`; update its release labels and guides before `scripts/release`, which
@@ -28,14 +28,14 @@ does not convert. `check.mjs` also fails when the SweetTalk skill
 (`templates/skills/sweettalk/SKILL.md`) cites a section the Markdown edition lacks, and
 when the guide or the skill still calls something planned for a release the edition
 has reached.
-`source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the build
-inlines it beside the wordmark in the header and sets it on a dark tile as the
-favicon. `dist` is recreated on every build, so keep authored content under `source`.
+`source/mark.svg` is the Caramel mark, the latte's cup and caramel spiral: the header
+inlines it beside the wordmark and the build sets it on a dark tile as the favicon.
+`dist` is recreated on every build, so keep authored content under `source`.
 
 Requires Node.js 22 or newer; no npm install is needed. Code examples declare
 their language in `source/site.html`. `highlight.mjs` uses a pinned, vendored
 Highlight.js core and grammars to highlight Crystal, Bash, YAML, and Markdown at
-build time. Token colors follow the site's light and dark palettes; the browser
+build time. Code keeps one dark palette in both colour schemes; the browser
 does not load a syntax-highlighting runtime. See `vendor/highlightjs/README.md`
 for the upstream version, license, and update procedure.
 

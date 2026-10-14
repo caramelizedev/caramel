@@ -28,8 +28,8 @@ agents: anything that only works visually is lost to them.
   sections; its tasks in order, imperative ("Follow one request"); What does not compile;
   Not covered yet; Prove it; `next()`.
 - **Recipe** (`Cookbook / Category`): `tags()`, contract, "Where the change goes" as
-  `files()`, "Decide before you generate" for choices that change the output, numbered
-  steps each with Expect, options, Prove it, a `note()` saying what the status means, `next()`.
+  `files()`, "Decide before you generate" for choices that change the output, `steps()`
+  each with Expect, options, Prove it, a `note()` saying what the status means, `next()`.
 - **Reference** (`Reference / Component`): contract, Limits at a glance, one h2 per rule in
   the present tense ("Views escape text and attributes"), each with its rules table;
   Prove it; `next()`.
@@ -44,17 +44,19 @@ A guide and its reference link to each other: the guide teaches, the reference l
 - `heading(eyebrow, title, lede)`. The title is two to six words ending in a full stop, a
   promise or an instruction: "Give your data shape." Product names are proper nouns; docs
   make no coffee puns. The lede says what the reader will be able to do.
-- **Contract**: a `<table class="c-map">` of three or four rows from Release, Needs, You
-  will have, Covers, Status and Proved by. Every value is stated on the page.
-- **Expect**: after each command, `<p><strong>Expect:</strong> …</p>`, what the release
-  really does. Never invent output; leave the line out sooner.
-- **Rules table**: Condition | Outcome, the outcome in the framework's verb: *fails
-  compilation*, *refuses*, *answers 422*, *raises ArgumentError*.
-- **Limits at a glance**: Limit | Value, each a number the page states again in its section.
-- **Guide map**: a `<ul>` of stages ("Start", "Model", "React", "Limits"), each linking
-  its sections' anchors.
-- **Prove it**: the last h2 before `next()`: a snippet of the commands, then
-  `<p><strong>Passing:</strong> …</p>`.
+- **Contract**: `contract(rows)`: three or four rows from Release, Needs, You will have,
+  Covers, Status and Proved by. Every value is stated on the page.
+- **Expect**: `expect(html)` after each command: what the release really does. Never
+  invent output; leave the line out sooner.
+- **Rules table**: `rules(rows)`: Condition | Outcome, the outcome in the framework's
+  verb: *fails compilation*, *refuses*, *answers 422*, *raises ArgumentError*; `'ok'`
+  marks a neutral outcome.
+- **Limits at a glance**: `limits(page, rows)`: Limit | Value, each a number the page
+  states again in its section.
+- **Guide map**: `guideMap(page, stages)`: stages ("Start", "Model", "React", "Limits"),
+  each linking its sections' anchors; `kicker('Stage N · Name')` above each stage's first h2.
+- **Prove it**: `prove(id, title, html)`: the last h2 before `next()`: a snippet of the
+  commands, then `passing(html)`.
 - **Sections**: h2 only, each `id="c-<page>-<topic>"`, short and stable.
 
 ## Voice
@@ -67,29 +69,32 @@ Caramel does and what the application must still do. No marketing adjectives or 
 
 ## Components
 
-Use the page script's helpers and this markup only; `website/markdown.mjs` throws on a
-tag it cannot convert.
+Use the page script's helpers; `website/markdown.mjs` throws on a tag it cannot convert.
 
 - `snippet(caption, code, language)`: captioned with the file path or where it runs
   (`Terminal · inside the application`). Real, copyable code.
-- `files([[path, role], …])`: roles of two to four words ("Rules for writes").
-- `note(title, body)`: rare; the title states the point as a sentence.
+- `files([[path, role], …])` when each role is two to four words; `lookup(columns, rows)`
+  for settings, calls and flags.
+- `steps([[title, html], …])`: a recipe's numbered commands, each a snippet and its Expect.
+- `choices([[title, html], …])`: Decide before you generate.
+- `note(title, body, label)`: rare; the title states the point as a sentence; a recipe's
+  status note is labelled `Draft` or `Needs validation`.
 - `tags()` on recipes only; `tags('Recipe needs validation')` when Caramel lacks a part.
 - `<ul class="c-status-list">` with `<small>` labels: what a recipe still has to show.
 - `<button class="c-secondary cursor-interaction" data-page="KEY">Verb phrase →</button>`
   links another page.
-- `<table class="c-map">` for contracts, rules, limits and lookups.
 
 ## Look
 
-Colours, type and layout are the `light-dark()` tokens in `site.html` and the shell in
-`website/source/docs.css`; reuse them. Code highlighting is built from the `--syntax-*`
-tokens. One accent, both colour schemes, no icons in prose.
+Colours, type and layout are the `light-dark()` tokens and components in
+`website/source/site.css`, and the header, rail and outline come from `website/shell.mjs`;
+reuse them. Code uses the `--syntax-*` tokens and stays dark in both colour schemes. One
+accent, both colour schemes, no icons in prose.
 
 ## Adding a page
 
-Add its function to `pages` in `site.html`, map its key in `website/build.mjs`, list it
-in the sidebar, in `searchIndex` and, for a recipe, in `recipes`, then link to it from
+Add its function to `pages` in `site.html`, its key to `sections` in `website/build.mjs`,
+its entry to `rail` and `searchIndex` and, for a recipe, to `recipes`; then link to it from
 pages that would otherwise restate it.
 
 ## Before publishing
@@ -98,4 +103,4 @@ pages that would otherwise restate it.
 - The contract is filled, and any fact another page states is a link.
 - Every command has an Expect line; every limit is a number; every failure names its outcome.
 - The status is honest: a recipe stays Draft until it has run end to end.
-- `scripts/check website` passes, and the page's `index.md` in `website/dist` reads well.
+- `scripts/check website` passes (it checks every page's contract and Prove it), and the page's `index.md` in `website/dist` reads well.
