@@ -98,6 +98,16 @@ for (const file of paged) {
   assert(fs.existsSync(path.join(root, edition)), `${file}: no Markdown edition`);
   assert(llms.includes(`](https://caramelize.dev/${edition}): `), `llms.txt omits ${edition}`);
 }
+// Every page declares its contract and ends in proof (.claude/skills/caramel-docs).
+for (const file of paged) {
+  const html = fs.readFileSync(path.join(root, file), 'utf8');
+  const article = html.slice(html.indexOf('<article class="c-article">'), html.indexOf('</article>'));
+  assert.equal(article.split('class="c-contract"').length - 1, 1, `${file}: one contract table`);
+  const proof = article.indexOf('<div class="c-prove">');
+  assert(proof !== -1, `${file}: no Prove it block`);
+  assert.equal(article.indexOf('<h2', proof), article.lastIndexOf('<h2'), `${file}: Prove it is not the last section`);
+  assert(article.includes('<strong>Passing:</strong>'), `${file}: Prove it has no Passing line`);
+}
 const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
 assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');
 // Cases the pages do not emit yet, so a page that starts to cannot break the Markdown.
