@@ -21,7 +21,9 @@ half of the repository's markdown and most of what a repository-wide grep return
    `/docs/X.Y.Z/llms.txt`. A release tag without an edition gets copies of its target's
    `llms.txt` and `index.md` files, since agents build those URLs from `shard.lock`.
 2. Contributors' contract is `CONTRIBUTING.md`. `AGENTS.md` (which `CLAUDE.md` imports)
-   holds only what an agent needs beyond it.
+   holds only what an agent needs beyond it. How a website page is shaped and worded is
+   the contributor skill `.claude/skills/caramel-docs/SKILL.md`, which links to the rules
+   it applies rather than restating them.
 3. How to report a vulnerability, and which releases get security fixes, is
    `SECURITY.md`, where GitHub shows it to reporters.
 4. Decisions are ADRs with three sections: Context (optional, the problem), Decision (the
