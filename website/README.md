@@ -1,6 +1,6 @@
 # caramelize.dev
 
-Static marketing site and preview documentation for Caramel 0.14.0.
+Static marketing site and preview documentation for Caramel 0.15.0.
 `source/site.html` holds the pages: the landing and catalog templates, the page helpers
 and every page's content. `build.mjs` renders them through `shell.mjs` (header, rail,
 outline) into crawlable HTML pages with native links and ordinary window scrolling.
