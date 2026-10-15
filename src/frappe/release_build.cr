@@ -18,8 +18,10 @@ module Caramel::Frappe
     GIT      = "/usr/bin/git"
     TAR      = "/usr/bin/tar"
     # Runs in the container with the entry point, the shard and the artifact's
-    # name as $1, $2 and $3. Debug info stays, for Crema's backtraces.
+    # name as $1, $2 and $3. gmp-static gives `require "big"` the archive a
+    # static link needs. Debug info stays, for Crema's backtraces.
     SCRIPT = <<-SH
+      apk add --no-cache gmp-static
       shards install --frozen --without-development
       mkdir -p /work/stage/bin
       crystal build "$1" --release --static -o "/work/stage/bin/$2"

@@ -268,7 +268,10 @@ module Caramel::Checks
       routes = attempt(ubuntu, timeout: 600.seconds)
       health = routes.success? && routes.stdout.lines.any?(&.matches?(/^GET\s+\/health\s/))
       assert!(health, routes.stdout + routes.stderr)
-      puts "PASS: frappe build writes a static linux/amd64 artifact that runs on Ubuntu"
+      probe = routes.stdout.lines.any?(&.matches?(/^POST\s+\/probe\/jobs\s/))
+      assert!(probe, routes.stdout)
+      puts "PASS: frappe build writes a static linux/amd64 artifact, GMP linked in, " \
+           "that runs on Ubuntu"
       ProductionArtifact.new(self, docker, unpacked).check
     end
 
@@ -1053,8 +1056,10 @@ module Caramel::Checks
         it "drains the job an action enqueued, \
           synchronously and inside the example's transaction" do
           Corretto.session do |client, db|
-            client.post("/probe/jobs", headers: {"HX-Request" => "true"}, \
-              params: {"title" => "Drained probe"}).should render_partial("#jobs")
+            queued = client.post("/probe/jobs", headers: {"HX-Request" => "true"}, \
+              params: {"title" => "Drained probe"})
+            queued.should render_partial("#jobs")
+            queued.body.should contain("Queued Drained probe at 0.3")
             db.should_not have_row(App::Book, title: "Drained probe")
             Caramel::ColdBrew.drain_queue!(db, "default").should eq(1)
             db.should have_row(App::Book, title: "Drained probe", author: "Cold Brew")
@@ -1084,6 +1089,8 @@ module Caramel::Checks
       CRYSTAL
 
     PROBE_ACTION = <<-'CRYSTAL'
+      require "big"
+
       module App::Probe
         struct Enqueue < App::ApplicationAction
           contract do
@@ -1092,7 +1099,8 @@ module Caramel::Checks
 
           def handle(contract : Contract)
             App::ProbeJob.enqueue(title: contract.title)
-            morph("#jobs", "Queued #{Caramel::HTML.escape(contract.title)}")
+            total = BigDecimal.new("0.1") + BigDecimal.new("0.2")
+            morph("#jobs", "Queued #{Caramel::HTML.escape(contract.title)} at #{total}")
           end
         end
       end

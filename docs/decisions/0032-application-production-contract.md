@@ -21,7 +21,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
 2. **Release build.** `frappe build`:
    - refuses a dirty tree;
    - publishes `app/assets` into `public/` and refuses if that leaves tracked changes;
-   - compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.21.1-alpine@sha256:bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
+   - installs Alpine's `gmp-static` from the image's package repository, then compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.21.1-alpine@sha256:bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
    - writes `.caramel/build/<shard>-<YYYYmmddTHHMMSSZ>-<sha7>-linux-amd64.tar.gz`, which holds `bin/<shard>` and `public/`. The time is the UTC build time; the sha is the commit's;
    - prints the artifact's absolute path as its only line on standard output; progress goes to standard error.
 
@@ -57,6 +57,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
 - **Deployment is a separate product.** This contract is all a deploy tool needs from the binary, and any tool can be written against it.
 - **Building off the server.** A PHP build is a dependency install and a bundle, so a deploy tool such as Forge can run it on the server. A Crystal release compile is too heavy for a small server, so the build runs where the developer works, as Vapor does. The pinned image keeps the build reproducible, as [ADR 0001](0001-managed-toolchain-provider.md) pins the development toolchain.
 - **A static musl binary.** One file, with no shared libraries to install on the server.
+- **`gmp-static` at build time.** The image has GMP's shared library but not its archive, and a static binary that uses `BigDecimal` needs the archive. It comes from Alpine's repository for the image's release, so its revision can change between builds of one Caramel release.
 - **Debug info kept.** Crema reports carry backtraces ([ADR 0027](0027-crema-tracing.md)).
 - **`preview_mt` left out.** It is untested in Caramel.
 - **`CARAMEL_ROOT`.** It is the smallest change that lets a binary leave its build path.
