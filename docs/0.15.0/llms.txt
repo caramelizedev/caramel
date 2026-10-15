@@ -5,6 +5,7 @@
 ## Learn
 
 - [The Bookshelf path](https://caramelize.dev/docs/0.15.0/getting-started/index.md): Install Caramel 0.15.0, create a bookshelf, and check the generated feature with real application tests.
+- [The Box Office path](https://caramelize.dev/docs/0.15.0/box-office/index.md): Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove each rule.
 
 ## Guides
 

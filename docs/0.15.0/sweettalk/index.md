@@ -11,6 +11,8 @@ SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into 
 | Status | Experimental: new in 0.13.0, until an application has run it in production |
 | Proved by | `frappe check` · `frappe db diff` · `frappe corretto` |
 
+Learning it for the first time? [Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) builds one domain in order, from the first command to passing specs. This guide lists every word and rule.
+
 > Experimental **A minor release may change the names it stores.**
 >
 > SweetTalk is new in Caramel 0.13.0. Until an application has run it in production, it is experimental, and its upgrade notes say how to move the names. The examples are the tea shop that its specs run against PostgreSQL. Accepted in ADRs 0030, 0031, 0033 and 0034 to 0036.
@@ -729,7 +731,7 @@ Stage 6 · Operate
 
 A name SweetTalk stores, such as a table, a channel or a job name, comes from a domain name. When the model finds a better word, `renamed_from:` keeps the table and the channel the old name used, so no data moves.
 
-**tea_shop.cr · a renamed aggregate**
+**tea_shop.cr · Tea renamed to Blend**
 
 ```crystal
 aggregate Blend, renamed_from: Tea, means: "one tea we sell" do
@@ -794,30 +796,32 @@ A domain that already holds data follows Add tenancy to existing data in the mul
 
 An action’s contract may declare a value or an aggregate’s id as a field. The field binds from the type the value wraps, with that type’s grammar and JSON type, and the value’s refusal becomes the field’s error, so a form shows it beside its input.
 
-**app/actions/orders/add_line.cr**
+**app/actions/holds/create.cr**
 
 ```crystal
-struct AddLine < App::ApplicationAction
-  contract do
-    field order : Shop::Ordering::Order::Id
-    field tea : Shop::Catalogue::Tea::Id
-    field quantity : Shop::Ordering::Quantity
-  end
+module App::Holds
+  struct Create < App::ApplicationAction
+    contract do
+      field show : App::BoxOffice::Seating::Show::Id
+      field guest : App::BoxOffice::Seating::Email
+      field seats : App::BoxOffice::Seating::Seats
+    end
 
-  def handle(contract : Contract)
-    order = Shop::Ordering::Order.find(contract.order)
-    order.add(Shop::Catalogue::Tea.find(contract.tea), contract.quantity)
-    redirect_to("/orders/#{order.id}")
+    def handle(contract : Contract)
+      show = App::BoxOffice::Seating::Show.find(contract.show)
+      show.hold(contract.guest, contract.seats)
+      redirect_to("/shows/#{show.id.raw}/holds/#{show.issued}")
+    end
   end
 end
 ```
 
-An id binds from an `Int64` and may bind a route parameter, as `:order` does. A value with parts is not a field: declare one field per part and build the value in `handle`. The contract reference says what else a field value may take.
+An id binds from an `Int64` and may bind a route parameter, as `:show` does. A value with parts is not a field: declare one field per part and build the value in `handle`. The contract reference says what else a field value may take.
 
 | Condition | Outcome |
 | --- | --- |
-| The route `post "/orders/:order/lines", AddLine` with `quantity=11` | answers 422 with `quantity: Quantity must be between 1 and 10`, before `handle` runs |
-| `/orders/abc/lines`, since an id binds from an `Int64` | answers 404 |
+| The route `post "/shows/:show/holds", App::Holds::Create` with `seats=9` from a JSON client | answers 422 with `{"errors": {"seats": ["Seats must be between 1 and 8"]}}`, before `handle` runs |
+| `/shows/abc/holds`, since an id binds from an `Int64` | answers 404 |
 | A refusal that `handle` does not rescue | answers 422 the way a failed contract does, with its message under `_base` |
 | `SweetTalk::Missing`, which `find` raises for an id that names no aggregate | answers 404 |
 | `SweetTalk::Boundary`, a mistake in the code | answers 500 |
@@ -826,7 +830,7 @@ A refusal answers each client as follows:
 
 | Client | Gets |
 | --- | --- |
-| JSON client | `{"errors": {"_base": ["Teas can be added only while the order is open."]}}` |
+| JSON client | `{"errors": {"_base": ["The Tempest is sold out."]}}` |
 | Browser or htmx request | `contract_failure_page(contract)`, so a form that re-renders itself on a failed contract shows the refusal too |
 | Any other client | Plain text that starts with `ERR INVALID:422` |
 
@@ -893,6 +897,6 @@ frappe corretto
 
 **Passing:** The domain compiles, the migration `frappe db diff` derives is the one you reviewed, and the specs, `spec/domain/` included, pass against PostgreSQL.
 
-[← Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
+[← Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/docs/0.15.0/sweettalk/
