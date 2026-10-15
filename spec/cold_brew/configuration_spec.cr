@@ -124,3 +124,12 @@ describe "Caramel::Cache.write" do
     end
   end
 end
+
+describe "Caramel::ColdBrew.start pool settings" do
+  it "refuses an invalid CARAMEL_POOL_TIMEOUT before connecting" do
+    message = "CARAMEL_POOL_TIMEOUT must be a whole number of seconds from 1 to 300"
+    expect_raises(Caramel::Database::ConfigurationError, message) do
+      Caramel::ColdBrew.start(UNREACHABLE, {"CARAMEL_POOL_TIMEOUT" => "0"}, scheduler: false)
+    end
+  end
+end
