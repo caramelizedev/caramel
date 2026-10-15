@@ -210,8 +210,9 @@ module Caramel
     def self.with_database(migration : Bool,
                            application_name : String = "caramel",
                            & : DB::Database, String -> Int32) : Int32
-      url, limits = begin
-        {Database.url(migration: migration), Database::Limits.from_env(migration)}
+      url, limits, pool = begin
+        {Database.url(migration: migration), Database::Limits.from_env(migration),
+         Database::PoolSettings.from_env}
       rescue ex : Database::ConfigurationError
         STDERR.puts(ex.message)
         return 1
@@ -223,7 +224,7 @@ module Caramel
       elsif ENV["CARAMEL_ENV"]? == "test"
         abort("Run specs through frappe corretto")
       end
-      db = open_database(url, application_name, limits) || return 1
+      db = open_database(url, application_name, limits, pool) || return 1
       begin
         SugarORM::Repo.database = db
         yield db, url
@@ -246,8 +247,9 @@ module Caramel
     # the pool opens belong to the command and stay unhandled.
     private def self.open_database(url : String,
                                    application_name : String,
-                                   limits : Database::Limits) : DB::Database?
-      Database.open(url, application_name: application_name, limits: limits)
+                                   limits : Database::Limits,
+                                   pool : Database::PoolSettings) : DB::Database?
+      Database.open(url, pool.size, application_name, limits, pool.checkout_timeout)
     rescue ex : ArgumentError | URI::Error | OverflowError
       STDERR.puts("Invalid database configuration: #{ex.message}")
       nil

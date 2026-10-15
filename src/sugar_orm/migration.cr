@@ -35,7 +35,7 @@ module SugarORM
     end
 
     # A migration made only of online statements (CONCURRENTLY index builds
-    # and drops, constraint validation) runs outside a transaction.
+    # and drops, index renames, constraint validation) runs outside a transaction.
     def transactional? : Bool
       !@statements.all? { |statement| Linter.online?(statement) }
     end
@@ -85,15 +85,32 @@ module SugarORM
       end
     end
 
-    # What `frappe migrate` reports and exits 1 for.
-    alias Failure = Drift | ConcurrentIndexFailed | ValidationFailed
+    # A transactional migration that still hit lock_timeout after every retry.
+    # It rolled back and is not journaled.
+    class LockTimedOut < Exception
+      def initialize(migration : Migration, attempts : Int32, cause : PQ::PQError)
+        super(<<-TEXT, cause)
+          #{migration} timed out waiting for a lock #{attempts} times: #{cause.message}
+          It rolled back and is not journaled, so the next migrate runs it again.
+            Remediation: find the session holding a lock on its tables \
+              (pg_locks joined to pg_stat_activity), let it finish or end it, then \
+              migrate again; CARAMEL_MIGRATION_LOCK_TIMEOUT sets how long each wait lasts.
+          TEXT
+      end
+    end
 
-    LOCK_ID = 0x434152414D454C_i64
+    # What `frappe migrate` reports and exits 1 for.
+    alias Failure = Drift | ConcurrentIndexFailed | ValidationFailed | LockTimedOut
+
+    LOCK_ID            = 0x434152414D454C_i64
+    LOCK_NOT_AVAILABLE = "55P03"
+    LOCK_RETRY_DELAYS  = [1.second, 2.seconds, 4.seconds]
     @migrations : Array(Migration)
 
     def initialize(@db : DB::Database,
                    migrations : Array(Migration),
-                   @warnings : IO = STDERR)
+                   @warnings : IO = STDERR,
+                   @lock_retry_delays : Array(Time::Span) = LOCK_RETRY_DELAYS)
       @migrations = migrations.sort_by(&.version)
       if @migrations.map(&.version).uniq!.size != @migrations.size
         raise ArgumentError.new("duplicate migration versions")
@@ -110,10 +127,10 @@ module SugarORM
     end
 
     # One session-level advisory lock covers the run. Pending migrations are
-    # linted before any statement executes. Consecutive transactional
-    # migrations share one transaction, so failed SQL rolls back both their DDL
-    # and their journal rows; an online migration runs after the preceding
-    # batch commits, each statement in autocommit, and is journaled last.
+    # linted before any statement executes. Each transactional migration runs in
+    # a transaction of its own that also writes its journal row, so a failure
+    # keeps the migrations before it. An online migration runs each statement in
+    # autocommit and is journaled last.
     def migrate(dev_override : Bool = false,
                 environment : String = Linter.environment) : Int32
       @db.using_connection do |connection|
@@ -129,16 +146,11 @@ module SugarORM
               applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             SQL
-          batches(pending).each do |batch|
-            if batch.first.transactional?
-              connection.transaction do
-                batch.each do |migration|
-                  migration.statements.each { |sql| connection.exec(sql) }
-                  journal(connection, migration)
-                end
-              end
+          pending.each do |migration|
+            if migration.transactional?
+              run_transactional(connection, migration)
             else
-              run_online(connection, batch.first)
+              run_online(connection, migration)
             end
           end
           pending.size
@@ -148,32 +160,63 @@ module SugarORM
       end
     end
 
-    # Consecutive transactional migrations share a batch; an online migration
-    # is a batch of its own.
-    private def batches(migrations : Array(Migration)) : Iterator(Array(Migration))
-      migrations.chunk_while { |left, right| left.transactional? && right.transactional? }
+    # A lock timeout rolls the migration back; it runs again after each of
+    # @lock_retry_delays, then LockTimedOut.
+    private def run_transactional(connection : DB::Connection, migration : Migration) : Nil
+      @lock_retry_delays.each_with_index do |delay, index|
+        return apply(connection, migration)
+      rescue error : PQ::PQError
+        raise error unless error.field_message(:code) == LOCK_NOT_AVAILABLE
+        @warnings.puts "#{migration} timed out waiting for a lock; " \
+                       "retry #{index + 1} of #{@lock_retry_delays.size} " \
+                       "in #{delay.total_milliseconds.to_i} ms"
+        sleep delay
+      end
+      begin
+        apply(connection, migration)
+      rescue error : PQ::PQError
+        raise error unless error.field_message(:code) == LOCK_NOT_AVAILABLE
+        raise LockTimedOut.new(migration, @lock_retry_delays.size + 1, error)
+      end
     end
 
-    private def run_online(connection : DB::Connection, migration : Migration) : Nil
-      migration.statements.each do |sql|
-        index = Linter.concurrent_index(sql)
-        begin
-          connection.exec(sql)
-        rescue ex : PQ::PQError
-          if index && invalid_index?(connection, index)
-            raise ConcurrentIndexFailed.new(migration, index, ex)
-          end
-          Linter.validated_constraint(sql).try do |table, constraint|
-            raise ValidationFailed.new(migration, table, constraint, ex)
-          end
-          raise ex
-        end
-        # IF NOT EXISTS skips an INVALID leftover silently; refuse to journal it.
-        if index && invalid_index?(connection, index)
-          raise ConcurrentIndexFailed.new(migration, index, nil)
-        end
+    private def apply(connection : DB::Connection, migration : Migration) : Nil
+      connection.transaction do
+        migration.statements.each { |sql| connection.exec(sql) }
+        journal(connection, migration)
       end
-      journal(connection, migration)
+      nil
+    end
+
+    # Online statements take SHARE UPDATE EXCLUSIVE, which no read or write waits
+    # behind, and CONCURRENTLY waits for older transactions, so they run with no
+    # lock_timeout.
+    private def run_online(connection : DB::Connection, migration : Migration) : Nil
+      saved = connection.query_one("SELECT current_setting('lock_timeout')", as: String)
+      connection.exec("SELECT set_config('lock_timeout', '0', false)")
+      begin
+        migration.statements.each do |sql|
+          index = Linter.concurrent_index(sql)
+          begin
+            connection.exec(sql)
+          rescue ex : PQ::PQError
+            if index && invalid_index?(connection, index)
+              raise ConcurrentIndexFailed.new(migration, index, ex)
+            end
+            Linter.validated_constraint(sql).try do |table, constraint|
+              raise ValidationFailed.new(migration, table, constraint, ex)
+            end
+            raise ex
+          end
+          # IF NOT EXISTS skips an INVALID leftover silently; refuse to journal it.
+          if index && invalid_index?(connection, index)
+            raise ConcurrentIndexFailed.new(migration, index, nil)
+          end
+        end
+        journal(connection, migration)
+      ensure
+        connection.exec("SELECT set_config('lock_timeout', $1, false)", saved)
+      end
     end
 
     private def invalid_index?(connection : DB::Connection, index : String) : Bool

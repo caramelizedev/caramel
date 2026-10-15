@@ -57,6 +57,31 @@ private def relation(db, name : String) : String?
   db.query_one("SELECT to_regclass('#{name}')::text", as: String?)
 end
 
+# A second pool on the scratch database whose connections time out of a lock in 1 s.
+private def with_short_lock_timeout(db, & : DB::Database ->)
+  database = db.query_one("SELECT current_database()", as: String)
+  url = MIGRATIONS_OWNER_URL.sub("/caramel_spec?", "/#{database}?")
+  short = Caramel::Database.open(url, 1,
+    limits: Caramel::Database::Limits.new(Time::Span.zero, 1.second))
+  begin
+    yield short
+  ensure
+    short.close
+  end
+end
+
+# Runs the block while a connection of `db` holds the locks of `statement`, in a
+# transaction that rolls back afterwards unless the block ends it.
+private def holding(db, statement : String, & : DB::Connection ->)
+  db.using_connection do |holder|
+    holder.exec("BEGIN")
+    holder.exec(statement)
+    yield holder
+  ensure
+    holder.exec("ROLLBACK")
+  end
+end
+
 private alias Catalog = SugarORM::Catalog
 
 # Authors and books that belong to an account, each book to an author of its account.
@@ -366,6 +391,131 @@ describe SugarORM::Migrator do
         end
       ensure
         holder.close
+      end
+    end
+  end
+
+  it "runs each transactional migration in its own transaction, " \
+     "so a failure keeps the ones before it" do
+    with_scratch_database do |db|
+      create = migration(1, "create_books", BOOKS_WITH_TITLE)
+      broken = migration(2, "broken", "INSERT INTO absent_table VALUES (1)")
+      expect_raises(PQ::PQError) { SugarORM::Migrator.new(db, [create, broken]).migrate }
+      journal(db).should eq([1_i64])
+      relation(db, "books").should eq("books")
+    end
+  end
+
+  it "retries a migration that hits lock_timeout, then applies it" do
+    with_scratch_database do |db|
+      create = migration(1, "create_books", BOOKS_WITH_TITLE)
+      pages = migration(2, "add_pages", %(ALTER TABLE "books" ADD COLUMN "pages" integer))
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      with_short_lock_timeout(db) do |short|
+        holding(db, "LOCK TABLE books IN ACCESS SHARE MODE") do |holder|
+          warnings = IO::Memory.new
+          delays = [200.milliseconds] * 3
+          done = Channel(Int32 | Exception).new(1)
+          spawn do
+            done.send(SugarORM::Migrator.new(short, [create, pages], warnings, delays).migrate)
+          rescue ex
+            done.send(ex)
+          end
+          retried = false
+          50.times do
+            sleep 100.milliseconds
+            retried = warnings.to_s.includes?("retry 1 of 3")
+            break if retried
+          end
+          holder.exec("ROLLBACK")
+          retried.should be_true
+          done.receive.should eq(1)
+          warnings.to_s.should contain(
+            "migration 2 (add_pages) timed out waiting for a lock; retry 1 of 3 in 200 ms")
+          journal(db).should eq([1_i64, 2_i64])
+        end
+      end
+    end
+  end
+
+  it "stops after the last retry and names the migration" do
+    with_scratch_database do |db|
+      create = migration(1, "create_books", BOOKS_WITH_TITLE)
+      pages = migration(2, "add_pages", %(ALTER TABLE "books" ADD COLUMN "pages" integer))
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      with_short_lock_timeout(db) do |short|
+        holding(db, "LOCK TABLE books IN ACCESS SHARE MODE") do
+          runner = SugarORM::Migrator.new(short, [create, pages], IO::Memory.new,
+            [100.milliseconds] * 3)
+          failure = expect_raises(SugarORM::Migrator::LockTimedOut) { runner.migrate }
+          failure.message.to_s.should contain(
+            "migration 2 (add_pages) timed out waiting for a lock 4 times")
+          failure.message.to_s.should contain("Remediation:")
+          journal(db).should eq([1_i64])
+        end
+      end
+    end
+  end
+
+  it "runs an online migration with no lock_timeout, waiting for older writers" do
+    with_scratch_database do |db|
+      create = migration(1, "create_books", BOOKS_WITH_ISBN)
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      with_short_lock_timeout(db) do |short|
+        holding(db, "INSERT INTO books (isbn) VALUES ('x')") do |holder|
+          done = Channel(Int32 | Exception).new(1)
+          spawn do
+            index = migration(2, "index_isbn", ISBN_INDEX)
+            done.send(SugarORM::Migrator.new(short, [create, index]).migrate)
+          rescue ex
+            done.send(ex)
+          end
+          sleep 2.seconds
+          holder.exec("COMMIT")
+          done.receive.should eq(1)
+          db.query_one(ISBN_INDEX_VALID, as: Bool).should be_true
+          short.query_one("SHOW lock_timeout", as: String).should eq("1s")
+        end
+      end
+    end
+  end
+
+  it "swaps a changed unique index without a gap and keeps an index it does not own" do
+    with_scratch_database do |db|
+      db.exec(BOOKS_WITH_ISBN)
+      db.exec(%(CREATE INDEX "index_books_on_isbn" ON "books" ("isbn")))
+      db.exec(%(CREATE INDEX "books_isbn_lookup" ON "books" ("isbn")))
+      id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+      isbn = Catalog::Column.new("isbn", "text", false, nil)
+      unique = Catalog::Index.new("index_books_on_isbn", ["isbn"], unique: true)
+      declared = [Catalog::Table.new("books", [id, isbn], [unique])]
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
+      plan.notes.should contain(
+        "ignored index books_isbn_lookup on books (no schema declares it)")
+      plan.transactional.should be_empty
+      statements = SugarORM::DDL.statements(plan.online)
+      swap = SugarORM::Migration.new(1_i64, "unique_isbn_concurrently", statements)
+      swap.transactional?.should be_false
+      SugarORM::Migrator.new(db, [swap]).migrate.should eq(1)
+      valid_unique = "SELECT indisvalid AND indisunique FROM pg_index " \
+                     "WHERE indexrelid = 'index_books_on_isbn'::regclass"
+      db.query_one(valid_unique, as: Bool).should be_true
+      relation(db, "index_books_on_isbn_swap").should be_nil
+      relation(db, "books_isbn_lookup").should_not be_nil
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db)).clean?.should be_true
+    end
+  end
+
+  it "restores lock_timeout when an online migration fails" do
+    with_scratch_database do |db|
+      duplicates = "INSERT INTO books (isbn) VALUES ('same'), ('same')"
+      create = migration(1, "create_books", BOOKS_WITH_ISBN, duplicates)
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      with_short_lock_timeout(db) do |short|
+        index = migration(2, "index_isbn", ISBN_INDEX)
+        runner = SugarORM::Migrator.new(short, [create, index])
+        expect_raises(SugarORM::Migrator::ConcurrentIndexFailed) { runner.migrate }
+        short.query_one("SHOW lock_timeout", as: String).should eq("1s")
       end
     end
   end
