@@ -104,6 +104,20 @@ cases = {
     "Blend declares the table \"teas\", which Tea already declares.",
     "Remediation: give one of them another table name",
   ],
+  "compile_belongs_to_option" => [
+    "compile_belongs_to_option.cr:12:",
+    "Unknown belongs_to option 'dependent'.",
+    "belongs_to takes only on_delete: :cascade, :restrict or :set_null; " \
+    "its column is `team_id`",
+  ],
+  "compile_on_delete_value" => [
+    "compile_on_delete_value.cr:12:",
+    "belongs_to team: on_delete: takes :cascade, :restrict or :set_null, not `:destroy`.",
+  ],
+  "compile_on_delete_set_null" => [
+    "compile_on_delete_set_null.cr:12:",
+    "belongs_to team: on_delete: :set_null needs a nilable reference",
+  ],
   "compile_check_shape" => [
     "compile_check_shape.cr:7:",
     "check expects column ranges or one named SQL expression, " \

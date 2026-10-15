@@ -359,25 +359,46 @@ module SugarORM
                          "not `#{declaration.type}`." %}
             {% declaration.raise problem + declaration_at %}
           {% end %}
+          {% on_delete = "NO ACTION" %}
           {% key = nil %}
           {% for argument in named %}
             {% option = argument.value %}
             {% symbol = option.is_a?(SymbolLiteral) || option.is_a?(StringLiteral) %}
-            {% keyed = argument.name.stringify == "foreign_key" && kind.starts_with?("has_") %}
-            {% unless keyed && symbol && option.id.stringify =~ /\A[a-z][a-z0-9_]*\z/ %}
-              {% remedy = "the only option is `foreign_key: :column`" %}
-              {% if kind == "belongs_to" || kind == "tenant" %}
-                {% remedy = "#{kind.id} takes no options; " +
-                            "its column is `#{name.id}_id`" %}
+            {% if kind == "belongs_to" && argument.name.stringify == "on_delete" %}
+              {% actions = {"cascade" => "CASCADE", "restrict" => "RESTRICT",
+                            "set_null" => "SET NULL"} %}
+              {% chosen = symbol ? actions[option.id.stringify] : nil %}
+              {% unless chosen %}
+                {% problem = "belongs_to #{name.id}: on_delete: takes :cascade, :restrict " +
+                             "or :set_null, not `#{option}`." %}
+                {% statement.raise problem + statement_at %}
               {% end %}
-              {% problem = "Unknown #{kind.id} option '#{argument.name}'.\n" +
-                           "Remediation: #{remedy.id}." %}
-              {% statement.raise problem + statement_at %}
+              {% on_delete = chosen %}
+            {% else %}
+              {% keyed = argument.name.stringify == "foreign_key" && kind.starts_with?("has_") %}
+              {% unless keyed && symbol && option.id.stringify =~ /\A[a-z][a-z0-9_]*\z/ %}
+                {% remedy = "the only option is `foreign_key: :column`" %}
+                {% if kind == "belongs_to" %}
+                  {% remedy = "belongs_to takes only on_delete: :cascade, :restrict or " +
+                              ":set_null; its column is `#{name.id}_id`" %}
+                {% elsif kind == "tenant" %}
+                  {% remedy = "tenant takes no options; its column is `#{name.id}_id`" %}
+                {% end %}
+                {% problem = "Unknown #{kind.id} option '#{argument.name}'.\n" +
+                             "Remediation: #{remedy.id}." %}
+                {% statement.raise problem + statement_at %}
+              {% end %}
+              {% key = argument.value.id.stringify %}
             {% end %}
-            {% key = argument.value.id.stringify %}
           {% end %}
           {% if kind == "belongs_to" || kind == "tenant" %}
             {% key = name + "_id" %}
+            {% if on_delete == "SET NULL" && !optional %}
+              {% problem = "belongs_to #{name.id}: on_delete: :set_null needs a nilable " +
+                           "reference, like `belongs_to #{name.id} : #{target}?`: " +
+                           "its column #{key.id} is NOT NULL." %}
+              {% statement.raise problem + statement_at %}
+            {% end %}
             {% tenant_key = kind == "tenant" %}
             {% columns << {
                  node:         declaration,
@@ -396,10 +417,12 @@ module SugarORM
                  written:      nil,
                } %}
             {% foreign_keys << {
-                 name:   "fk_#{table.id}_#{key.id}",
-                 column: key,
-                 target: target,
-                 tenant: tenant_key,
+                 name:      "fk_#{table.id}_#{key.id}",
+                 column:    key,
+                 target:    target,
+                 tenant:    tenant_key,
+                 on_delete: on_delete,
+                 node:      declaration,
                } %}
             {% if tenant_key %}
               {% tenants << {node: declaration, name: name, column: key, target: target} %}
@@ -1171,6 +1194,20 @@ module SugarORM
           \{% if t.has_constant?(:SUGAR_TENANT) %}
             \{% raise {{ nested }} %}
           \{% end %}
+          {% for key in foreign_keys %}
+            {% if key[:on_delete] == "SET NULL" && !key[:tenant] %}
+              {% key_node = key[:node] %}
+              {% head = "#{@type}: the key #{key[:name].id} " +
+                        "(at #{key_node.filename.id}:#{key_node.line_number}) " +
+                        "cannot use on_delete: :set_null: it references the tenanted " %}
+              {% tail = ", so it also holds #{tenant[:column].id}, which is NOT NULL.\n" +
+                        "Remediation: use on_delete: :cascade or :restrict." %}
+              \{% referenced = {{ key[:target] }}.resolve? %}
+              \{% if referenced && referenced.has_constant?(:SUGAR_TENANT) %}
+                \{% raise {{ head }} + "#{referenced}" + {{ tail }} %}
+              \{% end %}
+            {% end %}
+          {% end %}
           \{% tenancy = ::SugarORM::Tenancy %}
           \{% declared = tenancy.has_constant?(:SCHEMA) && tenancy.constant(:SCHEMA) %}
           \{% if declared && t.name.stringify != declared %}
@@ -1204,6 +1241,7 @@ module SugarORM
                   columns: [{{ key[:column] }}],
                   references_columns: [{{ target }}.__sugar_primary_key],
                 \{% end %}
+                on_delete: {{ key[:on_delete] }},
               ),
             {% end %}
           ] of ::SugarORM::Catalog::ForeignKey

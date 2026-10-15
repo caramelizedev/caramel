@@ -25,7 +25,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
    5. The branch is always dropped, and on any failure the written files are removed.
 
    `frappe make resource` derives its `CREATE TABLE` migration through the same DDL renderer, offline, because the table is new.
-3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`. Every other migration runs in a transaction of its own, which also writes its journal row, so a failure keeps the migrations before it. A statement that hits `lock_timeout` rolls its migration back, and the migrator runs it again after 1, 2 and 4 s. A fourth timeout stops `migrate` and names the migration. Online migrations run with no `lock_timeout`.
+3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY`, `ALTER INDEX … RENAME TO` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. A changed index is built under the name `<name>_swap`, then the old one is dropped and the new one renamed. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`. Every other migration runs in a transaction of its own, which also writes its journal row, so a failure keeps the migrations before it. A statement that hits `lock_timeout` rolls its migration back, and the migrator runs it again after 1, 2 and 4 s. A fourth timeout stops `migrate` and names the migration. Online migrations run with no `lock_timeout`.
 4. **Lints.** The linter runs over every pending migration before any statement executes:
    - **Rule 1:** a blocking `CREATE INDEX` on an existing table.
    - **Rule 2:** `ADD COLUMN … NOT NULL` without `DEFAULT`.
@@ -39,6 +39,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
    - Derived SQL carries the annotations `-- caramel:allow-rename table.column` and `-- caramel:allow-drop table.column`, which the linter accepts. Hand-written SQL must state them to pass.
    - Otherwise the differ halts, with a `Remediation:` line instead of emitting destructive DDL.
    - SugarORM owns CHECK constraints named `check_…`: an undeclared one is dropped, and any other CHECK is left in place with a note.
+   - SugarORM owns the indexes it names `index_<table>_on_…` and the keys it names `fk_<table>_…`: an undeclared one is dropped, and any other undeclared index or key is left in place with a note.
 6. **Environments.** `--dev-override` turns violations and overridable halts into warnings only when `CARAMEL_ENV=development`. The test and production environments, which include staging, always enforce. After migrating, `frappe migrate` reports schema drift read-only.
 
 ## Reasons
@@ -49,4 +50,5 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
 - Explicit rename and drop intent turns the most common source of data loss into a compile-visible, reviewable declaration.
 - Native PostgreSQL features are used directly, not abstracted.
 - One transaction per migration releases each migration's locks when it commits, so an early migration's `ACCESS EXCLUSIVE` lock is not held while later ones run. Retrying a short lock wait, instead of waiting long, stalls the queries queued behind a migration's lock for seconds at a time. An online statement's `SHARE UPDATE EXCLUSIVE` lock queues no reads or writes, so a timeout would only abandon a `CONCURRENTLY` build.
+- Ownership by name keeps a DBA's index or a hand-added key through the next diff, while removing a declaration still removes what it built. Building a changed index before dropping the old one keeps a unique index's guarantee through the change.
 - Halts carry remediation.

@@ -35,7 +35,7 @@ module SugarORM
     end
 
     # A migration made only of online statements (CONCURRENTLY index builds
-    # and drops, constraint validation) runs outside a transaction.
+    # and drops, index renames, constraint validation) runs outside a transaction.
     def transactional? : Bool
       !@statements.all? { |statement| Linter.online?(statement) }
     end

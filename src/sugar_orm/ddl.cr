@@ -104,6 +104,10 @@ module SugarORM
       "DROP INDEX CONCURRENTLY IF EXISTS #{quote(operation.name)}"
     end
 
+    def self.render(operation : Differ::RenameIndex) : String
+      "ALTER INDEX #{quote(operation.from)} RENAME TO #{quote(operation.to)}"
+    end
+
     def self.render(operation : Differ::AddForeignKey) : String
       table = quote(operation.table)
       sql = "ALTER TABLE #{table} ADD #{constraint(operation.foreign_key)}"

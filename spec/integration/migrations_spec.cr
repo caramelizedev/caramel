@@ -479,4 +479,30 @@ describe SugarORM::Migrator do
       end
     end
   end
+
+  it "swaps a changed unique index without a gap and keeps an index it does not own" do
+    with_scratch_database do |db|
+      db.exec(BOOKS_WITH_ISBN)
+      db.exec(%(CREATE INDEX "index_books_on_isbn" ON "books" ("isbn")))
+      db.exec(%(CREATE INDEX "books_isbn_lookup" ON "books" ("isbn")))
+      id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+      isbn = Catalog::Column.new("isbn", "text", false, nil)
+      unique = Catalog::Index.new("index_books_on_isbn", ["isbn"], unique: true)
+      declared = [Catalog::Table.new("books", [id, isbn], [unique])]
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
+      plan.notes.should contain(
+        "ignored index books_isbn_lookup on books (no schema declares it)")
+      plan.transactional.should be_empty
+      statements = SugarORM::DDL.statements(plan.online)
+      swap = SugarORM::Migration.new(1_i64, "unique_isbn_concurrently", statements)
+      swap.transactional?.should be_false
+      SugarORM::Migrator.new(db, [swap]).migrate.should eq(1)
+      valid_unique = "SELECT indisvalid AND indisunique FROM pg_index " \
+                     "WHERE indexrelid = 'index_books_on_isbn'::regclass"
+      db.query_one(valid_unique, as: Bool).should be_true
+      relation(db, "index_books_on_isbn_swap").should be_nil
+      relation(db, "books_isbn_lookup").should_not be_nil
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db)).clean?.should be_true
+    end
+  end
 end

@@ -17,6 +17,7 @@ module SugarORM
     record AlterType, table : String, column : String, sql_type : String
     record AddIndex, table : String, index : Catalog::Index, concurrently : Bool
     record DropIndex, table : String, name : String
+    record RenameIndex, table : String, from : String, to : String
     record AddForeignKey, table : String, foreign_key : Catalog::ForeignKey, not_valid : Bool
     record ValidateConstraint, table : String, name : String
     record DropForeignKey, table : String, name : String
@@ -25,9 +26,12 @@ module SugarORM
 
     alias Operation = CreateTable | AddColumn | RenameColumn | DropColumn |
                       AlterNull | AlterDefault | AlterType |
-                      AddIndex | DropIndex |
+                      AddIndex | DropIndex | RenameIndex |
                       AddForeignKey | ValidateConstraint | DropForeignKey |
                       AddCheck | DropCheck
+
+    # A changed index is built under this suffix first, then renamed.
+    SWAP_SUFFIX = "_swap"
 
     # Unique indexes a plan builds CONCURRENTLY, by table and sorted columns.
     alias OnlineIndexes = Hash({String, Array(String)}, Catalog::Index)
@@ -158,7 +162,7 @@ module SugarORM
     # Foreign key and check drops go to *constraint_drops*: the differ runs
     # them before every other statement, since a composite key depends on the
     # unique index of the table it references and a column drop cascades the
-    # checks on it. An undeclared key is dropped even when its own column is,
+    # checks on it. An undeclared key SugarORM named is dropped even when its own column is,
     # as another table's column drop may wait on it.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per kind of column change
     private def self.alter(declared : Catalog::Table,
@@ -223,13 +227,23 @@ module SugarORM
       declared.indexes.each do |index|
         found = indexes[index.name]?
         next if found == index
-        plan.online << DropIndex.new(table, index.name) if found
-        plan.online << AddIndex.new(table, index, concurrently: true)
+        if found
+          swap = index.copy_with(name: swap_name(index.name))
+          plan.online << AddIndex.new(table, swap, concurrently: true)
+          plan.online << DropIndex.new(table, index.name)
+          plan.online << RenameIndex.new(table, swap.name, index.name)
+        else
+          plan.online << AddIndex.new(table, index, concurrently: true)
+        end
       end
       current.indexes.each do |index|
         next if declared.indexes.any? { |wanted| wanted.name == index.name }
         next if index.columns.any? { |column| dropped.includes?(column) }
-        plan.online << DropIndex.new(table, index.name)
+        if owned_index?(table, index.name)
+          plan.online << DropIndex.new(table, index.name)
+        else
+          plan.notes << "ignored index #{index.name} on #{table} (no schema declares it)"
+        end
       end
 
       renamed_keys = current.foreign_keys.map do |key|
@@ -245,7 +259,11 @@ module SugarORM
       end
       current.foreign_keys.each do |key|
         next if declared.foreign_keys.any? { |wanted| wanted.name == key.name }
-        constraint_drops << DropForeignKey.new(table, key.name)
+        if owned_key?(table, key.name)
+          constraint_drops << DropForeignKey.new(table, key.name)
+        elsif key.columns.none? { |column| dropped.includes?(column) }
+          plan.notes << "ignored foreign key #{key.name} on #{table} (no schema declares it)"
+        end
       end
 
       compare_checks(declared, current, plan, constraint_drops, check_adds)
@@ -279,6 +297,21 @@ module SugarORM
           plan.notes << "ignored check #{live.name} on #{table} (no schema declares it)"
         end
       end
+    end
+
+    # The temporary name a changed index is built under, within 63 bytes.
+    def self.swap_name(name : String) : String
+      "#{name[0, 63 - SWAP_SUFFIX.size]}#{SWAP_SUFFIX}"
+    end
+
+    # SugarORM names an index index_<table>_on_… and a key fk_<table>_…;
+    # only those are its own to drop.
+    private def self.owned_index?(table : String, name : String) : Bool
+      name.starts_with?("index_#{table}_on_")
+    end
+
+    private def self.owned_key?(table : String, name : String) : Bool
+      name.starts_with?("fk_#{table}_")
     end
 
     private def self.composite_self_reference?(table : Catalog::Table,
