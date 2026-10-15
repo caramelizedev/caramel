@@ -373,6 +373,21 @@ describe SugarORM::Differ do
     ])
   end
 
+  it "never reuses a swap-named index whose definition differs from the declared one" do
+    plain = Catalog::Index.new("index_books_on_isbn", ["isbn"])
+    unique = plain.copy_with(unique: true)
+    leftover = plain.copy_with(name: "index_books_on_isbn_swap")
+    actual = books([nullable("isbn")], [plain, leftover])
+    declared = books([nullable("isbn")], [unique])
+    sql(Differ.diff([declared], [actual]).online).should eq([
+      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_isbn_swap2" ) +
+      %(ON "books" ("isbn")),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn"),
+      %(ALTER INDEX "index_books_on_isbn_swap2" RENAME TO "index_books_on_isbn"),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn_swap"),
+    ])
+  end
+
   it "does not halt a key on a changed unique index whose swap index already exists" do
     account = required("account_id", "bigint")
     author_id = required("author_id", "bigint")

@@ -230,7 +230,11 @@ module SugarORM
         found = indexes[index.name]?
         next if found == index
         if found
-          swap = index.copy_with(name: swap_name(index.name, declared_names))
+          # A live index under the swap name is reused only when it already has the
+          # declared definition: CREATE … IF NOT EXISTS would skip any other.
+          stale = indexes.reject { |name, live| live == index.copy_with(name: name) }.keys
+          taken = declared_names | swapped | stale.to_set
+          swap = index.copy_with(name: swap_name(index.name, taken))
           swapped << swap.name
           # A swap index a previous run built is kept; only the drop and rename remain.
           unless indexes[swap.name]? == swap
