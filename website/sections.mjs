@@ -10,6 +10,7 @@ export const sections = {
   corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',
   local: 'docs/local-environment', boxoffice: 'docs/box-office', sweettalk: 'docs/sweettalk',
   crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
+  forms: 'cookbook/rendered-forms',
   uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
   islands: 'cookbook/third-party-components',
   webhooks: 'cookbook/webhooks',
