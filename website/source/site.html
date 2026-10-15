@@ -211,6 +211,78 @@ const pages = {
     '<p>The field types are <code>string</code>, <code>int32</code>, <code>int64</code>, <code>bool</code>, <code>float64</code> and <code>time</code>, each nullable with <code>?</code>. <button class="c-secondary cursor-interaction" data-page="commands">Read the make resource syntax →</button></p><p>Extend the generated spec with your own validation rule and an example that fails that rule.</p>'+
     prove('c-crud-check','Prove the behavior',snippet('Terminal · inside the application','frappe check\nfrappe corretto spec/requests/books_spec.cr','bash')+passing('<code>frappe check</code> exits 0, and <code>frappe corretto</code> runs the generated request spec, which creates, reads, updates and deletes a book and refuses a forged token and an unknown field, then ends with <code>Corretto: 1 of 1 workers passed</code>.'))+
     note('Run end to end by a check.','<code>scripts/check frappe-project</code> creates an application, generates this resource and two more, migrates, and runs <code>frappe check</code>, <code>frappe lint</code> and <code>frappe corretto</code> on the result.','Proved')+next('json','Return the same data as JSON'),
+  forms: () => heading('Cookbook / Data and forms','Submit the form your view renders.','Post exactly the fields a page renders, so a request spec fails when a view and its action’s contract disagree.')+tags('Proved by scripts/check page-forms')+
+    contract([['Needs','The machine setup of <button class="c-secondary cursor-interaction" data-page="learn">Your first application</button>; the recipe generates its own Book resource'],['You will have','A <code>submit_rendered_form</code> spec helper that reads a page’s form with Corretto’s HTML parser and posts every field it renders, and a request spec that submits the new book form'],['Status','Run end to end by <code>scripts/check page-forms</code>'],['Proved by','<code>frappe check</code> · <code>frappe corretto</code> · <code>frappe lint</code>']])+
+    '<h2 id="c-forms-files">Where the change goes</h2>'+files([['spec/support/rendered_form.cr','Reads and submits forms'],['spec/requests/book_form_spec.cr','Submits the new form']])+
+    '<h2 id="c-forms-create">Create the application and its Book</h2><p>The application is <code>bookshelf</code>. Its Book has two text fields and a <code>Bool</code>, which the generated form renders as a select.</p>'+
+    steps([['Generate and migrate',snippet('Terminal · after machine setup','frappe new bookshelf\ncd bookshelf\nfrappe make resource Book title:string author:string in_print:bool\nfrappe migrate','bash')+expect('<code>frappe new</code> prints <code>Created bookshelf.</code>, then <code>bookshelf is configured at https://bookshelf.caramel</code>. <code>make resource</code> prints <code>Generated PATH</code> for each file it writes. <code>frappe migrate</code> prints <code>Applied 1 migrations.</code>, then <code>The database matches the declared schema.</code>')]])+
+    '<h2 id="c-forms-gap">A hand-built spec never sends what only the view renders</h2><p>The generated <code>spec/requests/books_spec.cr</code> posts a params hash it writes itself. A browser posts the fields the form renders. An action’s contract refuses a field it does not declare, so a field only the view has fails in the browser and passes in that spec. <button class="c-secondary cursor-interaction" data-page="routing">Read the contract rules →</button></p>'+
+    rules([['A spec posts a params hash it builds itself','sends only the fields the spec names','ok'],['A spec posts the form the page rendered','sends every field the view renders, as a browser does','ok'],['<code>fill</code> names a field the form does not render','raises ArgumentError']])+
+    '<h2 id="c-forms-helper">Read the form the page rendered</h2><p>Corretto parses HTML with Lexbor. The helper reads the page’s first form, takes the value each named field renders, replaces the values <code>fill</code> names and submits the form to its <code>action</code> with its <code>method</code>.</p>'+
+    steps([['Write the helper',snippet('spec/support/rendered_form.cr',`# Submits the first form on *page* as a browser would: every named input,
+# select and textarea it renders, with *fill* replacing the values it names.
+def submit_rendered_form(client : Corretto::Client, page : Caramel::Response,
+                         fill : Hash(String, String)) : Caramel::Response
+  action, verb, values = read_form(page.body)
+  fill.each do |name, value|
+    raise ArgumentError.new("The form has no field #{name}") unless values.has_key?(name)
+    values[name] = value
+  end
+  verb == "post" ? client.post(action, params: values) : client.get(action, params: values)
+end
+
+# The form's action, its method and the value of each field it renders.
+private def read_form(html : String) : {String, String, Hash(String, String)}
+  Corretto::HTML::Document.open(html) do |document|
+    form = document.select("form").first? || raise ArgumentError.new("The page has no form")
+    action = form["action"]? || raise ArgumentError.new("The form has no action")
+    values = {} of String => String
+    read_inputs(form, values)
+    read_selects(form, values)
+    form.css("textarea[name]") { |area| values[area["name"]] = area.inner_text }
+    {action, form["method"]?.try(&.downcase) || "get", values}
+  end
+end
+
+# Each input that a browser submits: not a button, and not an unchecked box.
+private def read_inputs(form : Lexbor::Node, values : Hash(String, String)) : Nil
+  form.css("input[name]") do |input|
+    type = input["type"]?.try(&.downcase) || "text"
+    next if type.in?("submit", "button", "reset", "image")
+    next if type.in?("checkbox", "radio") && !input.has_key?("checked")
+    values[input["name"]] = input["value"]? || ""
+  end
+end
+
+# Each select's selected option, or its first.
+private def read_selects(form : Lexbor::Node, values : Hash(String, String)) : Nil
+  form.css("select[name]") do |field|
+    options = [] of {String, Bool}
+    field.css("option") do |option|
+      options << {option["value"]? || option.inner_text, option.has_key?("selected")}
+    end
+    chosen = options.find(&.[1]) || options.first?
+    values[field["name"]] = chosen.try(&.[0]) || ""
+  end
+end`,'crystal')+expect('The helper skips submit buttons and unchecked boxes, takes a select’s selected option or else its first, and raises <code>ArgumentError</code> when the page has no form or <code>fill</code> names a field the form does not render. <code>frappe corretto</code> runs only <code>*_spec.cr</code> files, so the helper runs where a spec requires it.')]])+
+    '<h2 id="c-forms-spec">Submit the new book form</h2><p>The spec loads <code>/books/new</code>, fills the two text fields and submits what the page rendered. <code>in_print</code> keeps the value the form renders, <code>true</code>, the select’s first option.</p>'+
+    steps([['Write the spec',snippet('spec/requests/book_form_spec.cr',`require "../spec_helper"
+require "../support/rendered_form"
+
+describe "The new book form" do
+  it "creates a book when submitted as the page renders it" do
+    Corretto.session do |client, db|
+      page = client.get("/books/new")
+      page.should render_page("New book")
+      fill = {"title" => "Dune", "author" => "Frank Herbert"}
+      created = submit_rendered_form(client, page, fill)
+      created.should have_status(303)
+      db.should have_row(App::Book, title: "Dune", author: "Frank Herbert", in_print: true)
+    end
+  end
+end`,'crystal')+expect('The book is created and the response redirects with 303, as for a browser.')],['Run it',snippet('Terminal · inside the application','frappe corretto spec/requests/book_form_spec.cr','bash')+expect('Ends with <code>Corretto: 1 of 1 workers passed</code>, after a worker line reading <code>1 examples, 0 failures, 0 errors, 0 pending</code>.')]])+
+    prove('c-forms-prove','Prove the form spec',snippet('Terminal · inside the application','frappe check\nfrappe corretto\nfrappe lint','bash')+passing('<code>frappe check</code> and <code>frappe lint</code> exit 0. <code>frappe corretto</code> runs the form spec beside the generated book spec and ends with <code>Corretto: 1 of 1 workers passed</code>.'))+
+    note('Run end to end by a check.','<code>scripts/check page-forms</code> creates <code>bookshelf</code>, generates and migrates the Book resource, copies the helper and the spec at the steps above, and runs <code>frappe check</code>, <code>frappe corretto</code> and <code>frappe lint</code>. It then adds <code>input type: "hidden", name: "operation_key", value: "draft"</code> to <code>app/views/books/form.cr</code>. <code>spec/requests/books_spec.cr</code> still passes and <code>book_form_spec.cr</code> fails with <code>Expected status 303, got 422</code>. Finally it restores the view.','Proved')+next('testing','Test the HTML your app returns'),
   json: () => heading('Cookbook / Requests and responses','Read and write JSON.','Answer a generated Book resource’s actions as JSON, bind a JSON object to their contracts, and let an update check the version it was sent with If-Match.')+tags('Proved by scripts/check page-json')+
     contract([['Needs','A generated Book resource, as in <button class="c-secondary cursor-interaction" data-page="crud">Create a resource</button>'],['You will have','JSON answers from the generated actions, a version each book carries as <code>ETag</code>, updates that check <code>If-Match</code>, and a request spec for 200, 201, 412, 403, 400, 415 and 422'],['Status','Run end to end by <code>scripts/check page-json</code>'],['Proved by','<code>frappe check</code> · <code>frappe corretto</code> · <code>frappe lint</code>']])+
     '<h2 id="c-json-files">Where the change goes</h2>'+files([['app/models/book.cr','The version field'],['db/migrations/','The version column'],['app/actions/books/show.cr','Sends the version'],['app/actions/books/update.cr','Checks If-Match'],['spec/requests/books_json_spec.cr','JSON request examples']])+
@@ -1074,7 +1146,7 @@ end`)+
     next('testing','Test the HTML your app returns'),
   testing: () => heading('Guides / Testing HTML','Test the HTML your app returns.','Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state.')+
     contract([['Needs','A generated application that has run <code>frappe migrate</code>; it declares the <code>lexbor</code> shard 3.6.4 as a development dependency'],['You will have','Request specs that assert rendered elements against isolated database state'],['Covers','<code>have_html</code>, <code>render_page</code>, <code>render_partial</code>, <code>strict: true</code> and scoped matching'],['Proved by','<code>frappe check</code> · <code>frappe corretto</code> · <code>frappe lint</code>']])+
-    '<h2 id="c-testing-start">Start with a real response</h2><p>The generated <code>spec/spec_helper.cr</code> already configures Corretto; the reference lists what it does. This guide works on a Book resource and the request spec its generator writes.</p><button class="c-secondary cursor-interaction" data-page="corretto">Read the Corretto reference →</button>'+snippet('Terminal · inside your application','frappe make resource Book title:string\nfrappe migrate','bash')+
+    '<h2 id="c-testing-start">Start with a real response</h2><p>The generated <code>spec/spec_helper.cr</code> already configures Corretto; the reference lists what it does. This guide works on a Book resource and the request spec its generator writes.</p><button class="c-secondary cursor-interaction" data-page="corretto">Read the Corretto reference →</button><button class="c-secondary cursor-interaction" data-page="forms">Submit a rendered form →</button>'+snippet('Terminal · inside your application','frappe make resource Book title:string\nfrappe migrate','bash')+
     expect('<code>frappe make resource</code> prints <code>Generated</code> for the model, changeset, actions, views, <code>spec/requests/books_spec.cr</code>, a migration, <code>config/routes.cr</code> and <code>config/paths.cr</code>, then <code>Run frappe migrate to apply the new schema.</code> <code>frappe migrate</code> ends with <code>The database matches the declared schema.</code>')+
     '<p>Inside an example, a session requests the page and the expectation describes what the response must contain. Add this example to the generated spec:</p>'+snippet('spec/requests/books_spec.cr · a second example','it "shows a book with its title escaped" do\n  Corretto.session do |client, db|\n    created = client.post("/books", params: {"title" => "<Dune>"})\n    path = "/books/#{App::Book.query.order_by(:id, :desc).first!(db).id}"\n    created.should redirect_to(path)\n    shown = client.get(path)\n    shown.should have_status(200)\n    shown.should render_page("Book")\n    shown.should have_html {\n      section(class: "form-page") {\n        h1 { "Book" }\n        dl { dd { "<Dune>" } }\n        a(href: "#{path}/edit") { "Edit book" }\n      }\n    }\n  end\nend')+
     '<p>The block records requirements independently of the view renderer. Expected strings are decoded literal text: <code>"&lt;Dune&gt;"</code> checks escaped user text. Build expectations from values and elements, rather than rendering an application view as the expected result.</p>'+
@@ -2708,12 +2780,13 @@ end`)+
 };
 const rail = [
   ['Start here', [['releases', 'Current release'], ['learn', 'Your first application'], ['map', 'Project map'], ['practices', 'Best practices']]],
-  ['Build something', [['cookbook', 'All recipes'], ['crud', 'Create a resource'], ['json', 'Read and write JSON'], ['uploads', 'Upload a file'], ['jobs', 'Run a background job'], ['islands', 'Mount a component']]],
+  ['Build something', [['cookbook', 'All recipes'], ['crud', 'Create a resource'], ['forms', 'Submit a rendered form'], ['json', 'Read and write JSON'], ['uploads', 'Upload a file'], ['jobs', 'Run a background job'], ['islands', 'Mount a component']]],
   ['Go further', [['i18n', 'Internationalization'], ['tenancy', 'Multi-tenancy'], ['sweettalk', 'SweetTalk'], ['boxoffice', 'Build a box office', 'child'], ['crema', 'Observability'], ['testing', 'Test rendered HTML'], ['webhooks', 'Receive a webhook'], ['sessions', 'Revocable sessions'], ['agents', 'Work with an agent'], ['deploy', 'Production']]],
   ['Reference', [['routing', 'Routes and contracts'], ['actions', 'Actions and responses'], ['views', 'Views'], ['sugarorm', 'SugarORM'], ['coldbrew', 'Cold Brew'], ['corretto', 'Corretto'], ['cremaref', 'Crema'], ['security', 'Security defaults'], ['commands', 'Commands'], ['local', 'Local environment']]],
 ];
 const recipes = [
   {page:'crud',title:'Create a resource',text:'A small CRUD feature, from model and changeset to a passing request spec.',category:'Data and forms',status:'proved',keywords:'database validation model controller'},
+  {page:'forms',title:'Submit a rendered form',text:'Post exactly the fields a view renders, so a spec catches a field its action’s contract refuses.',category:'Data and forms',status:'proved',keywords:'form hidden field contract unknown field 422 corretto request spec lexbor submit select'},
   {page:'json',title:'Read and write JSON',text:'Answer the generated actions as JSON, bind JSON input, and check an update’s version with If-Match.',category:'Requests and responses',status:'proved',keywords:'api endpoint content negotiation accept json post csrf etag if-match 412 version lock_version'},
   {page:'uploads',title:'Upload and keep a file',text:'Go from a request-scoped temporary file to a complete persistence recipe.',category:'Files',status:'gap',keywords:'storage image multipart upload'},
   {page:'islands',title:'Mount a third-party component',text:'Wrap a headless JavaScript library in a Caramel island: assets, lifecycle, history and tests.',category:'Views',status:'draft',keywords:'island javascript a11y-dialog dialog headless component htmx csp history sse'},
