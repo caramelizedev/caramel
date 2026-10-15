@@ -491,14 +491,12 @@ Prove it
 
 ## Prove the box office works {#c-boxoffice-prove}
 
-Replace the generated domain spec, add a request spec, then run the checks.
+Add the builders that both specs share, replace the generated domain spec, add a request spec, then run the checks.
 
-**spec/domain/box_office_spec.cr**
+**spec/support/box_office.cr**
 
 ```crystal
-require "../spec_helper"
-
-# Builders for the box office's domain specs.
+# Builders and readers that the box office's specs share.
 module BoxOfficeSpec
   extend self
 
@@ -514,7 +512,22 @@ module BoxOfficeSpec
   def seats(count : Int32) : App::BoxOffice::Seating::Seats
     App::BoxOffice::Seating::Seats.new(count)
   end
+
+  def reload(show : App::BoxOffice::Seating::Show) : App::BoxOffice::Seating::Show
+    App::BoxOffice::Seating::Show.find(show.id)
+  end
+
+  def line(show : App::BoxOffice::Seating::Show) : App::BoxOffice::Waitlist::Line
+    App::BoxOffice::Waitlist::Line.for_show(show.id).first
+  end
 end
+```
+
+**spec/domain/box_office_spec.cr**
+
+```crystal
+require "../spec_helper"
+require "../support/box_office"
 
 describe App::BoxOffice do
   it "refuses a hold for more seats than are left" do
@@ -524,7 +537,7 @@ describe App::BoxOffice do
       expect_raises(SweetTalk::Refusal, "Only 1 seats left for The Tempest.") do
         show.hold(BoxOfficeSpec.email("bo@example.com"), BoxOfficeSpec.seats(2))
       end
-      App::BoxOffice::Seating::Show.find(show.id).left.should eq(1)
+      BoxOfficeSpec.reload(show).left.should eq(1)
     end
   end
 
@@ -537,7 +550,7 @@ describe App::BoxOffice do
         "App::BoxOffice::Seating::Checkout::LapseDeadline", as: Time)
       (due - Time.utc - 10.minutes).abs.should be < 1.minute
       Caramel::ColdBrew.drain_queue!(db, include_scheduled: true)
-      App::BoxOffice::Seating::Show.find(show.id).left.should eq(2)
+      BoxOfficeSpec.reload(show).left.should eq(2)
     end
   end
 
@@ -548,7 +561,7 @@ describe App::BoxOffice do
       Caramel::ColdBrew.drain_queue!(db)
       show.sell(1)
       Caramel::ColdBrew.drain_queue!(db, include_scheduled: true)
-      sold = App::BoxOffice::Seating::Show.find(show.id)
+      sold = BoxOfficeSpec.reload(show)
       sold.tickets.map(&.guest.raw).should eq(["ada@example.com"])
       sold.left.should eq(0)
     end
@@ -559,15 +572,13 @@ describe App::BoxOffice do
       show = BoxOfficeSpec.show(2)
       Caramel::ColdBrew.drain_queue!(db)
       show.hold(BoxOfficeSpec.email("ada@example.com"), BoxOfficeSpec.seats(2))
-      line = App::BoxOffice::Waitlist::Line.for_show(show.id).first
+      line = BoxOfficeSpec.line(show)
       line.join(BoxOfficeSpec.email("cy@example.com"), BoxOfficeSpec.seats(3))
       line.join(BoxOfficeSpec.email("di@example.com"), BoxOfficeSpec.seats(2))
       show.release(1, "changed plans")
       Caramel::ColdBrew.drain_queue!(db)
-      held = App::BoxOffice::Seating::Show.find(show.id).holds
-      held.map(&.guest.raw).should eq(["di@example.com"])
-      waiting = App::BoxOffice::Waitlist::Line.for_show(show.id).first.guests
-      waiting.map(&.email.raw).should eq(["cy@example.com"])
+      BoxOfficeSpec.reload(show).holds.map(&.guest.raw).should eq(["di@example.com"])
+      BoxOfficeSpec.line(show).guests.map(&.email.raw).should eq(["cy@example.com"])
     end
   end
 end
@@ -577,12 +588,12 @@ end
 
 ```crystal
 require "../spec_helper"
+require "../support/box_office"
 
 describe "The box office" do
   it "holds seats, sells them, and offers the waitlist once the show is sold out" do
     Corretto.session do |client, _db|
-      show = App::BoxOffice::Seating::Show.schedule("The Tempest",
-        Time.utc(2026, 11, 20, 19, 30), App::BoxOffice::Seating::Capacity.new(2))
+      show = BoxOfficeSpec.show(2)
       path = "/shows/#{show.id.raw}"
       client.get(path).should have_html {
         section(class: "show") { button(type: "submit") { "Hold seats" } }
@@ -604,10 +615,8 @@ describe "The box office" do
 
   it "answers 422 for a refusal or a bad value, and 404 for a show that is not a number" do
     Corretto.session do |client, _db|
-      show = App::BoxOffice::Seating::Show.schedule("The Tempest",
-        Time.utc(2026, 11, 20, 19, 30), App::BoxOffice::Seating::Capacity.new(1))
-      show.hold(App::BoxOffice::Seating::Email.new("ada@example.com"),
-        App::BoxOffice::Seating::Seats.new(1))
+      show = BoxOfficeSpec.show(1)
+      show.hold(BoxOfficeSpec.email("ada@example.com"), BoxOfficeSpec.seats(1))
       path = "/shows/#{show.id.raw}/holds"
       json = {"Accept" => "application/json"}
       sold_out = client.post(path, headers: json,

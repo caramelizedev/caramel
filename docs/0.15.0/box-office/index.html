@@ -291,9 +291,7 @@ post <span class="hljs-string">&quot;/shows/:show/waitlist&quot;</span>, <span c
       <span class="hljs-type">BoxOffice::Seating::Capacity</span>.new(<span class="hljs-number">120</span>))
     puts <span class="hljs-string">&quot;Scheduled The Tempest with 120 seats.&quot;</span>
   <span class="hljs-keyword">end</span>
-<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> seed</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Scheduled The Tempest with 120 seats.</code> A second run prints nothing and schedules nothing.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> dev</code></pre></div><p class="c-expect"><strong>Expect:</strong> Builds the application and serves it at <code>https://boxoffice.caramel</code>, as in your first application. Ctrl-C stops it. The page at <code>/shows/1</code> shows The Tempest, 120 of 120 seats left and a Hold seats button.</p><div class="c-prove"><p class="c-kicker">Prove it</p><h2 id="c-boxoffice-prove">Prove the box office works</h2><p>Replace the generated domain spec, add a request spec, then run the checks.</p><div class="c-snippet"><header>spec/domain/box_office_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
-
-<span class="hljs-comment"># Builders for the box office&#x27;s domain specs.</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> seed</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Scheduled The Tempest with 120 seats.</code> A second run prints nothing and schedules nothing.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> dev</code></pre></div><p class="c-expect"><strong>Expect:</strong> Builds the application and serves it at <code>https://boxoffice.caramel</code>, as in your first application. Ctrl-C stops it. The page at <code>/shows/1</code> shows The Tempest, 120 of 120 seats left and a Hold seats button.</p><div class="c-prove"><p class="c-kicker">Prove it</p><h2 id="c-boxoffice-prove">Prove the box office works</h2><p>Add the builders that both specs share, replace the generated domain spec, add a request spec, then run the checks.</p><div class="c-snippet"><header>spec/support/box_office.cr</header><pre><code class="hljs language-crystal"><span class="hljs-comment"># Builders and readers that the box office&#x27;s specs share.</span>
 <span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">BoxOfficeSpec</span></span>
   <span class="hljs-keyword">extend</span> <span class="hljs-keyword">self</span>
 
@@ -309,7 +307,16 @@ post <span class="hljs-string">&quot;/shows/:show/waitlist&quot;</span>, <span c
   <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">seats</span></span>(count : <span class="hljs-type">Int32</span>) : <span class="hljs-type">App::BoxOffice::Seating::Seats</span>
     <span class="hljs-type">App::BoxOffice::Seating::Seats</span>.new(count)
   <span class="hljs-keyword">end</span>
-<span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">reload</span></span>(show : <span class="hljs-type">App::BoxOffice::Seating::Show</span>) : <span class="hljs-type">App::BoxOffice::Seating::Show</span>
+    <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id)
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">line</span></span>(show : <span class="hljs-type">App::BoxOffice::Seating::Show</span>) : <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>
+    <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>.for_show(show.id).first
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>spec/domain/box_office_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+<span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../support/box_office&quot;</span>
 
 describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword">do</span>
   it <span class="hljs-string">&quot;refuses a hold for more seats than are left&quot;</span> <span class="hljs-keyword">do</span>
@@ -319,7 +326,7 @@ describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword
       expect_raises(<span class="hljs-type">SweetTalk::Refusal</span>, <span class="hljs-string">&quot;Only 1 seats left for The Tempest.&quot;</span>) <span class="hljs-keyword">do</span>
         show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;bo@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
       <span class="hljs-keyword">end</span>
-      <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id).left.should eq(<span class="hljs-number">1</span>)
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).left.should eq(<span class="hljs-number">1</span>)
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
 
@@ -332,7 +339,7 @@ describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword
         <span class="hljs-string">&quot;App::BoxOffice::Seating::Checkout::LapseDeadline&quot;</span>, <span class="hljs-attr">as:</span> <span class="hljs-type">Time</span>)
       (due - <span class="hljs-type">Time</span>.utc - <span class="hljs-number">10</span>.minutes).abs.should be &lt; <span class="hljs-number">1</span>.minute
       <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db, <span class="hljs-attr">include_scheduled:</span> <span class="hljs-literal">true</span>)
-      <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id).left.should eq(<span class="hljs-number">2</span>)
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).left.should eq(<span class="hljs-number">2</span>)
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
 
@@ -343,7 +350,7 @@ describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword
       <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
       show.sell(<span class="hljs-number">1</span>)
       <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db, <span class="hljs-attr">include_scheduled:</span> <span class="hljs-literal">true</span>)
-      sold = <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id)
+      sold = <span class="hljs-type">BoxOfficeSpec</span>.reload(show)
       sold.tickets.map(&amp;.guest.raw).should eq([<span class="hljs-string">&quot;ada@example.com&quot;</span>])
       sold.left.should eq(<span class="hljs-number">0</span>)
     <span class="hljs-keyword">end</span>
@@ -354,24 +361,22 @@ describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword
       show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
       <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
       show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
-      line = <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>.for_show(show.id).first
+      line = <span class="hljs-type">BoxOfficeSpec</span>.line(show)
       line.join(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;cy@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">3</span>))
       line.join(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;di@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
       show.release(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;changed plans&quot;</span>)
       <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
-      held = <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id).holds
-      held.map(&amp;.guest.raw).should eq([<span class="hljs-string">&quot;di@example.com&quot;</span>])
-      waiting = <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>.for_show(show.id).first.guests
-      waiting.map(&amp;.email.raw).should eq([<span class="hljs-string">&quot;cy@example.com&quot;</span>])
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).holds.map(&amp;.guest.raw).should eq([<span class="hljs-string">&quot;di@example.com&quot;</span>])
+      <span class="hljs-type">BoxOfficeSpec</span>.line(show).guests.map(&amp;.email.raw).should eq([<span class="hljs-string">&quot;cy@example.com&quot;</span>])
     <span class="hljs-keyword">end</span>
   <span class="hljs-keyword">end</span>
 <span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>spec/requests/box_office_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+<span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../support/box_office&quot;</span>
 
 describe <span class="hljs-string">&quot;The box office&quot;</span> <span class="hljs-keyword">do</span>
   it <span class="hljs-string">&quot;holds seats, sells them, and offers the waitlist once the show is sold out&quot;</span> <span class="hljs-keyword">do</span>
     <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, _db|
-      show = <span class="hljs-type">App::BoxOffice::Seating::Show</span>.schedule(<span class="hljs-string">&quot;The Tempest&quot;</span>,
-        <span class="hljs-type">Time</span>.utc(<span class="hljs-number">2026</span>, <span class="hljs-number">11</span>, <span class="hljs-number">20</span>, <span class="hljs-number">19</span>, <span class="hljs-number">30</span>), <span class="hljs-type">App::BoxOffice::Seating::Capacity</span>.new(<span class="hljs-number">2</span>))
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
       path = <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>&quot;</span>
       client.get(path).should have_html {
         section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;show&quot;</span>) { button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { <span class="hljs-string">&quot;Hold seats&quot;</span> } }
@@ -393,10 +398,8 @@ describe <span class="hljs-string">&quot;The box office&quot;</span> <span class
 
   it <span class="hljs-string">&quot;answers 422 for a refusal or a bad value, and 404 for a show that is not a number&quot;</span> <span class="hljs-keyword">do</span>
     <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, _db|
-      show = <span class="hljs-type">App::BoxOffice::Seating::Show</span>.schedule(<span class="hljs-string">&quot;The Tempest&quot;</span>,
-        <span class="hljs-type">Time</span>.utc(<span class="hljs-number">2026</span>, <span class="hljs-number">11</span>, <span class="hljs-number">20</span>, <span class="hljs-number">19</span>, <span class="hljs-number">30</span>), <span class="hljs-type">App::BoxOffice::Seating::Capacity</span>.new(<span class="hljs-number">1</span>))
-      show.hold(<span class="hljs-type">App::BoxOffice::Seating::Email</span>.new(<span class="hljs-string">&quot;ada@example.com&quot;</span>),
-        <span class="hljs-type">App::BoxOffice::Seating::Seats</span>.new(<span class="hljs-number">1</span>))
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">1</span>)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">1</span>))
       path = <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>/holds&quot;</span>
       json = {<span class="hljs-string">&quot;Accept&quot;</span> =&gt; <span class="hljs-string">&quot;application/json&quot;</span>}
       sold_out = client.post(path, <span class="hljs-attr">headers:</span> json,
