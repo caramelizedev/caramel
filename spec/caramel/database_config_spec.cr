@@ -30,6 +30,7 @@ describe Caramel::Database::Config do
     config.pool_options.max_pool_size.should eq(4)
     config.pool_options.max_idle_pool_size.should eq(4)
     config.pool_options.retry_attempts.should eq(0)
+    config.pool_options.checkout_timeout.should eq(5.0)
     config.sslrootcert.should eq("/etc/caramel/ca.pem")
   end
 
@@ -77,6 +78,8 @@ describe Caramel::Database::Config do
     config.pool_options.initial_pool_size.should eq(1)
     config.pool_options.max_pool_size.should eq(7)
     config.pool_options.max_idle_pool_size.should eq(7)
+    Caramel::Database::Config.parse(url, pool_size: 7, checkout_timeout: 2.seconds)
+      .pool_options.checkout_timeout.should eq(2.0)
 
     expect_raises(ArgumentError) { Caramel::Database::Config.parse(url, pool_size: 0) }
     expect_raises(ArgumentError) { Caramel::Database::Config.parse(url, pool_size: 33) }
@@ -185,6 +188,37 @@ describe Caramel::Database::Limits do
       message = "CARAMEL_LOCK_TIMEOUT must be a whole number of seconds from 0 to 86400"
       expect_raises(Caramel::Database::ConfigurationError, message) do
         Caramel::Database::Limits.from_env(false, {"CARAMEL_LOCK_TIMEOUT" => value})
+      end
+    end
+  end
+end
+
+describe Caramel::Database::PoolSettings do
+  it "reads the pool size and checkout timeout, defaulting to 4 and 5 s" do
+    defaults = Caramel::Database::PoolSettings.from_env({} of String => String)
+    {defaults.size, defaults.checkout_timeout}.should eq({4, 5.seconds})
+
+    env = {"CARAMEL_POOL_SIZE" => "12", "CARAMEL_POOL_TIMEOUT" => "30"}
+    pool = Caramel::Database::PoolSettings.from_env(env)
+    {pool.size, pool.checkout_timeout}.should eq({12, 30.seconds})
+  end
+
+  it "accepts 1 to the maximum and names a variable it refuses" do
+    %w[1 32].each do |value|
+      Caramel::Database::PoolSettings.from_env({"CARAMEL_POOL_SIZE" => value})
+    end
+    %w[0 33 four].each do |value|
+      message = "CARAMEL_POOL_SIZE must be a whole number from 1 to 32"
+      expect_raises(Caramel::Database::ConfigurationError, message) do
+        Caramel::Database::PoolSettings.from_env({"CARAMEL_POOL_SIZE" => value})
+      end
+    end
+
+    Caramel::Database::PoolSettings.from_env({"CARAMEL_POOL_TIMEOUT" => "300"})
+    %w[0 301].each do |value|
+      message = "CARAMEL_POOL_TIMEOUT must be a whole number of seconds from 1 to 300"
+      expect_raises(Caramel::Database::ConfigurationError, message) do
+        Caramel::Database::PoolSettings.from_env({"CARAMEL_POOL_TIMEOUT" => value})
       end
     end
   end

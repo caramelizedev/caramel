@@ -144,16 +144,17 @@ module Caramel::ColdBrew
   # declaration unless `scheduler` is false, and the PubSub broker. Invalid
   # settings raise ConfigurationError before anything connects. Without
   # *workers* it starts only the broker and maintenance, and reads neither
-  # setting. CARAMEL_STATEMENT_TIMEOUT and CARAMEL_LOCK_TIMEOUT set its pool's
-  # Database::Limits; an invalid one raises Database::ConfigurationError before
-  # anything connects.
+  # setting. CARAMEL_STATEMENT_TIMEOUT, CARAMEL_LOCK_TIMEOUT and CARAMEL_POOL_TIMEOUT
+  # set its pool's limits; an invalid one raises Database::ConfigurationError
+  # before anything connects.
   def self.start(database_url : String, env = ENV, *,
                  scheduler : Bool = true, workers : Bool = true) : Service
     queues = workers ? worker_queues(env) : [] of String
     concurrency = workers ? worker_concurrency(env, queues.size) : 0
     pool_size = workers ? queues.size * concurrency + 1 : 1
     limits = Caramel::Database::Limits.from_env(false, env)
-    db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew", limits)
+    checkout = Caramel::Database::PoolSettings.from_env(env).checkout_timeout
+    db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew", limits, checkout)
     broker = Broker.new(database_url)
     self.broker = broker
     running = queues.map { |queue| Worker.new(queue, concurrency, db).start }

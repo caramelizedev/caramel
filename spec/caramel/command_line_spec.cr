@@ -33,7 +33,7 @@ private def with_environment(values : Hash(String, String?), &)
   end
 end
 
-private def run_with(url : String?) : {Int32, String, Bool}
+private def run_with(url : String?, extra = {} of String => String?) : {Int32, String, Bool}
   status = 0
   ran = false
   environment = {
@@ -41,6 +41,7 @@ private def run_with(url : String?) : {Int32, String, Bool}
     "CARAMEL_EXPECTED_DATABASE_URL" => nil,
     "DATABASE_URL"                  => url,
   } of String => String?
+  environment = environment.merge(extra)
   printed = stderr_of do
     with_environment(environment) do
       status = Caramel::CommandLine.with_database(false) do |_, _|
@@ -57,6 +58,13 @@ describe "Caramel::CommandLine.with_database" do
     status, printed, ran = run_with(nil)
     status.should eq 1
     printed.should eq "Missing database configuration: DATABASE_URL\n"
+    ran.should be_false
+  end
+
+  it "reports an invalid CARAMEL_POOL_SIZE in one line and returns 1" do
+    status, printed, ran = run_with("postgres://u@localhost/x", {"CARAMEL_POOL_SIZE" => "0"})
+    status.should eq 1
+    printed.should eq "CARAMEL_POOL_SIZE must be a whole number from 1 to 32\n"
     ran.should be_false
   end
 
