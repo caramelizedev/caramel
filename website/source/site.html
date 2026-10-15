@@ -1684,7 +1684,7 @@ frappe lint`,'bash')+
     snippet('Terminal · inside your application','frappe make domain Shop Ordering --means="choosing teas and checking out"','bash')+
     expect('Prints <code>Generated app/domain/shop.cr</code> and <code>Generated spec/domain/shop_spec.cr</code>. It also prints <code>Generated config/application.cr</code> when it adds the requires, and <code>Generated .claude/skills/sweettalk/SKILL.md</code> when the application has no SweetTalk skill.')+
     note('','The skill lists the rules agents most often break. Each ends with a link to its section here, so the guide stays the one source. An existing skill, edited or not, is left alone.','Agents')+
-    '<p>In a multi-tenant application the domain names the tenant, and <code>--central</code> makes the context one every tenant shares.</p>'+
+    '<p>A multi-tenant application passes <code>--central</code> for a context every tenant shares: <a href="#c-sweettalk-tenancy">Share a domain between tenants</a>.</p>'+
     '<p>By hand, require SweetTalk after Caramel:</p>'+
     snippet('config/application.cr · excerpt',`require "caramel"
 require "caramel/sweet_talk"`)+
@@ -2481,7 +2481,7 @@ end`)+
       ['Forwarded headers','grant no trust','ok'],
       ['A path that does not start with <code>/</code>','answers 400']
     ])+
-    `<p>Put scripts and styles in files under <code>public/</code>, as the generated layout does.</p>`+
+    `<p>Put scripts and styles in files under <code>app/assets/</code>, which Frappé publishes to <code>public/assets/</code>, as the generated layout does; an edit made in <code>public/</code> by hand stops the next publish with <code>Asset output conflict</code>.</p>`+
     `<h2 id="c-security-escaping">Views escape text and attributes</h2><p>Blueprint views escape text and attribute values. The escape covers <code>&amp;</code>, <code>&lt;</code>, <code>&gt;</code>, <code>"</code> and <code>&#39;</code>. <code>markup { … }</code> builds a small fragment with the same escaping.</p>`+
     rules([
       ['A <code>Caramel::HTML::Safe</code> or <code>safe(...)</code> value','written as it is','ok'],

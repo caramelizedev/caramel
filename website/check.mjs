@@ -174,9 +174,14 @@ const articles = paged.map(file => {
   const article = html.slice(html.indexOf('<article class="c-article">'), html.indexOf('</article>'));
   const [type, topic] = textOf(article.match(/<div class="c-eyebrow">(.*?)<\/div>/)[1]).split(' / ');
   const h2s = [...article.matchAll(/<h2 id="([^"]+)">(.*?)<\/h2>/g)].map(([, id, text]) => ({id, text: textOf(text)}));
-  // The prose: the article without its code blocks and its contract table.
-  const prose = textOf(article.replace(/<pre[\s\S]*?<\/pre>/g, ' ').replace(/<table class="c-contract">[\s\S]*?<\/table>/, ' '));
-  return {file, key: pageKey(file), article, type, topic, h2s, prose, prove: article.indexOf('<div class="c-prove">')};
+  // The prose: the article without its code blocks and its contract table, each block
+  // element ending a sentence, so a sentence is the same wherever its paragraph starts.
+  const blocks = html => textOf(html.replace(/<pre[\s\S]*?<\/pre>/g, ' ').replace(/<table class="c-contract">[\s\S]*?<\/table>/, ' ').replace(/<\/(p|li|td|th|h[1-6]|div|small|strong|button|a)>/g, '$& '));
+  const prose = blocks(article);
+  // The facts: the prose without Expect and Passing lines, which observe a command's output
+  // and so repeat wherever the command does.
+  const facts = blocks(article.replace(/<p class="c-(expect|passing)">[\s\S]*?<\/p>/g, ' '));
+  return {file, key: pageKey(file), article, type, topic, h2s, prose, facts, prove: article.indexOf('<div class="c-prove">')};
 });
 const TYPES = {Learn: 'a learning path', Guides: 'a guide', Cookbook: 'a recipe', Reference: 'a reference'};
 for (const {file, key, article, type, topic, h2s, prove} of articles) {
@@ -216,8 +221,8 @@ for (const {file, article, h2s} of articles) {
 }
 // Every fact has one page: a sentence of 90 characters or more appears on one page only.
 const said = {};
-for (const {file, prose} of articles) {
-  for (const sentence of new Set(prose.split(/(?<=\.) /).filter(sentence => sentence.length >= 90))) {
+for (const {file, facts} of articles) {
+  for (const sentence of new Set(facts.split(/(?<=\.) /).filter(sentence => sentence.length >= 90))) {
     assert(!said[sentence], `${said[sentence]} and ${file} both say: ${sentence}`);
     said[sentence] = file;
   }
