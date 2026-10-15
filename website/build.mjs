@@ -4,6 +4,7 @@ import { highlightCode } from './highlight.mjs';
 import { commandRows } from './commands.mjs';
 import { markdown, llmsEntry } from './markdown.mjs';
 import { header, layout, document } from './shell.mjs';
+import { sections } from './sections.mjs';
 
 // site.html holds the pages; shell.mjs, site.css and site.js hold the shell, look and behaviour.
 // Export real documents with native links and ordinary window scrolling.
@@ -14,21 +15,6 @@ if (!source.includes(`Caramel ${version}`)) throw new Error('Update the site for
 const out = new URL('./dist/', import.meta.url);
 fs.rmSync(out, {recursive: true, force: true});
 fs.mkdirSync(new URL('assets/', out), { recursive: true });
-const sections = {
-  learn: 'docs/getting-started', map: 'docs/project-map',
-  agents: 'docs/agents', deploy: 'docs/deployment',
-  testing: 'docs/testing-html', releases: 'docs/releases',
-  i18n: 'docs/internationalization', tenancy: 'docs/multi-tenancy', crema: 'docs/observability', cremaref: 'docs/crema', practices: 'docs/best-practices',
-  routing: 'docs/routes-and-contracts', actions: 'docs/actions-and-responses',
-  views: 'docs/views', sugarorm: 'docs/sugarorm', coldbrew: 'docs/cold-brew',
-  corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',
-  local: 'docs/local-environment', boxoffice: 'docs/box-office', sweettalk: 'docs/sweettalk',
-  crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
-  uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
-  islands: 'cookbook/third-party-components',
-  webhooks: 'cookbook/webhooks',
-  sessions: 'cookbook/revocable-sessions',
-};
 const routesFor = edition => ({home: '/', cookbook: `/cookbook/${edition.version}/`,
   ...Object.fromEntries(Object.keys(edition.pages).map(key => {
     const [section, slug] = sections[key].split('/');
@@ -77,10 +63,13 @@ const cookbookRail = [['Cookbook', [['cookbook', 'All recipes']]], ...[...new Se
 const escapeAttr = str => str.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 // The text of a heading or lede, without tags or entities, for llms.txt.
 const content = html => html.replace(/<[^>]*>/g, '').replace(/&(lt|gt|quot|#39|amp);/g, (_, e) => ({lt: '<', gt: '>', quot: '"', '#39': "'", amp: '&'}[e]));
+// A recipe's status on its card: draft and gap recipes have not run end to end; a proved
+// one was built and run by a check (website/check.mjs holds the page's tags to it).
+const STATUS = {draft: ['c-draft', 'Draft recipe'], gap: ['c-gap', 'Needs validation'], proved: ['c-proved', 'Proved']};
 const recipeCards = current.recipes.map(r => {
-  const gap = r.status === 'gap';
+  const [kind, label] = STATUS[r.status] ?? fail(`Recipe ${r.page}: status ${r.status} is not one of ${Object.keys(STATUS).join(', ')}`);
   const search = `${r.title} ${r.text} ${r.keywords} ${r.category}`.toLowerCase();
-  return `<a class="c-recipe" href="${routes[r.page]}" data-search="${escapeAttr(search)}"><span class="c-recipe-meta"><span>${r.category}</span><span class="c-tag ${gap ? 'c-gap' : 'c-draft'}">${gap ? 'Needs validation' : 'Draft recipe'}</span></span><h2>${r.title}</h2><p>${r.text}</p></a>`;
+  return `<a class="c-recipe" href="${routes[r.page]}" data-search="${escapeAttr(search)}"><span class="c-recipe-meta"><span>${r.category}</span><span class="c-tag ${kind}">${label}</span></span><h2>${r.title}</h2><p>${r.text}</p></a>`;
 }).join('');
 const generatedRoutes = [];
 const llms = {};
@@ -121,7 +110,9 @@ for (const [key, route] of Object.entries(routes)) {
     const eyebrow = current.pages[key].match(/<div class="c-eyebrow">(.*?)<\/div>/)[1].split(' / ');
     const heading = route.startsWith('/cookbook/') ? 'Cookbook' : content(eyebrow[0]);
     const name = route.startsWith('/cookbook/') ? content(current.pages[key].match(/<h1>(.*?)<\/h1>/)[1]).replace(/\.$/, '') : content(eyebrow[1]);
-    (llms[heading] ??= []).push(llmsEntry(name, `https://caramelize.dev${route}index.md`, content(description)));
+    // A recipe's status tag leads its llms.txt entry, so an agent sees how far it ran.
+    const status = current.pages[key].match(/<div class="c-tagrow"><span class="c-tag[^"]*">([^<]*)<\/span>/)?.[1];
+    (llms[heading] ??= []).push(llmsEntry(name, `https://caramelize.dev${route}index.md`, `${status ? `${content(status)}: ` : ''}${content(description)}`));
   }
 }
 fs.copyFileSync(new URL('./source/site.css', import.meta.url), new URL('assets/site.css', out));
@@ -129,7 +120,7 @@ fs.writeFileSync(new URL('assets/site.js', out), `const CARAMEL = ${JSON.stringi
 for (const [route, target] of Object.entries({'/docs/': `/docs/${version}/getting-started/`, [`/docs/${version}/`]: `/docs/${version}/getting-started/`, '/cookbook/': `/cookbook/${version}/`})) {
   const dest = new URL('.' + route + 'index.html', out);
   fs.mkdirSync(path.dirname(dest.pathname), {recursive: true});
-  fs.writeFileSync(dest, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Caramel documentation</title><link rel="canonical" href="https://caramelize.dev${target}"><meta http-equiv="refresh" content="0;url=${target}"></head><body><a href="${target}">Read Caramel ${version} documentation</a></body></html>`);
+  fs.writeFileSync(dest, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Caramel ${version} documentation</title><link rel="canonical" href="https://caramelize.dev${target}"><meta http-equiv="refresh" content="0;url=${target}"></head><body><a href="${target}">Read Caramel ${version} documentation</a> · <a href="/docs/${version}/llms.txt">llms.txt</a></body></html>`);
 }
 // The favicon sets the mark on the dark glass tile of the GitHub avatar.
 const tileGlow = '<radialGradient id="tile-glow" cx=".5" cy=".5" r=".64"><stop offset="0" stop-color="#4c3223"/><stop offset=".58" stop-color="#2b211a"/><stop offset="1" stop-color="#1d1a17"/></radialGradient>';

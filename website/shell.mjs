@@ -10,13 +10,13 @@ const escapeAttr = str => str.replaceAll('&', '&amp;').replaceAll('"', '&quot;')
 
 export function header(key, {routes, version}) {
   const cookbook = key === 'cookbook' || routes[key]?.startsWith('/cookbook/');
-  const pill = key === 'home' ? `${version} · preview` : cookbook ? `cookbook · ${version}` : `docs · ${version}`;
+  const pill = key === 'home' ? `release · ${version}` : cookbook ? `cookbook · ${version}` : `docs · ${version}`;
   const searchable = key !== 'home' && key !== 'cookbook';
   const search = searchable ? `<div class="c-search" role="search"><label class="c-field">${SEARCH}<input id="c-search" type="search" autocomplete="off" placeholder="Search the docs" aria-label="Search Caramel ${version} documentation" aria-controls="c-search-results" aria-expanded="false"><kbd>⌘K</kbd></label><div class="c-search-results" id="c-search-results" hidden></div></div>` : '';
   // The top-level section stays selected while one of its child pages is read.
-  const section = key === 'home' ? null : key === 'agents' ? 'agents' : cookbook ? 'cookbook' : 'map';
+  const section = key === 'home' ? null : key === 'agents' ? 'agents' : cookbook ? 'cookbook' : 'learn';
   const link = (page, label) => `<a href="${routes[page]}"${section === page ? ` aria-current="${key === page ? 'page' : 'true'}"` : ''}>${label}</a>`;
-  return `<header class="c-header"><a class="c-brand" href="/" aria-label="Caramel home"><span class="c-mark" aria-hidden="true">${mark}</span>caramel</a><span class="c-edition">${pill}</span>${search}<nav class="c-nav" aria-label="Primary">${link('map', 'Docs')}${link('cookbook', 'Cookbook')}${link('agents', 'For agents')}<a href="https://github.com/caramelizedev/caramel">GitHub</a></nav><button class="c-theme" type="button" aria-label="Switch theme">${SUN}</button></header>`;
+  return `<header class="c-header"><a class="c-brand" href="/" aria-label="Caramel home"><span class="c-mark" aria-hidden="true">${mark}</span>caramel</a><span class="c-edition">${pill}</span>${search}<nav class="c-nav" aria-label="Primary">${link('learn', 'Docs')}${link('cookbook', 'Cookbook')}${link('agents', 'For agents')}<a href="https://github.com/caramelizedev/caramel">GitHub</a></nav><button class="c-theme" type="button" aria-label="Switch theme">${SUN}</button></header>`;
 }
 
 export function layout({key, content, routes, groups, route}) {

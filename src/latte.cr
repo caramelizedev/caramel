@@ -79,6 +79,8 @@ begin
         stop               Stop the running Latte. Services keep running.
         service install    Start Latte whenever you log in (a per-user login item), and now.
         service uninstall  Remove that login item; the Latte it started stops.
+        trust install      Trust Latte's certificate authority in your default keychain.
+        trust remove       Remove that one certificate from the keychain it was added to.
         version            Print this Latte's release and the control API versions it serves.
       Start and inspect services from Latte in the menu bar or with Frappé.
       TEXT

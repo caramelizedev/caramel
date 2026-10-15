@@ -53,7 +53,7 @@ module App::BoxOffice
       to hold(guest : Email, seats : Seats) do
         refuse "Sales for #{title} have closed." if closed?
         refuse "#{title} is sold out." if left.zero?
-        refuse "Only #{left} seats left for #{title}." if seats.to_i > left
+        refuse "Only #{left} of #{capacity.to_i} seats left for #{title}." if seats.to_i > left
         @issued += 1
         expires_at = Time.utc + HOLD_FOR
         @holds << Hold.new(@issued, guest, seats, expires_at)

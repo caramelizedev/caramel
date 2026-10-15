@@ -3,8 +3,9 @@ require "../support/box_office"
 
 describe "The box office" do
   it "holds seats, sells them, and offers the waitlist once the show is sold out" do
-    Corretto.session do |client, _db|
+    Corretto.session do |client, db|
       show = BoxOfficeSpec.show(2)
+      Caramel::ColdBrew.drain_queue!(db)
       path = "/shows/#{show.id.raw}"
       client.get(path).should have_html {
         section(class: "show") { button(type: "submit") { "Hold seats" } }
@@ -17,6 +18,10 @@ describe "The box office" do
       client.get(path).should have_html {
         section(class: "show") { button(type: "submit") { "Join the waitlist" } }
       }
+      joined = client.post("#{path}/waitlist",
+        params: {"guest" => "bo@example.com", "seats" => "1"})
+      joined.should redirect_to(path)
+      BoxOfficeSpec.line(show).guests.map(&.email.raw).should eq(["bo@example.com"])
       client.post("#{path}/holds/1/sale").should redirect_to("#{path}/holds/1")
       client.follow_redirect.should have_html {
         section(class: "hold") { p { "Paid: 2 seats. The tickets go to ada@example.com." } }
@@ -41,6 +46,16 @@ describe "The box office" do
       stray = client.post("/shows/abc/holds",
         params: {"guest" => "bo@example.com", "seats" => "1"})
       stray.should have_status(404)
+    end
+  end
+
+  it "offers a closed show nothing" do
+    Corretto.session do |client, _db|
+      show = BoxOfficeSpec.show(2)
+      show.close
+      client.get("/shows/#{show.id.raw}").should have_html {
+        section(class: "show") { p { "Sales for this show have closed." } }
+      }
     end
   end
 end

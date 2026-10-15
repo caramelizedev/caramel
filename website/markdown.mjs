@@ -15,7 +15,8 @@ export const llmsEntry = (name, url, description) =>
 function parse(html) {
   const root = {tag: '#root', attrs: '', children: []};
   const stack = [root];
-  for (const match of html.matchAll(/<(\/?)([a-z][a-z0-9-]*)\b([^>]*)>|([^<]+)/g)) {
+  // A < that opens no tag, as in <code>starts_at < ends_at</code>, is text.
+  for (const match of html.matchAll(/<(\/?)([a-z][a-z0-9-]*)\b([^>]*)>|([^<]+|<)/g)) {
     const [, close, tag, attrs, text] = match;
     let top = stack[stack.length - 1];
     if (text !== undefined) top.children.push(text);
