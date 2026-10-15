@@ -224,12 +224,18 @@ module SugarORM
         index.copy_with(columns: index.columns.map { |column| renamed[column]? || column })
       end
       indexes = renamed_indexes.index_by(&.name)
+      declared_names = declared.indexes.map(&.name).to_set
+      swapped = Set(String).new
       declared.indexes.each do |index|
         found = indexes[index.name]?
         next if found == index
         if found
-          swap = index.copy_with(name: swap_name(index.name))
-          plan.online << AddIndex.new(table, swap, concurrently: true)
+          swap = index.copy_with(name: swap_name(index.name, declared_names))
+          swapped << swap.name
+          # A swap index a previous run built is kept; only the drop and rename remain.
+          unless indexes[swap.name]? == swap
+            plan.online << AddIndex.new(table, swap, concurrently: true)
+          end
           plan.online << DropIndex.new(table, index.name)
           plan.online << RenameIndex.new(table, swap.name, index.name)
         else
@@ -238,6 +244,7 @@ module SugarORM
       end
       current.indexes.each do |index|
         next if declared.indexes.any? { |wanted| wanted.name == index.name }
+        next if swapped.includes?(index.name)
         next if index.columns.any? { |column| dropped.includes?(column) }
         if owned_index?(table, index.name)
           plan.online << DropIndex.new(table, index.name)
@@ -299,9 +306,17 @@ module SugarORM
       end
     end
 
-    # The temporary name a changed index is built under, within 63 bytes.
-    def self.swap_name(name : String) : String
-      "#{name[0, 63 - SWAP_SUFFIX.size]}#{SWAP_SUFFIX}"
+    # The temporary name a changed index is built under, within 63 bytes: the
+    # name with SWAP_SUFFIX, or with `_swap2`, `_swap3`… when that is the name
+    # itself or one of the *taken* names.
+    def self.swap_name(name : String, taken : Set(String)) : String
+      attempt = 1
+      loop do
+        suffix = attempt == 1 ? SWAP_SUFFIX : "#{SWAP_SUFFIX}#{attempt}"
+        candidate = "#{name[0, 63 - suffix.size]}#{suffix}"
+        return candidate unless candidate == name || taken.includes?(candidate)
+        attempt += 1
+      end
     end
 
     # SugarORM names an index index_<table>_on_… and a key fk_<table>_…;
