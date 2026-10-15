@@ -10,7 +10,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
 
 - how the headless binary reaches the declared schema;
 - how a derived migration is verified;
-- how `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` can run, since neither may run inside a one-transaction-per-batch migrator;
+- how `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` can run, since neither may run inside a migration's transaction;
 - which statements count as unsafe on a brand-new table;
 - how a deliberate column removal is expressed.
 
@@ -25,7 +25,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
    5. The branch is always dropped, and on any failure the written files are removed.
 
    `frappe make resource` derives its `CREATE TABLE` migration through the same DDL renderer, offline, because the table is new.
-3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`.
+3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`. Every other migration runs in a transaction of its own, which also writes its journal row, so a failure keeps the migrations before it. A statement that hits `lock_timeout` rolls its migration back, and the migrator runs it again after 1, 2 and 4 s. A fourth timeout stops `migrate` and names the migration. Online migrations run with no `lock_timeout`.
 4. **Lints.** The linter runs over every pending migration before any statement executes:
    - **Rule 1:** a blocking `CREATE INDEX` on an existing table.
    - **Rule 2:** `ADD COLUMN … NOT NULL` without `DEFAULT`.
@@ -48,4 +48,5 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
 - Separate online migrations are the only way PostgreSQL permits `CONCURRENTLY`. Refusing to journal an invalid index keeps the journal truthful.
 - Explicit rename and drop intent turns the most common source of data loss into a compile-visible, reviewable declaration.
 - Native PostgreSQL features are used directly, not abstracted.
+- One transaction per migration releases each migration's locks when it commits, so an early migration's `ACCESS EXCLUSIVE` lock is not held while later ones run. Retrying a short lock wait, instead of waiting long, stalls the queries queued behind a migration's lock for seconds at a time. An online statement's `SHARE UPDATE EXCLUSIVE` lock queues no reads or writes, so a timeout would only abandon a `CONCURRENTLY` build.
 - Halts carry remediation.
