@@ -294,6 +294,6 @@ Prove it
 
 **Passing:** `ops status` answers on the private socket. `ops errors` lists the failure by its fingerprint, and `ops metrics` prints Prometheus text. The exception message is on the socket and in no stdout log line.
 
-[← SweetTalk](https://caramelize.dev/docs/0.15.0/sweettalk/index.md) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
+[← Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/docs/0.15.0/observability/

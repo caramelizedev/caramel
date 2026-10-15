@@ -637,6 +637,6 @@ frappe lint
 
 **Passing:** `frappe check` and `frappe lint` exit 0, and `frappe corretto` passes every example, the box office’s included, and ends with `Corretto: 1 of 1 workers passed`.
 
-[← Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md) · [Read every SweetTalk rule →](https://caramelize.dev/docs/0.15.0/sweettalk/index.md)
+[← SweetTalk](https://caramelize.dev/docs/0.15.0/sweettalk/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/docs/0.15.0/box-office/

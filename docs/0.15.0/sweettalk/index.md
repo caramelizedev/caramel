@@ -11,7 +11,7 @@ SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into 
 | Status | Experimental: new in 0.13.0, until an application has run it in production |
 | Proved by | `frappe check` · `frappe db diff` · `frappe corretto` |
 
-Learning it for the first time? [Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) builds one domain in order, from the first command to passing specs. This guide lists every word and rule.
+Prefer to see it built first? [Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) follows one domain in order, from the first command to passing specs. This guide lists every word and rule.
 
 > Experimental **A minor release may change the names it stores.**
 >
@@ -897,6 +897,6 @@ frappe corretto
 
 **Passing:** The domain compiles, the migration `frappe db diff` derives is the one you reviewed, and the specs, `spec/domain/` included, pass against PostgreSQL.
 
-[← Build a box office](https://caramelize.dev/docs/0.15.0/box-office/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
+[← Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md) · [Read the Cold Brew reference →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/docs/0.15.0/sweettalk/
