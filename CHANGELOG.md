@@ -4,11 +4,27 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.16.0 - 2026-10-15
+
+### Upgrade notes
+
 - `frappe db diff` now keeps an index or foreign key whose name SugarORM did not generate and prints a note, where it dropped every undeclared one. A changed index is built under a temporary `_swap` name, then the old index is dropped and the new one renamed, so a unique index is never missing. `belongs_to` takes `on_delete: :cascade`, `:restrict` or `:set_null` ([ADR 0007](docs/decisions/0007-sugarorm-schemas-changesets-preload.md)).
 - `frappe migrate` commits each transactional migration with its own journal row instead of one shared transaction, so a failure no longer rolls back the migrations before it. A migration that hits `lock_timeout` rolls back and runs again after 1, 2 and 4 s; a fourth timeout stops `migrate` with `Migrator::LockTimedOut`, which names the migration ([ADR 0008](docs/decisions/0008-branch-and-diff-migrations.md)).
 - `CARAMEL_POOL_SIZE` (1 to 32) and `CARAMEL_POOL_TIMEOUT` (1 to 300 seconds) set the connection pool of every command that opens one, which was fixed at 4 connections and a 5 s checkout wait. An invalid value exits 1 with one line naming it ([ADR 0032](docs/decisions/0032-application-production-contract.md)).
 - Applications can use `BigDecimal`, `BigInt` and `BigRational` in every managed build: the toolchain now bundles GMP 6.3.0, and `frappe build` links it statically. Remove any `@[Link(ldflags: …)]` on `LibGMP` and any vendored `libgmp.a` an application added for this.
 - The toolchain changed, so installing this release sets up a new toolchain directory and its first builds start with an empty compiler cache. If you use the editor tools, run `frappe lsp install` again after installing.
+
+### Features
+
+- **core:** read the pool size and checkout timeout from the environment (69d8d1f)
+
+### Fixes
+
+- **sugar_orm:** run each migration in its own transaction and retry lock timeouts (67e4238)
+- **sugar_orm:** keep undeclared indexes and keys SugarORM did not name, and declare ON DELETE (6607cc6)
+- **sugar_orm:** let a rebuilt unique index's swap converge, avoid swap-name collisions, and correct the :set_null wording (8d551d9)
+- **sugar_orm:** never reuse a swap-named index with another definition (b65d20e)
+- **frappe:** link GMP in every managed build, so applications can use BigDecimal (0e8e146)
 
 ## 0.15.0 - 2026-10-14
 
