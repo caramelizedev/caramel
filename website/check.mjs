@@ -5,6 +5,7 @@ import { Script } from 'node:vm';
 import { highlightCode, decodeCode } from './highlight.mjs';
 import { frappeCommands, applicationCommands, latteCommands } from './commands.mjs';
 import { markdown, llmsEntry } from './markdown.mjs';
+import { sections, pageKey } from './sections.mjs';
 const root = new URL('./dist/', import.meta.url).pathname;
 const files = fs.readdirSync(root, { recursive: true }).filter(p => p.endsWith('.html'));
 for (const file of files) {
@@ -108,15 +109,25 @@ for (const file of paged) {
   assert.equal(article.indexOf('<h2', proof), article.lastIndexOf('<h2'), `${file}: Prove it is not the last section`);
   assert(article.includes('<strong>Passing:</strong>'), `${file}: Prove it has no Passing line`);
 }
-// The Box Office path's snippets are blocks of the application that
-// scripts/checks/sweet_talk_tutorial.cr builds, and the page shows every line of it.
-// The SweetTalk guide's snippets that name one of its files are held to it too; other
-// pages may show their own file of the same name.
-const boxOffice = new URL('../spec/fixtures/box_office/', import.meta.url);
-const fixtures = Object.fromEntries(fs.readdirSync(boxOffice, {recursive: true})
-  .filter(file => file.endsWith('.cr'))
-  .map(file => [file, fs.readFileSync(new URL(file, boxOffice), 'utf8').replace(/\n$/, '').split('\n')]));
-const shown = Object.fromEntries(Object.keys(fixtures).map(file => [file, new Set()]));
+// A page with a directory under spec/fixtures/pages/<key>/ shows an application that
+// scripts/checks/page_<key>.cr builds step by step. Each of its file snippets is a block
+// of the fixture file its caption names, the blocks of one file come in order, and
+// every line of every fixture file is shown. `quotes` lists pages that show a file of
+// another page's fixture: their snippets are held to it too.
+const quotes = {sweettalk: 'boxoffice'};
+const fixturesRoot = new URL('../spec/fixtures/pages/', import.meta.url);
+const fixtureOf = key => {
+  const dir = new URL(`${key}/`, fixturesRoot);
+  if (!fs.existsSync(dir)) return null;
+  return Object.fromEntries(fs.readdirSync(dir, {recursive: true})
+    .filter(file => file.endsWith('.cr'))
+    .map(file => [file, fs.readFileSync(new URL(file, dir), 'utf8').replace(/\n$/, '').split('\n')]));
+};
+const pageFixtures = Object.fromEntries(fs.readdirSync(fixturesRoot).map(key => [key, fixtureOf(key)]));
+for (const key of Object.keys(pageFixtures)) {
+  assert(sections[key], `spec/fixtures/pages/${key} names no page`);
+  assert(fs.existsSync(new URL(`../scripts/checks/page_${key}.cr`, import.meta.url)), `spec/fixtures/pages/${key} has no scripts/checks/page_${key}.cr`);
+}
 // Where *code* is a block of *lines* with its common indentation removed, or -1.
 const blockAt = (lines, code) => {
   const wanted = code.replace(/\n$/, '').split('\n');
@@ -127,23 +138,32 @@ const blockAt = (lines, code) => {
   }
   return -1;
 };
+const snippetsOf = html => [...html.matchAll(/<div class="c-snippet"><header>([^<]*)<\/header><pre><code class="hljs language-[a-z]+">([\s\S]*?)<\/code><\/pre><\/div>/g)]
+  .map(([, caption, code]) => ({caption: decodeCode(caption), code: decodeCode(code.replace(/<[^>]*>/g, ''))}));
 for (const file of paged) {
-  const html = fs.readFileSync(path.join(root, file), 'utf8');
-  const tutorial = file.split(path.sep)[2] === 'box-office';
-  const held = tutorial || file.split(path.sep)[2] === 'sweettalk';
-  for (const [, caption, code] of html.matchAll(/<div class="c-snippet"><header>([^<]*)<\/header><pre><code class="hljs language-[a-z]+">([\s\S]*?)<\/code><\/pre><\/div>/g)) {
-    const name = decodeCode(caption).split(' · ')[0];
-    if (held && fixtures[name]) {
-      const start = blockAt(fixtures[name], decodeCode(code.replace(/<[^>]*>/g, '')));
-      assert(start !== -1, `${file}: "${decodeCode(caption)}" is not a block of spec/fixtures/box_office/${name}`);
-      if (tutorial) code.replace(/<[^>]*>/g, '').split('\n').forEach((_, i) => shown[name].add(start + i));
-    } else {
-      assert(!tutorial || name.startsWith('Terminal'), `${file}: "${decodeCode(caption)}" names no file in spec/fixtures/box_office`);
+  const key = pageKey(file);
+  const own = pageFixtures[key];
+  const fixture = own ?? pageFixtures[quotes[key]];
+  if (!fixture) continue;
+  const where = `spec/fixtures/pages/${own ? key : quotes[key]}`;
+  const shown = Object.fromEntries(Object.keys(fixture).map(name => [name, new Set()]));
+  const last = {};
+  for (const {caption, code} of snippetsOf(fs.readFileSync(path.join(root, file), 'utf8'))) {
+    const name = caption.split(' · ')[0];
+    if (!fixture[name]) {
+      assert(!own || name.startsWith('Terminal'), `${file}: "${caption}" names no file in ${where}`);
+      continue;
     }
+    const start = blockAt(fixture[name], code);
+    assert(start !== -1, `${file}: "${caption}" is not a block of ${where}/${name}`);
+    if (!own) continue;
+    assert(!(name in last) || start > last[name], `${file}: "${caption}" shows ${name} out of order`);
+    code.split('\n').forEach((_, i) => shown[name].add(start + i));
+    last[name] = start;
   }
-}
-for (const [name, lines] of Object.entries(fixtures)) {
-  lines.forEach((line, i) => assert(!line.trim() || shown[name].has(i), `spec/fixtures/box_office/${name}: line ${i + 1} is not shown on the Box Office path`));
+  if (own) for (const [name, lines] of Object.entries(fixture)) {
+    lines.forEach((line, i) => assert(!line.trim() || shown[name].has(i), `${where}/${name}: line ${i + 1} is not shown on ${file}`));
+  }
 }
 const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
 assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');

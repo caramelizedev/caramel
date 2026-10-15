@@ -1037,7 +1037,18 @@ process Checkout, means: "the time one guest has to pay for the seats held for t
   end
 end`)+
     '<p>The process keeps one row per hold, picked by its claim. Its steps run as Cold Brew jobs after the show’s command commits. A hold arms the deadline for its expiry time, and a sale or a release disarms it. When the ten minutes pass first, the deadline releases the seats.</p>'+
-    '<h2 id="c-boxoffice-waitlist">05 · Offer released seats to the waitlist</h2><p>The waitlist is a second context. It follows Seating, so it may name Seating’s values and read its shows. Its policies react to Seating’s events: a scheduled show gets an empty line, a new hold seats its guest if they were waiting, and released seats are offered to the first guest they fit. Each policy changes one aggregate.</p>'+
+    '<h2 id="c-boxoffice-waitlist">05 · Offer released seats to the waitlist</h2><p>Seating answers an offer from the waitlist inside <code>border Waitlist</code>, reading only the event’s facts. Naming <code>Waitlist::Line</code> there would make Seating depend on Waitlist, and that cycle would stop the build. When someone else took the seats first, the hold is refused and the compensation leaves the guest in the line. The border closes <code>context Seating</code>.</p>'+
+    snippet('app/domain/box_office.cr · Seating’s border with Waitlist',`  border Waitlist do
+    whenever Waitlist::Line::Offered do |offered|
+      Show.find(offered.show).hold(offered.email, offered.seats)
+    end
+
+    compensate Waitlist::Line::Offered do |offered, refusal|
+      # The seats went to someone else first: the guest stays in the line.
+    end
+  end
+end`)+
+    '<p>The waitlist is a second context. It follows Seating, so it may name Seating’s values and read its shows. Its policies react to Seating’s events: a scheduled show gets an empty line, a new hold seats its guest if they were waiting, and released seats are offered to the first guest they fit. Each policy changes one aggregate.</p>'+
     snippet('app/domain/box_office.cr · the waitlist',`  context Waitlist, follows: Seating, subdomain: :supporting,
     means: "guests waiting for the seats a show gives back" do
     aggregate Line, means: "the guests waiting for one show, first come, first served" do
@@ -1082,17 +1093,6 @@ end`)+
     whenever Seating::Show::Released do |released|
       free = Seating::Show.find(released.show_id).left
       Line.for_show(released.show_id).first?.try(&.offer(free))
-    end
-  end
-end`)+
-    '<p>Seating answers an offer inside <code>border Waitlist</code>, reading only the event’s facts. Naming <code>Waitlist::Line</code> there would make Seating depend on Waitlist, and that cycle would stop the build. When someone else took the seats first, the hold is refused and the compensation leaves the guest in the line. Add the border to the file after the checkout process, before <code>context Waitlist</code>.</p>'+
-    snippet('app/domain/box_office.cr · Seating’s border with Waitlist',`  border Waitlist do
-    whenever Waitlist::Line::Offered do |offered|
-      Show.find(offered.show).hold(offered.email, offered.seats)
-    end
-
-    compensate Waitlist::Line::Offered do |offered, refusal|
-      # The seats went to someone else first: the guest stays in the line.
     end
   end
 end`)+

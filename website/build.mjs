@@ -4,6 +4,7 @@ import { highlightCode } from './highlight.mjs';
 import { commandRows } from './commands.mjs';
 import { markdown, llmsEntry } from './markdown.mjs';
 import { header, layout, document } from './shell.mjs';
+import { sections } from './sections.mjs';
 
 // site.html holds the pages; shell.mjs, site.css and site.js hold the shell, look and behaviour.
 // Export real documents with native links and ordinary window scrolling.
@@ -14,21 +15,6 @@ if (!source.includes(`Caramel ${version}`)) throw new Error('Update the site for
 const out = new URL('./dist/', import.meta.url);
 fs.rmSync(out, {recursive: true, force: true});
 fs.mkdirSync(new URL('assets/', out), { recursive: true });
-const sections = {
-  learn: 'docs/getting-started', map: 'docs/project-map',
-  agents: 'docs/agents', deploy: 'docs/deployment',
-  testing: 'docs/testing-html', releases: 'docs/releases',
-  i18n: 'docs/internationalization', tenancy: 'docs/multi-tenancy', crema: 'docs/observability', cremaref: 'docs/crema', practices: 'docs/best-practices',
-  routing: 'docs/routes-and-contracts', actions: 'docs/actions-and-responses',
-  views: 'docs/views', sugarorm: 'docs/sugarorm', coldbrew: 'docs/cold-brew',
-  corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',
-  local: 'docs/local-environment', boxoffice: 'docs/box-office', sweettalk: 'docs/sweettalk',
-  crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
-  uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
-  islands: 'cookbook/third-party-components',
-  webhooks: 'cookbook/webhooks',
-  sessions: 'cookbook/revocable-sessions',
-};
 const routesFor = edition => ({home: '/', cookbook: `/cookbook/${edition.version}/`,
   ...Object.fromEntries(Object.keys(edition.pages).map(key => {
     const [section, slug] = sections[key].split('/');
