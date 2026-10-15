@@ -24,8 +24,8 @@ hljs.registerLanguage('yaml', yaml);
 hljs.registerLanguage('markdown', markdown);
 hljs.registerLanguage('javascript', javascript);
 
-export const decodeCode = html => html.replace(/&(amp|lt|gt|quot|#39);/g,
-  (_, entity) => ({amp:'&', lt:'<', gt:'>', quot:'"', '#39':"'"}[entity]));
+export const decodeCode = html => html.replace(/&(amp|lt|gt|quot|#39|#x27);/g,
+  (_, entity) => ({amp:'&', lt:'<', gt:'>', quot:'"', '#39':"'", '#x27':"'"}[entity]));
 
 export function highlightCode(html) {
   return html.replace(/<code class="language-([a-z]+)">([\s\S]*?)<\/code>/g, (_, language, code) => {

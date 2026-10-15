@@ -22,7 +22,7 @@ const sections = {
   routing: 'docs/routes-and-contracts', actions: 'docs/actions-and-responses',
   views: 'docs/views', sugarorm: 'docs/sugarorm', coldbrew: 'docs/cold-brew',
   corretto: 'docs/corretto', security: 'docs/security', commands: 'docs/commands',
-  local: 'docs/local-environment', sweettalk: 'docs/sweettalk',
+  local: 'docs/local-environment', boxoffice: 'docs/box-office', sweettalk: 'docs/sweettalk',
   crud: 'cookbook/create-a-resource', json: 'cookbook/return-json',
   uploads: 'cookbook/uploads', jobs: 'cookbook/background-jobs',
   islands: 'cookbook/third-party-components',

@@ -22,7 +22,7 @@ for (const file of files) {
     assert(html.includes(`id="${id}"`), `${file}: missing anchor ${id}`);
   }
 }
-const fixture = 'section(class: "form-page") { h1 { "<Dune> & \\"Book\\"" } }';
+const fixture = 'section(class: "form-page") { h1 { "<Dune> & \\"Book\\" & a guest\'s" } }';
 const escaped = fixture.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const highlighted = highlightCode(`<code class="language-crystal">${escaped}</code>`);
 assert(highlighted.includes('class="hljs-attr">class:</span>'), 'Blueprint class: mistaken for a declaration');
@@ -107,6 +107,43 @@ for (const file of paged) {
   assert(proof !== -1, `${file}: no Prove it block`);
   assert.equal(article.indexOf('<h2', proof), article.lastIndexOf('<h2'), `${file}: Prove it is not the last section`);
   assert(article.includes('<strong>Passing:</strong>'), `${file}: Prove it has no Passing line`);
+}
+// The Box Office path's snippets are blocks of the application that
+// scripts/checks/sweet_talk_tutorial.cr builds, and the page shows every line of it.
+// The SweetTalk guide's snippets that name one of its files are held to it too; other
+// pages may show their own file of the same name.
+const boxOffice = new URL('../spec/fixtures/box_office/', import.meta.url);
+const fixtures = Object.fromEntries(fs.readdirSync(boxOffice, {recursive: true})
+  .filter(file => file.endsWith('.cr'))
+  .map(file => [file, fs.readFileSync(new URL(file, boxOffice), 'utf8').replace(/\n$/, '').split('\n')]));
+const shown = Object.fromEntries(Object.keys(fixtures).map(file => [file, new Set()]));
+// Where *code* is a block of *lines* with its common indentation removed, or -1.
+const blockAt = (lines, code) => {
+  const wanted = code.replace(/\n$/, '').split('\n');
+  for (let start = 0; start + wanted.length <= lines.length; start++) {
+    const block = lines.slice(start, start + wanted.length);
+    const indent = Math.min(...block.filter(line => line.trim()).map(line => line.match(/^ */)[0].length));
+    if (block.every((line, i) => line.slice(indent) === wanted[i])) return start;
+  }
+  return -1;
+};
+for (const file of paged) {
+  const html = fs.readFileSync(path.join(root, file), 'utf8');
+  const tutorial = file.split(path.sep)[2] === 'box-office';
+  const held = tutorial || file.split(path.sep)[2] === 'sweettalk';
+  for (const [, caption, code] of html.matchAll(/<div class="c-snippet"><header>([^<]*)<\/header><pre><code class="hljs language-[a-z]+">([\s\S]*?)<\/code><\/pre><\/div>/g)) {
+    const name = decodeCode(caption).split(' · ')[0];
+    if (held && fixtures[name]) {
+      const start = blockAt(fixtures[name], decodeCode(code.replace(/<[^>]*>/g, '')));
+      assert(start !== -1, `${file}: "${decodeCode(caption)}" is not a block of spec/fixtures/box_office/${name}`);
+      if (tutorial) code.replace(/<[^>]*>/g, '').split('\n').forEach((_, i) => shown[name].add(start + i));
+    } else {
+      assert(!tutorial || name.startsWith('Terminal'), `${file}: "${decodeCode(caption)}" names no file in spec/fixtures/box_office`);
+    }
+  }
+}
+for (const [name, lines] of Object.entries(fixtures)) {
+  lines.forEach((line, i) => assert(!line.trim() || shown[name].has(i), `spec/fixtures/box_office/${name}: line ${i + 1} is not shown on the Box Office path`));
 }
 const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
 assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');

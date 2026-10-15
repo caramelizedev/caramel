@@ -37,7 +37,7 @@ module Caramel::Checks::All
   WEIGHTS = {
     "frappe-project-dev" => 124, "installations" => 76, "schema-diff" => 43,
     "spec" => 25, "browser" => 23, "native" => 18, "integration" => 17,
-    "latte-postgres" => 10,
+    "latte-postgres" => 10, "sweet-talk-tutorial" => 44,
   }
 
   @@logs : String? = nil
