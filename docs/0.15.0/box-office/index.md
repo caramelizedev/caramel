@@ -285,11 +285,11 @@ post "/shows/:show/waitlist", App::Waitlists::Join
 module App::Shows
   struct Show < App::ApplicationAction
     contract do
-      field show : App::BoxOffice::Seating::Show::Id
+      field show : BoxOffice::Seating::Show::Id
     end
 
     def handle(contract : Contract)
-      show = App::BoxOffice::Seating::Show.find(contract.show)
+      show = BoxOffice::Seating::Show.find(contract.show)
       page show.title, Views::Shows::Show.new(show, csrf_token)
     end
   end
@@ -302,13 +302,13 @@ end
 module App::Holds
   struct Create < App::ApplicationAction
     contract do
-      field show : App::BoxOffice::Seating::Show::Id
-      field guest : App::BoxOffice::Seating::Email
-      field seats : App::BoxOffice::Seating::Seats
+      field show : BoxOffice::Seating::Show::Id
+      field guest : BoxOffice::Seating::Email
+      field seats : BoxOffice::Seating::Seats
     end
 
     def handle(contract : Contract)
-      show = App::BoxOffice::Seating::Show.find(contract.show)
+      show = BoxOffice::Seating::Show.find(contract.show)
       show.hold(contract.guest, contract.seats)
       redirect_to("/shows/#{show.id.raw}/holds/#{show.issued}")
     end
@@ -322,12 +322,12 @@ end
 module App::Holds
   struct Show < App::ApplicationAction
     contract do
-      field show : App::BoxOffice::Seating::Show::Id
+      field show : BoxOffice::Seating::Show::Id
       field hold : Int32, min: 1
     end
 
     def handle(contract : Contract)
-      show = App::BoxOffice::Seating::Show.find(contract.show)
+      show = BoxOffice::Seating::Show.find(contract.show)
       page "Your seats", Views::Holds::Show.new(show, contract.hold, csrf_token)
     end
   end
@@ -340,12 +340,12 @@ end
 module App::Holds
   struct Sell < App::ApplicationAction
     contract do
-      field show : App::BoxOffice::Seating::Show::Id
+      field show : BoxOffice::Seating::Show::Id
       field hold : Int32, min: 1
     end
 
     def handle(contract : Contract)
-      App::BoxOffice::Seating::Show.find(contract.show).sell(contract.hold)
+      BoxOffice::Seating::Show.find(contract.show).sell(contract.hold)
       redirect_to("/shows/#{contract.show.raw}/holds/#{contract.hold}")
     end
   end
@@ -358,13 +358,13 @@ end
 module App::Waitlists
   struct Join < App::ApplicationAction
     contract do
-      field show : App::BoxOffice::Seating::Show::Id
-      field guest : App::BoxOffice::Seating::Email
-      field seats : App::BoxOffice::Seating::Seats
+      field show : BoxOffice::Seating::Show::Id
+      field guest : BoxOffice::Seating::Email
+      field seats : BoxOffice::Seating::Seats
     end
 
     def handle(contract : Contract)
-      line = App::BoxOffice::Waitlist::Line.for_show(contract.show).first?
+      line = BoxOffice::Waitlist::Line.for_show(contract.show).first?
       return not_found unless line
       line.join(contract.guest, contract.seats)
       redirect_to("/shows/#{contract.show.raw}")
@@ -390,7 +390,7 @@ The pages read the show. A closed show offers nothing, a show with seats left of
 ```crystal
 module App::Views::Shows
   class Show < App::ApplicationView
-    def initialize(@show : App::BoxOffice::Seating::Show, @csrf_token : String)
+    def initialize(@show : BoxOffice::Seating::Show, @csrf_token : String)
     end
 
     private def blueprint
@@ -427,8 +427,7 @@ end
 ```crystal
 module App::Views::Holds
   class Show < App::ApplicationView
-    def initialize(@show : App::BoxOffice::Seating::Show, @number : Int32,
-                   @csrf_token : String)
+    def initialize(@show : BoxOffice::Seating::Show, @number : Int32, @csrf_token : String)
     end
 
     private def blueprint
@@ -463,10 +462,10 @@ Seed one show, then serve the application.
 module App
   # Schedules one show the first time it runs; a second run finds it and does nothing.
   def self.seed(db : DB::Database) : Nil
-    return unless App::BoxOffice::Seating::Show.all.empty?
+    return unless BoxOffice::Seating::Show.all.empty?
 
-    App::BoxOffice::Seating::Show.schedule("The Tempest", Time.utc + 30.days,
-      App::BoxOffice::Seating::Capacity.new(120))
+    BoxOffice::Seating::Show.schedule("The Tempest", Time.utc + 30.days,
+      BoxOffice::Seating::Capacity.new(120))
     puts "Scheduled The Tempest with 120 seats."
   end
 end
@@ -486,7 +485,7 @@ frappe seed
 frappe dev
 ```
 
-**Expect:** `https://boxoffice.caramel/shows/1` shows The Tempest, 120 of 120 seats left and a Hold seats button.
+**Expect:** Builds the application and serves it at `https://boxoffice.caramel`, as in your first application. Ctrl-C stops it. The page at `/shows/1` shows The Tempest, 120 of 120 seats left and a Hold seats button.
 
 Prove it
 
