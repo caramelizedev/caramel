@@ -479,4 +479,18 @@ describe SugarORM::Migrator do
       end
     end
   end
+
+  it "restores lock_timeout when an online migration fails" do
+    with_scratch_database do |db|
+      duplicates = "INSERT INTO books (isbn) VALUES ('same'), ('same')"
+      create = migration(1, "create_books", BOOKS_WITH_ISBN, duplicates)
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      with_short_lock_timeout(db) do |short|
+        index = migration(2, "index_isbn", ISBN_INDEX)
+        runner = SugarORM::Migrator.new(short, [create, index])
+        expect_raises(SugarORM::Migrator::ConcurrentIndexFailed) { runner.migrate }
+        short.query_one("SHOW lock_timeout", as: String).should eq("1s")
+      end
+    end
+  end
 end
