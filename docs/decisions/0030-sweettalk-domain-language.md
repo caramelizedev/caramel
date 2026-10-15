@@ -105,8 +105,8 @@ or a policy, and nothing stops one context from reaching into another's types.
    integration`. Every refusal that decisions 2 to 6 promise has a fixture in a
    `sweet-talk-compilation` check that must fail to compile with its message.
    `frappe-project` derives a generated domain's tables with `frappe db diff` and runs its
-   spec in `frappe corretto`. `sweet-talk-tutorial` builds the Box Office path's application
-   from `spec/fixtures/box_office` with the page's commands and runs its specs, and the
+   spec in `frappe corretto`. `page-boxoffice` builds the Box Office path's application
+   from `spec/fixtures/pages/boxoffice` with the page's commands and runs its specs, and the
    website check holds the page's snippets to those files.
 
 ## Reasons
