@@ -1,10 +1,10 @@
 require "../spec_helper"
+require "../support/box_office"
 
 describe "The box office" do
   it "holds seats, sells them, and offers the waitlist once the show is sold out" do
     Corretto.session do |client, _db|
-      show = App::BoxOffice::Seating::Show.schedule("The Tempest",
-        Time.utc(2026, 11, 20, 19, 30), App::BoxOffice::Seating::Capacity.new(2))
+      show = BoxOfficeSpec.show(2)
       path = "/shows/#{show.id.raw}"
       client.get(path).should have_html {
         section(class: "show") { button(type: "submit") { "Hold seats" } }
@@ -26,10 +26,8 @@ describe "The box office" do
 
   it "answers 422 for a refusal or a bad value, and 404 for a show that is not a number" do
     Corretto.session do |client, _db|
-      show = App::BoxOffice::Seating::Show.schedule("The Tempest",
-        Time.utc(2026, 11, 20, 19, 30), App::BoxOffice::Seating::Capacity.new(1))
-      show.hold(App::BoxOffice::Seating::Email.new("ada@example.com"),
-        App::BoxOffice::Seating::Seats.new(1))
+      show = BoxOfficeSpec.show(1)
+      show.hold(BoxOfficeSpec.email("ada@example.com"), BoxOfficeSpec.seats(1))
       path = "/shows/#{show.id.raw}/holds"
       json = {"Accept" => "application/json"}
       sold_out = client.post(path, headers: json,
