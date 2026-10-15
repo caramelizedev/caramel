@@ -11,7 +11,7 @@ require "uri"
 module Caramel
   # Creates a bounded PostgreSQL pool with an explicit transport policy.
   class Database
-    # A missing or invalid CARAMEL_ENV, database URL or database timeout variable
+    # A missing or invalid CARAMEL_ENV, database URL, database timeout or pool variable
     class ConfigurationError < Exception
     end
 
@@ -50,14 +50,16 @@ module Caramel
       sslkey : String?,
       pool_options : DB::Pool::Options,
       application_name : String = "caramel" do
-      SUPPORTED_QUERY_PARAMS = %w[host port sslmode sslrootcert sslcert sslkey]
-      DEFAULT_POOL_SIZE      =  4
-      MAX_POOL_SIZE          = 32
+      SUPPORTED_QUERY_PARAMS   = %w[host port sslmode sslrootcert sslcert sslkey]
+      DEFAULT_POOL_SIZE        =  4
+      MAX_POOL_SIZE            = 32
+      DEFAULT_CHECKOUT_TIMEOUT = 5.seconds
 
       # ameba:disable Metrics/CyclomaticComplexity -- one branch per supported URL parameter
       def self.parse(url : String,
                      pool_size : Int = DEFAULT_POOL_SIZE,
-                     application_name : String = "caramel") : self
+                     application_name : String = "caramel",
+                     checkout_timeout : Time::Span = DEFAULT_CHECKOUT_TIMEOUT) : self
         unless (1..MAX_POOL_SIZE).includes?(pool_size)
           raise ArgumentError.new("pool_size must be between 1 and #{MAX_POOL_SIZE}")
         end
@@ -119,6 +121,7 @@ module Caramel
           initial_pool_size: 1,
           max_pool_size: pool_size,
           max_idle_pool_size: pool_size,
+          checkout_timeout: checkout_timeout.total_seconds,
           retry_attempts: 0,
           retry_delay: 0.2,
         )
@@ -289,6 +292,33 @@ module Caramel
       end
     end
 
+    # How many connections a command's pool may hold, and how long a checkout
+    # waits for a free one before DB::PoolTimeout.
+    record PoolSettings, size : Int32, checkout_timeout : Time::Span do
+      MAX_CHECKOUT_SECONDS = 300
+
+      # CARAMEL_POOL_SIZE, 1 to Config::MAX_POOL_SIZE (default 4), and
+      # CARAMEL_POOL_TIMEOUT, whole seconds from 1 to 300 (default 5).
+      def self.from_env(env = ENV) : self
+        size = whole(env, "CARAMEL_POOL_SIZE", Config::DEFAULT_POOL_SIZE,
+          Config::MAX_POOL_SIZE, "a whole number")
+        seconds = whole(env, "CARAMEL_POOL_TIMEOUT",
+          Config::DEFAULT_CHECKOUT_TIMEOUT.total_seconds.to_i, MAX_CHECKOUT_SECONDS,
+          "a whole number of seconds")
+        new(size: size, checkout_timeout: seconds.seconds)
+      end
+
+      private def self.whole(env, key : String, default : Int32, max : Int32,
+                             noun : String) : Int32
+        value = env[key]? || return default
+        number = value.to_i?
+        unless number && (1..max).includes?(number)
+          raise ConfigurationError.new("#{key} must be #{noun} from 1 to #{max}")
+        end
+        number
+      end
+    end
+
     # The connection for CARAMEL_ENV, production unless set. Frappé and Latte
     # provide DATABASE_URL and MIGRATION_DATABASE_URL, and for specs
     # SPEC_DATABASE_URL and SPEC_MIGRATION_DATABASE_URL.
@@ -305,11 +335,13 @@ module Caramel
 
     # *application_name* labels the pool's backends in `pg_stat_activity`.
     # *limits* are the timeouts each connection sets (Limits).
+    # *checkout_timeout* is how long a checkout waits for a free connection.
     def self.open(url : String,
                   pool_size : Int = Config::DEFAULT_POOL_SIZE,
                   application_name : String = "caramel",
-                  limits : Limits = Limits::RUNTIME) : DB::Database
-      config = Config.parse(url, pool_size, application_name)
+                  limits : Limits = Limits::RUNTIME,
+                  checkout_timeout : Time::Span = Config::DEFAULT_CHECKOUT_TIMEOUT) : DB::Database
+      config = Config.parse(url, pool_size, application_name, checkout_timeout)
       connection_options = config.connection_options
       DB::Database.new(connection_options, config.pool_options) do
         build_connection(config, connection_options, limits)

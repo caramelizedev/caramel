@@ -286,9 +286,10 @@ module Caramel::Checks
       command(copy, echo: false)
       File.write(File.join(release, "public/marker.txt"), "production root\n")
       settings = {
-        "CARAMEL_ENV"    => "development",
-        "CARAMEL_SOCKET" => socket,
-        "CARAMEL_ROOT"   => release,
+        "CARAMEL_ENV"       => "development",
+        "CARAMEL_SOCKET"    => socket,
+        "CARAMEL_ROOT"      => release,
+        "CARAMEL_POOL_SIZE" => "7",
       }
       binary = File.join(@project, ".caramel/application")
       process = Process.new(binary, ["serve", "--no-workers"],
@@ -306,12 +307,15 @@ module Caramel::Checks
         idle = status == 200 && document["workers"].as_a.empty? &&
                document["scheduler"].as_s == "off"
         assert!(idle, "#{status}: #{body}")
+        web = document["pools"].as_a.find { |pool| pool["name"].as_s == "web" }
+        assert!(!web.nil? && web["max"].as_i == 7, "#{status}: #{body}")
       ensure
         Checks.stop(process, 30.seconds)
       end
       assert!(!File.exists?(socket), "serve left #{socket} behind")
       puts "PASS: serve reads public files from CARAMEL_ROOT"
       puts "PASS: serve --no-workers runs no workers or schedules"
+      puts "PASS: serve sizes its web pool from CARAMEL_POOL_SIZE"
     end
 
     private def unix_get(socket : String, path : String, host : String) : {Int32, String}

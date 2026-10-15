@@ -57,6 +57,19 @@ describe "PostgreSQL integration" do
     end
   end
 
+  it "fails a checkout after the pool's checkout timeout" do
+    db = Caramel::Database.open(url, 1, checkout_timeout: 1.second)
+    begin
+      db.using_connection do
+        started = Time.instant
+        expect_raises(DB::PoolTimeout) { db.using_connection { } }
+        (Time.instant - started).should be_close(1.second, 500.milliseconds)
+      end
+    ensure
+      db.close
+    end
+  end
+
   it "waits past IO_TIMEOUT when there is no statement timeout" do
     limits = Caramel::Database::Limits.new(Time::Span.zero, Time::Span.zero)
     db = Caramel::Database.open(url, 1, limits: limits)
