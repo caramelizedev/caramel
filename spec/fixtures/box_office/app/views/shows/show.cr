@@ -1,6 +1,6 @@
 module App::Views::Shows
   class Show < App::ApplicationView
-    def initialize(@show : App::BoxOffice::Seating::Show, @csrf_token : String)
+    def initialize(@show : BoxOffice::Seating::Show, @csrf_token : String)
     end
 
     private def blueprint
