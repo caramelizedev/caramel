@@ -20,11 +20,10 @@ Learning it for the first time? The guide [Test the HTML your app returns](https
 | `.env.test` size, at most | 64 KiB |
 | `--concurrency` workers | 1–8, default 1 |
 | Body shown when a response matcher fails | first 800 characters |
-| One drain, then `DrainLimitExceeded` | 1,000 jobs |
 
 ## Specs run only under frappe corretto {#c-corretto-setup}
 
-A generated application has a spec helper that requires `caramel/corretto` and calls `Corretto.configure(App)` once. The application is built on the spec database, with the origin and secret that `frappe corretto` supplies.
+A generated application has a spec helper that requires `caramel/corretto` and calls `Corretto.configure(App)` once. The application is built on the spec database, with the origin and secret that `frappe corretto` supplies. `Corretto.configure(App) { |config| … }` takes a block for settings.
 
 **spec/spec_helper.cr**
 
@@ -33,6 +32,9 @@ require "spec"
 require "caramel/corretto"
 require "../config/application"
 
+# `frappe corretto` runs each worker against its own Latte clone of the
+# migrated spec database; Corretto refuses any other database, wraps every
+# example in a rolled-back savepoint and answers outbound HTTP from wire stubs.
 Corretto.configure(App)
 ```
 
@@ -50,7 +52,7 @@ WEBHOOK_SECRET=test-webhook-secret
 | A database that is not this worker’s own spec database | stops, so development data is never touched |
 | Your development `.env` | never reaches a worker |
 | `.env.test` that is not a regular file, or is over 64 KiB | refuses |
-| `.env.test` that sets `APP_ORIGIN`, `APP_SECRET`, `DATABASE_URL`, or a key starting `SPEC_`, `CARAMEL_` or `CORRETTO_` | refuses |
+| `.env.test` that sets one of the ten keys `APP_ORIGIN`, `APP_SECRET`, `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `PATH`, `HOME`, `USER`, `LOGNAME`, `TMPDIR` or `LANG`, or a key starting `SPEC_`, `CARAMEL_`, `CORRETTO_`, `CRYSTAL_`, `LD_` or `DYLD_` | refuses with `.env.test cannot set KEY; Corretto and the toolchain supply these` |
 
 ## Each worker gets its own database {#c-corretto-run}
 
@@ -64,7 +66,7 @@ frappe corretto spec/requests/books_spec.cr
 frappe corretto spec/requests --concurrency=4
 ```
 
-**Expect:** Spec files are dealt round-robin to the workers. Each worker runs its own compiled spec binary and prefixes its output lines, such as `[w1]`. The spec database is migrated once, and the worker databases are dropped afterwards.
+**Expect:** Prints `Corretto: N spec files across M workers`. Spec files are dealt round-robin to the workers. Each worker runs its own compiled spec binary and prefixes its output lines, such as `[w1]`. The spec database is migrated once, the worker databases are dropped afterwards, and the last line is `Corretto: M of M workers passed`.
 
 Every example runs on one connection inside a transaction and a savepoint. Both are rolled back when the example ends, including the writes its requests and drained jobs made.
 
@@ -102,10 +104,10 @@ A request sends one body: URL-encoded `params:`, `params:` with `files:` as mult
 | Condition | Outcome |
 | --- | --- |
 | Any other mix of `params:`, `json:`, `body:` and `files:` | raises `Send one body: params: (with files: for multipart), json: or body:` |
-| Any body besides `params:` on GET | raises |
+| Any body besides `params:` on GET | raises `GET sends params: in the query and takes no body` |
 | `params:` on GET | becomes the query |
 | An Array value in `params:` | sends one key per item |
-| A path that is not local, such as `/books` | raises |
+| A path that does not start with `/`, or starts with `//`, such as `books` or `https://shop.test/books` | raises `Corretto requests take a local path such as /books` |
 
 ## The client behaves like a browser {#c-corretto-browser}
 
@@ -148,7 +150,7 @@ Corretto’s matchers work with `should` and `should_not`.
 
 | Condition | Outcome |
 | --- | --- |
-| A response matcher fails | shows the status, the headers and the first 800 characters of the body |
+| A response matcher fails | shows the status, the headers except `Content-Security-Policy` and `Set-Cookie`, and the first 800 characters of the body, cut with `…` |
 | `have_row` with an unknown or mistyped field | fails compilation |
 | `have_row` without conditions | checks for any row |
 
@@ -163,7 +165,7 @@ db.should have_row(App::Book, title: "Dune", author: nil)
 db.should_not have_row(App::Book, title: "Solaris")
 ```
 
-The Corretto guide covers `have_html` and the block form of `render_partial` in depth.
+The guide Test the HTML your app returns covers `have_html` and the block form of `render_partial` in depth.
 
 [Test the HTML your app returns →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
 
@@ -187,7 +189,11 @@ Corretto.stub_wire("https://api.stripe.com/v1/charges")
 | --- | --- |
 | A request matching no stub | answers 502 `Unstubbed outbound request: METHOD URL`, so specs never reach the network |
 | Several matching stubs | the latest answers |
+| `stub_wire` with a URL that is not absolute `http` or `https` | raises ArgumentError |
+| `to_return` with both `body:` and `fixture:` | raises `to_return takes fixture: or body:, not both` |
 | A fixture path | is relative to `spec/fixtures/wire/`, and its extension sets the default `Content-Type` |
+| A fixture path that starts with `/` or has an empty, `.` or `..` segment | raises ArgumentError |
+| A fixture file that does not exist | raises `Corretto::Error` naming the path |
 | A request not sent through `Caramel::Outbound` | does not pass through the proxy |
 | Stubs and recorded requests | reset after each example |
 
@@ -198,11 +204,11 @@ Corretto forbids mocks. Assert on requests, rows and rendered HTML instead.
 | Condition | Outcome |
 | --- | --- |
 | A mocking library that defines `Mocks`, `Mock` or `Double`, or Spectator’s mocks | fails compilation |
-| A spec file under `spec/` that calls `allow(`, `receive(`, `double(`, `instance_double(`, `mock(` or `.stub(` | `frappe corretto` refuses to run before building, naming the file and line |
+| A `.cr` file under `spec/` with a line, outside a `#` comment, that calls `allow(`, `receive(`, `double(`, `instance_double(`, `mock(` or `.stub(`, the first five not preceded by a word character, `.`, `:`, `@` or `$` | refuses to run before building: `frappe corretto` prints ``PATH:LINE: `allow(` is a mocking API; Corretto forbids mocks``, then `Specs refused: N mocking call(s) under spec/` |
 
 ## Specs start no workers {#c-corretto-jobs}
 
-Specs start no Cold Brew workers. A job enqueued during an example waits in the example’s transaction until you drain its queue on the example’s connection.
+Specs start no Cold Brew workers. A job enqueued during an example waits in the example’s transaction until you drain its queue on the example’s connection. The Cold Brew reference lists the drain rules and the 1,000-job limit.
 
 **Corretto · after a request enqueues a job**
 
@@ -213,11 +219,10 @@ db.should have_row(App::Book, title: "Drained probe", author: "Cold Brew")
 
 | Condition | Outcome |
 | --- | --- |
-| `drain_queue!` | runs every due job synchronously, including jobs those jobs enqueue, and returns how many ran |
-| Each job | runs in a savepoint |
-| A failed job | follows its retry policy and is not retried in the same drain; `DrainFailure` then lists every failure |
-| `include_scheduled: true` | also runs jobs scheduled for later |
-| Jobs still due after 1,000 runs | raises `DrainLimitExceeded` |
+| A job enqueued by a request in an example | waits, unrun, until `drain_queue!` runs it on the example’s `db` |
+| `work` under `CARAMEL_ENV=test` | stops with `Specs run no workers; drain queues with Caramel::ColdBrew.drain_queue!` |
+
+[Drain queues in specs →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 
 Prove it
 
@@ -254,7 +259,7 @@ end
 frappe corretto spec/requests/books_spec.cr
 ```
 
-**Passing:** Every example passes. The sample title contains `<title>`, so the HTML expectation also proves that the page escapes user text. The full spec goes on to check JSON, updates, forged requests, unknown fields and deletion.
+**Passing:** Every example passes and the last line is `Corretto: 1 of 1 workers passed`. The spec proves `render_page`, `have_row`, `have_html` and the 403 for forged requests; the sample title contains `<title>`, so it also proves that the page escapes user text. The full spec goes on to check JSON, updates, unknown fields and deletion. Caramel’s own `scripts/check frappe-project` proves the catalog reset, wire isolation, drains and the mock refusal.
 
 [← Cold Brew](https://caramelize.dev/docs/0.15.0/cold-brew/index.md) · [Look up Crema →](https://caramelize.dev/docs/0.15.0/crema/index.md)
 

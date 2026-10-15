@@ -107,7 +107,7 @@ Caramel adds three headers to every response, including static files and error p
 | Forwarded headers | grant no trust |
 | A path that does not start with `/` | answers 400 |
 
-Put scripts and styles in files under `public/`, as the generated layout does.
+Put scripts and styles in files under `app/assets/`, which Frappé publishes to `public/assets/`, as the generated layout does; an edit made in `public/` by hand stops the next publish with `Asset output conflict`.
 
 ## Views escape text and attributes {#c-security-escaping}
 

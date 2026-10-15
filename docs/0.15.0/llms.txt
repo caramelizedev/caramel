@@ -5,30 +5,30 @@
 ## Learn
 
 - [The Bookshelf path](https://caramelize.dev/docs/0.15.0/getting-started/index.md): Install Caramel 0.15.0, create a bookshelf, and check the generated feature with real application tests.
-- [The Box Office path](https://caramelize.dev/docs/0.15.0/box-office/index.md): Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove each rule.
+- [The Box Office path](https://caramelize.dev/docs/0.15.0/box-office/index.md): Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove the refusal, the timer and the waitlist.
 
 ## Guides
 
 - [Project structure](https://caramelize.dev/docs/0.15.0/project-map/index.md): Start with your intention. Caramel’s conventions give it a home, and its tools help you check the result.
-- [Working with an agent](https://caramelize.dev/docs/0.15.0/agents/index.md): The same conventions, release context, and proof commands that make Caramel easier for a person to learn.
+- [Working with an agent](https://caramelize.dev/docs/0.15.0/agents/index.md): Give an agent the conventions, release context and proof commands you use, so it changes the right file and shows its work.
 - [Internationalization](https://caramelize.dev/docs/0.15.0/internationalization/index.md): Add typed translations, choose a language for each request, and localize numbers, dates, and validation messages in Caramel 0.15.0.
-- [Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md): Give each account its own address and its own rows, with queries that refuse to run outside a tenant.
+- [Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md): Give each account its own /SLUG path and its own rows, with queries that refuse to run outside a tenant.
 - [Observability](https://caramelize.dev/docs/0.15.0/observability/index.md): Every request and job gets a stable id, one log line and, when something fails, a report that stays out of your logs.
-- [Corretto](https://caramelize.dev/docs/0.15.0/testing-html/index.md): Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state.
-- [Current release](https://caramelize.dev/docs/0.15.0/releases/index.md): The supported APIs, development requirements, and current limits of Caramel 0.15.0.
-- [Production](https://caramelize.dev/docs/0.15.0/deployment/index.md): What a compiled application promises any deploy tool: the release artifact, its process roles, readiness, shutdown and database setup.
+- [Testing HTML](https://caramelize.dev/docs/0.15.0/testing-html/index.md): Describe rendered elements with Blueprint-shaped expectations while Corretto drives real requests and isolated database state.
+- [Current release](https://caramelize.dev/docs/0.15.0/releases/index.md): What to do when you upgrade an application to Caramel 0.15.0, release by release since 0.8.0, and what the release supports and still lacks.
+- [Production](https://caramelize.dev/docs/0.15.0/deployment/index.md): Build the release artifact, set the variables a compiled application needs, and run its process roles under the contract any deploy tool can rely on.
 - [SweetTalk](https://caramelize.dev/docs/0.15.0/sweettalk/index.md): SweetTalk is an opt-in language for Domain-Driven Design. Its words expand into SugarORM schemas and changesets and Cold Brew jobs, so the domain keeps its own vocabulary and Caramel keeps one way to store and run it.
-- [Best practices](https://caramelize.dev/docs/0.15.0/best-practices/index.md): The conventions that keep a Caramel application typed, safe, and easy to change, and the checks that hold it to them.
+- [Best practices](https://caramelize.dev/docs/0.15.0/best-practices/index.md): The ten rules a Caramel application keeps for its inputs, writes, HTML, jobs, tests and text, and the checks that hold it to them.
 
 ## Cookbook
 
-- [Create a resource](https://caramelize.dev/cookbook/0.15.0/create-a-resource/index.md): Generate a book catalog, then make the model, actions, views, and request specs your own.
-- [Read and write JSON](https://caramelize.dev/cookbook/0.15.0/return-json/index.md): Use a generated Book resource for browser HTML, JSON responses, and typed JSON input through the same action contracts.
-- [Upload and keep a file](https://caramelize.dev/cookbook/0.15.0/uploads/index.md): Multipart parsing exists. A dependable recipe also needs to show where the file lives after the request ends.
-- [Mount a third-party component](https://caramelize.dev/cookbook/0.15.0/third-party-components/index.md): Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it.
-- [Give a task its own time](https://caramelize.dev/cookbook/0.15.0/background-jobs/index.md): Enqueue typed jobs with your data, inspect their status, and run Cold Brew workers with or without a web server.
-- [Receive a signed webhook](https://caramelize.dev/cookbook/0.15.0/webhooks/index.md): Use action ingress for the exact signed bytes, a bounded body, and provider authentication before the contract binds.
-- [Sign users in with revocable sessions](https://caramelize.dev/cookbook/0.15.0/revocable-sessions/index.md): The signed cookie carries a random token. PostgreSQL holds its digest, expiry and revocation, and every request rechecks them.
+- [Create a resource](https://caramelize.dev/cookbook/0.15.0/create-a-resource/index.md): Proved by scripts/check frappe-project: Generate a book catalog, then make the model, actions, views, and request specs your own.
+- [Read and write JSON](https://caramelize.dev/cookbook/0.15.0/return-json/index.md): Proved by scripts/check page-json: Answer a generated Book resource’s actions as JSON, bind a JSON object to their contracts, and let an update check the version it was sent with If-Match.
+- [Upload and keep a file](https://caramelize.dev/cookbook/0.15.0/uploads/index.md): Recipe needs validation: Bind an upload to a typed contract field and read it for the length of one request. Keeping it after the request is not covered yet.
+- [Mount a third-party component](https://caramelize.dev/cookbook/0.15.0/third-party-components/index.md): Draft recipe: Wrap a headless JavaScript library in a Caramel island. The worked example is a11y-dialog 8.1.5 as a navigation dialog: vendor its file, mount it with props the server renders, clean up after it, survive history navigation and refresh a region beside it.
+- [Give a task its own time](https://caramelize.dev/cookbook/0.15.0/background-jobs/index.md): Proved by scripts/check page-jobs: Enqueue a typed job inside the transaction that needs it, drain it in a request spec, and run Cold Brew workers without a web server.
+- [Receive a signed webhook](https://caramelize.dev/cookbook/0.15.0/webhooks/index.md): Proved by scripts/check page-webhooks: Use action ingress for the exact signed bytes, a bounded body, and provider authentication before the contract binds.
+- [Sign users in with revocable sessions](https://caramelize.dev/cookbook/0.15.0/revocable-sessions/index.md): Proved by scripts/check page-sessions: The signed cookie carries a random token. PostgreSQL holds its digest, expiry and revocation, and every request rechecks them.
 
 ## Reference
 

@@ -2,31 +2,40 @@ Cookbook / Files
 
 # Upload and keep a file.
 
-Multipart parsing exists. A dependable recipe also needs to show where the file lives after the request ends.
+Bind an upload to a typed contract field and read it for the length of one request. Keeping it after the request is not covered yet.
 
 Recipe needs validation · Target: 0.15.0 · Not yet recipe-tested
 
 | Contract | Value |
 | --- | --- |
-| Status | Needs validation: this preview claims no supported storage adapter |
+| Status | Needs validation: Caramel ships no storage adapter, so the recipe stops at the request |
 | Needs | A contract field typed `Caramel::UploadedFile` |
-| You will have | Today, a file bound to a temporary file scoped to the request, within a 64 MiB total upload cap |
-| Proved by | A Corretto spec for success and rejection |
+| You will have | A file bound to a temporary file for the length of the request, within the 64 MiB budget the security reference lists |
+| Proved by | Nothing yet on this page; the rules below are proved by the framework’s own specs |
 
-## Where the change goes {#c-upload-files}
+## Where the change goes {#c-uploads-files}
 
 - `app/actions/`: Contract binds the file
 - `spec/requests/`: Success and rejection checks
 
-## What is supported today {#c-upload-supported}
+## What is supported today {#c-uploads-supported}
 
-| Part | Today |
+These rules run in Caramel 0.15.0 and its specs prove them.
+
+| Condition | Outcome |
 | --- | --- |
-| Binding | Typed contracts can bind `Caramel::UploadedFile` |
-| Storage | Multipart files stream to temporary files scoped to the request |
-| Size cap | 64 MiB total upload cap in the current implementation |
+| A contract field typed `Caramel::UploadedFile` | binds one multipart file part of that name |
+| The bound file | has `filename`, `content_type`, `path` and `size`; `path` is a temporary file |
+| The request ends | deletes the temporary file; copy it elsewhere to keep it |
+| A route whose contract has no `UploadedFile` field | stores no file; a file part sent to it answers 422 with `Unknown field: cover` |
+| A POST form whose `_method` reaches a route with an `UploadedFile` field | stores the file |
+| More than 128 file parts in one request | answers 413 |
+| An `UploadedFile` field with a default | fails compilation |
+| A Corretto request with `files:`, such as `Corretto.upload("spec/fixtures/cover.png", "image/png")` | sends a multipart form |
 
-## What the recipe must demonstrate {#c-upload-work}
+[Read the upload limits →](https://caramelize.dev/docs/0.15.0/security/index.md)[Send files from a spec →](https://caramelize.dev/docs/0.15.0/corretto/index.md)
+
+## Not covered yet {#c-uploads-gaps}
 
 - Validate the file and its size Application rule
 - Persist beyond the request Needs example
@@ -36,7 +45,7 @@ Recipe needs validation · Target: 0.15.0 · Not yet recipe-tested
 
 Prove it
 
-## Prove success and rejection {#c-upload-prove}
+## Prove success and rejection {#c-uploads-prove}
 
 **Terminal · inside the application**
 
@@ -48,8 +57,8 @@ frappe corretto
 
 > Needs validation **A parser is only one part of file storage**
 >
-> This preview does not claim a supported storage adapter or offer untested persistence code. The complete recipe must establish that path first.
+> This recipe does not claim a storage adapter or offer untested persistence code. The complete recipe must establish that path first.
 
-[← All recipes](https://caramelize.dev/cookbook/0.15.0/) · [Find the application boundaries →](https://caramelize.dev/docs/0.15.0/project-map/index.md)
+[← All recipes](https://caramelize.dev/cookbook/0.15.0/) · [Send files from a spec →](https://caramelize.dev/docs/0.15.0/corretto/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/cookbook/0.15.0/uploads/

@@ -17,7 +17,7 @@ Learning it for the first time? The recipe [Create a resource](https://carameliz
 
 | Limit | Value |
 | --- | --- |
-| A view instance renders | 1 time |
+| Island name | 1–64 characters |
 
 ## A view is a class {#c-views-class}
 
@@ -43,8 +43,8 @@ An action renders it as the page: `page "Book", Views::Books::Show.new(book, csr
 
 | Condition | Outcome |
 | --- | --- |
-| Inputs typed in `initialize` and markup in `private def blueprint` | are checked by the compiler |
-| A view object | renders once; build a new one for each response |
+| An `initialize` argument of the wrong type, or markup outside `private def blueprint` that is not Crystal | fails compilation |
+| A second `to_s` on one view object | raises `Can only invoke 'to_s' once on String::Builder`; build a new view for each response |
 
 | File | Role |
 | --- | --- |
@@ -58,10 +58,11 @@ Each HTML element is a method. For example, `h1 { "<Dune>" }` writes `<h1>&lt;Du
 
 | Condition | Outcome |
 | --- | --- |
-| The value an element’s block returns | is escaped text |
+| The value an element’s block returns, when the block wrote nothing | is escaped text |
+| The value an element’s block returns, once the block wrote an element | is dropped: `p { "a"; strong { "b" } }` writes only `<p><strong>b</strong></p>` |
 | `plain` inside a block that writes elements | writes escaped text beside them |
 
-**A paragraph with text and an element**
+**app/views/books/show.cr · inside blueprint, text beside an element**
 
 ```crystal
 p do
@@ -91,11 +92,11 @@ Attributes are keyword arguments.
 
 | Condition | Outcome |
 | --- | --- |
-| An attribute value | is escaped like text, so &, \<, \> and both quotes are safe |
+| An attribute value | is escaped like text: `&`, `<`, `>`, `"` and `'` become entities |
 | htmx 4 attributes that children inherit | carry an `:inherited` suffix; a symbol cannot spell the colon, so quote the name |
 | An attribute name that contains `<`, `>`, `&` or a quote | raises ArgumentError |
 
-**Quoted and boolean attributes**
+**Inside blueprint · a quoted name and boolean attributes**
 
 ```crystal
 div "hx-swap:inherited": "innerMorph" do
@@ -109,20 +110,20 @@ end
 | --- | --- |
 | `render Card.new(book)` | writes a child view in place: `@books.each { \|book\| render Card.new(book) }` |
 | `island "Rating", {stars: 4}` | writes a `<caramel-island>` mount point with the props as JSON |
-| An island name that is not PascalCase | raises ArgumentError |
+| An island name that is not an upper-case ASCII letter followed by 0 to 63 ASCII letters or digits (`/\A[A-Z][A-Za-z0-9]{0,63}\z/`) | raises ArgumentError |
 | `CaramelIslands.define("Rating", (element, props) => { … })` in `app/assets/javascript/app.js` | brings it to life |
 | `raw value` with a `Caramel::HTML::Safe` or `safe(...)` value | writes it unescaped |
 | `raw value` with anything else | fails compilation, so an ordinary string cannot reach the page raw by accident |
 
 [Mount a third-party component →](https://caramelize.dev/cookbook/0.15.0/third-party-components/index.md)
 
-Only HTML your application built itself belongs in `Safe`. Never wrap user input, stored text or a third-party response. Escaped text is the default for a reason.
+Only HTML your application built itself belongs in `Safe`. Never wrap user input, stored text or a third-party response.
 
 ## markup builds small escaped fragments {#c-views-markup}
 
-An action or a view can build a fragment too small for a class with `markup { … }`.
+`markup { … }` builds a fragment in an action or a view without a view class.
 
-**An action morphs one element**
+**Inside an action · one element for morph**
 
 ```crystal
 morph "#count", with: markup { span { count.to_s } }
@@ -135,11 +136,15 @@ morph "#count", with: markup { span { count.to_s } }
 
 ## Forms carry the CSRF token {#c-views-forms}
 
-A form that posts carries the CSRF token in a hidden `_csrf` field, and a form for PATCH or DELETE names its method in `_method`.
+A form that posts carries the CSRF token in a hidden `_csrf` field, and a form for PATCH or DELETE names its method in `_method`. htmx requests need no hidden field: the layout’s `hx-headers` sends the token as `X-CSRF-Token`.
 
-[Review the security defaults →](https://caramelize.dev/docs/0.15.0/security/index.md)[Read how _method routes →](https://caramelize.dev/docs/0.15.0/routes-and-contracts/index.md)
+| Condition | Outcome |
+| --- | --- |
+| A form that posts with the hidden `_csrf` field, or an htmx request with the layout’s header | passes the check that [Security defaults](https://caramelize.dev/docs/0.15.0/security/index.md) states |
+| A form that posts without the field, from a page without the header | answers 403 |
+| `_method` of `PATCH`, `PUT` or `DELETE` in a posted form | routes as that method; [Routes and contracts](https://caramelize.dev/docs/0.15.0/routes-and-contracts/index.md) lists the cases |
 
-**A delete button**
+**app/views/books/show.cr · inside blueprint, a delete button**
 
 ```crystal
 form action: book_path(@book.id), method: "post" do
@@ -148,8 +153,6 @@ form action: book_path(@book.id), method: "post" do
   button(type: "submit") { "Delete" }
 end
 ```
-
-htmx requests need no hidden field. The layout’s `hx-headers` sends the token as `X-CSRF-Token`.
 
 `frappe make resource` generates a complete form to start from. Its `labelled` helper writes a label, the control and the field’s errors. Its error summary is an alert listing each message.
 
@@ -190,7 +193,7 @@ Prove it
 
 ## Test what a view writes {#c-views-testing}
 
-Test what a view writes through a real response. Corretto’s HTML expectations describe elements and decoded text, recorded apart from Blueprint’s renderer.
+Test what a view writes through a real response. Corretto’s HTML expectations describe elements and decoded text, recorded apart from Blueprint’s renderer. The command assumes the Book resource of [Your first application](https://caramelize.dev/docs/0.15.0/getting-started/index.md), step 02; generate it first.
 
 **Terminal · inside the application**
 
@@ -198,7 +201,7 @@ Test what a view writes through a real response. Corretto’s HTML expectations 
 frappe corretto spec/requests/books_spec.cr
 ```
 
-**Passing:** Every example is green. A shared escaping defect cannot make both sides agree, because the expectations are recorded apart from Blueprint’s renderer.
+**Passing:** The generated spec is green and the run ends with `Corretto: 1 of 1 workers passed`. A shared escaping defect cannot make both sides agree, because the expectations are recorded apart from Blueprint’s renderer.
 
 [Test the HTML →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
 

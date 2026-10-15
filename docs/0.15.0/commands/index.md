@@ -13,6 +13,16 @@ Frappé, your application’s binary, and Latte, listed from the source of Caram
 
 Learning it for the first time? [Your first application](https://caramelize.dev/docs/0.15.0/getting-started/index.md) runs the everyday commands in order. This page lists every command.
 
+## Limits at a glance {#c-commands-limits}
+
+| Limit | Value |
+| --- | --- |
+| Exit status | 0 success, 1 failure, 2 usage error (application binary and Latte) |
+| `frappe corretto --concurrency` | 1–8 |
+| `frappe db branch create NAME` | a lowercase letter, then up to 30 lowercase letters, digits or underscores |
+| `frappe traces --limit` default | 20 |
+| `frappe logs` lines | 200 |
+
 ## Frappé runs the release your application pins {#c-commands-frappe}
 
 | Condition | Outcome |
@@ -56,12 +66,12 @@ Learning it for the first time? [Your first application](https://caramelize.dev/
 - `frappe errors [--agent|--human]`: List development runtime errors and repeated queries, grouped.
 - `frappe services [status|start|stop]`: Show, start or stop Latte's PostgreSQL, DNS and HTTPS services. Works outside an application.
 - `frappe sites`: List the sites registered with Latte. Works outside an application.
-- `frappe sites remove NAME`: Unregister site NAME, keeping its files, databases and credentials. Works outside an application.
+- `frappe sites remove NAME`: Unregister site NAME, keeping its files, databases, credentials, logs and backups. Works outside an application.
 - `frappe installations [list]`: List the Caramel releases installed on this Mac. Works outside an application.
 - `frappe installations install VERSION`: Clone, build and register the tagged release VERSION, reusing this toolchain when the release pins the same one; if VERSION is installed, build what it lacks, such as its linter. Works outside an application.
 - `frappe installations register`: Register this checkout for projects pinned to its version; ~/.local/bin/frappe and latte run the newest installed release. Works outside an application.
 - `frappe installations remove VERSION`: Forget the installation registered for VERSION; the launchers move to the newest remaining release. Works outside an application.
-- `frappe doctor`: Check the toolchain, this Caramel installation, dependencies, local configuration and Latte services.
+- `frappe doctor`: Check the toolchain, this Caramel installation, dependencies, local configuration, Latte services, trusted HTTPS and the port relay.
 - `frappe open`: Open the application's HTTPS origin in the browser.
 - `frappe lsp crystalline|ameba-ls [SERVER_ARGS...]`: Run a pinned language server for this project on stdio.
 - `frappe lsp install`: Build the pinned language servers. Works outside an application.
@@ -70,16 +80,26 @@ Learning it for the first time? [Your first application](https://caramelize.dev/
 
 | Condition | Outcome |
 | --- | --- |
-| `check`, `lint`, `migrate` or `db diff` when stdout is not a terminal | prints MRDP diagnostics |
+| `check`, `lint`, `migrate`, `db diff`, `traces` or `errors` when stdout is not a terminal | prints MRDP diagnostics |
 | `--agent` | prints MRDP diagnostics |
 | `--human` | prints the terminal layout |
-| A mistyped command or option | exits 1 with the intended command’s exact syntax and a suggestion |
+| A mistyped command or option on a terminal | exits 1 with `frappe migrte: unknown command migrte`, the intended command’s `Usage:` line and `Did you mean migrate?` |
+| A mistyped command or option when stdout is not a terminal, or with `--agent` | exits 1 with one MRDP `USAGE` block: `MSG`, `SYNTAX` and `SUGGEST` |
+| `frappe corretto --concurrency` outside 1 to 8 | refuses |
+| `frappe db branch create NAME` that is not a lowercase letter followed by up to 30 lowercase letters, digits or underscores | exits 1 with `branch name NAME must be a lowercase letter followed by up to 30 lowercase letters, digits or underscores` |
+| `frappe traces` without `--limit` | prints at most 20 traces |
+| `frappe logs` | prints the last 200 lines |
 
 [Read diagnostics as an agent →](https://caramelize.dev/docs/0.15.0/agents/index.md)
 
 ## The application binary takes its own commands {#c-commands-app}
 
-Each application compiles to one binary whose main is `Caramel.run(App)`; below, `APP` stands for it. Frappé runs these commands for you: `frappe dev` serves, and `frappe routes`, `frappe seed`, `frappe migrate` and `frappe translations` run the commands of the same name. `serve` and `work` are the two process roles. `ops`, `jobs`, `db diagnose` and `insights` belong to Crema, which also lets your application add commands of its own.
+Each application compiles to one binary whose main is `Caramel.run(App)`; below, `APP` stands for it. Frappé runs these commands for you: `frappe dev` serves, `frappe routes`, `frappe seed`, `frappe migrate` and `frappe translations` run the commands of the same name, `frappe db diff` runs `schema`, `frappe db diagnose` runs `db diagnose` and `frappe corretto` runs `migrate` on the spec database. `frappe build` compiles the same binary for Linux in a container, so it needs a container engine such as Docker Desktop. `serve` and `work` are the two process roles. `ops`, `jobs`, `db diagnose` and `insights` belong to Crema, which also lets your application add commands of its own.
+
+| Condition | Outcome |
+| --- | --- |
+| Any binary command | exits 0 on success, 1 on failure, 2 on a usage error |
+| `serve` or `work` with pending migrations | stops with `Pending migrations. Run frappe migrate first.` |
 
 - `APP serve [--no-workers]`: Serve HTTP on the private socket CARAMEL_SOCKET names, with Cold Brew’s workers, maintenance and schedules; --no-workers keeps the PubSub broker and maintenance but runs no workers or schedules, for a deployment that runs work separately. CARAMEL_ROOT, when set, names the directory whose public/ it serves. Refuses to start with pending migrations.
 - `APP work [--queues=NAMES] [--concurrency=N] [--no-scheduler]`: Run Cold Brew’s workers, maintenance and schedules without HTTP. --queues and --concurrency replace CARAMEL_WORKER_QUEUES and CARAMEL_WORKER_CONCURRENCY; --no-scheduler leaves schedules to other processes.
@@ -97,13 +117,20 @@ Each application compiles to one binary whose main is `Caramel.run(App)`; below,
 
 ## Frappé starts Latte when a command needs it {#c-commands-latte}
 
-You rarely call Latte yourself. `frappe services` starts and stops the services Latte runs.
+Frappé runs `latte daemon --detach` when a command needs the services and Latte is not running, and `frappe services` starts and stops the services Latte runs. You call Latte yourself for the login item, certificate trust and its version.
+
+| Condition | Outcome |
+| --- | --- |
+| An unknown Latte command | exits 2 with `Unknown command. Use latte --help.` |
+| `latte version` | prints `Latte 0.15.0 (control API 1, 2)` |
 
 - `latte daemon`: Run Latte in this terminal.
 - `latte daemon --detach`: Run Latte in its own session, logging to logs/latte.log. Frappé starts Latte this way when it is not running.
 - `latte stop`: Stop the running Latte. Services keep running.
 - `latte service install`: Start Latte whenever you log in (a per-user login item), and now.
 - `latte service uninstall`: Remove that login item; the Latte it started stops.
+- `latte trust install`: Trust Latte's certificate authority in your default keychain.
+- `latte trust remove`: Remove that one certificate from the keychain it was added to.
 - `latte version`: Print this Latte's release and the control API versions it serves.
 
 Prove it
@@ -118,7 +145,7 @@ frappe agent-manifest
 frappe migrte
 ```
 
-**Passing:** `--help` prints the command’s syntax. `agent-manifest` prints every command with the diagnostic grammar. The mistyped `migrte` exits 1 with the syntax of `migrate` and a suggestion.
+**Passing:** `--help` prints `Usage: frappe check …` and the command’s summary. `agent-manifest` prints every command with the diagnostic grammar. The mistyped `migrte` exits 1: on a terminal with `frappe migrte: unknown command migrte`, the `Usage:` line of `migrate` and `Did you mean migrate?`; piped, with one MRDP `USAGE` block.
 
 [← Security defaults](https://caramelize.dev/docs/0.15.0/security/index.md) · [Set up the local environment →](https://caramelize.dev/docs/0.15.0/local-environment/index.md)
 

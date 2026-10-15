@@ -2,17 +2,17 @@ Guides / Best practices
 
 # Build it the Caramel way.
 
-The conventions that keep a Caramel application typed, safe, and easy to change, and the checks that hold it to them.
+The ten rules a Caramel application keeps for its inputs, writes, HTML, jobs, tests and text, and the checks that hold it to them.
 
 | Contract | Value |
 | --- | --- |
 | Covers | Placing changes, contracts, changesets, migrations, escaping, CSRF, jobs, tests, catalogs and lint rules |
-| You will have | An application that stays typed, safe and easy to change |
+| You will have | An application whose inputs, writes, HTML, jobs and text follow the ten rules below, checked by `frappe check`, `frappe lint` and `frappe corretto` |
 | Proved by | `frappe check` · `frappe lint` · `frappe corretto` |
 
-## The guide in five stages {#c-practices-map}
+## The guide in six stages {#c-practices-map}
 
-10 sections · read in order the first time
+12 sections · read in order the first time
 
 - **1 · Start**
 
@@ -34,40 +34,32 @@ The conventions that keep a Caramel application typed, safe, and easy to change,
 
   - [Keep user-facing text in catalogs](#c-practices-text)
   - [Write code that reads like short sentences](#c-practices-style)
+- **6 · Limits**
+
+  - [What does not compile](#c-practices-compile)
+  - [Not covered yet](#c-practices-gaps)
+
+The code on this page extends the bookshelf of [Your first application](https://caramelize.dev/docs/0.15.0/getting-started/index.md): a Book with `title` and `author`, to which this page adds a `rating` and a receipt job.
 
 Stage 1 · Start
 
 ## Give every change its home {#c-practices-home}
 
-Each kind of change has one place. Routes live in `config/routes.cr`, actions and their contracts in `app/actions/`, stored shapes in `app/models/`, write rules in `app/changesets/`, and a SweetTalk domain in `app/domain/`. HTML lives in `app/views/`, background work in `app/jobs/`, translations in `app/locales/`, and request specs in `spec/requests/`.
-
-Your application’s files are the extension point. When the public API cannot do what a task needs, name the gap instead of patching framework code.
-
-[Find the file for a change →](https://caramelize.dev/docs/0.15.0/project-map/index.md)
+Each kind of change has one place, and [Project structure](https://caramelize.dev/docs/0.15.0/project-map/index.md) lists them. Your application’s files are the extension point. When the public API cannot do what a task needs, name the gap, in an issue or in `AGENTS.md`, instead of patching `lib/caramel`: the next `shards install` would undo the patch.
 
 ## Declare every input {#c-practices-inputs}
 
-Read request data only through the action’s contract. Give each field its type, and bounds or a default where they apply.
+Read request data only through the action’s contract. Give each field its type, and bounds or a default where they apply. The outcomes of an undeclared field and of a route parameter without a field are in the [contract reference](https://caramelize.dev/docs/0.15.0/routes-and-contracts/index.md); `frappe check` prints the line that adds a missing field.
 
-| Condition | Outcome |
-| --- | --- |
-| A submitted field the contract does not declare | answers 422 |
-| The same, in the query of a GET or HEAD request | is not an error |
-| Route parameter with no matching field | fails compilation |
-
-`frappe check` prints the line that adds a missing field.
-
-**app/actions/books/create.cr · contract**
+**app/actions/books/create.cr · contract, with the rating this page adds**
 
 ```crystal
 contract do
   field title : String, min: 1, max: 200
-  field isbn : String
+  field author : String, min: 1, max: 200
   field rating : Int32?, min: 1, max: 5
 end
 ```
-
-[Read the contract reference →](https://caramelize.dev/docs/0.15.0/routes-and-contracts/index.md)
 
 Stage 2 · Data
 
@@ -80,39 +72,46 @@ Every insert and update goes through a changeset, so its rules run for every cal
 | Duplicate on a unique index, with `unique_constraint` declared | adds an error on the field |
 | The same duplicate without it | raises a database exception |
 
-**app/changesets/book.cr**
+**app/changesets/book.cr · for a Book generated with title:string:unique**
 
 ```crystal
 class Book::Changeset < SugarORM::Changeset(App::Book)
   param title : String
-  param isbn : String
+  param author : String
+  param rating : Int32?
 
   def validate(cs)
     cs.validate_presence(:title)
     cs.validate_length(:title, max: 200)
-    cs.unique_constraint(:isbn)
+    cs.unique_constraint(:title)
   end
 end
 ```
 
 ## Preload, and migrate in reviewed steps {#c-practices-data}
 
-Preload every association a page reads. To change stored data, edit the schema first, derive the migration, read its SQL, then apply it. Rehearse a risky change on a database branch.
+Preload every association a page reads. To change stored data, edit the schema first, derive the migration, read its SQL, then apply it. Rehearse a change you cannot undo, such as dropping a column, on a database branch.
 
 | Condition | Outcome |
 | --- | --- |
 | Association a page reads without a preload | fails compilation, reported as `N_PLUS_ONE` |
-| Migration that would lock a busy table | refuses |
+| A migration with `CREATE INDEX` on an existing table, which blocks its writes while the index builds | refuses; `frappe db diff` writes `CREATE INDEX CONCURRENTLY` in a migration of its own |
 
-**Terminal**
+**app/models/book.cr · the schema edit, inside schema "books"**
+
+```crystal
+field rating : Int32?
+```
+
+**Terminal · inside the application, after the schema edit**
 
 ```bash
 frappe db diff --name add_rating_to_books
 ```
 
-**Expect:** Writes the migration to `db/migrations/` and prints `Wrote PATH`.
+**Expect:** Writes the migration to `db/migrations/` and prints `Wrote PATH`. Without the schema edit it prints `already matches the declared schema; no migration was written`, and a second run after migrating prints the same.
 
-**Terminal**
+**Terminal · inside the application**
 
 ```bash
 frappe migrate
@@ -120,13 +119,13 @@ frappe migrate
 
 **Expect:** Prints `Applied N migrations.`, then `The database matches the declared schema.`
 
-**Terminal**
+**Terminal · inside the application**
 
 ```bash
 frappe db branch create rating_trial
 ```
 
-**Expect:** Prints the branch’s database URL.
+**Expect:** Prints the branch’s database URL. `frappe dev --branch rating_trial` then runs the application against the copy; the development database is untouched.
 
 [Read the SugarORM reference →](https://caramelize.dev/docs/0.15.0/sugarorm/index.md)
 
@@ -153,13 +152,25 @@ Stage 4 · Work
 
 ## Make background work safe to repeat {#c-practices-jobs}
 
-Enqueue a job in the same transaction as the write it follows, so both commit or neither does. Pass identifiers, not records, and load fresh data in `perform`. A job runs at least once: give each external call a stable identifier the receiving service can deduplicate. Keep retry and failure hooks short. A recurring schedule runs once per period however many processes run it, so its block should only enqueue the real work.
+Enqueue a job in the same transaction as the write it follows, so both commit or neither does. Pass identifiers, not records, and load fresh data in `perform`. A job runs at least once: give each external call a stable identifier the receiving service can deduplicate. A retry or failure hook only records or enqueues; it does no work of its own. A recurring schedule runs once per period however many processes run it, so its block should only enqueue the real work.
 
-**app/actions/books/create.cr · the write and its job**
+**app/jobs/send_receipt.cr · the job this page adds**
+
+```crystal
+struct App::SendReceipt < Caramel::ColdBrew::Job
+  param book_id : Int64
+
+  def perform
+    # Load the book by book_id and send its receipt.
+  end
+end
+```
+
+**app/actions/books/create.cr · handle, rewritten to enqueue the job beside the write**
 
 ```crystal
 def handle(contract : Contract)
-  changes = App::Book::Changeset.new(title: contract.title, isbn: contract.isbn)
+  changes = App::Book::Changeset.new(title: contract.title, author: contract.author)
   SugarORM::Repo.transaction do
     SugarORM::Repo.insert(changes)
     App::SendReceipt.enqueue(book_id: changes.record.id) if changes.saved?
@@ -171,13 +182,7 @@ end
 
 ## Test what users observe {#c-practices-tests}
 
-Write request specs that drive the application through Corretto against real PostgreSQL. Assert the rendered HTML with `have_html`, stored rows with `have_row`, and statuses and headers, with at least one failure case for each rule. Fake a third-party service at the wire with `Corretto.stub_wire`. Drain queues with `Caramel::ColdBrew.drain_queue!`, then assert what the job changed.
-
-| Condition | Outcome |
-| --- | --- |
-| A mocking library compiled beside Corretto | fails compilation |
-
-[Read the Corretto reference →](https://caramelize.dev/docs/0.15.0/corretto/index.md)
+Write request specs that drive the application through Corretto against real PostgreSQL. Assert the rendered HTML with `have_html`, stored rows with `have_row`, and statuses and headers, with at least one failure case for each rule. Fake a third-party service at the wire with `Corretto.stub_wire`. Drain queues with `Caramel::ColdBrew.drain_queue!`, then assert what the job changed. Corretto refuses a mocking library; the [Corretto reference](https://caramelize.dev/docs/0.15.0/corretto/index.md) says how.
 
 Stage 5 · Style
 
@@ -187,7 +192,24 @@ Once an application has locales, write user-facing text as `t.` messages. Use `%
 
 ## Write code that reads like short sentences {#c-practices-style}
 
-`frappe lint` holds the application to Caramel’s rule set: descriptive names, no service nouns such as `InvitationService`, short blocks, positive conditions, and actions small enough to read as one thought. Put the verb on its subject instead of a service: a method on the model, a changeset, or a job. `frappe format` applies the pinned formatter.
+`frappe lint` holds the application to Caramel’s rule set: descriptive names, no service nouns such as `InvitationService`, positive conditions, a cyclomatic complexity of at most 10 per method, and no `dump` left behind. Every other rule is Ameba 1.7.0’s default. Put the verb on its subject instead of a service: a method on the model, a changeset, or a job. `frappe format` applies the pinned formatter.
+
+Limits
+
+## What does not compile {#c-practices-compile}
+
+| Condition | Outcome |
+| --- | --- |
+| A route parameter with no matching contract field | fails compilation |
+| An association a page reads without a preload | fails compilation, reported as `N_PLUS_ONE` |
+| `ingress` with `csrf: false` and no authenticator | fails compilation |
+| A mocking library compiled beside Corretto | fails compilation |
+| A method whose cyclomatic complexity passes 10 | fails `frappe lint`, not compilation |
+
+## Not covered yet {#c-practices-gaps}
+
+- No rule here is checked by a page fixture; the snippets extend the bookshelf by hand and no check builds them.
+- Browser tests under `spec/system/` and file storage under `storage/` have no conventions yet.
 
 Prove it
 
@@ -203,7 +225,7 @@ frappe lint
 frappe corretto
 ```
 
-**Passing:** `frappe check` prints `✓ Type check passed`, `frappe lint` exits 0 and `frappe corretto` ends with `Corretto: N of N workers passed`.
+**Passing:** `frappe check` exits 0, `frappe lint` exits 0 and `frappe corretto` ends with `Corretto: N of N workers passed`.
 
 [← Project map](https://caramelize.dev/docs/0.15.0/project-map/index.md) · [Declare routes and contracts →](https://caramelize.dev/docs/0.15.0/routes-and-contracts/index.md)
 

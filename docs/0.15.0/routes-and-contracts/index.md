@@ -18,9 +18,12 @@ Learning it for the first time? The recipe [Create a resource](https://carameliz
 | Limit | Value |
 | --- | --- |
 | Path segments | 32 |
-| Parameter names per path | 1 |
+| Times one parameter name may appear in a path | 1 |
+| Values per request | 4,096 |
+| Files per request | 128 |
 | Body text read by default | 2 MiB |
 | Upload budget shared by files | 64 MiB |
+| Multipart framing beyond text and uploads | 1 MiB |
 
 ## Routes live in one draw block {#c-routing-draw}
 
@@ -36,6 +39,7 @@ module App
     get "/books/new", App::Books::New
     post "/books", App::Books::Create
     get "/books/:id", App::Books::Show
+    get "/books/:id/edit", App::Books::Edit
     patch "/books/:id", App::Books::Update
     delete "/books/:id", App::Books::Destroy
     # Frappé resource routes
@@ -47,7 +51,7 @@ end
 | --- | --- |
 | Start | Begins with `/` |
 | Static segment | Letters, digits and `._~-` |
-| Parameter | `:snake_case`, such as `:id`; appears once per path |
+| Parameter | `:snake_case`, such as `:id`; each name appears once per path, and a path may carry several, such as `/teams/:team_id/members/:id` |
 | Length | At most 32 segments |
 
 ## The compiler checks the route table {#c-routing-checks}
@@ -63,6 +67,8 @@ The route table is checked when the application compiles.
 | A parameter field that is not a non-nilable `String`, `Int32` or `Int64`, or a field value bound from one, without `default:` | fails compilation |
 | Two routes that match the same requests (`DUPLICATE ROUTE`) | fails compilation |
 | A static route declared after a parameter route that would catch it (`AMBIGUOUS ROUTE ORDER`) | fails compilation |
+| One `tenant App::Model, by: :field do … end` block, with `caramel/tenancy` required | groups the routes inside it under the tenant’s address |
+| A second `tenant` block, one without `caramel/tenancy`, a route outside it that starts with a parameter, or a route inside it whose first segment a central route also uses | fails compilation; [Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md) shows the block |
 
 Declare `/books/new` before `/books/:id`. A missing field names the route, the contract block and the fix:
 
@@ -89,7 +95,8 @@ Static segments win over parameters, and matching backtracks. `GET /books/new` r
 | A HEAD request to a streamed response | omits `Content-Length` |
 | A route parameter that fails its field (`field id : Int64, min: 1`: `/books/abc`, `/books/0`) | answers 404 |
 | A path over 32 segments | answers 404 |
-| A malformed path escape | answers 400 |
+| A malformed path escape, an escape that decodes to `/`, `\` or a control byte, or a raw backslash or control byte in the path | answers 400 with `Malformed path` |
+| A route parameter whose decoded bytes are not UTF-8 | answers 400 with `Malformed request` |
 
 HTML forms can only send GET and POST.
 
@@ -136,10 +143,10 @@ end
 | `min:` or `max:` on `Int32`, `Int64` or `Float64` | bound its value |
 | Bounds on other types, defaults on files, any other type | fails compilation |
 | `min:` or `max:` on a field value (its `from_field` checks its own bounds) | fails compilation |
-| An absent value, or text that is only whitespace | is missing |
+| An absent value, or text that is only whitespace | counts as missing |
 | A missing field with a default | takes the default |
 | A missing nilable field | stays `nil` |
-| A missing field with neither | is an error |
+| A missing field with neither | answers 422 with `is required` under the field |
 
 An unchecked checkbox sends nothing, so give its `Bool` field `default: false`.
 
@@ -147,10 +154,11 @@ An unchecked checkbox sends nothing, so give its `Bool` field `default: false`.
 | --- | --- |
 | An `Array(T)` field without `max:` | fails compilation |
 | An `Array(T)` field with `?` or a default | fails compilation |
+| `min:` or `max:` on an Array that is not an integer literal, or with `min:` below 0, `max:` below 1 or `min:` above `max:` | fails compilation |
 | `min:` and `max:` on an Array | count items |
 | An absent array | is empty |
-| A blank item | is missing |
-| An item equal to an earlier one | is an error |
+| A blank item | answers 422 with `is required` under `name[index]` |
+| An item equal to an earlier one | answers 422 with `repeats an earlier item` under `name[index]` |
 | Items | keep their order |
 | Each item | converts like a field of its type |
 
@@ -160,19 +168,19 @@ A field binds by name from the route parameters, the body or the query string. T
 
 | Condition | Outcome |
 | --- | --- |
-| A name sent twice, in one source or across two | is an error |
+| A name sent twice, in one source or across two | answers 422 with `Duplicate field: name` under `_base` |
 | The same name for an `Array` field | binds every item |
 | `_csrf` or `_method` in a form | is a transport control, never a field |
-| A submitted key the contract does not declare | is an error |
+| A submitted key the contract does not declare | answers 422 with `Unknown field: name` under `_base` |
 | An undeclared key in the query of a GET or HEAD request | is ignored, so links can carry tracking or cache-busting parameters |
-| An undeclared query key on other methods | is an error |
-| A JSON member of the wrong JSON type (a string for `String` and `Time`, a number for the numeric types, a boolean for `Bool`) | is an error |
+| An undeclared query key on other methods | answers 422 with `Unknown field: name` under `_base` |
+| A JSON member of the wrong JSON type (a string for `String` and `Time`, a number for the numeric types, a boolean for `Bool`, an array for `Array(T)`) | answers 422 with `must be a JSON string`, `number`, `boolean` or `array` under the field |
 | `null` in JSON | counts as absent |
-| A JSON number such as `3.5` for an `Int32` (numbers keep their source text) | is an error |
-| A JSON body that is not an object | is an error |
+| A JSON number such as `3.5` for an `Int32` (numbers keep their source text) | answers 422 with `must be a valid Int32` under the field |
+| A JSON body that is not an object | answers 422 with `Expected a JSON object` under `_base` |
 | `_csrf` and `_method` in JSON | are ordinary members; send `X-CSRF-Token` and the real method |
 | Broken encoding or JSON | answers 400 `Malformed request` |
-| A body past the route’s limit | answers 413 `Request body is too large` |
+| A body past the route’s limit, more than 4,096 values (every query and form pair, JSON member, JSON array item and multipart part counts as one), more than 128 file parts, or a multipart body that spends more than 1 MiB on boundaries and part headers beyond its text and uploads | answers 413 `Request body is too large` |
 | Any other content type | answers 415 |
 | An `ingress` authenticator that answers false | answers 401 before the contract binds |
 
@@ -188,7 +196,7 @@ Errors collect per field name. Errors about the request as a whole go under `_ba
 | --- | --- |
 | `is required` | A missing field with no default that is not nilable |
 | `must be a valid Int32` | Text that does not convert; also Int64, Float64, Bool and Time |
-| `must be a JSON string` | A JSON member of the wrong type; also number and boolean |
+| `must be a JSON string` | A JSON member of the wrong type; also number, boolean and, for an Array field, array |
 | `must be at least 3 characters` | A String under min:, or over max: with must be at most |
 | `must be at least 1` | A number under min:, or over max: with must be at most |
 | `must be a file` | Text sent for an UploadedFile field |
@@ -237,14 +245,16 @@ end
 
 | Condition | Outcome |
 | --- | --- |
+| A name given to `resource_paths` that is not a lowercase identifier (`[a-z][a-z0-9_]*`) | fails compilation |
 | An ID that is not positive | raises ArgumentError |
 | Locale prefixes enabled | each helper adds the request’s prefix |
+| `caramel/tenancy` required | each helper adds the request tenant’s prefix; [Multi-tenancy](https://caramelize.dev/docs/0.15.0/multi-tenancy/index.md) shows the addresses |
 
 Prove it
 
 ## Inspect and repair routes {#c-routing-tools}
 
-`frappe routes` lists every route with its action and contract. A filter keeps routes whose method, path or action contains it, in any case. A field value shows its type and the type it binds from, such as `quantity:Ordering::Quantity(Int32)`. Routes with their own ingress end with a bracketed summary, such as `[raw, 256 KiB, csrf off, authenticate signed?]`.
+These commands assume the Book resource of [Your first application](https://caramelize.dev/docs/0.15.0/getting-started/index.md), step 02; generate it first. `frappe routes` lists every route with its action and contract. A filter keeps routes whose method, path or action contains it, in any case. A field value shows its type and the type it binds from, such as `quantity:Ordering::Quantity(Int32)`. Routes with their own ingress end with a bracketed summary, such as `[raw, 256 KiB, csrf off, authenticate signed?]`.
 
 **Terminal · inside the application**
 
@@ -252,16 +262,9 @@ Prove it
 frappe routes books
 ```
 
-**Expect:** Prints one line per route whose method, path or action contains `books`, in any case: method, path, action, then the contract fields, such as `GET /books/:id App::Books::Show id:Int64(min=1)`.
+**Expect:** Prints one line per route whose method, path or action contains `books`, in any case, seven for a generated Book: method, path, action, then the contract fields. The show route’s line reads `GET /books/:id App::Books::Show id:Int64(min=1)`.
 
-**Output · frappe routes books**
-
-```bash
-GET     /books/:id    App::Books::Show  id:Int64(min=1)
-PATCH   /books/:id    App::Books::Update  id:Int64(min=1) title:String
-```
-
-`frappe check` runs the type check and prints MRDP unless stdout is a terminal. A route without its field becomes a `CONTRACT_MISMATCH` at the contract block, with a `PATCH` line. Inserting that line makes the check pass. A field of the wrong type gets a `FIX` line instead.
+`frappe check` runs the type check and prints MRDP unless stdout is a terminal. A route without its field becomes a `CONTRACT_MISMATCH` at the contract block, with a `PATCH` line when `contract do` ends its line. Inserting that line makes the check pass. A field of the wrong type gets a `FIX` line instead.
 
 **Terminal · inside the application**
 
@@ -269,7 +272,7 @@ PATCH   /books/:id    App::Books::Update  id:Int64(min=1) title:String
 frappe check
 ```
 
-**Expect:** Prints MRDP when stdout is not a terminal. A route without its field becomes a `CONTRACT_MISMATCH` at the contract block, with a `PATCH` line; inserting that line makes the check pass.
+**Expect:** Exits 0 and prints `OK check N files` when piped, `✓ Type check passed` on a terminal. A route without its field becomes a `CONTRACT_MISMATCH` at the contract block, with a `PATCH` line; inserting that line makes the check pass.
 
 **Output · frappe check, a route without its field**
 
@@ -280,8 +283,8 @@ MISSING: id:Int64
 PATCH: INSERT "field id : Int64" AT 4:7
 ```
 
-**Passing:** `frappe check` passes once every route parameter has its contract field: `OK check N files` in agent output, `✓ Type check passed` on a terminal. `frappe routes` lists each route with its contract fields.
+**Passing:** `frappe check` exits 0 once every route parameter has its contract field, and `frappe routes books` lists each Book route with its contract fields.
 
-[← Deployment status](https://caramelize.dev/docs/0.15.0/deployment/index.md) · [Answer the request →](https://caramelize.dev/docs/0.15.0/actions-and-responses/index.md)
+[← Production](https://caramelize.dev/docs/0.15.0/deployment/index.md) · [Answer the request →](https://caramelize.dev/docs/0.15.0/actions-and-responses/index.md)
 
 Caramel 0.15.0 · https://caramelize.dev/docs/0.15.0/routes-and-contracts/

@@ -8,8 +8,8 @@ Define typed jobs, run workers and schedules, publish notifications, and cache s
 | --- | --- |
 | Release | 0.15.0 |
 | Needs | A Caramel application and its PostgreSQL database |
-| Covers | Jobs, retries, renames, workers, schedules, PubSub, cache |
-| Proved by | `drain_queue!` in a Corretto spec |
+| Covers | Jobs, retries, status and hooks, renames, workers, schedules, PubSub, cache |
+| Proved by | `frappe corretto` on a spec that drains the queue |
 
 Learning it for the first time? The recipe [Run a background job](https://caramelize.dev/cookbook/0.15.0/background-jobs/index.md) walks through it in order. This page lists every name and limit.
 
@@ -23,14 +23,15 @@ Learning it for the first time? The recipe [Run a background job](https://carame
 | Worker fibers across all queues, at most | 31 |
 | Worker connections: one per fiber, plus one | 32 |
 | Maintenance runs in every process | 60 s |
-| A lock is released once its session has ended | 15 min |
+| A lock older than this whose session has ended is released | 15 min |
+| Releases of one lock before the job is failed as abandoned | 3 |
 | Job partitions: created through that many days ahead, dropped once ended more than that many days ago | 7 days |
 | Shortest schedule span | 1 s |
 | Longest wait before a raising schedule block runs again | 1 minute |
 | PubSub payload; publish an id instead | 8,000 bytes |
 | Payload not received within this time is dropped | 1 s |
 | Payloads waiting per subscriber before dropping | 10,000 |
-| A failed job’s `last_error` | 4,000 characters |
+| A failed job’s `last_error`: class, message and backtrace lines | 4,000 characters, 12 lines |
 | One drain in a spec, then it raises | 1,000 jobs |
 
 ## A job is a struct with typed params {#c-coldbrew-define}
@@ -60,7 +61,7 @@ end
 | A param named `run_at` or `priority` | fails compilation |
 | Param types | must round-trip through JSON |
 
-Keep payloads small: store an id and load the record in `perform`.
+A payload has no size limit of its own; store an id and load the record in `perform`. A PubSub payload does: 8,000 bytes, below.
 
 ## Failed runs retry by rule {#c-coldbrew-retry}
 
@@ -83,10 +84,52 @@ Caramel::ColdBrew::Job.retry_on Socket::ConnectError,
 | `perform` raises | rolls back its transaction; Cold Brew chooses a retry rule |
 | No rule matches | the job runs 3 times with exponential backoff from 1 second |
 | A job whose class name no compiled job claims | fails at once, without retries |
-| After the last run | the job is failed |
-| A failed row | keeps the error’s class, message and first backtrace lines in `last_error`, up to 4,000 characters; status and hooks expose only the class |
+| The last run fails | is failed for good |
+| A failed row | keeps the error’s class, message and first 12 backtrace lines in `last_error`, up to 4,000 characters; `APP jobs show ID` prints it |
 
-[Read status and observe failures →](https://caramelize.dev/cookbook/0.15.0/background-jobs/index.md)
+## Status and hooks name the class, never the message {#c-coldbrew-status}
+
+`Caramel::ColdBrew.status(id)` reads one job’s row through the current Repo connection; `status(db, id)` reads it on a handle, such as a spec’s `db`. `statuses(ids)` and `statuses(db, ids)` read many in one query and return a `Hash(Int64, JobStatus)`.
+
+**Inside an action or a spec**
+
+```crystal
+status = Caramel::ColdBrew.status(db, id)
+status.try(&.state) # => Caramel::ColdBrew::JobState::Queued
+```
+
+| Name | Meaning |
+| --- | --- |
+| `JobStatus` | `id`, `queue`, `class_name`, `state`, `attempts` (runs so far, one in progress included), `run_at`, `enqueued_at`, `locked_at`, `finished_at`, `failed_at` and `error_class`, the class of the newest failed run. It serializes to JSON. |
+| `JobState::Scheduled` | Waiting for a `run_at` in the future; it has not run. |
+| `JobState::Queued` | Due and waiting for a worker; it has not run. |
+| `JobState::Running` | Locked by a worker. A lock whose process died stays until maintenance releases it. |
+| `JobState::Retrying` | Ran and failed, and waits for its next attempt at `run_at`. |
+| `JobState::Finished` | Ran and succeeded. |
+| `JobState::Failed` | Failed for good; it will not run again. |
+
+Two hooks observe failed runs. Register them at boot, before `serve` or `work` starts.
+
+**Application boot**
+
+```crystal
+Caramel::ColdBrew.on_retry_scheduled do |event|
+  Caramel::ColdBrew.publish("deliveries", event.to_json)
+end
+Caramel::ColdBrew.on_failed do |event|
+  Log.error { "#{event.class_name} ##{event.id} failed: #{event.error_class}" }
+end
+```
+
+| Condition | Outcome |
+| --- | --- |
+| `on_retry_scheduled` | runs after a failed run is rescheduled, with a `RetryScheduled`: `id`, `queue`, `class_name`, `attempts`, the new `run_at` and `error_class` |
+| `on_failed` | runs after a job fails for good, with a `JobFailed`: `id`, `queue`, `class_name`, `attempts`, `failed_at` and `error_class` |
+| A hook under a worker | runs on the worker’s fiber after the transition has committed, in a transaction of its own: its `publish` is delivered and its `enqueue` committed when it returns |
+| A hook that raises | rolls back only its own writes and is reported to Crema by class, with the source `cold_brew.hooks on_failed` or `on_retry_scheduled`; the job’s transition stands |
+| A hook under `drain_queue!` | runs inside the example’s transaction |
+| A job released after its process died | fires no hook until its third release, when maintenance fails it with `AbandonedJob` and the `on_failed` hooks run |
+| `status` for a job maintenance dropped with its partition | returns nil |
 
 ## Enqueue joins the business transaction {#c-coldbrew-enqueue}
 
@@ -140,7 +183,7 @@ end
 | `Caramel::ColdBrew.unknown_queued_class_names(db)` | returns the sorted class names of waiting rows, neither locked, finished nor failed, that this binary compiles neither as a job nor as an alias; empty when every queued job can run |
 | `work` and `migrate` with such names | log a warning naming them and carry on |
 
-Keep an old name until no row carries it. Because those commands only warn, run the new binary’s `migrate` before the old one stops, and read the list from a deploy script that should fail on it.
+Keep an old name until no row carries it. Because those commands only warn, run the new binary’s `migrate` before the old one stops, and read the list from a deploy script that fails on it.
 
 **Application boot or a deploy script**
 
@@ -151,7 +194,7 @@ abort "Stranded jobs: #{names.join(", ")}" unless names.empty?
 
 ## serve and work run the workers {#c-coldbrew-run}
 
-The application binary’s `serve` command starts Cold Brew beside the HTTP server. Its `work` command starts the same workers, maintenance and schedules without HTTP. Both read queue settings from the environment, and `work`’s flags replace them.
+The application binary’s `serve` command starts Cold Brew beside the HTTP server. Its `work` command starts the same workers, maintenance and schedules without HTTP. Both read queue settings from the environment, and `work`’s flags replace them. Both need `DATABASE_URL`, `CARAMEL_ENV` and applied migrations; the deployment guide gives the environment.
 
 | Setting | Meaning |
 | --- | --- |
@@ -160,29 +203,33 @@ The application binary’s `serve` command starts Cold Brew beside the HTTP serv
 | `--queues=NAMES` | work only: replaces CARAMEL_WORKER_QUEUES |
 | `--concurrency=N` | work only: replaces CARAMEL_WORKER_CONCURRENCY |
 | `--no-scheduler` | work only: leaves every schedule to another process |
+| `--no-workers` | serve only: keeps PubSub and maintenance, runs no jobs or schedules, and reads neither queue setting |
 
-**Terminal · compiled application**
-
-```bash
-./bin/bookshelf work --queues=default,mailers --concurrency=4
-```
-
-**Expect:** Workers claim jobs from `default` and `mailers` with four fibers each. On SIGTERM they stop claiming, and in-flight jobs finish before the process exits.
-
-**Terminal · compiled application**
+**Terminal · where the unpacked artifact runs**
 
 ```bash
-./bin/bookshelf work --queues=default --no-scheduler
+bin/bookshelf work --queues=default,mailers --concurrency=4
 ```
 
-**Expect:** Workers claim jobs from `default` only and leave every schedule to another process; maintenance still runs here.
+**Expect:** Prints `Bookshelf worker is ready: queues default, mailers; concurrency 4; scheduler on` once the workers are claiming, with the application’s title first.
+
+**Terminal · where the unpacked artifact runs**
+
+```bash
+bin/bookshelf work --queues=default --no-scheduler
+```
+
+**Expect:** Prints `Bookshelf worker is ready: queues default; concurrency 4; scheduler off`. Every schedule is left to another process; maintenance still runs here.
+
+[Run the process roles in production →](https://caramelize.dev/docs/0.15.0/deployment/index.md)
 
 | Condition | Outcome |
 | --- | --- |
-| `work` with pending migrations, or with `CARAMEL_ENV=test` | refuses to start |
-| `serve` under test | starts no workers |
-| Invalid worker settings | stop the process before it connects |
-| Concurrency per queue | is limited to 31 divided by the number of queues |
+| `work` or `serve` with pending migrations | stops with `Pending migrations. Run frappe migrate first.` |
+| `work` with `CARAMEL_ENV=test` | stops with `Specs run no workers; drain queues with Caramel::ColdBrew.drain_queue!` |
+| `serve` with `CARAMEL_ENV=test` | starts no Cold Brew at all |
+| A queue name outside the rule, a queue named twice, or a concurrency outside its range | exits 1 with the message, before Cold Brew’s pool opens |
+| Concurrency per queue | is at most 31 divided by the number of queues, rounded down: 7 for 4 queues; with 8 or more queues the default 4 is outside the range |
 | The workers’ connection pool | holds one connection per fiber plus one, up to 32, so jobs never wait for request connections |
 | SIGTERM or SIGINT | workers stop claiming jobs; in-flight jobs and schedule blocks finish before the process exits |
 
@@ -191,7 +238,7 @@ Maintenance runs every 60 seconds in every process, even with `--no-scheduler`.
 | Condition | Outcome |
 | --- | --- |
 | A lock older than 15 minutes whose database session has ended | is released, so that job runs again |
-| A job released a third time | is failed with `AbandonedJob` and its failure hooks run; each release is counted apart from `attempts` |
+| A job released a third time | is failed with `AbandonedJob` and its `on_failed` hooks run; each release is counted apart from `attempts`. `APP jobs retry ID` runs it again |
 | Expired cache entries | are deleted |
 | Daily job partitions | are created from today through seven days ahead, in UTC |
 | A partition that ended more than 7 days ago and holds only finished or failed jobs | is dropped; `status` then returns nil for those jobs |
@@ -288,7 +335,7 @@ Prove it
 
 ## Drain queues in specs {#c-coldbrew-test}
 
-Specs run no workers. `Caramel::ColdBrew.drain_queue!(db, queue)` runs the queue’s due jobs synchronously on `db`, including jobs that those jobs enqueue. It returns the number of runs.
+Specs run no workers. `Caramel::ColdBrew.drain_queue!(db, queue)` runs the queue’s due jobs synchronously on `db`, including jobs that those jobs enqueue. It returns the number of runs. `drain_queue` is the same without raising.
 
 | Condition | Outcome |
 | --- | --- |
@@ -299,15 +346,32 @@ Specs run no workers. `Caramel::ColdBrew.drain_queue!(db, queue)` runs the queue
 | `include_scheduled: true` | runs jobs that are not yet due |
 | A drain that has run 1,000 jobs while more are still due | raises `DrainLimitExceeded` |
 
-**Inside a Corretto session · after enqueueing**
+This spec enqueues the job from the first section on a new application’s `db`, drains its queue and reads its status.
+
+**spec/jobs/send_invitation_spec.cr**
 
 ```crystal
-Caramel::ColdBrew.drain_queue!(db, "mailers")
-Caramel::ColdBrew.status(db, id).not_nil!.state
-  .should eq(Caramel::ColdBrew::JobState::Finished)
+require "../spec_helper"
+
+describe SendInvitation do
+  it "runs once its queue is drained" do
+    Corretto.session do |_client, db|
+      id = SendInvitation.enqueue(db, invite_id: 42)
+      Caramel::ColdBrew.drain_queue!(db, "mailers").should eq(1)
+      Caramel::ColdBrew.status(db, id).not_nil!.state
+        .should eq(Caramel::ColdBrew::JobState::Finished)
+    end
+  end
+end
 ```
 
-**Passing:** The job is `Finished`. A failed run makes `drain_queue!` raise `DrainFailure`, listing every failed run.
+**Terminal · inside the application**
+
+```bash
+frappe corretto spec/jobs/send_invitation_spec.cr
+```
+
+**Passing:** `[w1] 1 examples, 0 failures, 0 errors, 0 pending`, then `Corretto: 1 of 1 workers passed`. A failed run would make `drain_queue!` raise `DrainFailure`, listing every failed run.
 
 [Test requests with Corretto →](https://caramelize.dev/docs/0.15.0/corretto/index.md)
 

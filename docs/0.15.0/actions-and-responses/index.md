@@ -212,7 +212,7 @@ end
 | Each line of `data` | becomes its own `data:` field, so the browser receives the text unchanged |
 | An event name with a line break | raises ArgumentError |
 | A client that disconnects | ends the stream quietly |
-| Any other error in the block (it comes after the status line) | is only logged |
+| Any other error in the block (it comes after the status line) | ends the stream and is reported to Crema as unhandled, with `source: "stream"` |
 
 [Publish updates with Cold Brew →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 
@@ -227,9 +227,10 @@ An invalid contract never reaches `handle`.
 | Invalid contract, any other client | answers 422 as plain text |
 | `render_errors(errors, status = 422)` for errors found after the contract, such as a changeset’s | answers each client the same way with your status; its text starts with `ERR INVALID:` and the status |
 | A SweetTalk refusal that `handle` does not rescue (with `caramel/sweet_talk`) | answers 422 with its message under `_base`, by `render_refusal(contract, refusal)` |
+| A `SweetTalk::Missing` that `handle` does not rescue | answers 404 by `not_found` |
 | Override of `contract_failure_page(contract)` | changes the browser page |
 
-**POST /items with seats=0&extra=1 · Accept: */***
+**POST /items with seats=0&extra=1 · Accept: */*, with a valid CSRF token and Origin**
 
 ```markdown
 ERR CONTRACT_INVALID:422 at POST /items
@@ -237,7 +238,7 @@ FIELD seats: must be at least 1
 FIELD _base: Unknown field: extra
 ```
 
-[Call the domain from actions](https://caramelize.dev/docs/0.15.0/sweettalk/index.md) says what each client gets for a refusal. A generated resource with a form re-renders it with the submitted values and every error:
+What each client gets for a refusal is in the SweetTalk guide: [Call the domain from actions →](https://caramelize.dev/docs/0.15.0/sweettalk/index.md). A generated resource with a form re-renders it with the submitted values and every error:
 
 **app/actions/books.cr · generated, inside module Form**
 
@@ -246,6 +247,21 @@ def contract_failure_page(contract : Caramel::RequestContract) : Caramel::Respon
   render_form(contract.values, contract.errors, contract.values["id"]?.try(&.to_i64?), 422)
 end
 ```
+
+## JSON answers may carry a version {#c-actions-json}
+
+`json(value, status = 200)` answers a value as JSON. `self.etag = version` in `handle` adds the version to the answer, and `if_match?(version)` reads the request’s `If-Match` header against it.
+
+| Condition | Outcome |
+| --- | --- |
+| `json(value)` | answers 200 with `value.to_json`; `json(value, status)` uses your status |
+| `self.etag = version`, then a JSON answer below 300 | adds `ETag: "version"`; pages, fragments and redirects never carry it |
+| `if_match?(version)` with no `If-Match` header, with `*`, or with `"version"` among its entries | returns true |
+| `if_match?(version)` with another version, or a weak tag such as `W/"3"` | returns false; the action decides the answer, such as 412 |
+
+A versioned update that answers 409 and 412 is application code; the SugarORM reference shows one.
+
+[Read how saves return a changeset →](https://caramelize.dev/docs/0.15.0/sugarorm/index.md)
 
 ## The session is a signed cookie {#c-actions-request}
 
@@ -265,13 +281,20 @@ def handle(contract : Contract)
 end
 ```
 
-The session is a signed cookie. Security defaults lists its cookie, signature, lifetime, `Caramel::Session::Overflow` limit and the `csrf: false` case.
+| Condition | Outcome |
+| --- | --- |
+| A session that `handle` changed | sends `Set-Cookie` with the response |
+| A session whose cookie is over the limit | raises `Caramel::Session::Overflow` |
+
+Security defaults lists the cookie, its signature, its lifetime, the limit and the `csrf: false` case.
 
 [Review the security defaults →](https://caramelize.dev/docs/0.15.0/security/index.md)[Receive a signed webhook →](https://caramelize.dev/cookbook/0.15.0/webhooks/index.md)
 
 Prove it
 
 ## Check the answers with Corretto {#c-actions-test}
+
+These commands assume the Book resource of [Your first application](https://caramelize.dev/docs/0.15.0/getting-started/index.md), step 02; generate it first.
 
 **Terminal · inside the application**
 
@@ -280,9 +303,9 @@ frappe check
 frappe corretto spec/requests/books_spec.cr
 ```
 
-**Expect:** `frappe check` passes when every result that is not a `Caramel::Response` has a `render`; a result without one fails compilation.
+**Expect:** `frappe check` exits 0 when every result that is not a `Caramel::Response` has a `render`; a result without one fails compilation. `frappe corretto` runs the generated request spec and ends with `Corretto: 1 of 1 workers passed`.
 
-**Passing:** `frappe check` passes and the request spec is green: a JSON client gets 201 and the record, a browser gets a 303 to the new book, and an invalid contract gets 422 for every client.
+**Passing:** The generated spec is green: a browser form gets a 303 to the new book, `Accept: application/json` on its page gets 200 and the record, a forged token or a foreign `Origin` gets 403, and a stray field under `HX-Request-Type: partial` gets 422 with `Unknown field: unexpected_field`.
 
 [Test requests with Corretto →](https://caramelize.dev/docs/0.15.0/corretto/index.md)
 

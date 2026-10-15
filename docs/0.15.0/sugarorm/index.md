@@ -17,10 +17,15 @@ Learning it for the first time? The recipe [Create a resource](https://carameliz
 
 | Limit | Value |
 | --- | --- |
-| `primary: true` fields per schema | 1 |
+| `primary: true` fields per schema | exactly 1 |
+| `version: true` fields and `timestamps` per schema | at most 1 each |
+| Check constraint name | 63 bytes |
+| `numeric(P,S)` precision | 1,000 |
 | Extra queries per `preload` | 1 |
-| Starting value of a `version: true` column | 0 |
-| Branch name after its first lowercase letter: lowercase letters, digits, underscores | up to 30 |
+| Migration name | a lowercase letter, then up to 62 lowercase letters, digits or underscores |
+| Branch name | a lowercase letter, then up to 30 lowercase letters, digits or underscores |
+| Statement, per connection | 30 s |
+| Lock wait, per connection | 5 s |
 
 ## A model declares its table once {#c-sugarorm-schemas}
 
@@ -28,7 +33,7 @@ A model is a struct that extends `SugarORM::Schema` and declares its table once.
 
 [Create a resource →](https://caramelize.dev/cookbook/0.15.0/create-a-resource/index.md)
 
-**app/models/book.cr**
+**app/models/book.cr · assumes an App::Author schema with has_many books : Book**
 
 ```crystal
 module App
@@ -58,22 +63,28 @@ Fields take `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time`, or any type
 | --- | --- |
 | An unsupported field type | fails compilation |
 | A default that is not a literal (it becomes the column’s SQL default), or any default on a `Time` field | fails compilation |
+| A schema with no `primary: true` field | fails compilation |
 | A `primary: true` field that is nilable, not `Int64`, or has a default | fails compilation |
 | The one `primary: true` field | is a non-nilable `Int64` without a default, stored as an identity column |
 | `timestamps` | adds `created_at` and `updated_at` |
+| `timestamps` declared twice, or a second `version: true` field | fails compilation |
 | An update that changes a field | also sets `updated_at` |
 | A `has_many` or `has_one` whose foreign key the target lacks | fails compilation |
+| `belongs_to` with an `on_delete:` other than `:cascade`, `:restrict` or `:set_null`, or with any other option | fails compilation |
+| `on_delete: :set_null` on a reference that is not nilable, or on a key from a tenanted schema to a tenanted schema | fails compilation |
 | A duplicate column | fails compilation |
 | Two schemas that name one table | fails compilation |
 | A reserved name such as `query` or `update` | fails compilation |
+| A range check that is not an inclusive range of integer literals, an empty range such as `10..1`, a check declared twice, or a check name over 63 bytes | fails compilation |
 | A record | is immutable: `book.with(title: "Dune Messiah")` returns a changed copy and never persists it |
+| An insert or update that breaks a unique index or a CHECK the changeset did not map | raises `SugarORM::UniqueViolation` or `SugarORM::CheckViolation` |
 
 - `belongs_to author : Author`: Adds the author_id Int64 column, its foreign key and its index. Author? makes it nullable.
 - `has_many books : Book`: Reads the Book rows whose author_id points at this record.
 - `has_one charter : Charter`: Reads the first matching row by primary key, or nil.
 - `index :isbn, unique: true`: Creates index_books_on_isbn. Several columns join with _and_ in the name.
-- `check copies: 0..`: Adds the CHECK constraint check_books_copies. Range checks take Int32 and Int64 fields; 1..10 bounds both ends.
-- `check :dates, "starts_at  ends_at"`: A named SQL expression, compared by name: rename it to change it.
+- `check copies: 0..`: Adds the CHECK constraint check_books_copies. Range checks take Int32 and Int64 fields and an inclusive range of integer literals: 0.., ..10 or 1..10.
+- `check :dates, "starts_at < ends_at"`: A named SQL expression, compared by name: rename it to change it.
 - `renamed_from: :code`: Renames the old column instead of dropping it.
 - `drop_column :shelf`: Records the decision to drop a column and its data.
 
@@ -149,6 +160,7 @@ end
 | Condition | Outcome |
 | --- | --- |
 | A codec field with a default | fails compilation |
+| A `sql_type` other than `numeric`, `numeric(P,S)` with S ≤ P ≤ 1000, `jsonb` or `text` | raises ArgumentError |
 | A changeset `param` on a codec field | uses the field’s type, such as `Rate` |
 | The number validators on a codec field | do not apply, because the stored value is text |
 | `validate_inclusion` on a codec field | takes values of the field’s type |
@@ -175,9 +187,13 @@ In `where` a codec field takes a value or `nil`, never an Array or a Range. `Big
 | --- | --- |
 | Keyword `where` with a name that is not a column, or a value of the wrong type | fails compilation |
 | `where` with a value that may be nil, such as an optional contract field (it would match the NULL rows) | fails compilation; narrow it first (`if isbn = contract.isbn`) or use `where_null` |
-| `order_by` with a name that is not a field, or a direction other than `:asc` or `:desc` | fails compilation |
+| `where("copies >= ?", …)` with a number of values other than its `?` count | raises ArgumentError |
+| `order_by` with a name that is not a field | fails compilation |
+| `order_by` with a direction other than `:asc` or `:desc` | raises ArgumentError: `order_by direction must be :asc or :desc, not :sideways` |
+| A negative `limit` or `offset` | raises ArgumentError |
 | `find` and `first` when nothing matches | return nil |
 | `find!` and `first!` when nothing matches | raise `SugarORM::NotFound` |
+| `find(db, id)`, `first!(db)` and `create(db, …)` | run on the connection you pass, as the generated request spec does with Corretto’s |
 
 **Inside an action · author is a loaded App::Author**
 
@@ -205,8 +221,9 @@ App::Book.query.where(isbn: nil).first!
 | Condition | Outcome |
 | --- | --- |
 | `lock` | adds `FOR UPDATE`: the rows the query returns stay locked until the transaction ends, and a competing transaction waits for them |
-| A locking query outside a transaction | raises, because the lock would end with the statement |
-| `count`, `exists?` or `delete_all` on a locking query | refuses |
+| A competing transaction that has waited 5 s (`lock_timeout`), or any statement that ran 30 s (`statement_timeout`) | fails with PostgreSQL’s error; [Crema reference](https://caramelize.dev/docs/0.15.0/crema/index.md) lists `CARAMEL_LOCK_TIMEOUT` and `CARAMEL_STATEMENT_TIMEOUT` |
+| A locking query outside a transaction | raises `SugarORM::Error`, because the lock would end with the statement |
+| `count`, `exists?` or `delete_all` on a locking query | raises ArgumentError |
 | A tenanted model with `lock` | keeps its tenant scope |
 | Preloaded associations under `lock` | are not locked |
 
@@ -225,7 +242,7 @@ end
 
 An association stays unloaded until its query preloads it.
 
-**Inside an action**
+**Inside an action · App::Author declares has_many books : Book**
 
 ```crystal
 authors = App::Author.query.preload(:books).order_by(:name).to_a
@@ -235,7 +252,7 @@ authors.each { |loaded| puts "#{loaded.name}: #{loaded.books.size}" }
 | Condition | Outcome |
 | --- | --- |
 | A `preload` | adds one query that loads the association for every record in the result, so a list never runs one query per row |
-| A preloaded result | wraps each record and still answers its fields |
+| A preloaded result | is a wrapper around each record that answers its fields and the association |
 | An association that was not preloaded | fails compilation, not a hidden query: `frappe check` reports `N_PLUS_ONE` (`Association 'books' of App::Author was not preloaded.`) and its remediation names `.preload(:books)` |
 
 ## SugarORM.sql reads rows as named tuples {#c-sugarorm-sql}
@@ -295,9 +312,11 @@ Before your rules run, SugarORM checks NOT NULL columns.
 | The primary key or a timestamp as a `param` | fails compilation |
 | An insert that omits a NOT NULL column without a default | adds the error `is required` |
 | A write that sets a NOT NULL column to nil | adds the error `is required` |
-| Validations | run when the changeset is built |
+| Building the changeset | runs `validate(cs)` before any SQL |
 | Every validator except `validate_length` | takes `message:` to replace its default |
 | The number, length, format, inclusion and URL validators | skip values that did not change and nil values |
+| A number validator on a column that is not numeric, or a string validator on one that is not a String | raises ArgumentError |
+| `check_constraint(:name)` on an expression check without `on: :field` | raises ArgumentError |
 | `cs.add_error(:title, "is checked out")` | adds your own error |
 
 These are the validators and their default messages:
@@ -371,7 +390,7 @@ A changeset can say what to do when a row with the same key exists.
 | `record` | is the stored row either way |
 | Concurrent inserts of one key | leave one row |
 
-**app/changesets/sale.cr**
+**app/changesets/sale.cr · App::Sale declares index :tea_id, unique: true**
 
 ```crystal
 module App
@@ -391,12 +410,13 @@ A version field stops two people from overwriting each other.
 | The version column | starts at 0; `frappe db diff` adds it as `integer NOT NULL DEFAULT 0` |
 | Every changeset update | checks the version it loaded and adds one |
 | A row that changed since you loaded it | writes nothing and adds `Record changed since you loaded it` under `_base`; `stale?` is true |
-| A changeset given `lock_version:` | checks that version instead, so a form carries the version it was rendered from |
+| A changeset with `param lock_version : Int32` given `lock_version:` | checks that version instead, so a form carries the version it was rendered from |
 | An insert that names a version | raises ArgumentError |
+| `upsert … update:` that names the version field | fails compilation |
 | A delete | does not check the version |
-| A stale form at the update action | answers 409, re-rendering the form with the errors |
-| An `If-Match` header that names another version | answers 412 |
-| The show action | sends the version as `self.etag` |
+| The update action below, given a stale form | answers 409 with the errors, by its own `render_errors` call |
+| The update action below, given an `If-Match` header that names another version | answers 412, by its own `if_match?` check |
+| The show action below | sets `self.etag`, so its JSON answer carries `ETag`; [Actions and responses](https://caramelize.dev/docs/0.15.0/actions-and-responses/index.md) lists the header rules |
 
 **app/models/book.cr · schema excerpt**
 
@@ -416,7 +436,16 @@ input type: "hidden", name: "_csrf", value: @csrf_token
 input type: "hidden", name: "lock_version", value: @values["lock_version"]? || ""
 ```
 
-The update action declares `field lock_version : Int32` in its contract.
+The changeset takes the version as a param, and the update action declares `field lock_version : Int32` in its contract. The 409 and 412 below are this action’s code, not a framework default.
+
+**app/changesets/book.cr · the version param**
+
+```crystal
+class Book::Changeset < SugarORM::Changeset(App::Book)
+  param title : String
+  param lock_version : Int32
+end
+```
 
 **app/actions/books/update.cr**
 
@@ -460,7 +489,7 @@ Change the schema first, then derive the SQL.
 frappe db diff --name add_copies
 ```
 
-**Expect:** Prints `Wrote PATH` for each migration file it derives under `db/migrations/`; if the declared schema already matches, nothing is written.
+**Expect:** Prints `Wrote PATH` for each migration file it derives under `db/migrations/`, and a `Note:` line for each CHECK it leaves in place. If the declared schema already matches, it prints `The development database already matches the declared schema; no migration was written.` A `--name` that is not a lowercase letter followed by up to 62 lowercase letters, digits or underscores is refused.
 
 **Terminal · inside the application**
 
@@ -470,7 +499,7 @@ frappe migrate
 
 **Expect:** Lints every pending migration, then prints `Applied N migrations.` and reports schema drift without changing anything; `The database matches the declared schema.` when there is none.
 
-Review each file before you apply it. Adding `copies` with a default and a unique `isbn` index to an existing `books` table writes this migration:
+Review each file before you apply it. Adding `copies` with a default and a unique `isbn` index to an existing `books` table writes two files; the first is:
 
 **db/migrations/20261002120000_add_copies.cr**
 
@@ -543,11 +572,13 @@ frappe db branch list
 frappe db branch delete try_isbn
 ```
 
+**Expect:** `list` prints one branch name per line, or `APP has no database branches.` on stderr. `delete` prints `Deleted database branch try_isbn.`; a second run fails, because the branch is gone.
+
 | Condition | Outcome |
 | --- | --- |
-| A branch name that does not start with a lowercase letter, or is followed by more than 30 lowercase letters, digits or underscores | refuses |
+| A branch name that is not a lowercase letter followed by up to 30 lowercase letters, digits or underscores | refuses: `branch name NAME must be a lowercase letter followed by up to 30 lowercase letters, digits or underscores` |
 | While the copy is made | Latte closes other connections to the development database |
-| `frappe dev --branch` with a branch that does not exist | refuses |
+| `frappe dev --branch` with a branch that does not exist | refuses: `APP has no database branch NAME; create it with frappe db branch create NAME` |
 
 Branches are for experiments. To keep a backup, use `frappe db dump` and `frappe db restore`.
 
@@ -557,6 +588,8 @@ Prove it
 
 ## Check the schema against the database {#c-sugarorm-test}
 
+Run these in the development branch, with the database `frappe new` created.
+
 **Terminal · inside the application**
 
 ```bash
@@ -564,7 +597,7 @@ frappe check
 frappe migrate
 ```
 
-**Passing:** `frappe check` reports no compile error and no `N_PLUS_ONE`, and `frappe migrate` ends with `The database matches the declared schema.`
+**Passing:** `frappe check` exits 0, with no compile error and no `N_PLUS_ONE`, and `frappe migrate` ends with `The database matches the declared schema.`
 
 [← Views](https://caramelize.dev/docs/0.15.0/views/index.md) · [Move work to the background →](https://caramelize.dev/docs/0.15.0/cold-brew/index.md)
 

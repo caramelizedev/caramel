@@ -2,17 +2,17 @@ Guides / Multi-tenancy
 
 # Serve many accounts from one app.
 
-Give each account its own address and its own rows, with queries that refuse to run outside a tenant.
+Give each account its own `/SLUG` path and its own rows, with queries that refuse to run outside a tenant.
 
 | Contract | Value |
 | --- | --- |
-| Needs | A configured application and a singular model to own the data, such as `Account` |
-| You will have | Each account at its own address with its own rows, and queries that refuse to run outside a tenant |
+| Needs | An application that has run `frappe migrate`, and a singular model name to own the data, such as `Account` |
+| You will have | Each account under its own `/SLUG` path with its own rows, and queries that refuse to run outside a tenant |
 | Proved by | `frappe routes` · `frappe corretto` |
 
 ## The guide in five stages {#c-tenancy-map}
 
-9 sections · read in order the first time
+10 sections · read in order the first time
 
 - **1 · Start**
 
@@ -33,6 +33,7 @@ Give each account its own address and its own rows, with queries that refuse to 
 - **5 · Limits**
 
   - [What does not compile](#c-tenancy-refusals)
+  - [Not covered yet](#c-tenancy-gaps)
 
 Stage 1 · Start
 
@@ -47,30 +48,37 @@ frappe make tenancy Account
 frappe migrate
 ```
 
-**Expect:** `frappe make tenancy` prints a `Generated` line for each file it writes and ends with a `Next:` line that names `frappe migrate` and the sign-up page at `/accounts/new`. `frappe migrate` applies `create_accounts`.
+**Expect:** `frappe make tenancy` prints a `Generated` line for each file it writes and ends with a `Next:` line that names `frappe migrate` and the sign-up page at `/accounts/new`. With a SweetTalk domain present, the `Next:` line adds that each domain in `app/domain/` now names `App::Account`. `frappe migrate` applies `create_accounts`.
 
-The command writes the `Account` model (name, slug, timestamps, a unique slug index), its changeset, the `create_accounts` migration, a sign-up page at `/accounts/new`, a home page at `/SLUG` and a request spec. It requires `caramel/tenancy` after `caramel` in `config/application.cr`, adds the tenant block to `config/routes.cr` and `Caramel.resource_paths :accounts, :account` to `config/paths.cr`, and adds the `account` and `tenant_session` spec helpers. Sign up at `/accounts/new`; a new account redirects to its home.
+The command writes the `Account` model (name, slug, timestamps, a unique slug index), its changeset, the `create_accounts` migration, a sign-up page at `/accounts/new`, a home page at `/SLUG` and a request spec. It requires `caramel/tenancy` after `caramel` in `config/application.cr`, adds the tenant block to `config/routes.cr` and `Caramel.resource_paths :accounts, :account` to `config/paths.cr`, and adds the `account` and `tenant_session` spec helpers. In every `app/domain/*.cr` it adds `tenant App::Account` after `include SweetTalk`, because a program that requires `caramel/tenancy` refuses a domain that does not name its tenant. Sign up at `/accounts/new`; a new account redirects to its home.
+
+[Share a domain between tenants →](https://caramelize.dev/docs/0.15.0/sweettalk/index.md)
 
 Stage 2 · Model
 
 ## Route inside the tenant {#c-tenancy-routes}
 
-The tenant block names the tenant model and the String field its address uses. Routes inside it live under the slug, so `/books` answers at `/acme/books`.
+The tenant block names the tenant model and the String field whose value is the first path segment. Routes inside it live under the slug, so `/notes` answers at `/acme/notes`. This is the block `frappe make tenancy Account` writes, with the Note resource of the next section inside it:
 
-**config/routes.cr · excerpt**
+**config/routes.cr · after make tenancy and make resource Note**
 
 ```crystal
 Caramel::Router.draw do
   get "/", App::Home::Show
+  get "/health", App::Health::Show
+  get "/accounts/new", App::Accounts::New
   post "/accounts", App::Accounts::Create
+  # Frappé resource routes
+
   tenant App::Account, by: :slug do
     get "/", App::Accounts::Home
-    get "/books", App::Books::Index
+    get "/notes", App::Notes::Index
+    # Frappé tenant routes
   end
 end
 ```
 
-`frappe routes` lists tenant routes as `/:tenant/books`.
+`frappe routes` lists tenant routes as `/:tenant/notes`. A tenant is chosen by its path prefix only: `acme.example.com` selects nothing.
 
 ## Generate tenant resources {#c-tenancy-resources}
 
@@ -87,30 +95,28 @@ frappe make resource Tag label:string --central
 
 ## Declare tenanted data {#c-tenancy-schema}
 
-The `tenant` statement adds the `account_id` column and scopes the schema to the bound tenant. The column is never a changeset param.
+The `tenant` statement adds the `account_id` column and scopes the schema to the bound tenant. The column is never a changeset param. This is the schema `frappe make resource Note body:string` wrote:
 
-**app/models/book.cr · schema excerpt**
+**app/models/note.cr · schema excerpt**
 
 ```crystal
-schema "books" do
+schema "notes" do
   field id : Int64, primary: true
   tenant account : Account
-  field isbn : String
-  belongs_to author : Author
+  field body : String
   timestamps
-  index :isbn, unique: true
 end
 ```
 
 | Condition | Outcome |
 | --- | --- |
-| A tenanted query with no tenant bound, such as “App::Book is tenanted, but no tenant is bound.” | raises `SugarORM::Tenancy::Missing` |
+| A tenanted query with no tenant bound | raises `SugarORM::Tenancy::Missing`: “App::Note is tenanted, but no tenant is bound.” |
 | Another tenant’s id | answers 404, like an unknown one |
-| A `belongs_to` to a row of another tenant, even from raw SQL | PostgreSQL refuses it |
+| A `belongs_to` to a row of another tenant, even from raw SQL | is refused by PostgreSQL’s composite foreign key |
 | Creating a tenanted row inside `Caramel::Tenancy.without` | raises |
 
 - Queries, `find`, `count`, `exists?`, `delete_all`, preloads, updates and deletes see only the bound tenant’s rows, and inserts are stamped with it.
-- A unique index is unique per tenant, so two accounts may share an ISBN.
+- A unique index on a tenanted schema is unique per tenant, so two accounts may hold the same value.
 - A `belongs_to` to another tenanted schema becomes a composite foreign key.
 - `Caramel::Tenancy.without { … }` reaches every tenant’s rows on purpose.
 - Raw `SugarORM.sql` is not scoped.
@@ -126,10 +132,10 @@ Actions and views expose `tenant`, the request’s tenant record, and `tenant_pa
 ```crystal
 h1 { tenant.name }
 a(href: tenant_path("/")) { "Home" }  # /acme
-a(href: books_path) { "Books" }       # /acme/books
+a(href: notes_path) { "Notes" }       # /acme/notes
 ```
 
-With locale prefixes, the tenant comes first: `/acme/fr/books`. The language switcher keeps the tenant prefix.
+With locale prefixes, the tenant comes first: `/acme/fr/notes`. The language switcher keeps the tenant prefix.
 
 ## Carry the tenant into background work {#c-tenancy-background}
 
@@ -139,7 +145,7 @@ Outside a request, bind a tenant explicitly. `Caramel::Tenancy.current` and `cur
 
 ```crystal
 Caramel::Tenancy.with(account) do
-  App::Book.query.count
+  App::Note.query.count
 end
 
 Caramel::Tenancy.each do |account|
@@ -158,26 +164,51 @@ Stage 4 · Operate
 
 ## Validate slugs and check membership {#c-tenancy-slugs}
 
-`validate_tenant_slug` checks the address a tenant gets:
+`validate_tenant_slug`, which the generated `Account` changeset calls, checks the address a tenant gets:
 
 | Condition | Outcome |
 | --- | --- |
-| A slug that is not a lowercase DNS label (letters, digits and hyphens, 1 to 63 characters, no leading or trailing hyphen) | `validate_tenant_slug` refuses it |
-| A slug equal to a central route’s first segment, such as `health` or `accounts` | `validate_tenant_slug` refuses it |
-| A slug equal to a locale prefix code | `validate_tenant_slug` refuses it |
+| A slug that is not a lowercase DNS label (letters, digits and hyphens, 1 to 63 characters, no leading or trailing hyphen) | adds `has invalid format` to the field |
+| A slug equal to a central route’s first segment, such as `health` or `accounts` | adds `has already been taken` to the field |
+| A slug equal to a locale prefix code | adds `has already been taken` to the field |
 
-Tenancy decides which rows a request sees, not who may act in a tenant. Check membership in the application, for example with `ingress authenticate: :member?`.
+Tenancy decides which rows a request sees, not who may act in a tenant. Check membership in the application: `ingress authenticate: :member?` on an action names an instance method returning `Bool`, and `false` answers 401 before the contract binds.
+
+[Read the ingress rules →](https://caramelize.dev/docs/0.15.0/security/index.md)
 
 ## Add tenancy to existing data {#c-tenancy-existing}
 
-On a populated table, add and backfill the new NOT NULL column by hand, build its index in a migration of its own, then let `frappe db diff` write the keys. Drain every queue before the first deploy with tenancy.
+Adding `tenant` to a populated table needs five steps, because the new column is NOT NULL and its index must exist before another tenanted table can reference it.
+
+1. Add `tenant account : Account` to the schema and run `frappe db diff`.
+
+**Terminal · inside your application**
+
+```bash
+frappe db diff --name tenant_notes
+```
+
+**Expect:** Halts with `NOT NULL column without a default cannot be added to the existing notes table: existing rows have no value for it.` and writes no migration.
+
+1. Write a migration by hand that adds the column as nullable, backfills it and sets it NOT NULL.
+2. In a second migration, build the index: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_notes_on_account_id_and_id" ON "notes" ("account_id", "id")`. When another tenanted table’s key references the table, the differ halts until the index exists and prints this SQL.
+3. Run `frappe migrate`, then `frappe db diff` again for the foreign keys.
+4. Drain every queue before deploying: a job enqueued without a tenant runs with none.
+
+**Terminal · before the first deploy with tenancy · APP is the application binary**
+
+```bash
+APP jobs stats
+```
+
+**Expect:** Prints one row per queue with its `running`, `retrying`, `queued`, `scheduled` and `failed` counts. Deploy once every row’s `queued`, `scheduled` and `running` are 0.
 
 | Condition | Outcome |
 | --- | --- |
-| `frappe db diff` on a populated table that gains a NOT NULL column | halts |
+| `frappe db diff` on a populated table that gains a NOT NULL column | halts and writes no migration |
 | A job enqueued without a tenant, run on tenanted rows | fails with `SugarORM::Tenancy::Missing` |
 
-[Read the multi-tenancy design and the exact steps ↗](https://github.com/caramelizedev/caramel/blob/main/docs/decisions/0025-multi-tenancy.md)
+[Read the multi-tenancy design ↗](https://github.com/caramelizedev/caramel/blob/v0.15.0/docs/decisions/0025-multi-tenancy.md)
 
 Stage 5 · Limits
 
@@ -190,20 +221,31 @@ A router has one tenant block. Each mistake below stops the build.
 | A central route other than `/` that starts with a parameter | fails compilation |
 | A tenant route that starts with a central route’s first segment | fails compilation |
 | A router with a second tenant block | fails compilation |
+| A SweetTalk domain that does not name the tenant, in a program that requires `caramel/tenancy` | fails compilation |
+
+## Not covered yet {#c-tenancy-gaps}
+
+- A tenant is selected by its `/SLUG` path prefix only. There is no host or subdomain tenancy.
+- Membership and authorization are the application’s: tenancy answers 404 for another tenant’s rows, and nothing else.
+- `Caramel::Tenancy.without` and raw `SugarORM.sql` are unscoped; the application adds the tenant predicate itself.
+- Removing tenancy follows the design’s “Plugging out” steps by hand; no command does it.
 
 Prove it
 
 ## Test isolation {#c-tenancy-testing}
 
-`tenant_session("acme")` opens a Corretto session in a new account, and the example’s queries see only its rows. `account(db, "globex")` creates a second account to prove isolation.
+`tenant_session("acme")` opens a Corretto session in a new account, and the example’s queries see only its rows. `account(db, "globex")` creates a second account to prove isolation. `frappe make resource Note` already wrote these lines into its spec; nothing to add.
 
-**spec/requests/notes_spec.cr · inside an example**
+**spec/requests/notes_spec.cr · the lines make resource wrote**
 
 ```crystal
 tenant_session("acme") do |client, db|
-  record = App::Note.create!(db, body: "Plan")
+  created = client.post("/acme/notes", params: {"body" => "Example <body>"})
+  record = App::Note.query.order_by(:id, :desc).first!(db)
+  # …
   account(db, "globex")
   client.get("/globex/notes/#{record.id}").should have_status(404)
+  # …
 end
 ```
 
@@ -214,7 +256,7 @@ frappe routes
 frappe corretto spec/requests/notes_spec.cr
 ```
 
-**Passing:** `frappe routes` lists `/:tenant/notes` beside the central `/tags`. The example passes: a request from `acme` for `globex`’s note answers 404.
+**Passing:** `frappe routes` lists `/:tenant/notes` beside the central `/tags`. `frappe corretto` ends with `Corretto: 1 of 1 workers passed`: a request from `acme` for `globex`’s note answers 404.
 
 [← Internationalization](https://caramelize.dev/docs/0.15.0/internationalization/index.md) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
 

@@ -7,7 +7,7 @@ Add typed translations, choose a language for each request, and localize numbers
 | Contract | Value |
 | --- | --- |
 | Release | 0.15.0 |
-| Needs | An application whose `config/application.cr` `frappe make locale` can wire |
+| Needs | An application that has run `frappe migrate`, whose `config/application.cr` still has one `require "caramel"` and one `require "../app/views/application_view"` line |
 | You will have | Typed messages, a language for each request, and localized numbers, dates and validation messages |
 | Proved by | `frappe check` · `frappe translations` · `frappe corretto` |
 
@@ -49,14 +49,21 @@ Internationalization is opt-in. Inside your application, add a locale before gen
 
 ```bash
 frappe make locale fr
+```
+
+**Expect:** Prints `Generated` for `app/locales/en.cr`, `app/locales/fr.cr` and `config/application.cr`, then a `Next:` line that says to write translations in `app/locales/fr.cr`, set `dir: locale.dir` in the layout for right-to-left languages, and run `frappe translations`. It refuses, naming the three lines to add by hand, when `config/application.cr` lacks exactly one `require "caramel"` and one `require "../app/views/application_view"`.
+
+The configuration now requires `caramel/i18n` after `caramel`, loads `app/locales/*`, then calls `Caramel.locales default: "en"` once, before loading views. A resource generated from now on writes `t.` calls and adds its messages to `app/locales/en.cr`. Resource views generated earlier keep their text until you replace it with message calls. The rest of this guide and its spec use a Book resource:
+
+**Terminal · inside your application**
+
+```bash
+frappe make resource Book title:string
+frappe migrate
 frappe check
 ```
 
-**Expect:** Creates `app/locales/en.cr` and `app/locales/fr.cr` and wires `config/application.cr`, printing a `Generated` line for each file.
-
-New resource generation then writes `t.` calls and adds messages to the default catalog. Existing resource views keep their text until you replace it with message calls.
-
-The configuration requires `caramel/i18n` after `caramel`, loads the locale files, then calls `Caramel.locales default: "en"` once, before loading views. If your configuration has been customized, follow the generator’s instructions to add that wiring by hand.
+**Expect:** `frappe make resource` prints `Generated` for the model, changeset, actions, views, `spec/requests/books_spec.cr`, a migration, `config/routes.cr`, `config/paths.cr` and `app/locales/en.cr`, which gains a `books:` group. `frappe migrate` ends with `The database matches the declared schema.` `frappe check` exits 0.
 
 Stage 2 · Write
 
@@ -115,7 +122,7 @@ p { l(Time.utc(2026, 10, 2), :date) }
 
 In French, these calls produce `Bonjour, Ann !`, `3 livres`, `1 234,50`, and `02/10/2026`.
 
-Plurals follow CLDR cardinal rules for whole numbers. English requires `one` and `other`; French also requires `many`. Optional exact forms such as `"=0"` take priority, and `%{count}` uses its number separators.
+Plurals follow CLDR cardinal rules for whole numbers. English requires `one` and `other`; French also requires `many`, which French selects for a non-zero multiple of a million, as in `2 000 000 de livres`. Optional exact forms such as `"=0"` take priority, and `%{count}` uses its number separators.
 
 Stage 3 · Choose
 
@@ -138,7 +145,13 @@ Caramel.locales default: "en", prefix: true
 
 With this setting, `/fr/books` routes to `/books` in French. The default locale stays unprefixed; `/en/books` does not select English. Prefixes use lowercase codes, such as `/pt-br/books`. Generated resource path helpers already include the request locale’s prefix. Use `localize_path("/account")` for a manually written application path.
 
-Routed responses identify their language with `Content-Language`. Responses selected without a prefix also vary by `Accept-Language` and `Cookie`. A language-switch request returns a 303 redirect, or a 200 response with `HX-Redirect` for htmx, and remembers the choice in a secure cookie. Unknown switch values are ignored.
+Routed responses identify their language with `Content-Language`. Responses selected without a prefix also vary by `Accept-Language` and `Cookie`. A language-switch request returns a 303 redirect, or a 200 response with `HX-Redirect` for htmx, with `Cache-Control: no-store`, and remembers the choice in a cookie. Unknown switch values are ignored.
+
+| Condition | Outcome |
+| --- | --- |
+| An `Accept-Language` header over 1,024 bytes | is ignored |
+| An `Accept-Language` header with more than 16 ranges | reads the first 16 |
+| The remembered locale | is the `__Host-caramel_locale` cookie: Secure, HttpOnly, SameSite Lax, path `/`, 365 days |
 
 ## Add a language switcher {#c-i18n-switcher}
 
@@ -154,7 +167,7 @@ nav(aria_label: "Language") do
 end
 ```
 
-The layout’s `html` element should use `lang: Caramel.language`; generated applications already do. Add `dir: locale.dir` when supporting right-to-left languages, and check your styles in both directions.
+Set the layout’s `html` element to `lang: Caramel.language`; generated applications already have it. For a right-to-left language, add `dir: locale.dir` and use `margin-inline` and `padding-inline` in your styles, so they mirror with the direction.
 
 Stage 4 · Localize
 
@@ -276,18 +289,20 @@ Prove it
 
 ## Check translations and requests {#c-i18n-check}
 
-Use the completeness report alongside the compiler and request specs. `frappe translations` prints `MISSING code key file` and exits 1 while translations are missing. It includes framework wording and formatting data, so a newly generated locale has more to fill in than application text. Missing keys can still compile and fall back intentionally.
+Use the completeness report alongside the compiler and request specs. `frappe translations` counts framework wording and formatting data as well as application text, so a newly generated locale has more to fill in than this guide’s catalog. Missing keys still compile and fall back to the default locale.
 
-Use a fresh Corretto session to test browser language negotiation without a remembered locale. With a Book resource and a layout using `Caramel.language`:
+Use a fresh Corretto session to test browser language negotiation without a remembered locale. Add this example to the spec `frappe make resource Book` wrote; the generated layout already sets `lang: Caramel.language`:
 
-**spec/requests/books_spec.cr · inside an example**
+**spec/requests/books_spec.cr · a second example**
 
 ```crystal
-Corretto.session do |client, db|
-  response = client.get("/books",
-    headers: {"Accept-Language" => "fr"})
-  response.should have_header("Content-Language", "fr")
-  response.should have_html { html(lang: "fr") }
+it "answers in the browser’s language" do
+  Corretto.session do |client, db|
+    response = client.get("/books",
+      headers: {"Accept-Language" => "fr"})
+    response.should have_header("Content-Language", "fr")
+    response.should have_html { html(lang: "fr") }
+  end
 end
 ```
 
@@ -301,7 +316,7 @@ frappe translations
 frappe corretto
 ```
 
-**Passing:** `frappe check` compiles the catalogs. `frappe translations` prints OK with the locale and key counts and exits 0, or lists only `MISSING` keys you leave on the fallback on purpose. The Corretto example sees `Content-Language: fr`.
+**Passing:** `frappe check` exits 0. `frappe translations` prints one `MISSING fr KEY app/locales/fr.cr` line per key the French catalog leaves on the default, such as `MISSING fr books.collection app/locales/fr.cr`, then `N missing in 1 locales`, and exits 1: with this guide’s catalog that is the outcome. Once `fr` has every key it prints `OK 2 locales, N keys` and exits 0. `frappe corretto` ends with `Corretto: 1 of 1 workers passed`, and the new example sees `Content-Language: fr`.
 
 [← Mount a component](https://caramelize.dev/cookbook/0.15.0/third-party-components/index.md) · [Test the HTML your app returns →](https://caramelize.dev/docs/0.15.0/testing-html/index.md)
 
