@@ -49,7 +49,8 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
      that is not a schema or is tenanted, and a target other than the routes' model.
 5. **Foreign keys span several columns.** `SugarORM::Catalog::ForeignKey` holds `columns`
    and `references_columns`, and the schema document is version 2. The differ drops every
-   changed or undeclared key before any other statement, adds a composite key on a new
+   changed key, and every undeclared key it named ([ADR 0008](0008-branch-and-diff-migrations.md)
+   §5), before any other statement, adds a composite key on a new
    table's own rows after that table's indexes, and halts a key that would wait on a
    unique index it only builds CONCURRENTLY; the halt prints the index to build first.
 6. **Work outside a request.** A job enqueued in a tenant carries its id and runs in it; a

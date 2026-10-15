@@ -61,6 +61,8 @@ describe SugarORM::DDL do
     DDL.render(add).should eq(inline)
     DDL.render(add_online).should eq(concurrent)
     DDL.render(drop).should eq(dropped)
+    DDL.render(Differ::RenameIndex.new("books", "a_swap", "a"))
+      .should eq(%(ALTER INDEX "a_swap" RENAME TO "a"))
   end
 
   it "marks only explicit renames and drops with the annotation the linter accepts" do

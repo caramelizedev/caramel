@@ -324,8 +324,10 @@ describe SugarORM::Differ do
       %(-- caramel:allow-drop books.legacy\nALTER TABLE "books" DROP COLUMN "legacy"),
     ])
     sql(plan.online).should eq([
+      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_isbn_swap" ) +
+      %(ON "books" ("isbn")),
       %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn"),
-      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_isbn" ON "books" ("isbn")),
+      %(ALTER INDEX "index_books_on_isbn_swap" RENAME TO "index_books_on_isbn"),
       %(CREATE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_pages" ON "books" ("pages")),
       %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_title"),
     ])
@@ -335,6 +337,97 @@ describe SugarORM::Differ do
     ]
     migrations.map(&.transactional?).should eq([true, false])
     SugarORM::Linter.lint(migrations).should be_empty
+  end
+
+  it "keeps an undeclared index or key that SugarORM did not name, with a note" do
+    lookup = Catalog::Index.new("books_title_idx", ["title"])
+    shelf = Catalog::ForeignKey.new("books_shelf_fkey", ["shelf_id"], "shelves")
+    shelved = nullable("shelf_id", "bigint")
+    plan = Differ.diff([books([shelved])], [books([shelved], [lookup], [shelf])])
+    plan.clean?.should be_true
+    plan.notes.should eq([
+      "ignored index books_title_idx on books (no schema declares it)",
+      "ignored foreign key books_shelf_fkey on books (no schema declares it)",
+    ])
+  end
+
+  it "builds a changed index under a swap name of at most 63 bytes" do
+    name = "index_books_on_" + "a" * 48
+    actual = books([nullable("a")], [Catalog::Index.new(name, ["a"])])
+    declared = books([nullable("a")], [Catalog::Index.new(name, ["a"], unique: true)])
+    build = Differ.diff([declared], [actual]).online.first.as(Differ::AddIndex)
+    build.index.name.should eq(name[0, 58] + "_swap")
+    build.index.name.bytesize.should eq(63)
+  end
+
+  it "keeps a swap index a previous run built, so only the drop and rename remain" do
+    plain = Catalog::Index.new("index_books_on_isbn", ["isbn"])
+    unique = plain.copy_with(unique: true)
+    swap = unique.copy_with(name: "index_books_on_isbn_swap")
+    actual = books([nullable("isbn")], [plain, swap])
+    declared = books([nullable("isbn")], [unique])
+    plan = Differ.diff([declared], [actual])
+    sql(plan.online).should eq([
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn"),
+      %(ALTER INDEX "index_books_on_isbn_swap" RENAME TO "index_books_on_isbn"),
+    ])
+  end
+
+  it "never reuses a swap-named index whose definition differs from the declared one" do
+    plain = Catalog::Index.new("index_books_on_isbn", ["isbn"])
+    unique = plain.copy_with(unique: true)
+    leftover = plain.copy_with(name: "index_books_on_isbn_swap")
+    actual = books([nullable("isbn")], [plain, leftover])
+    declared = books([nullable("isbn")], [unique])
+    sql(Differ.diff([declared], [actual]).online).should eq([
+      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_isbn_swap2" ) +
+      %(ON "books" ("isbn")),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn"),
+      %(ALTER INDEX "index_books_on_isbn_swap2" RENAME TO "index_books_on_isbn"),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_isbn_swap"),
+    ])
+  end
+
+  it "does not halt a key on a changed unique index whose swap index already exists" do
+    account = required("account_id", "bigint")
+    author_id = required("author_id", "bigint")
+    author = composite_key("fk_books_author_id", "author_id", "authors")
+    tenant = tenant_index("authors")
+    stale = tenant.copy_with(unique: false)
+    swap = tenant.copy_with(name: "#{tenant.name}_swap")
+    authors = Catalog::Table.new("authors", [id_column, account])
+    declared = [
+      authors.copy_with(indexes: [tenant]),
+      books([author_id, account], keys: [author]),
+    ]
+    actual = [authors.copy_with(indexes: [stale, swap]), books([author_id, account])]
+    plan = Differ.diff(declared, actual)
+    plan.halts.should be_empty
+    sql(plan.online).should eq([
+      %(DROP INDEX CONCURRENTLY IF EXISTS "#{tenant.name}"),
+      %(ALTER INDEX "#{swap.name}" RENAME TO "#{tenant.name}"),
+      %(ALTER TABLE "books" VALIDATE CONSTRAINT "fk_books_author_id"),
+    ])
+  end
+
+  it "picks another swap name when the usual one is the index itself or a declared index" do
+    long = "index_books_on_" + "a" * 43 + "_swap"
+    stale = books([nullable("a")], [Catalog::Index.new(long, ["a"])])
+    changed = books([nullable("a")], [Catalog::Index.new(long, ["a"], unique: true)])
+    build = Differ.diff([changed], [stale]).online.first.as(Differ::AddIndex)
+    build.index.name.should eq(long[0, 57] + "_swap2")
+    build.index.name.bytesize.should eq(63)
+
+    plain = Catalog::Index.new("index_books_on_a", ["a"])
+    taken = Catalog::Index.new("index_books_on_a_swap", ["a"])
+    declared = books([nullable("a")], [plain.copy_with(unique: true), taken])
+    actual = books([nullable("a")], [plain, taken])
+    sql(Differ.diff([declared], [actual]).online).should eq([
+      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "index_books_on_a_swap2" ) +
+      %(ON "books" ("a")),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "index_books_on_a"),
+      %(ALTER INDEX "index_books_on_a_swap2" RENAME TO "index_books_on_a"),
+    ])
   end
 
   it "adds a foreign key to an existing table NOT VALID " \

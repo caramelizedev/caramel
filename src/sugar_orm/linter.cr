@@ -26,6 +26,7 @@ module SugarORM
     REINDEX       = /\AREINDEX\s.*\bCONCURRENTLY\b/i
     ALTER_TABLE   = /\AALTER\s+TABLE\s+#{IF_EXISTS}#{ONLY}#{NAME}\s+(.+)\z/im
     VALIDATE      = /\AVALIDATE\s+CONSTRAINT\s+(#{IDENTIFIER})\s*;?\z/i
+    RENAME_INDEX  = /\AALTER\s+INDEX\s+#{IF_EXISTS}#{NAME}\s+RENAME\s+TO\s+#{IDENTIFIER}\s*;?\z/i
     ADD_COLUMN    = /\AADD\s+#{NOT_CONSTRAINT}#{COLUMN}#{IF_NOT_EXISTS}(#{IDENTIFIER})\s/i
     DROP_COLUMN   = /\ADROP\s+(?!CONSTRAINT\b)#{COLUMN}#{IF_EXISTS}(#{IDENTIFIER})/i
     RENAME_COLUMN = /\ARENAME\s+(?!(?:TO|CONSTRAINT)\b)#{COLUMN}(#{IDENTIFIER})\s+TO\s/i
@@ -189,11 +190,12 @@ module SugarORM
       code.matches?(DROP_INDEX) || code.matches?(REINDEX)
     end
 
-    # Online statements may run in autocommit: CONCURRENTLY statements and
-    # constraint validation, which must not share the transaction that added
-    # the NOT VALID constraint, or its lock is held for the whole scan.
+    # Online statements may run in autocommit: CONCURRENTLY statements, index
+    # renames, which take SHARE UPDATE EXCLUSIVE, and constraint validation,
+    # which must not share the transaction that added the NOT VALID
+    # constraint, or its lock is held for the whole scan.
     def self.online?(statement : String) : Bool
-      return true if concurrent?(statement)
+      return true if concurrent?(statement) || code(statement).matches?(RENAME_INDEX)
       match = code(statement).match(ALTER_TABLE)
       !!match && actions(match[2]).all?(&.matches?(VALIDATE))
     end

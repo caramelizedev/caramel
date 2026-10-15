@@ -30,6 +30,8 @@ PROBLEMS = [
                       "which Fixture::Book already declares."},
   {"shared_first_segment", "Route '/books/shelves' in the tenant block starts with " \
                            "'books', as a central route does"},
+  {"set_null_tenanted", "cannot use on_delete: :set_null: it references the tenanted " \
+                        "Fixture::Author"},
 ]
 # The guard runs once the program is complete, so it names no fixture line.
 UNLOCATED    = %w[compile_missing_tenant_block]
@@ -39,6 +41,7 @@ REMEDIATIONS = {
   "compile_tenant_mismatch"              => "Remediation: name Fixture::Account here.",
   "compile_central_parameter_route"      => "Remediation: give it a static first segment",
   "compile_shared_first_segment"         => "Remediation: rename one of them.",
+  "compile_set_null_tenanted"            => "Remediation: use on_delete: :cascade or :restrict.",
 }
 
 cases = {"compile_valid" => nil} of String => String?

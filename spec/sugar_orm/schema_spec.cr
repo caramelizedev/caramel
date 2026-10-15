@@ -90,6 +90,17 @@ describe SugarORM::Schema do
     table.indexes.should eq([index])
   end
 
+  it "declares each foreign key's ON DELETE action" do
+    SugarUnit::Loan.__sugar_table.foreign_keys.should eq([
+      Catalog::ForeignKey.new("fk_unit_loans_team_id", ["team_id"], "unit_teams",
+        on_delete: "CASCADE"),
+      Catalog::ForeignKey.new("fk_unit_loans_member_id", ["member_id"], "unit_members",
+        on_delete: "SET NULL"),
+      Catalog::ForeignKey.new("fk_unit_loans_charter_id", ["charter_id"], "unit_charters",
+        on_delete: "RESTRICT"),
+    ])
+  end
+
   it "turns range and expression checks into named catalog checks" do
     SugarUnit::Shelf.__sugar_table.checks.should eq([
       Catalog::Check.new("check_unit_shelves_stock", column: "stock", min: 0_i64, max: 10_i64),

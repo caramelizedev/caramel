@@ -40,6 +40,15 @@ module SugarUnit
     end
   end
 
+  struct Loan < SugarORM::Schema
+    schema "unit_loans" do
+      field id : Int64, primary: true
+      belongs_to team : Team, on_delete: :cascade
+      belongs_to member : Member?, on_delete: :set_null
+      belongs_to charter : Charter, on_delete: :restrict
+    end
+  end
+
   struct Counter < SugarORM::Schema
     schema "unit_counters" do
       field id : Int64, primary: true

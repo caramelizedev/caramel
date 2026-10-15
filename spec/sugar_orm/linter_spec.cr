@@ -151,6 +151,12 @@ describe SugarORM::Migration do
                 %(CREATE INDEX i ON books (isbn))
     named = %(CREATE INDEX concurrently_built ON books (isbn))
     migration("index", build, drop).transactional?.should be_false
+    swap = migration("swap",
+      %(CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "a_swap" ON "books" ("isbn")),
+      %(DROP INDEX CONCURRENTLY IF EXISTS "a"),
+      %(ALTER INDEX "a_swap" RENAME TO "a"))
+    swap.transactional?.should be_false
+    SugarORM::Linter.lint([swap]).should be_empty
     migration("validate", validate).transactional?.should be_false
     migration("mixed", concurrent, update).transactional?.should be_true
     migration("commented", commented).transactional?.should be_true
