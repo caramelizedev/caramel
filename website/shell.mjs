@@ -20,7 +20,7 @@ export function header(key, {routes, version}) {
 }
 
 export function layout({key, content, routes, groups, route}) {
-  const rail = groups.map(([group, items]) => `<h3>${group}</h3>${items.map(([page, label]) => `<a href="${routes[page]}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`).join('')}`).join('');
+  const rail = groups.map(([group, items]) => `<h3>${group}</h3>${items.map(([page, label, child]) => `<a href="${routes[page]}"${child ? ' class="c-child"' : ''}${page === key ? ' aria-current="page"' : ''}>${label}</a>`).join('')}`).join('');
   const outline = [...content.matchAll(/<h2 id="([^"]+)">(.*?)<\/h2>/g)].map(m => `<a href="#${m[1]}">${m[2]}</a>`).join('');
   const skill = key === 'sweettalk' ? '<a href="https://github.com/caramelizedev/caramel/blob/main/templates/skills/sweettalk/SKILL.md">The SweetTalk skill</a>' : '';
   return `<div class="c-layout"><details class="c-railnav" open><summary>Browse documentation</summary><nav class="c-rail" aria-label="Documentation">${rail}</nav></details><main id="c-main" class="c-doc" tabindex="-1"><article class="c-article">${content}</article></main><aside class="c-outline" aria-label="On this page"><p>On this page</p>${outline}<div class="c-outline-more"><a href="${route}index.md">This page as Markdown</a><a href="https://github.com/caramelizedev/caramel/blob/main/website/source/site.html">Edit the source</a>${skill}</div></aside></div>`;

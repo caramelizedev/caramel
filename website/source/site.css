@@ -73,6 +73,7 @@ table:is(.c-contract, .c-limits, .c-rules) thead { position: absolute; width: 1p
 .c-rail a { display: block; padding: 7px 12px; border-left: 2px solid transparent; font-size: 14px; color: var(--body); text-decoration: none; }
 .c-rail a:hover { color: var(--ink); }
 .c-rail a[aria-current] { color: var(--ink); border-left-color: var(--accent); background: var(--tint); }
+.c-rail a.c-child { margin-left: 12px; padding-left: 16px; font-size: 13px; }
 .c-doc { flex: 999 1 560px; min-width: 0; padding: 56px 48px 96px; }
 .c-doc:focus { outline: none; }
 .c-article { max-width: 780px; margin: 0 auto; }
