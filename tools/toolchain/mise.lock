@@ -10,6 +10,10 @@ checksum = "sha256:0a0544cf95f64394fe4959286f5c71f5444ad58feb0602e53becb27448d24
 url = "https://conda.anaconda.org/conda-forge/osx-arm64/cyrus-sasl-2.1.28-hb961e35_1.conda"
 checksum = "sha256:2bb1a8cfc2534b05718c21ffacd806c5c3d5289c9e8be12270d9fc5606c859bf"
 
+[conda-packages.macos-arm64."gmp-6.3.0-hf5e55b1_3"]
+url = "https://conda.anaconda.org/conda-forge/osx-arm64/gmp-6.3.0-hf5e55b1_3.conda"
+checksum = "sha256:980cb1bbc3656d6f923d44297a2c4ab75f20482b8930c70537fd7f1ef2378894"
+
 [conda-packages.macos-arm64."icu-78.3-py310h579977c_2"]
 url = "https://conda.anaconda.org/conda-forge/osx-arm64/icu-78.3-py310h579977c_2.conda"
 checksum = "sha256:6cdb5dee54c72e56ab189fb3ad33cb28533553d42590e7e831160248f4416a43"
@@ -99,6 +103,19 @@ specifiers = ["2.11.4"]
 checksum = "sha256:9efb0af2d6cf09cfb5053c0e51721b9b3d4956d346234f39368d943d25a3c9a7"
 url = "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_arm64.tar.gz"
 url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/436912311"
+
+[[tools."conda:gmp"]]
+version = "6.3.0"
+backend = "conda:gmp"
+specifiers = ["6.3.0"]
+
+[tools."conda:gmp".options]
+channel = "conda-forge"
+
+[tools."conda:gmp"."platforms.macos-arm64"]
+checksum = "sha256:980cb1bbc3656d6f923d44297a2c4ab75f20482b8930c70537fd7f1ef2378894"
+url = "https://conda.anaconda.org/conda-forge/osx-arm64/gmp-6.3.0-hf5e55b1_3.conda"
+conda_deps = ["libcxx-23.1.1-h55c6f16_0"]
 
 [[tools."conda:openssl"]]
 version = "3.6.4"

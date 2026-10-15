@@ -6,7 +6,7 @@ Status: accepted.
 
 ## Context
 
-Caramel needs Crystal, Shards, Caddy, PostgreSQL, OpenSSL and pkgconf at known versions on a
+Caramel needs Crystal, Shards, Caddy, PostgreSQL, OpenSSL, GMP and pkgconf at known versions on a
 developer's machine, without Homebrew, a global version manager or a compiled PostgreSQL.
 Each tool must install from prebuilt artifacts and run without touching the host's own tools.
 
@@ -14,10 +14,10 @@ Each tool must install from prebuilt artifacts and run without touching the host
 
 1. **Provider.** Pinned mise 2026.9.11 runs behind an isolated toolchain adapter. Backends are
    explicit: GitHub for Crystal, aqua for Caddy, and conda-forge for prebuilt PostgreSQL,
-   OpenSSL and pkgconf. Caramel does not write a general version manager and does not compile
+   OpenSSL, GMP and pkgconf. Caramel does not write a general version manager and does not compile
    PostgreSQL during ordinary setup.
 2. **Tested set.** Crystal 1.21.1 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6,
-   OpenSSL 3.6.4 and pkgconf 3.0.7. The experiment lockfile preserves the concrete artifact
+   OpenSSL 3.6.4, GMP 6.3.0 and pkgconf 3.0.7. The experiment lockfile preserves the concrete artifact
    URLs and SHA-256 checksums, including PostgreSQL's transitive dependency packages. Updating
    a tool version or backend is a reviewed dependency change.
 3. **Responsibilities.** Frappé is the application developer's interface. Shards owns Crystal
@@ -30,7 +30,10 @@ Each tool must install from prebuilt artifacts and run without touching the host
 5. **Supply native compiler dependencies explicitly.** The Crystal archive does not include
    OpenSSL. Use a dedicated managed OpenSSL prefix and pkgconf with a `pkg-config` entry point.
    OpenSSL is exposed via `PKG_CONFIG_LIBDIR`, and its library directory is embedded as a
-   development runtime search path.
+   development runtime search path. Nor does it include GMP, which `BigDecimal`, `BigInt` and
+   `BigRational` link. `scripts/crystal` links it through a single link to `libgmp.dylib` in its
+   private compiler directory, not through GMP's conda library directory, and embeds that
+   directory as a development runtime search path.
 6. **Keep native search paths narrow.** Adding the entire PostgreSQL library directory to the
    compiler search path causes an iconv ABI mismatch with Crystal's macOS bindings. A database
    prefix is not a general compiler dependency directory.
@@ -65,3 +68,5 @@ Each tool must install from prebuilt artifacts and run without touching the host
   request smuggling, and automatic decompression of request bodies.
 - Separate prefixes let several Crystal versions coexist and leave the host's shell, Homebrew
   and Herd untouched.
+- Bundling GMP lets an application use the standard library's exact arithmetic in every
+  managed build, without Homebrew or a link annotation of its own.

@@ -35,14 +35,18 @@ BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
 CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
 COMPILER=$CRYSTAL_ROOT/embedded/bin/crystal
 OPENSSL=$BASE/data/installs/conda-openssl/3.6.4
+GMP=$BASE/data/installs/conda-gmp/6.3.0
 
 # Crystal 1.21 pastes pkg-config output into a shell command without quoting.
 # Keep the metadata in a short private alias; link the durable path into binaries.
+# GMP, which Crystal links by name, is found through one link to its library in
+# the same directory.
 KEY=$(printf '%s' "$BASE" | /usr/bin/openssl dgst -sha256 -r)
 REST=${KEY#????????????????}
 KEY=${KEY%"$REST"}
 RUNTIME=/private/tmp/caramel-compiler-$USER_ID-$KEY
 ALIAS=$RUNTIME/openssl
+GMPLINK=$RUNTIME/libgmp.dylib
 STAMP=$RUNTIME/.stamp
 
 # The fast path: one stat shows that the private directory, the alias and
@@ -50,7 +54,7 @@ STAMP=$RUNTIME/.stamp
 # stamp it wrote names this toolchain and the unchanged .pc sources. Any
 # mismatch, or any missing file, takes the full path.
 FRESH=
-STATS=$(stat -f '%u %Lp %Sp %i:%m:%z %Y' "$RUNTIME" "$ALIAS" "$STAMP" \
+STATS=$(stat -f '%u %Lp %Sp %i:%m:%z %Y' "$RUNTIME" "$ALIAS" "$GMPLINK" "$STAMP" \
     "$RUNTIME/libssl.pc" "$RUNTIME/libcrypto.pc" "$RUNTIME/openssl.pc" \
     "$OPENSSL/lib/pkgconfig/libssl.pc" "$OPENSSL/lib/pkgconfig/libcrypto.pc" \
     "$OPENSSL/lib/pkgconfig/openssl.pc" 2>/dev/null) || STATS=
@@ -65,7 +69,9 @@ if [ -n "$STATS" ]; then
                [ "$OWNER" = "$USER_ID" ] && [ $(( 0$MODE & 077 )) -eq 0 ] || FRESH= ;;
             2) case $PERMISSIONS in l*) ;; *) FRESH= ;; esac
                [ "$OWNER" = "$USER_ID" ] && [ "$TARGET" = "$OPENSSL" ] || FRESH= ;;
-            [3-6]) case $PERMISSIONS in -*) ;; *) FRESH= ;; esac
+            3) case $PERMISSIONS in l*) ;; *) FRESH= ;; esac
+               [ "$OWNER" = "$USER_ID" ] && [ "$TARGET" = "$GMP/lib/libgmp.dylib" ] || FRESH= ;;
+            [4-7]) case $PERMISSIONS in -*) ;; *) FRESH= ;; esac
                [ "$OWNER" = "$USER_ID" ] && [ $(( 0$MODE & 077 )) -eq 0 ] || FRESH= ;;
             *) SOURCES="$SOURCES $IDENTITY" ;;
         esac
@@ -94,6 +100,15 @@ if [ -z "$FRESH" ]; then
     if [ ! -L "$ALIAS" ] || [ "$(stat -f %u "$ALIAS")" != "$USER_ID" ] ||
         [ "$(readlink "$ALIAS")" != "$OPENSSL" ]; then
         echo 'Compiler OpenSSL alias conflicts with existing state' >&2
+        exit 1
+    fi
+
+    if [ ! -e "$GMPLINK" ] && [ ! -L "$GMPLINK" ]; then
+        ln -s "$GMP/lib/libgmp.dylib" "$GMPLINK" 2>/dev/null || true
+    fi
+    if [ ! -L "$GMPLINK" ] || [ "$(stat -f %u "$GMPLINK")" != "$USER_ID" ] ||
+        [ "$(readlink "$GMPLINK")" != "$GMP/lib/libgmp.dylib" ]; then
+        echo 'Compiler GMP link conflicts with existing state' >&2
         exit 1
     fi
 
@@ -138,7 +153,7 @@ if [ -z "$FRESH" ]; then
 fi
 
 CRYSTAL_PATH=${CRYSTAL_PATH-lib:$CRYSTAL_ROOT/src}
-CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$CRYSTAL_ROOT/embedded/lib
+CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$RUNTIME:$CRYSTAL_ROOT/embedded/lib
 PATH=$BASE/bin:${PATH-}
 unset PKG_CONFIG_PATH
 PKG_CONFIG_LIBDIR=$RUNTIME
@@ -222,7 +237,7 @@ case ${1:-} in
 esac
 
 if [ "${1:-}" = eval ]; then
-    DYLD_LIBRARY_PATH=$OPENSSL/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
+    DYLD_LIBRARY_PATH=$OPENSSL/lib:$GMP/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
     export DYLD_LIBRARY_PATH
 fi
 case ${1:-} in
@@ -230,7 +245,8 @@ case ${1:-} in
         SUBCOMMAND=$1
         shift
         QUOTED=$(printf '%s' "$OPENSSL/lib" | sed "s/'/'\\\\''/g")
-        set -- "$SUBCOMMAND" "--link-flags=-Xlinker -rpath -Xlinker '$QUOTED'" "$@"
+        GMP_QUOTED=$(printf '%s' "$GMP/lib" | sed "s/'/'\\\\''/g")
+        set -- "$SUBCOMMAND" "--link-flags=-Xlinker -rpath -Xlinker '$QUOTED' -Xlinker -rpath -Xlinker '$GMP_QUOTED'" "$@"
         ;;
 esac
 
