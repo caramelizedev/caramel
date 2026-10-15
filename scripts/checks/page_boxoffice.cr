@@ -23,8 +23,10 @@ module Caramel::Checks
       next_step = "Next: write the domain in app/domain/box_office.cr, " \
                   "then run frappe db diff --name create_box_office and frappe migrate."
       assert!(domain.stdout.includes?(next_step), domain.stdout)
-      # 02 to 05 · The domain, as one file
+      # 02 to 05 · The domain, as one file, then frappe format and frappe check
       copy(["app/domain/box_office.cr"])
+      frappe("format")
+      check
       # 06 · Derive the tables
       migration = diff("create_box_office")
       %w[seating_shows seating_show_holds seating_show_tickets seating_checkouts
@@ -38,8 +40,9 @@ module Caramel::Checks
         assert!(migration.includes?(text), migration)
       end
       migrate(1)
-      # 07 · Let the show choose the buttons
+      # 07 · Let the show choose the buttons, then frappe check
       copy(["app/views/shows/show.cr", "app/views/holds/show.cr"])
+      check
       # 08 · Answer guests from actions
       copy(["config/routes.cr", "app/actions/shows/show.cr", "app/actions/holds/create.cr",
             "app/actions/holds/show.cr", "app/actions/holds/sell.cr",
@@ -71,10 +74,18 @@ module Caramel::Checks
       assert!(show.match(page), show.failure_message(page))
       # The second seed scheduled nothing, so there is no second show.
       assert!(fetch("/shows/2", status_only: true) == "404")
-      # Prove it
+      # 10 · Specify the rules
       copy(["spec/support/box_office.cr", "spec/domain/box_office_spec.cr",
             "spec/requests/box_office_spec.cr"])
+      corretto
+      # Prove it
       prove
+    end
+
+    # `frappe check`, piped, prints `OK check N files`.
+    private def check : Nil
+      checked = frappe("check", timeout: 600.seconds)
+      assert!(checked.stdout.includes?("OK check "), checked.stdout)
     end
   end
 end

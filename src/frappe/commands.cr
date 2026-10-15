@@ -211,7 +211,7 @@ module Caramel::Frappe
         project: false),
       Command.new("sites", "List the sites registered with Latte.", project: false),
       Command.new("sites remove NAME",
-        "Unregister site NAME, keeping its files, databases and credentials.",
+        "Unregister site NAME, keeping its files, databases, credentials, logs and backups.",
         project: false),
       Command.new("installations [list]",
         "List the Caramel releases installed on this Mac.",
@@ -230,8 +230,8 @@ module Caramel::Frappe
         "the launchers move to the newest remaining release.",
         project: false),
       Command.new("doctor",
-        "Check the toolchain, this Caramel installation, dependencies, " \
-        "local configuration and Latte services."),
+        "Check the toolchain, this Caramel installation, dependencies, local configuration, " \
+        "Latte services, trusted HTTPS and the port relay."),
       Command.new("open", "Open the application's HTTPS origin in the browser."),
       Command.new("lsp crystalline|ameba-ls [SERVER_ARGS...]",
         "Run a pinned language server for this project on stdio.",

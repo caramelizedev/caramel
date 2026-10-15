@@ -166,11 +166,124 @@ for (const file of paged) {
   }
 }
 const markdownPage = route => fs.readFileSync(path.join(root, route, 'index.md'), 'utf8');
+// Each page follows its type (.claude/skills/caramel-docs/SKILL.md, "Page types"). The
+// guards below read the built article: its eyebrow names the type, its h2s its sections.
+const textOf = html => decodeCode(html.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+const articles = paged.map(file => {
+  const html = fs.readFileSync(path.join(root, file), 'utf8');
+  const article = html.slice(html.indexOf('<article class="c-article">'), html.indexOf('</article>'));
+  const [type, topic] = textOf(article.match(/<div class="c-eyebrow">(.*?)<\/div>/)[1]).split(' / ');
+  const h2s = [...article.matchAll(/<h2 id="([^"]+)">(.*?)<\/h2>/g)].map(([, id, text]) => ({id, text: textOf(text)}));
+  // The prose: the article without its code blocks and its contract table.
+  const prose = textOf(article.replace(/<pre[\s\S]*?<\/pre>/g, ' ').replace(/<table class="c-contract">[\s\S]*?<\/table>/, ' '));
+  return {file, key: pageKey(file), article, type, topic, h2s, prose, prove: article.indexOf('<div class="c-prove">')};
+});
+const TYPES = {Learn: 'a learning path', Guides: 'a guide', Cookbook: 'a recipe', Reference: 'a reference'};
+for (const {file, key, article, type, topic, h2s, prove} of articles) {
+  assert(TYPES[type], `${file}: the eyebrow "${type} / ${topic}" names none of ${Object.keys(TYPES).join(', ')}`);
+  for (const {id} of h2s) assert(id.startsWith(`c-${key}-`), `${file}: the section id ${id} does not start with c-${key}-`);
+  const titles = h2s.map(h2 => h2.text);
+  const before = article.slice(0, prove);
+  if (type === 'Learn') {
+    for (const [, title] of before.matchAll(/<h2 id="[^"]+">(.*?)<\/h2>/g)) assert(/^\d\d · /.test(textOf(title)), `${file}: a learning path numbers its steps "01 · Verb the thing", not "${textOf(title)}"`);
+  } else if (type === 'Guides' && topic === 'Current release') {
+    assert(titles.includes(`Upgrading to ${version}`), `${file}: the current release guide has a section "Upgrading to ${version}"`);
+  } else if (type === 'Guides') {
+    for (const required of ['What does not compile', 'Not covered yet']) assert(titles.includes(required), `${file}: a guide has a section "${required}"`);
+  } else if (type === 'Cookbook') {
+    assert(article.includes('<div class="c-tagrow">'), `${file}: a recipe opens with tags()`);
+  } else if (type === 'Reference') {
+    assert(article.includes(`<h2 id="c-${key}-limits">Limits at a glance</h2><table class="c-limits">`), `${file}: a reference opens with limits()`);
+    for (const section of before.split(/(?=<h2 id=")/).slice(1)) {
+      const id = section.match(/<h2 id="([^"]+)"/)[1];
+      assert(/<table class="c-(rules|map|limits)">|<div class="c-files" data-commands="/.test(section), `${file}: the reference section ${id} has no rules() or lookup() table`);
+    }
+  }
+}
+// Every command says what to expect: a Terminal snippet is followed by an Expect line, or
+// sits in the Prove it block, whose Passing line is checked above.
+for (const {file, article, prove} of articles) {
+  for (const match of article.matchAll(/<div class="c-snippet"><header>(Terminal[^<]*)<\/header><pre>[\s\S]*?<\/pre><\/div>/g)) {
+    if (match.index > prove) continue;
+    assert(article.startsWith('<p class="c-expect">', match.index + match[0].length), `${file}: the snippet "${textOf(match[1])}" is not followed by an Expect line`);
+  }
+}
+// A guide map names each section as its heading does.
+for (const {file, article, h2s} of articles) {
+  for (const [, id, label] of (article.match(/<div class="c-guidemap">([\s\S]*?)<\/div>/)?.[1] ?? '').matchAll(/<a href="#([^"]+)">([^<]*)<\/a>/g)) {
+    assert.equal(textOf(label), h2s.find(h2 => h2.id === id)?.text, `${file}: the guide map calls ${id} "${textOf(label)}", not what its heading says`);
+  }
+}
+// Every fact has one page: a sentence of 90 characters or more appears on one page only.
+const said = {};
+for (const {file, prose} of articles) {
+  for (const sentence of new Set(prose.split(/(?<=\.) /).filter(sentence => sentence.length >= 90))) {
+    assert(!said[sentence], `${said[sentence]} and ${file} both say: ${sentence}`);
+    said[sentence] = file;
+  }
+}
+// The voice says what Caramel does, without softeners (SKILL.md, "Voice").
+for (const {file, prose} of articles) {
+  for (const softener of [' simply ', ' be careful', ' reasonably ', ' you may want', ' easily ']) {
+    const at = prose.toLowerCase().indexOf(softener);
+    assert(at === -1, `${file}: "${softener.trim()}" softens: …${prose.slice(Math.max(0, at - 40), at + 40)}…`);
+  }
+}
+// A rules table states each outcome in the framework's verb; an 'ok' row describes the
+// plain path and may start with its subject.
+const OUTCOME_VERBS = new Set(('fails fail refuses refuse answers answer raises raise runs run is are keeps keep kept ' +
+  'stays stay does do returns return rolls allowed has have defaults follows adds add leaves leave checks checked ' +
+  'sends send warns holds hold prints exits replaced continues counts revokes takes take queries saves re-renders ' +
+  'never fires calls unmounts sets set draws uses use must commits writes write starts stops stop delivers vacuums ' +
+  'ticks logs log becomes makes includes derives halts selects skips skip wraps turns clones goes splits lints shows ' +
+  'overrides override resets reset binds bound fills omits converts routes brings escapes comes come carries carry ' +
+  'renders passes changes weighs gets get ends works stores says folds fold aggregates traces loses falls builds ' +
+  'installs forwards registers unregisters marks resolves waits refreshes refresh outlives undoes undo opens costs ' +
+  'grants grant blocked reads read clears written stored ignored offered needs need moves also still not nothing').split(' '));
+const VAGUE = /^(is|are) (an error|invalid|not allowed|rejected|missing|checked)\b/;
+for (const {file, article} of articles) {
+  for (const [, table] of article.matchAll(/<table class="c-rules">([\s\S]*?)<\/table>/g)) {
+    for (const [, tone, cell] of table.matchAll(/<\/td><td( class="c-ok")?>([\s\S]*?)<\/td><\/tr>/g)) {
+      const outcome = textOf(cell);
+      assert(!VAGUE.test(outcome), `${file}: the outcome "${outcome}" names no framework verb; say what fails, refuses, answers or raises`);
+      const verb = outcome.split(/[\s,;:(]/)[0];
+      assert(tone || OUTCOME_VERBS.has(verb), `${file}: the outcome "${outcome.slice(0, 70)}" starts with "${verb}", not a framework verb (fails, refuses, answers, raises, …)`);
+    }
+  }
+}
+// A recipe's status: the catalog card (its recipes row), its tags() and its fixture agree,
+// and a proved recipe names the check that ran it, which exists under scripts/checks.
+const cards = Object.fromEntries([...read(`cookbook/${version}`).matchAll(/<a class="c-recipe" href="\/cookbook\/[^/]+\/([^/]+)\/"[^>]*><span class="c-recipe-meta"><span>[^<]*<\/span><span class="c-tag c-(draft|gap|proved)">/g)]
+  .map(([, slug, status]) => [slug, status]));
+for (const {file, key, type, article} of articles) {
+  if (type !== 'Cookbook') continue;
+  const status = cards[file.split(path.sep)[2]];
+  assert(status, `${file}: no recipes row puts it on the cookbook catalog`);
+  const tag = textOf(article.match(/<div class="c-tagrow"><span class="c-tag[^"]*">([^<]*)<\/span>/)?.[1] ?? '');
+  const prover = tag.match(/^Proved by scripts\/check ([a-z-]+)$/)?.[1];
+  if (status === 'proved') {
+    assert(prover, `${file}: its recipes row says proved, so its tags() must say "Proved by scripts/check NAME", not "${tag}"`);
+    assert(fs.existsSync(new URL(`../scripts/checks/${prover.replaceAll('-', '_')}.cr`, import.meta.url)), `${file}: tagged "${tag}", but scripts/checks/${prover.replaceAll('-', '_')}.cr does not exist`);
+  } else {
+    assert.equal(tag, status === 'gap' ? 'Recipe needs validation' : 'Draft recipe', `${file}: its recipes row says ${status}; its tags() says "${tag}"`);
+  }
+  assert(!pageFixtures[key] || status === 'proved', `${file}: spec/fixtures/pages/${key} exists, so its recipes row says proved`);
+}
+// The release guide's upgrade notes name everything the CHANGELOG's upgrade notes do.
+const changelog = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+const released = changelog.slice(changelog.indexOf(`\n## ${version} `)).split('\n## ')[1] ?? '';
+assert(released.startsWith(version), `CHANGELOG.md has no ## ${version} section`);
+const upgradeNotes = released.split('\n### ').find(part => part.startsWith('Upgrade notes')) ?? '';
+const releasesPage = markdownPage(`docs/${version}/releases`);
+for (const [, token] of upgradeNotes.matchAll(/`([^`]+)`/g)) {
+  assert(releasesPage.includes(token), `docs/${version}/releases/index.md: the CHANGELOG's ${version} upgrade notes name ${token}; the release guide does not`);
+}
 assert(markdownPage(`docs/${version}/agents`).includes('# Working in this Caramel application'), 'The agents page\'s Markdown omits the agent guide');
 // Cases the pages do not emit yet, so a page that starts to cannot break the Markdown.
 const converted = html => markdown(html, href => href);
 assert.equal(converted('<p><a href="/x/?a=1&amp;b=(2)">x</a></p>'), '[x](/x/?a=1&b=%282%29)\n', 'A Markdown link keeps an entity or a parenthesis from its href');
 assert.equal(converted('<p>Never &lt;script&gt; here, but <code>&lt;b&gt;</code></p>'), 'Never \\<script\\> here, but `<b>`\n', 'Prose < and > become raw HTML in Markdown');
+assert.equal(converted('<p><code>check :dates, "starts_at < ends_at"</code> when a < b</p>'), '`check :dates, "starts_at < ends_at"` when a \\< b\n', 'A bare < in a code span or prose is dropped from the Markdown');
 assert.equal(converted('<ul><li><p>One.</p><p>Two.</p></li></ul>'), '- One.\n\n  Two.\n', 'An item\'s paragraphs run together in Markdown');
 assert.equal(llmsEntry('Read [this]', 'https://caramelize.dev/a b/', 'Why.'), '- [Read \\[this\\]](https://caramelize.dev/a%20b/): Why.', 'An llms.txt name ends its link early');
 assert(!/&(lt|gt|quot|#39|amp);/.test(llms), 'llms.txt holds an undecoded entity');
@@ -190,4 +303,60 @@ for (const line of skill.split('\n')) {
   const planned = line.match(/planned for (\d+\.\d+\.\d+)/)?.[1];
   assert(!planned || !reached(planned), `The SweetTalk skill still plans for ${planned} in ${version}: ${line}`);
 }
+// The SweetTalk guide's "What does not compile" table covers every fixture of
+// scripts/checks/sweet_talk_compilation.cr: each fixture name belongs to one row, named by a
+// phrase of the row's condition, and every phrase is in the table.
+const compilation = fs.readFileSync(new URL('../scripts/checks/sweet_talk_compilation.cr', import.meta.url), 'utf8');
+const problems = compilation.slice(compilation.indexOf('PROBLEMS = ['), compilation.indexOf('\n]\n'));
+const fixtureNames = new Set([...problems.matchAll(/\{"([a-z_]+)",/g)].map(match => match[1]));
+assert(fixtureNames.size > 100, 'sweet_talk_compilation.cr lists fewer fixtures than expected');
+const compileRows = {
+  'A noun without means:': ['missing_meaning', 'specification_without_meaning'],
+  'A subdomain: other than :core, :supporting or :generic': ['subdomain_unknown'],
+  'A foreign name or call outside a border, a border or follows: to an unknown context, or a cycle of dependency edges': ['foreign_name', 'context_cycle', 'cycle_without_boot', 'unknown_border', 'call_outside_border'],
+  'A name or call another context does not publish, a publishes of a name the context does not declare, or of an expression': ['unpublished_name', 'unpublished_call', 'unpublished_in_border', 'published_after_use', 'publishes_unknown', 'publishes_expression'],
+  'Caramel::Outbound or HTTP::Client outside a border with an outside system, or such a border named like a context, holding a whenever, or without its outside: text': ['outbound_outside_border', 'client_in_context_border', 'outside_is_a_context', 'whenever_outside', 'outside_not_text', 'outside_nil'],
+  'emit of another aggregate’s event': ['foreign_event'],
+  'A mover the lifecycle does not declare': ['unknown_state'],
+  'A lifecycle whose check name would pass PostgreSQL’s 63 bytes': ['state_check_long'],
+  'the without a type': ['the_without_type'],
+  'A value that wraps anything but Int32, Int64 or String, or has no parts': ['value_type', 'composite_without_parts'],
+  'A value that takes an option its raw type does not, such as matches: on an integer or at_least: on a string, database_check: true, or database_check: false on a value with parts': ['value_string_bounds', 'value_int_matches', 'database_check_true', 'composite_database_check'],
+  'A bound that is not an integer literal, unless the value takes database_check: false': ['bound_not_literal', 'length_not_literal'],
+  'Two different values mixed in arithmetic, or multiplied without times:': ['value_mix', 'undeclared_times'],
+  'A word out of its place: whenever or service in an aggregate, key outside a projection or a process, deadline outside a process, specification inside an aggregate, or compensate in a projection': ['whenever_in_aggregate', 'service_in_aggregate', 'key_outside_projection', 'deadline_outside_process', 'specification_in_aggregate', 'compensate_in_projection'],
+  'has or part with a type that cannot be stored, a has of a Hash, or an attribute or key whose constraint or index name would pass PostgreSQL’s 63 bytes': ['unsupported_type', 'hash_attribute', 'composite_part_type', 'check_name_long', 'reference_index_long', 'key_index_long'],
+  'An event whose channel would pass PostgreSQL’s 63 characters': ['channel_long'],
+  'Two declarations whose names give one table': ['table_taken'],
+  'A context that names Rows, or code outside the domain that reads an aggregate’s rows': ['rows_named', 'finds_block_rows', 'loader_outside'],
+  'A projection or a process without key, a process step without key:, or a process attribute without a literal default': ['projection_without_key', 'process_without_key', 'process_whenever_without_key', 'process_attribute_default'],
+  'Two whenever blocks for one event in one place, or each: naming a field that is not a list': ['duplicate_handler', 'each_not_list'],
+  'A handler that reads an aggregate from an event, as in placed.order': ['event_loads_nothing'],
+  'A factory that leaves an attribute unset, or named like a repository method': ['factory_unset_attribute', 'factory_repository_name'],
+  'create on an aggregate that has a factory': ['create_beside_factory'],
+  'A query on an unknown attribute, state or order, on a list of entities, with a value of the wrong type, with an argument it does not take, with nothing, with where: or order: that is not a tuple, or with a direction other than :asc or :desc': ['finds_unknown_attribute', 'finds_unknown_state', 'finds_uncalled_unknown_key', 'finds_order_unknown', 'finds_order_entities', 'finds_entities', 'finds_value_type', 'finds_unknown_argument', 'finds_nothing', 'finds_where_not_tuple', 'counts_where_not_tuple', 'finds_order_not_tuple', 'finds_order_direction', 'projection_finds_order_unknown'],
+  'A finds with a block and an option, a block of more than one expression, or a block that does more than narrow its rows': ['finds_block_and_where', 'finds_block_two', 'finds_block_count', 'finds_block_delete', 'finds_block_sql', 'projection_finds_block_count'],
+  'A counts with order: or a block': ['counts_with_order', 'counts_with_block'],
+  'A query named all or like another query': ['query_name_taken', 'finds_name_taken', 'finds_named_all', 'counts_named_all', 'projection_finds_named_all'],
+  'A specification on an unknown attribute or state, on a list of entities or a derived value, with a block, without on:, outside a context, whose predicate the aggregate already has, or whose where: is neither a tuple nor specifications joined by &, | and !': ['specification_entities', 'specification_block', 'specification_derived', 'specification_unknown_state', 'specification_predicate_taken', 'specification_joins_unknown', 'specification_without_on', 'specification_state_without_moves', 'specification_not_a_where', 'specification_value_type'],
+  'satisfying: with anything but a specification on that aggregate, or satisfying: and state: on a projection': ['all_satisfying_other', 'finds_satisfying_value', 'projection_finds_satisfying', 'projection_counts_satisfying', 'projection_finds_state'],
+  'A compensate without its whenever': ['compensate_without_whenever'],
+  'arm of a deadline the process lacks': ['arm_unknown_deadline'],
+  'An event field named like its metadata, or typed as a union of other types': ['event_reserved_field', 'event_reserved_flow', 'event_union_field'],
+  'renamed_from: naming its own name, or a rename whose old job name another job has': ['renamed_from_itself', 'job_alias_taken'],
+  'A value with parts as a contract field': ['composite_field'],
+  'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_index_long', 'tenant_column_taken', 'tenant_parent_column'],
+};
+const sweetTalkPage = read(`docs/${version}/sweettalk`);
+const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));
+const covered = new Set();
+for (const [phrase, names] of Object.entries(compileRows)) {
+  assert(compileTable.includes(phrase), `The SweetTalk guide's "What does not compile" lacks the row "${phrase}", which covers ${names.join(', ')}`);
+  for (const name of names) {
+    assert(fixtureNames.has(name), `check.mjs maps compile_${name}, which sweet_talk_compilation.cr no longer lists`);
+    assert(!covered.has(name), `check.mjs maps compile_${name} to two rows`);
+    covered.add(name);
+  }
+}
+for (const name of fixtureNames) assert(covered.has(name), `The SweetTalk guide's "What does not compile" covers no row for compile_${name}: add it to compileRows in check.mjs`);
 console.log(`Checked ${files.length} HTML documents and all local navigation/asset targets.`);

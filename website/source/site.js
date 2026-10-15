@@ -68,12 +68,12 @@
     });
   }
 
-  // The agents page shows its guide as Markdown on request.
+  // The agents page shows the AGENTS.md that frappe new writes, on request.
   document.getElementById('c-agent-plain')?.addEventListener('click', event => {
     const button = event.currentTarget;
     const el = document.getElementById('c-agent-markdown');
     el.hidden = !el.hidden;
-    button.textContent = el.hidden ? 'View compact guide as Markdown' : 'Hide Markdown guide';
+    button.textContent = el.hidden ? 'View AGENTS.md' : 'Hide AGENTS.md';
     button.setAttribute('aria-expanded', String(!el.hidden));
   });
 

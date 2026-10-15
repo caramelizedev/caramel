@@ -6,10 +6,20 @@ describe App::BoxOffice do
     Corretto.session do |_client, _db|
       show = BoxOfficeSpec.show(3)
       show.hold(BoxOfficeSpec.email("ada@example.com"), BoxOfficeSpec.seats(2))
-      expect_raises(SweetTalk::Refusal, "Only 1 seats left for The Tempest.") do
+      expect_raises(SweetTalk::Refusal, "Only 1 of 3 seats left for The Tempest.") do
         show.hold(BoxOfficeSpec.email("bo@example.com"), BoxOfficeSpec.seats(2))
       end
       BoxOfficeSpec.reload(show).left.should eq(1)
+    end
+  end
+
+  it "refuses a hold once sales have closed" do
+    Corretto.session do |_client, _db|
+      show = BoxOfficeSpec.show(2)
+      show.close
+      expect_raises(SweetTalk::Refusal, "Sales for The Tempest have closed.") do
+        show.hold(BoxOfficeSpec.email("ada@example.com"), BoxOfficeSpec.seats(1))
+      end
     end
   end
 
