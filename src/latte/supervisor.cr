@@ -193,12 +193,15 @@ module Caramel::Latte
       end
     end
 
+    # Removing a site needs no running service: the registry is a file, and the
+    # next start publishes it. Only a running proxy and DNS are refreshed now,
+    # so a registration that stopped the proxy from starting can be removed.
     def unregister(id : String) : Bool
-      require_ready!
+      raise PublicError.new("services_not_ready", NOT_READY, 409) if @busy
       @lock.synchronize do
         OperationDeadline.check!
         removed = @registry.unregister(id)
-        reconcile if removed
+        reconcile if removed && @states.values.all? { |state| state == "running" }
         !removed.nil?
       end
     end
@@ -510,7 +513,10 @@ module Caramel::Latte
       expected = File.read(@proxy.config_file)
       command = ["/usr/bin/curl", "--silent", "--fail", "--max-time", "1", "--noproxy", "*",
                  "--unix-socket", @proxy.admin_socket, "http://localhost/config/"]
-      limit = expected.bytesize + 4096
+      # Caddy echoes the configuration with its defaults filled in, about 150
+      # bytes more per site than Latte wrote, so the guard against a runaway
+      # answer grows with the file; a fixed margin truncated 28 sites' echo.
+      limit = expected.bytesize * 2 + 4096
       result = ProcessRunner.run(command, timeout: 2.seconds, output_limit: limit)
       return false unless result.success? && JSON.parse(result.stdout) == JSON.parse(expected)
       if site = @registry.list.first?

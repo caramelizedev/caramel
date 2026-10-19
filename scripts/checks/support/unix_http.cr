@@ -32,7 +32,7 @@ module Caramel::Checks::UnixHTTP
                  body : JSON::Any? = nil,
                  timeout : Time::Span = 15.seconds) : JSON::Any
     status, document = request(socket, method, path, body, timeout)
-    raise "Latte request failed: #{status}" if status >= 400
+    raise "Latte request failed: #{status} for #{method} #{path}: #{document}" if status >= 400
     document || raise "Latte returned an empty response"
   end
 end

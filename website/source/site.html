@@ -2688,6 +2688,7 @@ end`)+
       ['A site’s state in <code>frappe sites</code>','is <code>running</code>, <code>building</code>, <code>build-error</code>, <code>stopped</code>, <code>unavailable</code> or <code>unknown</code>; <code>(terminal)</code> after it marks a site that a <code>frappe dev</code> session serves','ok'],
       ['<code>frappe sites remove NAME</code>','unregisters the site and keeps its folder, databases, credentials, logs, and backups; <code>frappe setup</code> registers it again','ok'],
       ['<code>frappe sites remove NAME</code> for a name Latte does not know','exits 1 with <code>No registered site is named NAME</code>'],
+      ['<code>frappe sites remove NAME</code> while the services are stopped or failed','removes the registration; the next start publishes the rest, so a registry that stops the proxy from starting can be repaired','ok'],
       ['<code>domain_suffix</code> in <code>config/environment.yml</code>','<code>caramel</code>, <code>test</code>, or <code>localhost</code>','ok'],
       ['A <code>.localhost</code> name','resolves to loopback without a resolver entry, but <code>frappe dev</code>, <code>frappe open</code>, and <code>frappe doctor</code> still need the port relay and <code>latte trust install</code>, because they require the origin to reach loopback with trusted HTTPS on the standard port','ok'],
       ['Switching the suffix','change it, delete <code>.env</code>, and run <code>frappe setup</code>, which registers a new site with its own databases','ok']

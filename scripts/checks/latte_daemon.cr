@@ -238,8 +238,33 @@ module Caramel::Checks::LatteDaemon
       end
       request(socket, "POST", "/v1/services/start", JSON.parse("{}"))
       wait_state(socket, "running")
+      # Caddy echoes its configuration with defaults filled in, so the echo
+      # grows faster than the file Latte wrote. With 28 sites a fixed margin
+      # truncated it and the proxy never read ready (#171); 31 covers that.
+      many = (1..31).map do |index|
+        directory = File.join(root, "many", "site#{index}")
+        Dir.mkdir_p(directory)
+        body = JSON.parse({name: "many#{index}", directory: directory}.to_json)
+        request(socket, "POST", "/v1/sites", body)["site"]["id"].as_s
+      end
       request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
       wait_state(socket, "stopped")
+      started_at = Time.instant
+      request(socket, "POST", "/v1/services/start", JSON.parse("{}"))
+      wait_state(socket, "running")
+      elapsed = Time.instant - started_at
+      if elapsed > 8.seconds
+        raise "Starting with 32 registered sites took #{elapsed.total_seconds.round(1)} s"
+      end
+      last = many.pop
+      many.each { |id| request(socket, "DELETE", "/v1/sites/#{id}") }
+      request(socket, "POST", "/v1/services/stop", JSON.parse("{}"))
+      wait_state(socket, "stopped")
+      # A site can be removed while the services are down, which is how a
+      # registry that stops the proxy from starting gets repaired.
+      request(socket, "DELETE", "/v1/sites/#{last}")
+      names = request(socket, "GET", "/v1/sites")["sites"].as_a.map(&.["name"].as_s)
+      raise "Removal while stopped left #{names}" unless names == ["bookshelf"]
       pg_version = File.join(root, "services/postgres/18/data/PG_VERSION")
       raise "PostgreSQL cluster was not retained" unless File.exists?(pg_version)
       process.terminate
