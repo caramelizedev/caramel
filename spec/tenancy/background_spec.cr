@@ -51,6 +51,16 @@ describe "A job" do
   end
 end
 
+# Writes `plan` in two tenants and a central `banner`.
+private def seeded
+  acme = TenancySpec.account("acme")
+  globex = TenancySpec.account("globex")
+  Tenancy.with(acme) { Caramel::Cache.write("plan", "gold") }
+  Tenancy.with(globex) { Caramel::Cache.write("plan", "silver") }
+  Caramel::Cache.write("banner", "hi")
+  {acme, globex}
+end
+
 describe "The cache" do
   it "keeps each tenant's keys apart" do
     acme = TenancySpec.account("acme")
@@ -59,9 +69,76 @@ describe "The cache" do
     Tenancy.with(globex) { Caramel::Cache.read("plan") }.should be_nil
     Tenancy.with(acme) { Caramel::Cache.read("plan") }.should eq("gold")
   end
+
+  it "refuses a tenant-prefixed key when no tenant is bound" do
+    message = "starts with t<id>:"
+    expect_raises(ArgumentError, message) { Caramel::Cache.write("t5:plan", "x") }
+    expect_raises(ArgumentError, message) { Caramel::Cache.read("t5:plan") }
+    expect_raises(ArgumentError, message) { Caramel::Cache.delete("t5:plan") }
+  end
+
+  it "accepts names that only resemble the prefix" do
+    Caramel::Cache.write("t5", "a")
+    Caramel::Cache.write("task:1", "a")
+    Caramel::Cache.write("t5x:a", "a")
+    Brew.validate_channel!("t5:x")
+  end
+
+  it "lets without reach prefixed names" do
+    acme = TenancySpec.account("acme")
+    Tenancy.with(acme) { Caramel::Cache.write("plan", "gold") }
+    Tenancy.without { Caramel::Cache.read("t#{acme.id}:plan") }.should eq("gold")
+  end
+
+  it "keeps a bound tenant inside its own prefix" do
+    acme = TenancySpec.account("acme")
+    globex = TenancySpec.account("globex")
+    Tenancy.with(acme) { Caramel::Cache.write("t#{globex.id}:plan", "evil") }
+    forged = "t#{acme.id}:t#{globex.id}:plan"
+    Tenancy.without { Caramel::Cache.read(forged) }.should eq("evil")
+    Tenancy.with(globex) { Caramel::Cache.read("plan") }.should be_nil
+  end
+
+  describe "clear" do
+    it "deletes only the bound tenant's keys" do
+      acme, globex = seeded
+      Tenancy.with(acme) { Caramel::Cache.clear }
+      Tenancy.with(acme) { Caramel::Cache.read("plan") }.should be_nil
+      Tenancy.with(globex) { Caramel::Cache.read("plan") }.should eq("silver")
+      Caramel::Cache.read("banner").should eq("hi")
+    end
+
+    it "deletes only untenanted keys when no tenant is bound" do
+      acme, globex = seeded
+      Caramel::Cache.clear
+      Caramel::Cache.read("banner").should be_nil
+      Tenancy.with(acme) { Caramel::Cache.read("plan") }.should eq("gold")
+      Tenancy.with(globex) { Caramel::Cache.read("plan") }.should eq("silver")
+    end
+
+    it "deletes every key inside without" do
+      seeded
+      Tenancy.without { Caramel::Cache.clear }
+      count = SugarORM.sql("SELECT count(*) AS value FROM caramel_cache", as: {value: Int64})
+      count.first[:value].should eq(0)
+    end
+  end
 end
 
 describe "PubSub" do
+  it "refuses a tenant-prefixed channel when no tenant is bound" do
+    message = %(PubSub channel "t5:news" starts with t<id>:)
+    broker = Brew::Broker.new(TenancySpec.url(TenancySpec::RUNTIME_URL))
+    Brew.broker = broker
+    begin
+      expect_raises(ArgumentError, message) { Brew.publish("t5:news", "{}") }
+      expect_raises(ArgumentError, message) { Brew.subscribe("t5:news", Channel(String).new) }
+    ensure
+      broker.close
+      Brew.broker = nil
+    end
+  end
+
   it "delivers a channel's messages only to its own tenant's subscribers" do
     acme = TenancySpec.account("acme")
     globex = TenancySpec.account("globex")

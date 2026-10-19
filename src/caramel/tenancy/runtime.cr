@@ -14,6 +14,8 @@ module Caramel::Tenancy
   SLUG = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
   # The JSON key that carries a job's tenant.
   CARRY_KEY = "caramel_tenant"
+  # The form of a bound tenant's name prefix.
+  PREFIXED = /\At[0-9]+:/
 
   # :nodoc:
   NO_TENANT = <<-TEXT
@@ -105,10 +107,21 @@ module Caramel::Tenancy
   end
 
   # :nodoc:
-  # *name* under the bound tenant's `t<id>:` prefix.
-  def self.scoped(name : String) : String
-    tenant = current? || return name
-    "t#{tenant.__sugar_primary_value}:#{name}"
+  # *name* under the bound tenant's `t<id>:` prefix. With none bound, a *name*
+  # that already looks prefixed raises, except inside `without`.
+  def self.scoped(name : String, kind : String) : String
+    if tenant = current?
+      return "t#{tenant.__sugar_primary_value}:#{name}"
+    end
+    if name.matches?(PREFIXED) && !Fiber.current.__sugar_untenanted?
+      raise ArgumentError.new(
+        "#{kind} #{name.inspect} starts with t<id>:, the prefix of a tenant's names, " \
+        "and no tenant is bound.\n" \
+        "Remediation: choose a name that does not start with t<id>:, or run inside " \
+        "Caramel::Tenancy.without { … } to reach every tenant's names on purpose."
+      )
+    end
+    name
   end
 
   # :nodoc:
@@ -142,14 +155,31 @@ module Caramel
   module Cache
     # *key* under the bound tenant's prefix.
     def self.scoped(key : String) : String
-      Tenancy.scoped(key)
+      Tenancy.scoped(key, "Cache key")
+    end
+
+    # `LIKE` needs no escaping: a prefix is `t`, digits and `:`.
+    CLEAR_TENANT  = "DELETE FROM caramel_cache WHERE key LIKE $1"
+    CLEAR_CENTRAL = "DELETE FROM caramel_cache WHERE key !~ '^t[0-9]+:'"
+
+    # The bound tenant's keys; with none bound, the keys no tenant owns; inside
+    # Tenancy.without, every key.
+    def self.clear : Nil
+      if tenant = Tenancy.current?
+        SugarORM.sql_exec(CLEAR_TENANT, "t#{tenant.__sugar_primary_value}:%")
+      elsif Fiber.current.__sugar_untenanted?
+        SugarORM.sql_exec("DELETE FROM caramel_cache")
+      else
+        SugarORM.sql_exec(CLEAR_CENTRAL)
+      end
+      nil
     end
   end
 
   module ColdBrew
     # *name* under the bound tenant's prefix, within PostgreSQL's 63 characters.
     def self.channel(name : String) : String
-      scoped = Tenancy.scoped(name)
+      scoped = Tenancy.scoped(name, "PubSub channel")
       return scoped if scoped.size <= 63
       raise ArgumentError.new(
         "PubSub channel #{name.inspect} is #{scoped.size} characters once prefixed " \
