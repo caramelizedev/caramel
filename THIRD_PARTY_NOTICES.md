@@ -7,6 +7,8 @@ Caramel reuses these components in the current runtime slice:
 - **crystal-pg 0.31.0** — BSD 3-Clause, copyright Will Leinweber. Restored through Shards, linked into applications. Full license: `vendor/licenses/crystal-pg-LICENSE`.
 - **crystal-db 0.15.0** — MIT, copyright Brian J. Cardiff. Restored through Shards, linked into applications. Full license: `vendor/licenses/crystal-db-LICENSE`.
 - **htmx 4.0.0** — Zero-Clause BSD. The unmodified asset is vendored in `vendor/htmx/` and copied into the Bookshelf example's public assets. Full license: `vendor/htmx/LICENSE`; source and integrity digest: `vendor/htmx/README.md`.
+- **Ameba 1.7.0** — MIT, copyright Vitalii Elenhaupt, Sijawusz Pur Rahnama and Ameba Contributors. A development dependency of the framework that builds `bin/frappe-lint`; it is not linked into applications. Full license: `vendor/licenses/ameba-LICENSE`.
+- **highlight.js 11.12.0** — BSD-3-Clause, copyright Ivan Sagalaev. Build-time files vendored in `website/vendor/highlightjs/`, used only by the website build. Full license: `website/vendor/highlightjs/LICENSE`; source and integrity digest: `website/vendor/highlightjs/README.md`.
 
 The managed compiler/database/proxy toolchain includes additional components. Its artifact inventory and remaining redistribution checks are tracked separately in [caramel-notes](https://github.com/caramelizedev/caramel-notes/blob/main/research/toolchain-artifacts.md). This source repository does not contain those toolchain binaries.
 

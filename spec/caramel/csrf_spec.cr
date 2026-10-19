@@ -26,6 +26,15 @@ describe Caramel::CSRF do
     csrf.valid?(request, token).should be_false
   end
 
+  it "fails a token issued under one APP_SECRET when another secret is configured" do
+    origin = "https://bookshelf.caramel"
+    secret_a = Caramel::CSRF.new("a" * 64, origin)
+    secret_b = Caramel::CSRF.new("b" * 64, origin)
+    token = secret_a.issue
+    secret_a.valid_token?(token).should be_true
+    secret_b.valid_token?(token).should be_false
+  end
+
   it "rejects expired tokens and uses secure host-only cookies" do
     csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
     expired = csrf.issue(Time.utc - 2.days)
