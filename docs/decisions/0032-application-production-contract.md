@@ -23,6 +23,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - publishes `app/assets` into `public/` and refuses if that leaves tracked changes;
    - installs Alpine's `gmp-static` from the image's package repository, then compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.21.1-alpine@sha256:bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
    - writes `.caramel/build/<shard>-<YYYYmmddTHHMMSSZ>-<sha7>-linux-amd64.tar.gz`, which holds `bin/<shard>` and `public/`. The time is the UTC build time; the sha is the commit's;
+   - holds nothing else: no source tree and no Node or other external runtime. A file the binary reads at run time must be embedded when it compiles (`read_file`) or be a browser-fetched asset in `public/`;
    - prints the artifact's absolute path as its only line on standard output; progress goes to standard error.
 
    A container engine is needed only for this build. Principle 3 governs development, not release builds.

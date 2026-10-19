@@ -16,6 +16,7 @@ Code should read like prose while the compiler does the proving, and one formatt
    - `scripts/build-lint` builds `bin/frappe-lint`: Ameba's rules plus Caramel's.
 3. **The rule set is Ameba's defaults, plus Caramel's additions.** It lives in `templates/application/.ameba.yml`, which every generated application receives.
    - `Caramel/ServiceNoun`, a Caramel rule: reports classes, structs and modules named for a service noun. These are names ending in `Service`, `Handler`, `Manager`, `Factory`, `Controller`, `Helper`, `Util`, `Utils` or `Utility`, or starting with `Abstract`. The verb belongs on its subject.
+   - `Caramel/SourceTreeRead`, a Caramel rule: reports `File` and `Dir` readers whose arguments contain `__DIR__` (a release artifact holds no source tree, [ADR 0032](0032-application-production-contract.md)).
    - `Metrics/CyclomaticComplexity` at 10: an action is a single thought, not a junk drawer.
    - `Documentation/Admonition`: shipped code carries no undated or overdue `TODO`, `FIXME` or `BUG` comments.
    - Ameba's defaults already carry the rest:

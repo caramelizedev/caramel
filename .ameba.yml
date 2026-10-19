@@ -21,6 +21,14 @@ Caramel/ServiceNoun:
 Caramel/Dump:
   Enabled: true
 
+# ADR 0032: a release artifact holds no source tree, so a run-time read of a
+# path built from __DIR__ fails only in production.
+Caramel/SourceTreeRead:
+  Enabled: true
+  Excluded:
+    - "spec/**/*.cr"
+    - "scripts/**/*.cr"
+
 # The framework keeps Ameba's default limit of 12; the methods that exceed it,
 # dispatch tables, parsers, validation and process-lifecycle code, say why
 # inline. Applications use 10. Crystal under scripts/, the checks and the

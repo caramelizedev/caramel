@@ -19,6 +19,7 @@ module Caramel::Checks::Lint
     end
     service_nouns
     dump_calls
+    source_tree_reads
     line_length
     no_exemptions
     html_expectations
@@ -71,6 +72,27 @@ module Caramel::Checks::Lint
     lines = issues(result, "Caramel/Dump").map(&.[0])
     refuse("Caramel/Dump", lines, result) if result.success? || lines != [1, 2]
     puts "PASS: Caramel/Dump reports dump(1) and Caramel.dump(2), not value.dump"
+  end
+
+  # A `File` or `Dir` reader given `__DIR__` is reported; `read_file` and other paths are not.
+  private def source_tree_reads : Nil
+    result = probe(<<-'CRYSTAL')
+      File.read("#{__DIR__}/a.css")
+      File.open(File.join(File.expand_path("..", __DIR__), "b")) { |io| io }
+      File.read_lines(__DIR__ + "/c")
+      Dir.glob("#{__DIR__}/*.css")
+      STYLES = {{ read_file("#{__DIR__}/d.css") }}
+      File.read("config.yml")
+      File.join(__DIR__, "e")
+      File.read(path)
+      CRYSTAL
+    found = issues(result, "Caramel/SourceTreeRead")
+    lines = found.map(&.[0])
+    advises = found.all?(&.[1].includes?("read_file"))
+    wrong = result.success? || lines != [1, 2, 3, 4] || !advises
+    refuse("Caramel/SourceTreeRead", lines, result) if wrong
+    puts "PASS: Caramel/SourceTreeRead reports File and Dir readers given __DIR__, " \
+         "not read_file or other paths"
   end
 
   # ADR 0021: the framework's configuration holds a line to 100 characters.
