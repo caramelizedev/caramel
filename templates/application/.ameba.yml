@@ -22,6 +22,13 @@ Caramel/ServiceNoun:
 Caramel/Dump:
   Enabled: true
 
+# ADR 0032: a release artifact holds no source tree, so a run-time read of a
+# path built from __DIR__ fails only in production.
+Caramel/SourceTreeRead:
+  Enabled: true
+  Excluded:
+    - "spec/**/*.cr"
+
 # §2.5: an action is a single thought, not a junk drawer.
 Metrics/CyclomaticComplexity:
   MaxComplexity: 10

@@ -260,6 +260,8 @@ module Caramel::Checks
       listing = command(["/usr/bin/tar", "-tzf", artifact], echo: false).stdout.lines
       packed = listing.includes?("bin/bookshelf") && listing.any?(&.starts_with?("public/"))
       assert!(packed, listing.join('\n'))
+      only_both = listing.all? { |entry| %w[bin/ public/].any? { |top| entry.starts_with?(top) } }
+      assert!(only_both, listing.join('\n'))
       unpacked = File.join(@root, "release")
       Dir.mkdir(unpacked, 0o755)
       command(["/usr/bin/tar", "-xzf", artifact, "-C", unpacked], echo: false)
