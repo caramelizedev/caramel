@@ -48,6 +48,7 @@ private CAPTURED = {
   "diagnostics" => {
     "compile_syntax_error"       => {"SYNTAX", "10:5"},
     "compile_undefined_constant" => {"UNDEFINED_CONSTANT", "3:6"},
+    "compile_undefined_method"   => {"UNDEFINED_METHOD", "3:40"},
   },
 }
 
@@ -73,7 +74,7 @@ describe Caramel::Frappe::Diagnostics do
         {name, diagnostic.code, diagnostic.location}.should eq({name, code, location})
       end
     end
-    Dir.children(File.join(ROOT, "spec/fixtures/compiler_output")).size.should eq(30)
+    Dir.children(File.join(ROOT, "spec/fixtures/compiler_output")).size.should eq(31)
   end
 
   it "turns a missing route field into MRDP with a PATCH into the contract block" do
@@ -123,6 +124,12 @@ describe Caramel::Frappe::Diagnostics do
         the rows whose billing_email IS NULL.
       FIX: pass a value that is never nil, or write where_null(:billing_email) \
         to match those rows\n
+      MRDP
+    # Only the sentinel loses the compiler's suggestion; a real typo keeps it.
+    mrdp(diagnose("diagnostics_compile_undefined_method")).should eq(<<-MRDP)
+      ERR UNDEFINED_METHOD at spec/fixtures/diagnostics/compile_undefined_method.cr:3:40
+      MSG: undefined method 'statuss' for Caramel::Response
+      FIX: Did you mean 'status'?\n
       MRDP
   end
 
