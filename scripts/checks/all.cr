@@ -38,7 +38,7 @@ module Caramel::Checks::All
     "frappe-project-dev" => 124, "installations" => 76, "schema-diff" => 43,
     "spec" => 25, "browser" => 23, "native" => 18, "integration" => 17,
     "latte-postgres" => 10, "page-boxoffice" => 83, "page-json" => 73, "page-jobs" => 59,
-    "page-webhooks" => 68, "page-sessions" => 72,
+    "page-webhooks" => 68, "page-sessions" => 72, "latte-daemon" => 44,
   }
 
   @@logs : String? = nil
