@@ -25,6 +25,7 @@ module Caramel::ColdBrew
       raise ArgumentError.new("concurrency must be at least 1") if @concurrency < 1
       @stopping = Channel(Nil).new
       @done = WaitGroup.new
+      @running = Atomic(Int32).new(0)
       @started = false
     end
 
@@ -34,6 +35,16 @@ module Caramel::ColdBrew
       @done.add(@concurrency)
       @concurrency.times { |index| spawn(name: "cold_brew:#{@queue}:#{index}") { run } }
       self
+    end
+
+    # Stops claiming jobs; returns at once.
+    def halt : Nil
+      @stopping.close
+    end
+
+    # How many jobs this worker is running now.
+    def running : Int32
+      @running.get
     end
 
     # Stops fetching and returns once every in-flight job has finished.
@@ -63,7 +74,12 @@ module Caramel::ColdBrew
 
     private def work : Bool
       job = Queue.claim(@queue) || return false
-      Queue.run(job)
+      @running.add(1)
+      begin
+        Queue.run(job)
+      ensure
+        @running.sub(1)
+      end
       true
     end
 

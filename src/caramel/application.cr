@@ -72,11 +72,12 @@ module Caramel
             streamer.call(context.response)
           rescue IO::Error | HTTP::Server::ClientError
             # The client disconnected; the server wraps socket errors in ClientError.
+          rescue error : Channel::ClosedError
+            # A closed subscription ends a stream at the first signal; outside a drain it is
+            # a fault.
+            report_stream(error, response) unless @draining.get
           rescue error
-            # The status line has already been sent; the request id joins this report to
-            # the request's canonical line.
-            request_id = response.headers["X-Request-ID"]?
-            Crema.report(error, handled: false, source: "stream", request_id: request_id)
+            report_stream(error, response)
           end
         else
           context.response.print(response.body)
@@ -89,6 +90,18 @@ module Caramel
     # Starts shutdown: every response written from now on closes its connection.
     def drain : Nil
       @draining.set(true)
+    end
+
+    # How many requests are in flight.
+    def in_flight : Int32
+      @in_flight.get
+    end
+
+    # The status line has already been sent; the request id joins this report to the
+    # request's canonical line.
+    private def report_stream(error : Exception, response : Response) : Nil
+      request_id = response.headers["X-Request-ID"]?
+      Crema.report(error, handled: false, source: "stream", request_id: request_id)
     end
 
     # Waits until no request is in flight or *timeout* passes, and returns how many remain.

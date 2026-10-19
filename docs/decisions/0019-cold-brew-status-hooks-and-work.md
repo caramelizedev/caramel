@@ -36,7 +36,7 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
 3. **Worker-only process.** The application binary's `work [--queues=NAMES] [--concurrency=N] [--no-scheduler]` runs `ColdBrew.start` without an HTTP server.
    - The flags replace `CARAMEL_WORKER_QUEUES` and `CARAMEL_WORKER_CONCURRENCY`, which `start` still validates.
    - `ColdBrew.start(url, env, scheduler: false)` leaves `every` schedules to other processes. Maintenance always runs, because it is idempotent.
-   - `work` refuses pending migrations, prints a ready line once its workers are claiming jobs, and on SIGTERM or SIGINT lets in-flight jobs finish before it exits 0.
+   - `work` refuses pending migrations, prints a ready line once its workers are claiming jobs, and on SIGTERM or SIGINT stops claiming and lets in-flight jobs finish for up to `CARAMEL_SHUTDOWN_TIMEOUT` seconds before it exits 0; a second signal exits 1 at once ([ADR 0032](0032-application-production-contract.md) decision 5).
    - It refuses to run under `CARAMEL_ENV=test`, where specs drain queues.
    - `serve` starts Cold Brew inside the block that removes its socket, so invalid worker settings never leave the socket behind.
 4. **Names.** `enqueue` always stores the job's current fully qualified class name, and a worker runs a row whose stored name is that name or one the job declares with `renamed_from "Old::Name", …`.

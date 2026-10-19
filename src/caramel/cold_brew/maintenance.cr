@@ -69,6 +69,11 @@ module Caramel::ColdBrew
       self
     end
 
+    # Stops its passes; returns at once.
+    def halt : Nil
+      @stopping.close
+    end
+
     def stop : Nil
       @stopping.close
       @done.wait

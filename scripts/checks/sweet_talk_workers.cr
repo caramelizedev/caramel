@@ -10,9 +10,10 @@ module Caramel::Checks::SweetTalkWorkers
   extend self
 
   FIXTURE      = "spec/fixtures/sweet_talk_workers.cr"
-  STEPS        =   50
-  PAUSE_MS     =   50
-  IN_FLIGHT_MS = 3000
+  STEPS        =     50
+  PAUSE_MS     =     50
+  IN_FLIGHT_MS =   3000
+  LONG_STEP_MS = 20_000
   TALLIED      = "Rules::Shelf::Tally::WhenBoxTallied"
 
   private def required(argv : Array(String),
@@ -118,7 +119,7 @@ module Caramel::Checks::SweetTalkWorkers
         end
         raise "#{name} did not start: #{File.read(path)}" unless ready
       end
-      steps(binary, env, logs, workers)
+      steps(binary, env, logs, workers, owned)
     ensure
       workers.each_value { |process| Checks.stop(process) }
     end
@@ -127,7 +128,8 @@ module Caramel::Checks::SweetTalkWorkers
   private def steps(binary : String,
                     env : Hash(String, String?),
                     logs : Hash(String, String),
-                    workers : Hash(String, Process)) : Nil
+                    workers : Hash(String, Process),
+                    owned : String) : Nil
     issue(binary, env, STEPS, PAUSE_MS)
     latest = nil
     finished = Checks.wait_until(60.seconds, 100.milliseconds) do
@@ -160,6 +162,8 @@ module Caramel::Checks::SweetTalkWorkers
     puts "PASS: every box's Tally total is the sum of its steps"
 
     sigterm(binary, env, workers)
+    deadline(binary, env, owned)
+    second_signal(binary, env, owned)
   end
 
   private def sigterm(binary : String,
@@ -182,6 +186,80 @@ module Caramel::Checks::SweetTalkWorkers
       raise "SIGTERM left the in-flight tally step unfinished: #{progress}"
     end
     puts "PASS: SIGTERM lets the in-flight tally step finish, then work exits 0"
+  end
+
+  # `work` with CARAMEL_SHUTDOWN_TIMEOUT=1 and a step that runs for 20 s: it gives up
+  # at the deadline, logs what it left and exits 0.
+  private def deadline(binary : String, env : Hash(String, String?), owned : String) : Nil
+    limited = env.merge({"CARAMEL_SHUTDOWN_TIMEOUT" => "1"})
+    with_worker(binary, limited, owned, "gamma") do |worker, log|
+      before = report(binary, env)["locked"].as_i
+      issue(binary, env, 1, LONG_STEP_MS)
+      wait_for_lock(binary, env, before)
+      worker.terminate
+      exited = Checks.wait_until(5.seconds, 50.milliseconds) { worker.terminated? }
+      raise "work did not exit within 5 s of SIGTERM with a 1 s deadline" unless exited
+      status = worker.wait
+      raise "work did not exit 0 at its deadline: #{status}" unless status.success?
+      assert_logged(log, "stopped with 1 jobs in flight after 1 s")
+    end
+    puts "PASS: a step that outlives CARAMEL_SHUTDOWN_TIMEOUT=1 lets work exit 0 after 1 s"
+  end
+
+  private def assert_logged(path : String, text : String) : Nil
+    output = File.read(path)
+    raise "#{path} does not say #{text.inspect}: #{output}" unless output.includes?(text)
+  end
+
+  # A second SIGTERM while a step still runs ends `work` at once with status 1.
+  private def second_signal(binary : String, env : Hash(String, String?), owned : String) : Nil
+    with_worker(binary, env, owned, "delta") do |worker, log|
+      before = report(binary, env)["locked"].as_i
+      issue(binary, env, 1, LONG_STEP_MS)
+      wait_for_lock(binary, env, before)
+      worker.terminate
+      sleep 200.milliseconds
+      worker.terminate
+      exited = Checks.wait_until(5.seconds, 50.milliseconds) { worker.terminated? }
+      raise "work did not exit within 5 s of a second SIGTERM" unless exited
+      status = worker.wait
+      raise "work did not exit 1 at a second SIGTERM: #{status}" unless status.exit_code == 1
+      assert_logged(log, "stopped at a second signal")
+    end
+    puts "PASS: a second SIGTERM ends work at once with status 1"
+  end
+
+  # Starts a worker the way `scenario` does, with its own log, and stops it afterwards
+  # when it still runs.
+  private def with_worker(binary : String,
+                          env : Hash(String, String?),
+                          owned : String,
+                          name : String,
+                          & : Process, String -> Nil) : Nil
+    log = File.join(owned, "#{name}.log")
+    process = File.open(log, "w") do |output|
+      Process.new(binary, ["work", "--concurrency=2", "--no-scheduler"],
+        env: env, input: Process::Redirect::Close, output: output, error: output)
+    end
+    begin
+      ready = Checks.wait_until(30.seconds, 50.milliseconds) do
+        File.read(log).includes?("worker is ready")
+      end
+      raise "#{name} did not start: #{File.read(log)}" unless ready
+      yield process, log
+    ensure
+      Checks.stop(process)
+    end
+  end
+
+  # Waits until one more step than *before* is locked and unfinished.
+  private def wait_for_lock(binary : String, env : Hash(String, String?), before : Int32) : Nil
+    latest = nil
+    locked = Checks.wait_until(10.seconds, 50.milliseconds) do
+      latest = report(binary, env)
+      latest["locked"].as_i == before + 1
+    end
+    raise "no step was taken: #{latest}" unless locked
   end
 
   private def issue(binary : String,

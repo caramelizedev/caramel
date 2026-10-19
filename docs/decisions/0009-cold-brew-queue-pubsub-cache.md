@@ -40,7 +40,7 @@ Jobs, schedules, notifications and cache run on the PostgreSQL that holds domain
    - A subscription also ends when its owning fiber dies, so an action that never unsubscribes does not leak. The block form of `subscribe` unsubscribes explicitly.
    - `Caramel::SSE.write(io, data, event:)` frames multi-line payloads correctly.
 7. **Cache.** `Caramel::Cache.write/read/fetch/delete/clear` works on the `UNLOGGED caramel_cache` table with optional TTLs.
-8. **Hosting.** The generated application's `serve` calls `Caramel::ColdBrew.start(database_url)` unless `CARAMEL_ENV=test`. It uses a separate connection pool so jobs never starve requests, and it stops gracefully on SIGTERM: in-flight jobs finish.
+8. **Hosting.** The generated application's `serve` calls `Caramel::ColdBrew.start(database_url)` unless `CARAMEL_ENV=test`. It uses a separate connection pool so jobs never starve requests, and it stops gracefully on SIGTERM: in-flight jobs finish, within `CARAMEL_SHUTDOWN_TIMEOUT` ([ADR 0032](0032-application-production-contract.md) decision 5).
 9. **Tests.** `Caramel::ColdBrew.drain_queue!(db, queue)` runs due jobs synchronously on the test's connection until the queue is empty, including jobs enqueued by jobs, and raises on failures. A job that fails during a drain is not retried in the same drain. There is no background polling in tests.
 
 ## Reasons

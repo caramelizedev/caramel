@@ -437,9 +437,8 @@ module Caramel::Checks
       end
     end
 
-    # SIGTERM while a job runs: serve stops fetching, lets the job finish and exits.
-    # The page's open EventSource is a request in flight, so serve also waits out
-    # its 25 s drain before it exits.
+    # SIGTERM while a job runs: serve stops claiming, ends the page's EventSource, lets
+    # the job finish and exits.
     private def check_graceful_stop : Nil
       group("Cold Brew graceful stop on SIGTERM", "#pubsub") do
         previous = js("return document.getElementById('pubsub-delivery').textContent").as_s
@@ -463,6 +462,8 @@ module Caramel::Checks
           "The in-flight job did not finish before exit: #{job_state(delivery).inspect}")
         assert!(delivered?(delivery), "The in-flight job's write did not commit")
         stop_ms = stopped.total_milliseconds.round.to_i
+        assert!(stopped < 10.seconds,
+          "serve took #{stop_ms} ms to stop; SIGTERM should have ended the open EventSource")
         puts "PASS: SIGTERM while delivery #{delivery}'s job ran: " \
              "serve let the job finish (1 attempt, committed) " \
              "and exited 0 after #{stop_ms} ms"

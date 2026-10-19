@@ -41,8 +41,21 @@ module Caramel
       "lint [--dev-override]",
     ].join('|')
 
-    # How long `serve` waits for in-flight requests after SIGTERM.
-    DRAIN_TIMEOUT = 25.seconds
+    # What `serve` and `work` give requests and jobs in flight after their first signal,
+    # unless CARAMEL_SHUTDOWN_TIMEOUT says otherwise.
+    DEFAULT_SHUTDOWN_TIMEOUT = 25.seconds
+    MAX_SHUTDOWN_SECONDS     = 3600
+
+    # CARAMEL_SHUTDOWN_TIMEOUT: whole seconds from 1 to 3600 (default 25) that `serve`
+    # and `work` give requests and jobs in flight after their first signal. Prints
+    # why and returns nil when it is invalid.
+    def self.shutdown_timeout(env = ENV) : Time::Span?
+      value = env["CARAMEL_SHUTDOWN_TIMEOUT"]? || return DEFAULT_SHUTDOWN_TIMEOUT
+      seconds = value.to_i?
+      return seconds.seconds if seconds && (1..MAX_SHUTDOWN_SECONDS).includes?(seconds)
+      STDERR.puts("CARAMEL_SHUTDOWN_TIMEOUT must be a whole number of seconds from 1 to 3600")
+      nil
+    end
 
     # `work`'s flags: `--queues` and `--concurrency` stand in for
     # CARAMEL_WORKER_QUEUES and CARAMEL_WORKER_CONCURRENCY, which
@@ -92,19 +105,29 @@ module Caramel
       Crema.run_command(command, flags) || dispatch(app, command, flags, root)
     end
 
+    # `work` with its flags and CARAMEL_SHUTDOWN_TIMEOUT.
+    private def self.work_command(app : T.class, flags : Array(String)) : Int32 forall T
+      options = WorkOptions.parse(flags) || return refuse_usage
+      shutdown = shutdown_timeout || return 1
+      run_workers(app, options, shutdown)
+    end
+
+    # CARAMEL_SHUTDOWN_TIMEOUT for `serve`, which reads it; nil when it is invalid.
+    private def self.shutdown_for(command : String) : Time::Span?
+      command == "serve" ? shutdown_timeout : DEFAULT_SHUTDOWN_TIMEOUT
+    end
+
     # One of the framework's own commands; application commands registered with
     # `Crema.command` answer first.
     private def self.dispatch(app : T.class,
                               command : String,
                               flags : Array(String),
                               root : String) : Int32 forall T
-      if command == "work"
-        options = WorkOptions.parse(flags) || return refuse_usage
-        return run_workers(app, options)
-      end
+      return work_command(app, flags) if command == "work"
       dev_override = flags == ["--dev-override"] && {"migrate", "lint"}.includes?(command)
       no_workers = command == "serve" && flags == ["--no-workers"]
       return refuse_usage unless flags.empty? || dev_override || no_workers
+      shutdown = shutdown_for(command) || return 1
 
       case command
       when "routes", "schema", "translations"
@@ -112,7 +135,7 @@ module Caramel
       when "serve", "seed", "migrate", "lint", "drift"
         name = command == "serve" ? "caramel-web" : "caramel"
         with_database(command == "migrate", name) do |db, url|
-          database_command(app, command, db, url, dev_override, root, !no_workers)
+          database_command(app, command, db, url, dev_override, root, !no_workers, shutdown)
         end
       else
         puts usage
@@ -137,20 +160,28 @@ module Caramel
 
     # Runs Cold Brew's workers, maintenance and, unless disabled, schedules
     # without an HTTP server until *stop* closes, then lets in-flight jobs
-    # finish. The ready line goes to *output* once the workers are claiming.
+    # finish for up to *shutdown*. The ready line goes to *output* once the
+    # workers are claiming.
     def self.work(title : String, url : String, options : WorkOptions,
-                  stop : Channel(Nil), output : IO = STDOUT) : Int32
+                  stop : Channel(Nil), output : IO = STDOUT,
+                  shutdown : Time::Span = DEFAULT_SHUTDOWN_TIMEOUT) : Int32
       service = ColdBrew.start(url, options.environment, scheduler: options.scheduler)
       ColdBrew.warn_unknown_queued(service.database)
       runtime = Crema.start("work", title, database: service.database, cold_brew: service)
+      running = 0
       begin
         output.puts "#{title} worker is ready: #{readiness(service, options)}"
         output.flush
         stop.receive?
       ensure
-        # In-flight jobs finish; no new ones start.
-        service.stop
+        # In-flight jobs finish until the deadline; no new ones start.
+        running = service.stop(Time.instant + shutdown)
         runtime.stop
+      end
+      if running > 0
+        Log.for("caramel").warn do
+          "stopped with #{running} jobs in flight after #{shutdown.total_seconds.to_i} s"
+        end
       end
       0
     end
@@ -172,17 +203,28 @@ module Caramel
       2
     end
 
-    # `work`, once the database holds every migration; a signal stops it.
-    private def self.run_workers(app : T.class, options : WorkOptions) : Int32 forall T
+    # `work`, once the database holds every migration. The first signal stops it
+    # (ADR 0032 decision 5); a second exits 1 at once.
+    private def self.run_workers(app : T.class,
+                                 options : WorkOptions,
+                                 shutdown : Time::Span) : Int32 forall T
       if ENV["CARAMEL_ENV"]? == "test"
         abort("Specs run no workers; drain queues with Caramel::ColdBrew.drain_queue!")
       end
       with_database(false) do |db, url|
         refuse_pending(db, T::MIGRATIONS)
         stop = Channel(Nil).new
-        # A second signal finds the channel closed and changes nothing.
-        Process.on_terminate { stop.close }
-        work(T::TITLE, url, options, stop)
+        signals = 0
+        Process.on_terminate do
+          signals += 1
+          if signals == 1
+            stop.close
+          else
+            Log.for("caramel").warn { "stopped at a second signal" }
+            exit 1
+          end
+        end
+        work(T::TITLE, url, options, stop, shutdown: shutdown)
       end
     end
 
@@ -271,7 +313,8 @@ module Caramel
                                       url : String,
                                       dev_override : Bool,
                                       root : String,
-                                      workers : Bool) : Int32 forall T
+                                      workers : Bool,
+                                      shutdown : Time::Span) : Int32 forall T
       migrator = SugarORM::Migrator.new(db, T::MIGRATIONS)
       case command
       when "migrate"
@@ -284,7 +327,7 @@ module Caramel
         return drift(db)
       else
         refuse_pending(db, T::MIGRATIONS)
-        command == "seed" ? app.seed(db) : serve(app, db, url, root, workers)
+        command == "seed" ? app.seed(db) : serve(app, db, url, root, workers, shutdown)
       end
       0
     end
@@ -331,13 +374,15 @@ module Caramel
     # Serves on the private socket `frappe dev` names, with Cold Brew's
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
     # Without *workers* it keeps PubSub and maintenance but runs no jobs or
-    # schedules. On SIGTERM it finishes in-flight requests for up to
-    # DRAIN_TIMEOUT.
+    # schedules. At the first SIGTERM or SIGINT it stops listening, claiming jobs and
+    # streaming, and gives requests and jobs in flight *shutdown* to finish (ADR 0032
+    # decision 5); a second signal exits 1 at once.
     private def self.serve(app : T.class,
                            db : DB::Database,
                            url : String,
                            root : String,
-                           workers : Bool) : Nil forall T
+                           workers : Bool,
+                           shutdown : Time::Span) : Nil forall T
       root = served_root(root)
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
@@ -349,6 +394,11 @@ module Caramel
       cold_brew : ColdBrew::Service? = nil
       # ameba:disable Lint/UselessAssign -- read by the ensure below when startup fails
       runtime : Crema::Runtime? = nil
+      deadline : Time::Instant? = nil
+      # ameba:disable Lint/UselessAssign -- typed before the begin; the begin assigns it
+      remaining = 0
+      # ameba:disable Lint/UselessAssign -- typed before the begin; the ensure assigns it
+      running = 0
       begin
         server.bind_unix(socket_path)
         bound = true
@@ -358,23 +408,51 @@ module Caramel
         cold_brew = ColdBrew.start(url, workers: workers) unless ENV["CARAMEL_ENV"]? == "test"
         runtime = Crema.start("serve", T::TITLE, database: db, cold_brew: cold_brew,
           application: application)
-        # The listener stops; responses still in flight close their connections.
-        Process.on_terminate do
-          application.drain
-          server.close unless server.closed?
-        end
+        stop_at_signals(application, server, cold_brew, socket_path)
         puts "#{T::TITLE} is ready at #{origin}"
         server.listen
-        remaining = application.wait_idle(DRAIN_TIMEOUT)
-        if remaining > 0
-          Log.for("caramel").warn { "stopped with #{remaining} requests in flight after 25 s" }
-        end
+        deadline = Time.instant + shutdown
+        remaining = application.wait_idle(shutdown)
       ensure
         server.close unless server.closed?
         File.delete?(socket_path) if bound
-        # In-flight jobs finish; no new ones start.
-        cold_brew.try(&.stop)
+        # Jobs and schedule blocks in flight finish until the deadline.
+        running = cold_brew.try(&.stop(deadline || Time.instant + shutdown)) || 0
         runtime.try(&.stop)
+      end
+      warn_unfinished(remaining, running, shutdown)
+    end
+
+    # The first signal stops listening, claiming and streaming, so requests and jobs in
+    # flight can finish; the second exits 1 at once.
+    private def self.stop_at_signals(application : Application,
+                                     server : HTTP::Server,
+                                     cold_brew : ColdBrew::Service?,
+                                     socket_path : String) : Nil
+      signals = 0
+      Process.on_terminate do
+        signals += 1
+        if signals == 1
+          application.drain
+          cold_brew.try(&.halt)
+          cold_brew.try(&.broker.end_subscriptions)
+          server.close unless server.closed?
+        else
+          File.delete?(socket_path)
+          Log.for("caramel").warn do
+            "stopped at a second signal with #{application.in_flight} requests in flight"
+          end
+          exit 1
+        end
+      end
+    end
+
+    # What `serve` left unfinished when its deadline passed.
+    private def self.warn_unfinished(requests : Int32, jobs : Int32, shutdown : Time::Span) : Nil
+      return unless requests > 0 || jobs > 0
+      Log.for("caramel").warn do
+        "stopped with #{requests} requests and #{jobs} jobs in flight " \
+        "after #{shutdown.total_seconds.to_i} s"
       end
     end
 

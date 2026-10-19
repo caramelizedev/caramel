@@ -3,6 +3,8 @@ require "log/spec"
 require "../../src/caramel"
 
 STREAM_GATE = Channel(Nil).new
+# A subscription's channel once the first signal closed it.
+STREAM_ENDED = Channel(String).new.tap(&.close)
 
 abstract struct StreamingSpecAction < Caramel::Action
   def layout(page : Caramel::Page) : String
@@ -33,10 +35,20 @@ struct StreamingSpecTicks < StreamingSpecAction
   end
 end
 
+struct StreamingSpecSubscribed < StreamingSpecAction
+  contract do
+  end
+
+  def handle(contract : Contract)
+    stream("text/event-stream") { |io| Caramel::SSE.write(io, STREAM_ENDED.receive) }
+  end
+end
+
 module StreamingSpecApp
   Caramel::Router.draw do
     get "/events", StreamingSpecEvents
     get "/ticks", StreamingSpecTicks
+    get "/subscribed", StreamingSpecSubscribed
   end
 end
 
@@ -68,6 +80,13 @@ private def streaming_spec_line(io : IO) : String?
   end
 end
 
+# A request for a stream that waits on a subscription which is already closed.
+private def streaming_spec_subscribed_context : HTTP::Server::Context
+  host = HTTP::Headers{"Host" => "bookshelf.caramel"}
+  request = HTTP::Request.new("GET", "/subscribed", host)
+  HTTP::Server::Context.new(request, HTTP::Server::Response.new(IO::Memory.new))
+end
+
 describe "Caramel streaming responses" do
   it "writes each event to the client before the stream finishes" do
     server = HTTP::Server.new([streaming_spec_app] of HTTP::Handler)
@@ -96,6 +115,22 @@ describe "Caramel streaming responses" do
     Log.capture(Log::Severity::Warn) do |logs|
       streaming_spec_app.call(context)
       logs.empty
+    end
+  end
+
+  it "ends a stream whose subscription the first signal closed, without reporting it" do
+    app = streaming_spec_app
+    app.drain
+    Log.capture(Log::Severity::Warn) do |logs|
+      app.call(streaming_spec_subscribed_context)
+      logs.empty
+    end
+  end
+
+  it "reports a closed channel outside a drain" do
+    Log.capture(Log::Severity::Warn) do |logs|
+      streaming_spec_app.call(streaming_spec_subscribed_context)
+      expect_raises(Spec::AssertionFailed) { logs.empty }
     end
   end
 

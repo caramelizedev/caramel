@@ -1122,6 +1122,19 @@ describe "Caramel::ColdBrew PubSub" do
     end
   end
 
+  it "ends every subscription, and closes a later one at once" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.with_broker do |broker|
+      subscribed = Channel(String).new(8)
+      Brew.subscribe("board_1", subscribed)
+      broker.end_subscriptions
+      subscribed.closed?.should be_true
+      later = Channel(String).new(8)
+      Brew.subscribe("board_2", later)
+      later.closed?.should be_true
+    end
+  end
+
   it "never lets a subscriber that does not receive hold up the others" do
     ColdBrewSpec.reset
     ColdBrewSpec.with_broker do
@@ -1271,6 +1284,35 @@ describe "the work command" do
     ColdBrewSpec.job(running)[:finished_at].should_not be_nil
     ColdBrewSpec.labels.should eq(["worked"])
     ColdBrewSpec.schedule_count.should eq(0)
+  end
+
+  it "stops waiting for an in-flight job at the shutdown deadline" do
+    ColdBrewSpec.reset
+    running = ColdBrewSpec::Gated.enqueue(label: "outlives the deadline")
+    url = ColdBrewSpec.runtime_url
+    options = Caramel::CommandLine::WorkOptions.new("gated", "1", false)
+    stop = Channel(Nil).new
+    output = IO::Memory.new
+    result = Channel(Int32).new(1)
+    spawn do
+      result.send(Caramel::CommandLine.work("Brew", url, options, stop, output, shutdown: 1.second))
+    end
+    ColdBrewSpec.eventually { !ColdBrewSpec.job(running)[:locked_at].nil? }
+
+    Log.capture("caramel") do |logs|
+      stop.close
+      select
+      when status = result.receive
+        status.should eq(0)
+      when timeout(3.seconds)
+        fail "work kept waiting for a job past its shutdown deadline"
+      end
+      logs.check(:warn, /stopped with 1 jobs in flight after 1 s/)
+    end
+    ColdBrewSpec.job(running)[:finished_at].should be_nil
+    # The cut-off job's fiber still holds its claim; let it commit before the next example.
+    ColdBrewSpec.gate.send(nil)
+    ColdBrewSpec.eventually { !ColdBrewSpec.job(running)[:finished_at].nil? }
   end
 
   it "warns at start-up about queued jobs it cannot run, and leaves them queued" do
