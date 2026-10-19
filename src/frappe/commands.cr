@@ -233,7 +233,9 @@ module Caramel::Frappe
       Command.new("doctor",
         "Check the toolchain, this Caramel installation, dependencies, local configuration, " \
         "Latte services, trusted HTTPS and the port relay."),
-      Command.new("open", "Open the application's HTTPS origin in the browser."),
+      Command.new("open",
+        "Open the application's HTTPS origin in the browser; while frappe dev runs, a " \
+        "single-use link signs the browser in to the toolbar and inspector."),
       Command.new("lsp crystalline|ameba-ls [SERVER_ARGS...]",
         "Run a pinned language server for this project on stdio.",
         passthrough: true),

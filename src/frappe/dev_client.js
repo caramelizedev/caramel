@@ -112,7 +112,11 @@
     const response = await fetch('/__caramel/dev/traces.json?' + query, {
       ...session, signal: AbortSignal.timeout(3000)
     });
-    if (!response.ok) throw new Error('traces.json answered ' + response.status);
+    if (!response.ok) {
+      const error = new Error('traces.json answered ' + response.status);
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   }
 
@@ -323,6 +327,14 @@
     renderToggle();
   }
 
+  function showSignedOut() {
+    toolbar.bar.dataset.state = 'empty';
+    toolbar.dot.dataset.state = 'empty';
+    const note = element('span', 'Not signed in', { class: 'note', title: 'Run frappe open, or open the sign-in link frappe dev printed, to sign this browser in.' });
+    toolbar.bar.replaceChildren(element('span', undefined, { class: 'dot empty', 'aria-hidden': 'true' }), note, toolbar.toggle, toolbar.minimise);
+    renderToggle();
+  }
+
   function showWaiting() {
     toolbar.bar.dataset.state = 'wait';
     const note = element('span', 'Waiting for this page’s trace…', { class: 'note' });
@@ -372,7 +384,10 @@
       seen = Math.max(seen ?? 0, recent.latest);
       keepRows(recent.traces);
       renderRows();
-    } catch (_) { /* The toolbar is a convenience; the page works without it. */ }
+    } catch (error) {
+      // The toolbar is a convenience; the page works without it.
+      if (error.status === 403) showSignedOut();
+    }
   }
 
   async function follow(latest) {
@@ -398,7 +413,6 @@
       const response = await fetch('/__caramel/dev/status', {
         ...session, signal: AbortSignal.timeout(3000)
       });
-      if (response.status === 403) { location.reload(); return; }
       if (response.ok) {
         const status = await response.json();
         if (status.state !== 'building' && status.generation !== generation) {

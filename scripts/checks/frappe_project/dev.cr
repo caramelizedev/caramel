@@ -61,6 +61,28 @@ module Caramel::Checks
       wait_for(name) { |code, content| code == 503 && content.includes?(text) }
     end
 
+    # Until a browser follows the sign-in link, the inspector and its feed refuse it and
+    # no page hands out the session cookie.
+    private def signed_out_refused(name : String) : Nil
+      assert!(request(name, "/__caramel/dev/inspector")[0] == 403, "unsigned inspector served")
+      feed = request(name, "/__caramel/dev/traces.json", ["X-Caramel-Dev: 1"])
+      assert!(feed[0] == 403, "unsigned traces.json served")
+      jar = File.join(@fixture.root, "#{name}-cookies")
+      handed_out = File.exists?(jar) && File.read(jar).includes?("__Host-caramel_dev")
+      assert!(!handed_out, "a page handed out the development session cookie")
+    end
+
+    # Follows the single-use link `frappe dev` printed: it signs in once, then is spent.
+    private def sign_in_with_printed_link(name : String) : Nil
+      output = File.read(File.join(@fixture.root, "#{name}-dev.log"))
+      printed = output.match(/Toolbar and inspector sign-in \(single use\): (\S+)/)
+      link = printed.try(&.[1]) || raise "frappe dev printed no sign-in link\n#{output}"
+      target = URI.parse(link).request_target
+      assert!(request(name, target)[0] == 303, "the sign-in link did not redirect")
+      assert!(request(name, target)[0] == 403, "the sign-in link was not single use")
+      assert!(request(name, "/__caramel/dev/inspector")[0] == 200, "signed-in inspector refused")
+    end
+
     # The start of a development exception page, for a failed assertion.
     private def excerpt(body : String) : String
       body[0, Math.min(16000, body.size)]
@@ -109,6 +131,8 @@ module Caramel::Checks
         assert!(body.includes?("/__caramel/dev/client.js"))
         status, state = request("bookshelf", "/__caramel/dev/status", ["X-Caramel-Dev: 1"])
         assert!(status == 200 && JSON.parse(state)["state"].as_s == "ready")
+        signed_out_refused("bookshelf")
+        sign_in_with_printed_link("bookshelf")
         current = site("bookshelf")
         assert!(current["state"].as_s == "running" && current["owner"].as_s == "terminal")
         initial_generation = JSON.parse(state)["generation"].as_i64

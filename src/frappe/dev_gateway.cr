@@ -22,9 +22,16 @@ module Caramel::Frappe
     INSPECTOR_STYLE = {{ read_file("#{__DIR__}/../caramel/crema/palette.css") }} +
                       {{ read_file("#{__DIR__}/inspector.css") }} +
                       {{ read_file("#{__DIR__}/../caramel/crema/render.css") }}
-    TOOLBAR_STYLE = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
-    THEME         = {{ read_file("#{__DIR__}/../caramel/crema/theme.js") }}
-    PREFIX        = "/__caramel/dev/"
+    TOOLBAR_STYLE   = {{ read_file("#{__DIR__}/dev_toolbar.css") }}
+    THEME           = {{ read_file("#{__DIR__}/../caramel/crema/theme.js") }}
+    PREFIX          = "/__caramel/dev/"
+    SIGN_IN         = "#{PREFIX}sign-in"
+    SIGN_IN_LINK    = "#{PREFIX}sign-in-link"
+    MAX_SIGN_INS    = 8
+    SIGN_IN_REFUSED = "This sign-in link was already used or is not valid. " \
+                      "Run frappe open for a new one."
+    SIGNED_OUT = "The inspector needs this project's development session. " \
+                 "Open the sign-in link frappe dev printed, or run frappe open."
 
     # The diagnostic page's stylesheet.
     STYLE = "body{max-width:960px;margin:8vh auto;padding:24px;font:16px/1.6 system-ui;" \
@@ -49,6 +56,7 @@ module Caramel::Frappe
     @message = "Compiling your application…"
     @upstream : String? = nil
     @token = Random::Secure.hex(32)
+    @sign_ins = [] of String
     @authority : String
     @events : DevEvents? = nil
     @inspector : Inspector? = nil
@@ -81,6 +89,15 @@ module Caramel::Frappe
 
     def events : DevEvents?
       @events
+    end
+
+    # A new single-use link that signs a browser in to the toolbar and the inspector. At
+    # most `MAX_SIGN_INS` stay outstanding; minting another retires the oldest.
+    def sign_in_path : String
+      nonce = Random::Secure.hex(32)
+      @sign_ins.shift if @sign_ins.size >= MAX_SIGN_INS
+      @sign_ins << nonce
+      "#{SIGN_IN}?nonce=#{nonce}"
     end
 
     def building : Nil
@@ -161,6 +178,8 @@ module Caramel::Frappe
         "#{PREFIX}status"        => ->(request : HTTP::Request) { status(request) },
         "#{PREFIX}traces.json"   => ->(request : HTTP::Request) { traces_feed(request) },
         "#{PREFIX}trace.md"      => ->(request : HTTP::Request) { trace_markdown(request) },
+        SIGN_IN                  => ->(request : HTTP::Request) { sign_in(request) },
+        SIGN_IN_LINK             => ->(request : HTTP::Request) { sign_in_link(request) },
       }
     end
 
@@ -172,29 +191,67 @@ module Caramel::Frappe
       ok(body, "text/css; charset=utf-8")
     end
 
-    # Latte's owner token or the browser's development session may read the status.
+    # Latte's owner token or the browser's development session may read the whole
+    # status; any other client sees only what the refresh script needs.
     private def status(request : HTTP::Request) : Caramel::Response
-      if token = request.headers["X-Caramel-Owner-Token"]?
-        if token.bytesize == @owner_token.bytesize &&
-           Crypto::Subtle.constant_time_compare(token, @owner_token)
-          return status_response
-        end
-      end
-      return refused unless session_request?(request)
+      return status_response if owner?(request) || session_request?(request)
 
-      status_response
+      ok({generation: @generation, state: @state}.to_json, "application/json")
+    end
+
+    private def owner?(request : HTTP::Request) : Bool
+      token = request.headers["X-Caramel-Owner-Token"]? || return false
+
+      same?(token, @owner_token)
+    end
+
+    # True when the request carries this session's cookie, which only a sign-in link sets.
+    private def cookie_session?(request : HTTP::Request) : Bool
+      cookie = request.cookies[COOKIE]?.try(&.value) || return false
+
+      same?(cookie, @token)
     end
 
     # True for a request from the page this session served: its cookie, the
     # `X-Caramel-Dev` header and, when sent, this project's origin.
     private def session_request?(request : HTTP::Request) : Bool
-      cookie = request.cookies[COOKIE]?.try(&.value)
       origin = request.headers["Origin"]?
-      return false unless cookie && cookie.bytesize == @token.bytesize
-
-      Crypto::Subtle.constant_time_compare(cookie, @token) &&
+      cookie_session?(request) &&
         request.headers["X-Caramel-Dev"]? == "1" &&
         (origin.nil? || origin == @origin)
+    end
+
+    private def same?(given : String, secret : String) : Bool
+      given.bytesize == secret.bytesize && Crypto::Subtle.constant_time_compare(given, secret)
+    end
+
+    # Spends the sign-in link's nonce, once, and sets the session cookie.
+    private def sign_in(request : HTTP::Request) : Caramel::Response
+      nonce = request.query_params["nonce"]? || ""
+      matched = false
+      # Every outstanding nonce is compared, so the time taken does not show which one matched.
+      @sign_ins.reject! do |entry|
+        hit = same?(nonce, entry)
+        matched ||= hit
+        hit
+      end
+      return secure(Caramel::Response.new(403, SIGN_IN_REFUSED)) unless matched
+
+      response = Caramel::Response.redirect("/")
+      add_cookie(response)
+      secure(response)
+    end
+
+    # A new sign-in link for the owner, who proves it with the owner token. A
+    # session cookie cannot mint one, so a page script cannot.
+    private def sign_in_link(request : HTTP::Request) : Caramel::Response
+      return refused unless owner?(request)
+
+      ok({path: sign_in_path}.to_json, "application/json")
+    end
+
+    private def signed_out : Caramel::Response
+      secure(Caramel::Response.new(403, SIGNED_OUT))
     end
 
     private def refused : Caramel::Response
@@ -252,15 +309,15 @@ module Caramel::Frappe
     end
 
     private def inspector_page(request : HTTP::Request) : Caramel::Response
+      return signed_out unless cookie_session?(request)
+
       inspector = @inspector || return secure(Caramel::Response.new(404, "Not found"))
       page = inspector.response(request)
       secured = secure(page)
       return secured unless page.headers["Content-Type"]?.try(&.starts_with?("text/html"))
 
       body = with_script(page.body, @generation, nil)
-      response = Caramel::Response.new(page.status, body, page.headers)
-      add_cookie(response)
-      secure(response)
+      secure(Caramel::Response.new(page.status, body, page.headers))
     end
 
     private def diagnostic(request : HTTP::Request,
@@ -280,9 +337,7 @@ module Caramel::Frappe
              "This page refreshes when the application is ready.</p></main>" \
              "#{script(generation, nil)}</body></html>"
       headers = HTTP::Headers{"Content-Type" => "text/html; charset=utf-8"}
-      response = secure(Caramel::Response.new(503, body, headers))
-      add_cookie(response)
-      response
+      secure(Caramel::Response.new(503, body, headers))
     end
 
     # The message alone, or the diagnostics as links with the compiler's output after them.
@@ -355,7 +410,6 @@ module Caramel::Frappe
           if bodiless?(request, upstream.status_code)
             # HEAD, 1xx, 204 and 304 carry no body to read or decorate.
             response = Caramel::Response.new(upstream.status_code, "", returned)
-            add_cookie(response)
             outcome.send(response)
           elsif returned["Content-Type"]?.try(&.starts_with?("text/event-stream"))
             socket.read_timeout = nil
@@ -370,7 +424,6 @@ module Caramel::Frappe
             ensure
               released.send(nil)
             end
-            add_cookie(response)
             outcome.send(response)
             select
             when started.receive
@@ -388,7 +441,6 @@ module Caramel::Frappe
               returned["Cache-Control"] = "no-store"
             end
             response = Caramel::Response.new(upstream.status_code, body, returned)
-            add_cookie(response)
             outcome.send(response)
           end
         end

@@ -105,7 +105,12 @@ secrets in logs and without a diagnostic that costs a production binary anything
     traces with a waterfall, errors by fingerprint and builds. A toolbar on each page
     links its route, time, queries and flags to the trace page's `#timeline`, `#queries`
     and `#error`, and **Copy for an agent** fetches `/__caramel/dev/trace.md?id=` (a hex
-    id; session cookie and `X-Caramel-Dev` required). A query offers **Copy SQL** and
+    id; session cookie and `X-Caramel-Dev` required). The development session is the
+    `__Host-caramel_dev` cookie, which the gateway sets only on a single-use link,
+    `/__caramel/dev/sign-in?nonce=…` (a 256-bit nonce, at most eight outstanding), that
+    `frappe dev` prints and opens and `frappe open` mints through the owner token. The
+    inspector pages need that cookie and answer 403 without it; `status` shows an unsigned
+    client only the generation and state. A query offers **Copy SQL** and
     **Copy with values**, which fills each `$n` from the literals recorded in development
     detail and leaves what it cannot fill. A query is a card: its statement with one clause
     per line (display only; a copy writes the statement as it ran) and each bind listed

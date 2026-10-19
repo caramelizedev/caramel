@@ -14,6 +14,7 @@ require "./locale_generator"
 require "./tenancy_generator"
 require "./domain_generator"
 require "./dev_session"
+require "./dev_sign_in"
 require "./site_log"
 require "./schema_diff"
 require "./editor_tools"
@@ -195,7 +196,7 @@ module Caramel::Frappe
       when "open"
         project = Project.load
         verify_origin(project)
-        result = Process.run("/usr/bin/open", [project.origin])
+        result = Process.run("/usr/bin/open", [open_url(project)])
         raise Error.new("Could not open the project URL") unless result.success?
       when "lsp"
         directory = File.realpath(Dir.current)
@@ -585,6 +586,14 @@ module Caramel::Frappe
       return if !installed || Release.linter?(@framework_root)
       raise Error.new("Caramel #{Caramel::VERSION} was installed without its linter; " \
                       "finish it: frappe installations install #{Caramel::VERSION}")
+    end
+
+    # The origin; while frappe dev runs, a single-use link that also signs the browser in.
+    private def open_url(project : Project) : String
+      id = Latte::Site.id_for(project.name, project.root, project.metadata.domain_suffix)
+      DevSignIn.url(project, LatteClient.new.site_directory(id))
+    rescue Error | ArgumentError
+      project.origin
     end
 
     private def verify_origin(project : Project) : Nil
