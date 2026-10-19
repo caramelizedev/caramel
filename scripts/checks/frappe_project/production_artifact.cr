@@ -156,6 +156,9 @@ module Caramel::Checks
         health.try(&.status_code) == 200
       end
       assert!(answered && health.try(&.body) == "ok", "GET /health failed:\n#{logs(@app)}")
+      # The binary runs with CARAMEL_ENV unset, which is production.
+      hsts = health.try(&.headers["Strict-Transport-Security"]?)
+      assert!(hsts == "max-age=31536000", "Strict-Transport-Security: #{hsts.inspect}")
       # The central resource index reads PostgreSQL as the runtime role.
       status = get("/tags").try(&.status_code)
       assert!(status == 200, "GET /tags: #{status}\n#{logs(@app)}")

@@ -5,6 +5,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 ## Unreleased
 
 - A record is written as JSON only with the columns its schema's `json` line lists, such as `json :id, :title, :created_at, :updated_at`, where it wrote every column. Every model an action returns, or any other code writes as JSON, needs a `json` line; compilation fails without one and the error names the model. `frappe make resource` writes the line for new resources, listing the id, its fields and the timestamps, never the tenant column ([ADR 0007](docs/decisions/0007-sugarorm-schemas-changesets-preload.md)).
+- `Caramel.content_security_policy` (in `config/application.cr`) changes the Content-Security-Policy of every response, `content_security_policy` in an action changes one response's copy, and `csp_nonce` adds a per-response nonce to `script-src` and `style-src`. A header an action sets itself is kept. `serve` now sends `Strict-Transport-Security: max-age=31536000` when `CARAMEL_ENV` is production or unset, so a proxy that added it can stop; it is never sent in development or test ([ADR 0037](docs/decisions/0037-response-security-headers.md)).
 
 ## 0.16.0 - 2026-10-15
 

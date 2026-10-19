@@ -19,14 +19,17 @@ module Caramel
   end
 
   # The application's HTTP handler on a database pool: its router behind
-  # CSRF protection, serving *root*/public.
+  # CSRF protection, serving *root*/public. It sends Strict-Transport-Security
+  # when CARAMEL_ENV is production or unset (ADR 0037).
   def self.build(app : T.class,
                  db : DB::Database,
                  secret : String,
                  origin : String,
                  root : String) : Application forall T
     SugarORM::Repo.database = db
-    Application.new(T::AppRouter.new, CSRF.new(secret, origin), File.join(root, "public"))
+    production = (ENV["CARAMEL_ENV"]? || "production") == "production"
+    Application.new(T::AppRouter.new, CSRF.new(secret, origin), File.join(root, "public"),
+      hsts: production)
   end
 
   module CommandLine

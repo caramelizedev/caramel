@@ -3,6 +3,7 @@ require "../csrf"
 require "../session"
 require "./request_input"
 require "./ingress"
+require "../content_security_policy"
 
 module Caramel
   # Everything one action needs about its request: the parsed input, the CSRF
@@ -16,15 +17,41 @@ module Caramel
     @html_q = 0.0
     @session : Hash(String, String)? = nil
     @loaded_session : Hash(String, String)? = nil
+    @response_policy : ContentSecurityPolicy? = nil
+    @csp_nonce : String? = nil
 
     def initialize(@request : HTTP::Request,
                    @csrf : CSRF,
                    @sessions : Session,
                    @input : RequestInput,
-                   @ingress : Ingress = Ingress::DEFAULT)
+                   @ingress : Ingress = Ingress::DEFAULT,
+                   @policy : ContentSecurityPolicy = Caramel.content_security_policy)
       cookie = @request.cookies[CSRF::COOKIE_NAME]?.try(&.value)
       @csrf_token = cookie && @csrf.valid_token?(cookie) ? cookie : @csrf.issue
       negotiate(@request.headers["Accept"]?)
+    end
+
+    # This response's policy: a copy of the application's that only this response carries.
+    def content_security_policy : ContentSecurityPolicy
+      @response_policy ||= @policy.dup
+    end
+
+    # A nonce for this response's inline scripts and styles; taking it adds
+    # `'nonce-…'` to `script-src` and `style-src`.
+    def csp_nonce : String
+      @csp_nonce ||= Random::Secure.urlsafe_base64(16)
+    end
+
+    # The Content-Security-Policy this response carries instead of the
+    # application's, or nil when the action changed neither the policy nor its nonce.
+    def content_security_policy_header : String?
+      return if @response_policy.nil? && @csp_nonce.nil?
+      policy = (@response_policy || @policy).dup
+      @csp_nonce.try do |nonce|
+        policy.add("script-src", "'nonce-#{nonce}'")
+        policy.add("style-src", "'nonce-#{nonce}'")
+      end
+      policy.to_s
     end
 
     # The signed session, verified on first use; an invalid cookie reads as
