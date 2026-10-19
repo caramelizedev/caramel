@@ -88,8 +88,15 @@ module Caramel::Frappe
         client.ready!
         tools.dependencies(project)
         configure(project, client)
-        migrate_configured(project, tools)
-        @output.puts("#{project.name} is configured. Run frappe dev.")
+        if invocation.flag?("--no-migrate")
+          @output.puts("Skipped migrations (--no-migrate); " \
+                       "the development database was not changed.")
+          @output.puts("#{project.name} is configured. " \
+                       "Run frappe migrate to apply any pending migrations, then frappe dev.")
+        else
+          migrate_configured(project, tools)
+          @output.puts("#{project.name} is configured. Run frappe dev.")
+        end
       when "dev"
         dev(invocation)
       when "check"
@@ -475,7 +482,7 @@ module Caramel::Frappe
     # A new or newly set-up project starts migrated, so frappe dev serves it
     # at once.
     private def migrate_configured(project : Project, tools : Tools) : Nil
-      @output.puts("Applying migrations…")
+      @output.puts("Applying pending migrations to the development database…")
       values = development_environment(project).merge({"CARAMEL_ENV" => "development"})
       unless apply_migrations(project, tools, tools.compile(project), values).success?
         raise Error.new("Migrations were not applied; see the diagnostic above. " \

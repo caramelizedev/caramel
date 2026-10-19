@@ -18,6 +18,8 @@ describe Caramel::Frappe::Commands do
     dev["--branch"].should eq("feature_x")
     dev.flag?("--no-open").should be_true
     parse("dev").flag?("--no-open").should be_false
+    parse("setup", "--no-migrate").flag?("--no-migrate").should be_true
+    parse("setup").flag?("--no-migrate").should be_false
 
     make = parse("make", "resource", "Person", "name:string", "age:int32", "--plural=people")
     make.command.name.should eq("make resource")
@@ -64,6 +66,10 @@ describe Caramel::Frappe::Commands do
         %w[corretto --concurrency]    => "--concurrency needs a value: --concurrency=1..8",
         ["corretto", ""]              => "empty argument for SPEC_PATHS",
       },
+      "frappe setup [--no-migrate]" => {
+        %w[setup --no-migrate --no-migrate] => "--no-migrate is given more than once",
+        %w[setup --no-migrate=1]            => "--no-migrate takes no value",
+      },
       "frappe dev [--no-open] [--branch NAME]" => {
         %w[dev --branch]      => "--branch needs a value: --branch NAME",
         %w[dev --branch=x]    => "--branch needs a value: --branch NAME",
@@ -100,6 +106,7 @@ describe Caramel::Frappe::Commands do
     unknown = refusal("migrte")
     expected = {"unknown command migrte", "migrate", MIGRATE}
     {unknown.message, unknown.suggestion, unknown.syntax}.should eq(expected)
+    refusal("setup", "--no-migrat").suggestion.should eq("--no-migrate")
     refusal("dev", "--branc", "x").suggestion.should eq("--branch")
     refusal("check", "--agnet").suggestion.should eq("--agent")
     refusal("logs", "complier").suggestion.should eq("compiler")

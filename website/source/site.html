@@ -2699,7 +2699,8 @@ end`)+
     `<h2 id="c-local-sites">Every site gets its own origin</h2><p>A site’s origin is <code>https://NAME.caramel</code>.</p>`+
     rules([
       ['<code>frappe new NAME</code>','registers the application with Latte as a site, writes its private <code>.env</code>, and applies its migrations','ok'],
-      ['<code>frappe setup</code> in a cloned project','installs the locked dependencies and takes the same steps, keeping existing files','ok'],
+      ['<code>frappe setup</code> in a cloned project','installs the locked dependencies and takes the same steps as <code>frappe new</code>, including applying pending migrations to the development database, keeping existing files','ok'],
+      ['<code>frappe setup --no-migrate</code>','takes every step except applying migrations, prints <code>Skipped migrations (--no-migrate); the development database was not changed.</code> and applies no migration, so the schema gains no application table and the migration journal no row','ok'],
       ['A site’s state in <code>frappe sites</code>','is <code>running</code>, <code>building</code>, <code>build-error</code>, <code>stopped</code>, <code>unavailable</code> or <code>unknown</code>; <code>(terminal)</code> after it marks a site that a <code>frappe dev</code> session serves','ok'],
       ['<code>frappe sites remove NAME</code>','unregisters the site and keeps its folder, databases, credentials, logs, and backups; <code>frappe setup</code> registers it again','ok'],
       ['<code>frappe sites remove NAME</code> for a name Latte does not know','exits 1 with <code>No registered site is named NAME</code>'],

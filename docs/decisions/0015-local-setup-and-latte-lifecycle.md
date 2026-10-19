@@ -40,7 +40,7 @@ The first-run path, `frappe new demo && cd demo && frappe dev`, must work withou
      - The agent runs `latte daemon --detach` with `RunAtLoad` and `AbandonProcessGroup`, and no `KeepAlive`.
      - Installing takes over from a running daemon. `latte service uninstall` unloads the agent and deletes it.
 5. **A new project starts migrated.**
-   - `frappe new` and `frappe setup` apply pending migrations after they configure the site.
+   - `frappe new` and `frappe setup` apply pending migrations after they configure the site. `frappe setup --no-migrate` configures the site and applies no migration, so the schema holds no application table and the migration journal no row; it prints that migrations were skipped and names `frappe migrate` as the next command.
    - When `frappe dev` finds pending migrations, it says so once, retries quietly every second, and serves as soon as they are applied.
 
 ## Reasons
