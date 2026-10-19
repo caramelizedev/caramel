@@ -4,8 +4,19 @@ module Caramel
   # Latte runs these statements for its sites, and `APP db roles` prints them for
   # a server Latte does not manage.
   module DatabaseRoles
-    # A role or database name `script` writes without quoting.
-    NAME = /\A[a-z_][a-z0-9_]{0,62}\z/
+    # A role or database name `script` and `role` write.
+    NAME      = /\A[a-z_][a-z0-9_]{0,62}\z/
+    NAME_RULE = "names must match [a-z_][a-z0-9_]*, up to 63 characters"
+
+    # *value* when it is a NAME; raises ArgumentError otherwise.
+    def self.name!(value : String) : String
+      return value if value.matches?(NAME)
+      raise ArgumentError.new("#{NAME_RULE}, got #{value.inspect}")
+    end
+
+    ELEVATED      = "SUPERUSER, CREATEDB, CREATEROLE, BYPASSRLS or REPLICATION"
+    ELEVATED_HINT = "As a superuser run ALTER ROLE name NOSUPERUSER NOCREATEDB NOCREATEROLE " \
+                    "NOBYPASSRLS NOREPLICATION, then run this script again."
 
     MIGRATION_CONNECTION_LIMIT =  1
     RUNTIME_CONNECTION_LIMIT   = 24
@@ -21,21 +32,42 @@ module Caramel
     end
 
     # Creates the login role *name* unless it exists, then sets its connection
-    # limit. The attributes beyond LOGIN are set only on creation, because
-    # PostgreSQL refuses `ALTER ROLE … NOSUPERUSER` from a role that is not a
-    # superuser, such as a managed server's administrator.
+    # limit and password. The attributes beyond LOGIN are set only on creation,
+    # because PostgreSQL refuses `ALTER ROLE … NOSUPERUSER` from a role that is
+    # not a superuser, such as a managed server's administrator.
     def self.role(name : String, connection_limit : Int32, password : String? = nil) : String
+      name!(name)
       identifier = quote_identifier(name)
       limit = "CONNECTION LIMIT #{connection_limit}"
       secret = password.try { |value| " PASSWORD #{quote_literal(value)}" }
+      # Only NAME-checked text and an Int go between the `$$`; never put a password here.
       <<-SQL
         DO $$ BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = #{quote_literal(name)}) THEN
             CREATE ROLE #{identifier} #{ATTRIBUTES}
-              #{limit}#{secret};
+              #{limit};
           END IF;
         END $$;
         ALTER ROLE #{identifier} LOGIN #{limit}#{secret};
+        SQL
+    end
+
+    # A DO block that raises, naming them, when any of *roles* already exists
+    # with SUPERUSER, CREATEDB, CREATEROLE, BYPASSRLS or REPLICATION.
+    def self.attribute_check(roles : Array(String)) : String
+      names = roles.map { |role| quote_literal(name!(role)) }.join(", ")
+      <<-SQL
+        DO $$
+        DECLARE elevated text;
+        BEGIN
+          SELECT string_agg(rolname, ', ' ORDER BY rolname) INTO elevated FROM pg_roles
+            WHERE rolname IN (#{names})
+              AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication);
+          IF elevated IS NOT NULL THEN
+            RAISE EXCEPTION 'role(s) % have #{ELEVATED}', elevated
+              USING HINT = '#{ELEVATED_HINT}';
+          END IF;
+        END $$;
         SQL
     end
 
@@ -92,19 +124,26 @@ module Caramel
     # A psql script, without passwords, that creates both roles and the
     # database. It grants both roles to the role that runs it, which a managed
     # server's administrator that is not a superuser needs to create a database
-    # they own and to change its schema. The names must match NAME.
+    # they own and to change its schema. Raises ArgumentError for a name that
+    # does not match NAME.
     def self.script(database : String, migration : String, runtime : String) : String
+      name!(database)
+      name!(migration)
+      name!(runtime)
       [
         "-- psql script: creates roles #{migration} and #{runtime} and database #{database}.",
-        "-- Set passwords separately.",
+        "-- Set passwords separately. Run with psql -v ON_ERROR_STOP=1 so a failed check stops it.",
         role(migration, MIGRATION_CONNECTION_LIMIT),
         role(runtime, RUNTIME_CONNECTION_LIMIT),
+        attribute_check([migration, runtime]),
         "GRANT #{quote_identifier(migration)} TO CURRENT_USER;",
         "GRANT #{quote_identifier(runtime)} TO CURRENT_USER;",
         create_database(database, migration),
         database_access(database, migration, runtime),
         "\\connect #{database}",
         schema_access(migration, runtime),
+        "-- The role that ran this script stays a member of both roles;" \
+        " REVOKE them when you no longer need them.",
       ].join('\n') + "\n"
     end
   end

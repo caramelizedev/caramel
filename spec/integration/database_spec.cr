@@ -111,4 +111,27 @@ describe "PostgreSQL integration" do
       holder.close
     end
   end
+
+  it "refuses an existing elevated role before any grant and creates a plain role" do
+    admin = Caramel::Database.open(ENV["CARAMEL_OWNED_ADMIN_URL"], 1)
+    probe = "probe_#{Random::Secure.hex(4)}"
+    fresh = "probe_#{Random::Secure.hex(4)}"
+    begin
+      admin.exec("CREATE ROLE #{probe} LOGIN BYPASSRLS")
+      error = expect_raises(PQ::PQError) do
+        admin.exec(Caramel::DatabaseRoles.attribute_check([probe]))
+      end
+      error.message.to_s.should contain("have SUPERUSER, CREATEDB, CREATEROLE, BYPASSRLS " \
+                                        "or REPLICATION")
+      admin.exec("ALTER ROLE #{probe} NOBYPASSRLS")
+      admin.exec(Caramel::DatabaseRoles.attribute_check([probe]))
+      statements = Caramel::DatabaseRoles.role(fresh, 1, "pw").split("\nALTER ROLE ", 2)
+      admin.exec(statements[0])
+      admin.exec("ALTER ROLE " + statements[1])
+    ensure
+      admin.exec("DROP ROLE IF EXISTS #{probe}")
+      admin.exec("DROP ROLE IF EXISTS #{fresh}")
+      admin.close
+    end
+  end
 end
