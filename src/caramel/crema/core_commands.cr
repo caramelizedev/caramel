@@ -99,12 +99,11 @@ module Caramel::Crema
 
     # Prints the role script without opening a database.
     private def self.roles(database : String, migration : String, runtime : String) : Int32
-      unless {database, migration, runtime}.all?(&.matches?(DatabaseRoles::NAME))
-        STDERR.puts("db roles: names must match [a-z_][a-z0-9_]*, up to 63 characters")
-        return 2
-      end
       print DatabaseRoles.script(database, migration, runtime)
       0
+    rescue error : ArgumentError
+      STDERR.puts("db roles: #{error.message}")
+      2
     end
   end
 
