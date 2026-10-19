@@ -183,12 +183,17 @@ module Caramel::ColdBrew
       @lock = Mutex.new
       @link = nil.as(Link?)
       @closed = false
+      @ending = false
     end
 
     # Returns once PostgreSQL LISTENs to `name` for this subscriber.
     def subscribe(name : String, channel : Channel(String)) : Nil
       ColdBrew.validate_channel!(name)
       @lock.synchronize do
+        if @ending
+          channel.close
+          return
+        end
         raise IO::Error.new("Caramel::ColdBrew::Broker is closed") if @closed
         subscribers = @subscribers[name] ||= [] of Subscriber
         subscribers.reject!(&.owner.dead?)
@@ -219,6 +224,15 @@ module Caramel::ColdBrew
             Log.warn { "channel=#{name} UNLISTEN failed error_type=#{error.class}" }
           end
         end
+      end
+    end
+
+    # Ends every subscription by closing its channel, so a stream waiting on one ends;
+    # later subscriptions close at once. `serve` calls it at its first signal.
+    def end_subscriptions : Nil
+      @lock.synchronize do
+        @ending = true
+        @subscribers.each_value { |list| list.each(&.channel.close) }
       end
     end
 

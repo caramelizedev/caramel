@@ -68,6 +68,11 @@ module Caramel::ColdBrew
       self
     end
 
+    # Starts no more blocks; returns at once.
+    def halt : Nil
+      @stopping.close
+    end
+
     # Returns once no block is running.
     def stop : Nil
       @stopping.close

@@ -124,17 +124,44 @@ module Caramel::ColdBrew
     # False when `--no-scheduler` left `every` schedules to other processes.
     getter? scheduler_on : Bool
 
-    # Fetches no new jobs, lets in-flight jobs and schedule blocks finish,
-    # then closes the LISTEN connection and the pool.
-    def stop : Nil
-      WaitGroup.wait do |group|
-        @workers.each { |worker| group.spawn { worker.stop } }
-        group.spawn { @maintenance.stop }
-        group.spawn { @scheduler.stop }
+    # Stops claiming jobs and starting schedule blocks; returns at once.
+    def halt : Nil
+      @workers.each(&.halt)
+      @scheduler.halt
+      @maintenance.halt
+    end
+
+    # Stops claiming, waits for in-flight jobs and schedule blocks until *deadline*, and
+    # returns how many jobs were still running. Everything finished when that is 0: the
+    # LISTEN connection and the pool are closed then, and only then.
+    def stop(deadline : Time::Instant? = nil) : Int32
+      halt
+      finished = Channel(Nil).new
+      spawn(name: "cold_brew:stop") do
+        WaitGroup.wait do |group|
+          @workers.each { |worker| group.spawn { worker.stop } }
+          group.spawn { @maintenance.stop }
+          group.spawn { @scheduler.stop }
+        end
+      ensure
+        finished.close
       end
+      completed = wait_finished(finished, deadline)
       @broker.close
       ColdBrew.broker = nil if ColdBrew.broker?.same?(@broker)
-      @db.close
+      @db.close if completed
+      @workers.sum(&.running)
+    end
+
+    # True when *finished* closed before *deadline*.
+    private def wait_finished(finished : Channel(Nil), deadline : Time::Instant?) : Bool
+      return finished.receive?.nil? unless deadline
+      select
+      when finished.receive?
+        true
+      when timeout({deadline - Time.instant, Time::Span.zero}.max)
+        false
+      end
     end
   end
 
