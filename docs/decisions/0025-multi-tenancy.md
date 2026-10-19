@@ -13,8 +13,8 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
 
 1. **Core hooks with identity bodies.** `Application#handle` routes through `tenanted`,
    which only yields; the generic 500 response is `failure`. `Caramel.tenant_path(path,
-   of:)`, `Caramel::Cache.scoped` and `Caramel::ColdBrew.carry`, `carried` and `channel`
-   return their input. Resource path helpers and the i18n locale switch pass through
+   of:)`, `Caramel::Cache.scoped` and `ColdBrew.carry`, `carried` and `channel` return their
+   input, and `Caramel::Cache.clear` deletes every key. Resource path helpers and the i18n locale switch pass through
    `tenant_path`. A job `param caramel_tenant` is a compile error.
 2. **`require "caramel/tenancy"` is the only way in.** It redefines the hooks, and its
    `macro finished` guard refuses a program without a tenant block. The documented API is
@@ -57,7 +57,10 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
    job whose tenant is gone fails with `Caramel::Tenancy::Gone`. A job enqueued with no
    tenant runs with none. A `spawn`ed fiber starts with none. While a tenant is bound,
    cache keys and PubSub channels get the prefix `t<id>:`, and a prefixed channel stays
-   within 63 characters.
+   within 63 characters. With none bound, a cache key or channel name that starts with
+   `t<id>:` raises ArgumentError, except inside `without`. `Cache.clear` deletes the
+   bound tenant's keys; with none bound it deletes the keys no tenant owns; inside
+   `without` it deletes every key.
 7. **Frappé.** `frappe make tenancy MODEL` writes the tenant's schema, changeset,
    migration, sign-up page at `/PLURAL/new` and home at `/SLUG`, and adds the require,
    the tenant block, the path helpers and the `tenant_session` spec helper. In a
@@ -118,5 +121,4 @@ Rejected:
   one call forgets.
 - **`tenant: true` on path helpers,** and **a separate configuration declaration.** The
   router's tenant block already names the model, the slug and the tenant routes.
-- **Deferred:** host-based identification, a per-tenant `Cache.clear`, and row-level
-  security.
+- **Deferred:** host-based identification and row-level security.

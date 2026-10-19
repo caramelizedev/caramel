@@ -44,6 +44,7 @@ module Caramel
       SugarORM.sql_exec("DELETE FROM caramel_cache WHERE key = $1", scoped(key)) > 0
     end
 
+    # Deletes every entry. caramel/tenancy deletes the bound tenant's keys instead.
     def self.clear : Nil
       SugarORM.sql_exec("DELETE FROM caramel_cache")
     end
