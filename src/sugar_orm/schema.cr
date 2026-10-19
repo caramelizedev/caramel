@@ -15,9 +15,9 @@ module SugarORM
   #       scope larger_than(seats : Int32) { where("seats > ?", seats) }
   #     end
   #
-  # `schema` generates getters, `with`, `from_row`, JSON, the `Team::Field`
-  # enum, `Team::Query`, association sentinels, the catalog table and the
-  # facade (`create`, `update`, `delete`).
+  # `schema` generates getters, `with`, `from_row`, JSON of the columns its
+  # `json` line lists, the `Team::Field` enum, `Team::Query`, association
+  # sentinels, the catalog table and the facade (`create`, `update`, `delete`).
   abstract struct Schema
     macro inherited
       macro finished
@@ -30,13 +30,20 @@ module SugarORM
     end
 
     {% for name in %w(field timestamps belongs_to has_many has_one index drop_column
-                     check tenant) %}
+                     check tenant json) %}
       # :nodoc:
       macro {{ name.id }}(*arguments, **options)
         \{% raise "`{{ name.id }}` belongs inside the schema block.\n" +
                   "Remediation: move it into `schema \"table\" do ... end` of #{@type}." %}
       end
     {% end %}
+
+    # A record is written as JSON only with the columns its schema's `json` line lists.
+    def to_json(json : ::JSON::Builder) : Nil
+      {% raise "#{@type} has no `json` line, so it cannot be written as JSON.\n" +
+               "Remediation: add `json :id, …` to the schema block of #{@type}, " +
+               "listing the columns a client may read." %}
+    end
 
     macro schema(table, &block)
       {% table_at = "\n  --> #{table.filename.id}:" +
@@ -94,13 +101,14 @@ module SugarORM
          ) %}
       {% holds_only = "Remediation: a schema block holds only " +
                       "field, timestamps, belongs_to, has_many, has_one, " +
-                      "index, drop_column, check and tenant declarations." %}
+                      "index, drop_column, check, tenant and json declarations." %}
       {% owner = @type.name(generic_args: false).stringify.split("::").last %}
       {% owner_key = owner.underscore + "_id" %}
       {% columns = [] of Nil %}
       {% associations = [] of Nil %}
       {% indexes = [] of Nil %}
       {% explicit_indexes = [] of Nil %}
+      {% json_line = nil %}
       {% check_declarations = [] of Nil %}
       {% foreign_keys = [] of Nil %}
       {% drops = [] of Nil %}
@@ -471,6 +479,21 @@ module SugarORM
                unique:  unique,
              } %}
 
+        {% elsif kind == "json" %}
+          {% symbols = statement.args.all? do |argument|
+               argument.is_a?(SymbolLiteral) || argument.is_a?(StringLiteral)
+             end %}
+          {% unless !statement.args.empty? && symbols && named.empty? %}
+            {% problem = "json expects column symbols, like `json :id, :title`." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
+          {% if json_line %}
+            {% problem = "#{@type} declares json twice.\n" +
+                         "Remediation: list every column a client may read in one `json` line." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
+          {% json_line = {node: statement, columns: statement.args.map(&.id.stringify)} %}
+
         {% elsif kind == "drop_column" %}
           {% dropped = statement.args[0] %}
           {% single = statement.args.size == 1 && named.empty? %}
@@ -596,6 +619,24 @@ module SugarORM
         {% indexes = replaced + [entry] %}
         {% if index[:unique] %}
           {% unique_targets << {key: index[:columns].join("_and_"), columns: indexed} %}
+        {% end %}
+      {% end %}
+      {% if json_line %}
+        {% node = json_line[:node] %}
+        {% node_at = "\n  --> #{node.filename.id}:" +
+                     "#{node.line_number}:#{node.column_number}" %}
+        {% listed = [] of Nil %}
+        {% for column in json_line[:columns] %}
+          {% unless columns.any? { |candidate| candidate[:name] == column } %}
+            {% problem = "json lists '#{column.id}', " +
+                         "which is not a column of #{@type}.\n" +
+                         "Columns: #{columns.map(&.[:name]).join(", ").id}" %}
+            {% node.raise problem + node_at %}
+          {% end %}
+          {% if listed.includes?(column) %}
+            {% node.raise "json lists '#{column.id}' twice." + node_at %}
+          {% end %}
+          {% listed << column %}
         {% end %}
       {% end %}
       {% checks = [] of Nil %}
@@ -813,14 +854,16 @@ module SugarORM
         new({{ readers.join(", ").id }})
       end
 
-      # Declared columns in declaration order; associations are not serialized.
-      def to_json(json : ::JSON::Builder) : Nil
-        json.object do
-          {% for column in columns %}
-            json.field {{ column[:name] }}, @{{ column[:name].id }}
-          {% end %}
+      {% if json_line %}
+        # Only the columns its `json` line lists, in that order; associations never.
+        def to_json(json : ::JSON::Builder) : Nil
+          json.object do
+            {% for column in json_line[:columns] %}
+              json.field {{ column }}, @{{ column.id }}
+            {% end %}
+          end
         end
-      end
+      {% end %}
 
       def self.__sugar_table_name : String
         {{ table }}

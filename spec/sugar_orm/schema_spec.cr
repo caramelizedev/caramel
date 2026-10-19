@@ -140,13 +140,11 @@ describe SugarORM::Schema do
     team.owner_id.should be_nil
   end
 
-  it "serializes declared columns in declaration order and never association sentinels" do
+  it "writes only the columns its json line lists, in that order" do
     json = SugarUnit.team(billing_email: "a@b.c").to_json
-    columns = %w[
-      id name seats ratio archived motto billing_email
-      created_at updated_at owner_id
-    ]
+    columns = %w[id name seats created_at updated_at owner_id]
     JSON.parse(json).as_h.keys.should eq(columns)
+    json.should_not contain("billing_email")
     json.should contain(%("created_at":"2026-01-01T00:00:00Z"))
     json.should_not contain("members")
     json.should_not contain("charter")

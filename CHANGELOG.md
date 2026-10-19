@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- A record is written as JSON only with the columns its schema's `json` line lists, such as `json :id, :title, :created_at, :updated_at`, where it wrote every column. Every model an action returns, or any other code writes as JSON, needs a `json` line; compilation fails without one and the error names the model. `frappe make resource` writes the line for new resources, listing the id, its fields and the timestamps, never the tenant column ([ADR 0007](docs/decisions/0007-sugarorm-schemas-changesets-preload.md)).
+
 ## 0.16.0 - 2026-10-15
 
 ### Upgrade notes

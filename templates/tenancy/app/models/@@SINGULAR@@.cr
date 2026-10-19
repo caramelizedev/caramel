@@ -7,6 +7,7 @@ module App
       field slug : String
       timestamps
       index :slug, unique: true
+      json :id, :name, :slug, :created_at, :updated_at
     end
   end
 end

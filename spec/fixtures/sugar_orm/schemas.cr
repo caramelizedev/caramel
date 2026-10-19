@@ -12,6 +12,7 @@ struct Team < SugarORM::Schema
     belongs_to owner : User?
     has_one profile : Profile
     index :name, unique: true
+    json :id, :name
   end
 
   scope active { where(archived: false) }

@@ -13,6 +13,7 @@ describe "Books as JSON" do
       shown = client.get("/books/#{book.id}", headers: accept)
       shown.should have_status(200)
       shown.should have_header("ETag", %("0"))
+      JSON.parse(shown.body)["record"].as_h.has_key?("lock_version").should be_false
     end
   end
 
