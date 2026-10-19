@@ -16,6 +16,7 @@ module SugarUnit
       has_one charter : Charter
       index :name, unique: true
       index :seats, :archived
+      json :id, :name, :seats, :created_at, :updated_at, :owner_id
       drop_column :legacy_code
     end
 

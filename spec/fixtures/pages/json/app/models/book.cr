@@ -6,6 +6,7 @@ module App
       field author : String
       field lock_version : Int32, version: true
       timestamps
+      json :id, :title, :author, :created_at, :updated_at
     end
   end
 end

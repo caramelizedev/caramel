@@ -275,6 +275,7 @@ module Caramel::Frappe
         "@@PARAMS@@"            => field_declarations(fields, "    param"),
         "@@VALIDATIONS@@"       => validations(required_text, fields),
         "@@INDEXES@@"           => unique_indexes(uniques),
+        "@@JSON_COLUMNS@@"      => json_columns(fields),
         "@@CREATE_ATTRIBUTES@@" => create_attributes(fields),
         "@@UPDATE_ATTRIBUTES@@" => update_attributes(inputs),
         "@@VALUES@@"            => form_values(inputs),
@@ -532,6 +533,12 @@ module Caramel::Frappe
 
     private def unique_indexes(uniques : Array(ResourceField)) : String
       uniques.join { |field| "\n      index :#{field.name}, unique: true" }
+    end
+
+    # The model's json line: the id, every field (:server ones too) and the
+    # timestamps; never the tenant column.
+    private def json_columns(fields : Array(ResourceField)) : String
+      (["id"] + fields.map(&.name) + %w[created_at updated_at]).join(", ") { |name| ":#{name}" }
     end
 
     # Each input from the contract, and each required :server field's

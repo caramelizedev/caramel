@@ -7,6 +7,7 @@ module App
       # frappe:end
 @@MODEL_FIELDS@@
       timestamps@@INDEXES@@
+      json @@JSON_COLUMNS@@
     end
   end
 end

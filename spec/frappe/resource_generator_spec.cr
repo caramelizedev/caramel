@@ -189,6 +189,7 @@ describe Caramel::Frappe::ResourceGenerator do
               index :email, unique: true
               index :token, unique: true
               index :number, unique: true
+              json :id, :email, :token, :number, :created_at, :updated_at
         CRYSTAL
       read.call("app/changesets/invite.cr").should contain(<<-CRYSTAL + "\n")
               cs.unique_constraint(:email)
@@ -437,6 +438,14 @@ describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
                  "      tenant account : Account\n" \
                  "      field body : String\n"
       read(project, "app/models/note.cr").should contain(expected)
+    end
+  end
+
+  it "lists the tenanted model's own columns in its json line, never the tenant column" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      json = "      json :id, :body, :created_at, :updated_at\n"
+      read(project, "app/models/note.cr").should contain(json)
     end
   end
 

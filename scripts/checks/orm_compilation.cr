@@ -205,6 +205,19 @@ cases = {
     "Team::Upsert declares upsert twice.",
     "Remediation: keep one `upsert`.",
   ],
+  "compile_json_missing" => [
+    "Team has no `json` line, so it cannot be written as JSON.",
+    "Remediation: add `json :id, …` to the schema block of Team",
+  ],
+  "compile_json_unknown_column" => [
+    "compile_json_unknown_column.cr:7:",
+    "json lists 'title', which is not a column of Team.",
+    "Columns: id, name",
+  ],
+  "compile_json_twice" => [
+    "compile_json_twice.cr:8:",
+    "Team declares json twice.",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)
