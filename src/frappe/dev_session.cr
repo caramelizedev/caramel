@@ -9,6 +9,7 @@ require "./site_log"
 require "./dev_events"
 require "./diagnostics"
 require "../caramel/crema/editor"
+require "../caramel/crema/ops_key"
 require "../caramel/crema/redact"
 require "../latte/project_status"
 require "../latte/watcher"
@@ -439,7 +440,7 @@ module Caramel::Frappe
             if previous
               @retirement.retire(previous) do
                 previous_socket.try { |path| File.delete?(path) }
-                previous_ops.try { |path| File.delete?(path) }
+                previous_ops.try { |path| File.delete?(path); Caramel::Crema::OpsKey.remove(path) }
                 cleanup_binaries
               end
             end
@@ -470,6 +471,7 @@ module Caramel::Frappe
           candidate.stop
           File.delete?(socket)
           File.delete?(ops)
+          Caramel::Crema::OpsKey.remove(ops)
         end
       end
     end
@@ -527,6 +529,11 @@ module Caramel::Frappe
           sleep 100.milliseconds
         end
       end
+      Dir.children(@directory).each do |name|
+        next unless name.matches?(/\Aops-[0-9a-f]{8}\.sock\.key\z/)
+        path = File.join(@directory, name)
+        File.delete?(path) unless File.exists?(path.chomp(".key"))
+      end
     end
 
     private def open_logs : Nil
@@ -579,7 +586,7 @@ module Caramel::Frappe
       Latte::ProjectStatus.remove_session(@directory, @socket) unless @socket.empty?
       File.delete?(@socket) unless @socket.empty?
       @application_socket.try { |socket| File.delete?(socket) }
-      @application_ops.try { |path| File.delete?(path) }
+      @application_ops.try { |path| File.delete?(path); Caramel::Crema::OpsKey.remove(path) }
       @events.try(&.close)
       Signal::INT.reset
       Signal::TERM.reset
