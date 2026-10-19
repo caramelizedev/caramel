@@ -237,6 +237,17 @@ module Caramel
       @context.csrf_token
     end
 
+    # This response's policy: a copy of the application's that only this response carries.
+    def content_security_policy : ContentSecurityPolicy
+      @context.content_security_policy
+    end
+
+    # A nonce for this response's inline scripts and styles; taking it adds
+    # `'nonce-…'` to `script-src` and `style-src`.
+    def csp_nonce : String
+      @context.csp_nonce
+    end
+
     # The signed session; changes are saved in the response's cookie.
     def session : Hash(String, String)
       @context.session

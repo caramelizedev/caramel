@@ -6,6 +6,7 @@ require "./crema"
 require "./csrf"
 require "./http/request_input"
 require "./http/request_context"
+require "./content_security_policy"
 require "./http/router"
 require "./wording"
 {% if flag?(:caramel_development) %}
@@ -20,18 +21,27 @@ module Caramel
   class Application
     include HTTP::Handler
 
-    CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; " \
-                              "img-src 'self' data:; base-uri 'self'; form-action 'self'; " \
-                              "frame-ancestors 'none'; object-src 'none'"
+    # What `serve` sends in production: one year, for this host only. There is no
+    # `includeSubDomains` or `preload`, because a parent domain may serve sites that
+    # are not HTTPS-only.
+    STRICT_TRANSPORT_SECURITY = "max-age=31536000"
 
     getter csrf : CSRF
     getter sessions : Session
     @authority : String
     @public_root : String?
+    @policy : ContentSecurityPolicy
+    @policy_header : String
     @in_flight = Atomic(Int32).new(0)
     @draining = Atomic(Bool).new(false)
 
-    def initialize(@router : Router::Dispatcher, @csrf : CSRF, public_root : String? = nil)
+    def initialize(@router : Router::Dispatcher,
+                   @csrf : CSRF,
+                   public_root : String? = nil,
+                   policy : ContentSecurityPolicy = Caramel.content_security_policy,
+                   @hsts : Bool = false)
+      @policy = policy.dup
+      @policy_header = @policy.to_s
       @authority = URI.parse(@csrf.origin).authority ||
                    raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
       @public_root = public_root.try { |root| File.realpath(root) }
@@ -97,12 +107,15 @@ module Caramel
       # a request that matches none reads and is checked as a form.
       match = @router.match(request)
       input = RequestInput.read(request, match.ingress, uploads: match.uploads)
-      context = RequestContext.new(request, @csrf, @sessions, input, match.ingress)
+      context = RequestContext.new(request, @csrf, @sessions, input, match.ingress, @policy)
       if RequestInput::BODY_METHODS.includes?(request.method) && match.ingress.csrf?
         token = input.csrf_token || request.headers["X-CSRF-Token"]?
         raise Forbidden.new unless @csrf.valid?(request, token)
       end
       response = @router.dispatch(context, match)
+      if header = context.content_security_policy_header
+        response.headers["Content-Security-Policy"] = header
+      end
       if cookie = context.session_cookie
         response.headers.add("Set-Cookie", cookie.to_set_cookie_header)
       end
@@ -162,7 +175,10 @@ module Caramel
     private def secure(response : Response) : Response
       response.headers["X-Content-Type-Options"] = "nosniff"
       response.headers["Referrer-Policy"] = "same-origin"
-      response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+      unless response.headers.has_key?("Content-Security-Policy")
+        response.headers["Content-Security-Policy"] = @policy_header
+      end
+      response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY if @hsts
       response
     end
 

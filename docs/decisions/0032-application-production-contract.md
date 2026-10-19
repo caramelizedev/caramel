@@ -51,6 +51,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
    - (c) The old binary's workers stop before the new binary takes traffic.
    - (d) A binary that lacks an applied migration refuses to start (`Drift`). Migrations never roll back, so going back across a migration means restoring the database, and a cutover that fails after `migrate` means rolling forward or restoring.
 10. **Socket access.** `serve` binds `CARAMEL_SOCKET` with mode 0600 in a directory only its user can reach. With `CARAMEL_SOCKET_GROUP=GROUP` the directory may instead belong to the user and GROUP, with no group write and nothing for others. The socket then gets group GROUP and mode 0660, so a proxy running as another user in GROUP can connect. The ops socket always needs a private directory; `CARAMEL_OPS_SOCKET` places it in one.
+11. **HSTS.** In production `serve` sends `Strict-Transport-Security: max-age=31536000` on every response ([ADR 0037](0037-response-security-headers.md)); a proxy need not add it.
 
 ## Reasons
 
