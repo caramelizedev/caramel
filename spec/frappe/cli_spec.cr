@@ -30,6 +30,10 @@ describe Caramel::Frappe::CLI do
     ]
     output.to_s.lines.select(&.starts_with?("Usage: ")).should eq(usages)
     output.clear
+    frappe.run(["setup", "--help"]).should eq(0)
+    summary = Caramel::Frappe::Commands::TABLE.find!(&.name.==("setup")).summary
+    output.to_s.should eq("Usage: frappe setup [--no-migrate]\n  #{summary}\n")
+    output.clear
     frappe.run(["--version"]).should eq(0)
     output.to_s.should eq("Frappé #{Caramel::VERSION}\n")
   end

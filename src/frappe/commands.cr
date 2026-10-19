@@ -121,9 +121,10 @@ module Caramel::Frappe
         "Create the application ./NAME, install its locked dependencies " \
         "and register it with Latte.",
         project: false),
-      Command.new("setup",
-        "Install locked dependencies and register this project with Latte, " \
-        "preserving existing files."),
+      Command.new("setup [--no-migrate]",
+        "Install locked dependencies, register this project with Latte and apply " \
+        "pending migrations to the development database, preserving existing files; " \
+        "--no-migrate leaves the database unchanged."),
       Command.new("dev [--no-open] [--branch NAME]",
         "Build, serve and reload the app at its HTTPS origin; " \
         "--branch runs it against database branch NAME."),

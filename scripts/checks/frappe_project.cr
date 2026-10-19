@@ -162,8 +162,26 @@ module Caramel::Checks
         resumed = File.join(@projects, "resumed")
         resume_readme = File.join(resumed, "README.md")
         File.write(resume_readme, File.read(resume_readme) + "\nPreserve this edit during setup.\n")
-        command([@frappe, "setup"], chdir: resumed)
+        skipped = command([@frappe, "setup", "--no-migrate"], chdir: resumed)
+        assert!(skipped.stdout.includes?("Skipped migrations (--no-migrate)") &&
+                !skipped.stdout.includes?("Applied"), skipped.stdout)
+        resumed_values = local_values(resumed)
+        resumed_url_m = resumed_values["MIGRATION_DATABASE_URL"]
+        tables = sql(resumed_url_m,
+          "SELECT count(*) FROM information_schema.tables " \
+          "WHERE table_schema = 'public' AND table_name <> 'caramel_migrations'")
+        journal = sql(resumed_url_m, "SELECT count(*) FROM caramel_migrations")
+        assert!(tables == "0" && journal == "0", "tables #{tables}, journal rows #{journal}")
+        command([@frappe, "setup", "--no-migrate"], chdir: resumed)
         assert!(File.read(resume_readme).ends_with?("Preserve this edit during setup.\n"))
+        kept = local_values(resumed)
+        assert!(kept["APP_SECRET"] == resumed_values["APP_SECRET"] &&
+                kept["DATABASE_URL"] == resumed_values["DATABASE_URL"])
+        migrated = command([@frappe, "migrate"], chdir: resumed)
+        applied = migrated.stdout.match(/^Applied ([1-9]\d*) migrations\.$/m)
+        assert!(!applied.nil?, migrated.stdout)
+        counted = sql(resumed_url_m, "SELECT count(*) FROM caramel_migrations")
+        assert!(counted == applied.not_nil![1], "journal #{counted}, applied #{applied}")
         dump = command([@frappe, "db", "dump"], chdir: @project, echo: false)
         backup = dump.stdout.lines.last.strip.split(": ", 2).last
         backups = File.join(@state, "backups") + "/"
@@ -186,7 +204,8 @@ module Caramel::Checks
         sites = rpc("GET", "/v1/sites")["sites"].as_a
         assert!(sites.none? { |entry| entry["name"].as_s == "resumed" })
         assert!(File.exists?(File.join(@state, "secrets", "site-#{resumed_id}.json")))
-        command([@frappe, "setup"], chdir: resumed, echo: false)
+        again = command([@frappe, "setup"], chdir: resumed, echo: false)
+        assert!(again.stdout.includes?("Applied 0 migrations."), again.stdout)
         same_site = site("resumed")["id"].as_s == resumed_id
         assert!(same_site && local_values(resumed)["DATABASE_URL"] == resumed_url)
         puts "PASS: frappe db dump/restore with safety dump, missing-log guidance, " \
