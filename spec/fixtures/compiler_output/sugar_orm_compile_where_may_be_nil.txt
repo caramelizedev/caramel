@@ -1,0 +1,9 @@
+Showing last frame. Use --error-trace for full trace.
+
+In spec/fixtures/sugar_orm/compile_where_may_be_nil.cr:4:43
+
+ 4 | Team::Query.where(billing_email: email).to_a
+                                             ^---
+Error: undefined method 'to_a' for Team::BillingEmailMayBeNil(NamedTuple("where(billing_email: value) got a value that may be nil, and nil matches the rows whose billing_email IS NULL. Remediation: pass a value that is never nil, or write where_null(:billing_email) to match those rows": Nil))
+
+Did you mean 'to_s'?

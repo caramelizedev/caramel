@@ -42,6 +42,7 @@ private CAPTURED = {
     "compile_unknown_preload"           => {"NO_OVERLOAD", "3:20"},
     "compile_unknown_where_field"       => {"NO_OVERLOAD", "3:12"},
     "compile_unsupported_type"          => {"COMPILE", "6:11"},
+    "compile_where_may_be_nil"          => {"NULLABLE_WHERE", "4:43"},
     "compile_wrong_where_type"          => {"NO_OVERLOAD", "3:13"},
   },
   "diagnostics" => {
@@ -72,7 +73,7 @@ describe Caramel::Frappe::Diagnostics do
         {name, diagnostic.code, diagnostic.location}.should eq({name, code, location})
       end
     end
-    Dir.children(File.join(ROOT, "spec/fixtures/compiler_output")).size.should eq(29)
+    Dir.children(File.join(ROOT, "spec/fixtures/compiler_output")).size.should eq(30)
   end
 
   it "turns a missing route field into MRDP with a PATCH into the contract block" do
@@ -111,6 +112,17 @@ describe Caramel::Frappe::Diagnostics do
       MSG: Association 'users' of Team was not preloaded.
       FIX: add .preload(:users) to the query that loaded this Team, \
         e.g. Team.query.preload(:users).find(id)\n
+      MRDP
+  end
+
+  it "reads the rule and remedy from SugarORM's nullable where sentinel " \
+     "and drops the compiler's unrelated suggestion" do
+    mrdp(diagnose("sugar_orm_compile_where_may_be_nil")).should eq(<<-MRDP)
+      ERR NULLABLE_WHERE at spec/fixtures/sugar_orm/compile_where_may_be_nil.cr:4:43
+      MSG: where(billing_email: value) got a value that may be nil, and nil matches \
+        the rows whose billing_email IS NULL.
+      FIX: pass a value that is never nil, or write where_null(:billing_email) \
+        to match those rows\n
       MRDP
   end
 

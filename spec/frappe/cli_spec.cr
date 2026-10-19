@@ -57,7 +57,8 @@ describe Caramel::Frappe::CLI do
     patch = "PATCH: INSERT \"<text>\" AT <line>:<col>  # insert <text> as a new line " \
             "before <line> of the ERR file, indented to <col>"
     grammar.should contain(patch)
-    grammar.any?(&.starts_with?("CODES: CONTRACT_MISMATCH N_PLUS_ONE")).should be_true
+    codes = "CODES: CONTRACT_MISMATCH N_PLUS_ONE NULLABLE_WHERE"
+    grammar.any?(&.starts_with?(codes)).should be_true
     errors.to_s.should eq("")
   end
 

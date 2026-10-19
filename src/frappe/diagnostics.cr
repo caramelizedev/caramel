@@ -7,6 +7,7 @@ module Caramel::Frappe
     SUMMARIES = {
       "CONTRACT_MISMATCH"  => "A route parameter must bind to a field of its action's contract.",
       "N_PLUS_ONE"         => "Accessing un-preloaded relationships triggers runtime N+1 queries.",
+      "NULLABLE_WHERE"     => "A keyword where argument may be nil, which would match NULL rows.",
       "UNDEFINED_METHOD"   => "The receiver's type defines no such method or local variable.",
       "UNDEFINED_CONSTANT" => "No type or constant has this name here.",
       "NO_OVERLOAD"        => "No method signature accepts these arguments.",
@@ -101,6 +102,7 @@ module Caramel::Frappe
     ARROW    = /\A\s*--> (.+):(\d+):(\d+)\s*\z/
     CONTRACT = /\AContract: (.+):(\d+):(\d+)\z/
     SENTINEL = /NotLoaded\(NamedTuple\("(.+?)": Nil\)\)/
+    NULLABLE = /MayBeNil\(NamedTuple\("(.+?)": Nil\)\)/
 
     # The ways a call fails to match any overload.
     OVERLOAD_FAILURES = "no overload matches|expected argument #\\d+|" \
@@ -145,6 +147,9 @@ module Caramel::Frappe
       end
       if sentinel = text.match(SENTINEL)
         return [n_plus_one(sentinel[1], root, file, line, column, width)]
+      end
+      if sentinel = text.match(NULLABLE)
+        return [nullable_where(sentinel[1], root, file, line, column, width)]
       end
 
       details = [] of String
@@ -287,6 +292,23 @@ module Caramel::Frappe
         remediation: remediation.empty? ? nil : remediation,
         patch: patch,
         source: source)
+    end
+
+    # SugarORM's MayBeNil type name reads "where(x: value) got a value that
+    # may be nil, … Remediation: pass a value that is never nil, or write
+    # where_null(:x) …". The compiler's own "Did you mean" is about the
+    # sentinel, not the query, so it is left out.
+    private def self.nullable_where(text : String,
+                                    root : String,
+                                    file : String,
+                                    line : Int32,
+                                    column : Int32,
+                                    width : Int32) : Diagnostic
+      statement, _, remediation = text.partition(" Remediation: ")
+      Diagnostic.new("NULLABLE_WHERE", file, line, column, statement,
+        width: width,
+        remediation: remediation.empty? ? nil : remediation,
+        source: source(root, file, line))
     end
 
     private def self.relative(path : String, root : String) : String
