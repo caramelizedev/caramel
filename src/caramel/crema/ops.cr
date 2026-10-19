@@ -3,6 +3,7 @@ require "json"
 require "socket"
 require "../version"
 require "./debug_token"
+require "./ops_key"
 require "./prometheus"
 require "./rings"
 require "./runtime"
@@ -10,8 +11,9 @@ require "./runtime"
 module Caramel::Crema
   # The ops socket (ADR 0028): an HTTP/1.1 API and a read-only console on an
   # owner-only Unix socket inside the running binary. Nothing here listens on
-  # the public listener. Every request must name a local host, and a write
-  # that carries an `Origin` header is refused, so a web page cannot reach it.
+  # the public listener. Every request must name a local host and carry the key in the
+  # `.key` file beside the socket, and a write that carries an `Origin` header is
+  # refused, so a web page cannot reach it.
   class Ops
     include HTTP::Handler
 
@@ -23,6 +25,9 @@ module Caramel::Crema
     MAX_BODY        = 1024
     MAX_TAILS       =    8
     IO_TIMEOUT      = 10.seconds
+    UNAUTHORIZED    = "The ops key is missing or wrong. Send it as Authorization: Bearer KEY; " \
+                      "it is in the .key file beside the socket."
+    KEY_PARAM = "key"
 
     alias Route = Proc(HTTP::Server::Context, Nil)
 
@@ -53,6 +58,7 @@ module Caramel::Crema
     end
 
     def initialize(@runtime : Runtime,
+                   @key : String,
                    @errors : ErrorRing = ErrorRing.new,
                    @traces : TraceRing = TraceRing.new)
     end
@@ -60,6 +66,9 @@ module Caramel::Crema
     def call(context : HTTP::Server::Context) : Nil
       request = context.request
       return refuse(context, 421, "misdirected", "Unknown host") unless local_host?(request)
+      return exchange(context) if request.method == "GET" && request.path == "/" &&
+                                  request.query_params.has_key?(KEY_PARAM)
+      return unauthorized(context) unless OpsKey.valid?(OpsKey.presented(request), @key)
       if request.method != "GET" && request.headers.has_key?("Origin")
         return refuse(context, 403, "forbidden", "Browsers may not write to the ops socket")
       end
@@ -69,6 +78,24 @@ module Caramel::Crema
       return handler.call(context) if handler
 
       missing(context)
+    end
+
+    private def unauthorized(context : HTTP::Server::Context) : Nil
+      context.response.headers["WWW-Authenticate"] = %(Bearer realm="ops")
+      refuse(context, 401, "unauthorized", UNAUTHORIZED)
+    end
+
+    # `GET /?key=KEY` trades the key for the cookie, so it stays out of the address bar.
+    private def exchange(context : HTTP::Server::Context) : Nil
+      presented = context.request.query_params[KEY_PARAM]
+      return unauthorized(context) unless OpsKey.valid?(presented, @key)
+
+      response = context.response
+      response.status_code = 303
+      response.headers["Location"] = "/"
+      response.headers["Set-Cookie"] = OpsKey.cookie(@key).to_set_cookie_header
+      response.headers["Referrer-Policy"] = "no-referrer"
+      response.headers["Cache-Control"] = "no-store"
     end
 
     private def local_host?(request : HTTP::Request) : Bool
@@ -343,10 +370,16 @@ module Caramel::Crema
       end
       return unless free?(path)
 
-      ops = new(runtime)
+      key = OpsKey.create(path)
+      ops = new(runtime, key)
       server = HTTP::Server.new([ops])
-      server.bind(TimedServer.new(path))
-      File.chmod(path, 0o600)
+      begin
+        server.bind(TimedServer.new(path))
+        File.chmod(path, 0o600)
+      rescue error
+        OpsKey.remove(path)
+        raise error
+      end
       Crema.subscribe(ops.errors)
       Crema.subscribe(ops.traces)
       spawn(name: "crema:ops") do
@@ -359,6 +392,7 @@ module Caramel::Crema
         Crema.unsubscribe(ops.traces)
         ops.stop_tails
         server.close unless server.closed?
+        OpsKey.remove(path)
         File.delete?(path)
         nil
       end

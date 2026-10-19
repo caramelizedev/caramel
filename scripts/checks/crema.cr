@@ -117,6 +117,17 @@ rebinding = Caramel::Checks.run([CURL, "-s", "-o", "/dev/null", "-w", "%{http_co
 Caramel::Checks.fail("evil Host got #{rebinding.stdout}") unless rebinding.stdout == "421"
 puts "PASS: an unknown Host is refused with 421"
 
+unkeyed = Caramel::Checks.run([CURL, "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                               "--unix-socket", ops_socket,
+                               "http://ops/v1/status"], timeout: 30.seconds)
+Caramel::Checks.fail("keyless request got #{unkeyed.stdout}") unless unkeyed.stdout == "401"
+keyed = Caramel::Checks.run([CURL, "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                             "--unix-socket", ops_socket, "-H",
+                             "Authorization: Bearer #{File.read(ops_socket + ".key").strip}",
+                             "http://ops/v1/status"], timeout: 30.seconds)
+Caramel::Checks.fail("keyed request got #{keyed.stdout}") unless keyed.stdout == "200"
+puts "PASS: the ops socket answers 401 without its key and 200 with it"
+
 token = ops.call(["debug-token", "--minutes=5"]).lines.first.split.last
 traced = request(socket, "/books/4", {"X-Caramel-Debug" => token})
 header = traced.downcase.includes?("x-caramel-trace: ")

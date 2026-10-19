@@ -19,9 +19,13 @@ nothing.
    binds one only when `CARAMEL_OPS_SOCKET` names a path. `CARAMEL_OPS_SOCKET=off`
    disables it. The default path is the application socket's, with `.ops.sock` for
    `.sock`. A socket whose directory is not private is not bound; the application keeps
-   serving. A live socket is never replaced; a dead one is.
+   serving. A live socket is never replaced; a dead one is. At start the process writes a random
+   256-bit key to `<socket path>.key` (mode 0600, same private directory), replaced on every
+   start and removed on stop.
 2. **Guards.** A request whose `Host` is not `ops`, `localhost`, `127.0.0.1` or `[::1]`
-   (with or without a port) answers 421, which stops DNS rebinding. A write with an
+   (with or without a port) answers 421, which stops DNS rebinding. A request without the
+   key answers 401 `unauthorized`; the key is `Authorization: Bearer KEY` on any request, or
+   the `caramel_ops` cookie on GET only. The order is 421, then 401, then 403. A write with an
    `Origin` header answers 403. JSON errors read
    `{"version":1,"error":{"code","message"}}`.
 3. **The API, version 1.** `GET /v1/status`, `/v1/requests`, `/v1/fibers`, `/v1/metrics`
@@ -45,11 +49,12 @@ nothing.
    `X-Caramel-Debug` or the `__Host-caramel_debug` cookie, it makes one request a debug
    trace: recorded, answered with `X-Caramel-Trace`, kept in the trace ring and passed
    to the jobs it enqueues.
-7. **The console** is read-only HTML on the same socket, reached with `ssh -L`. Its pages
+7. **The console** is read-only HTML on the same socket, reached with `ssh -L`; `ops console` prints a URL with `?key=`, which `GET /` swaps for
+   the cookie and a 303. Its pages
    load only their own stylesheet and script under a strict content security policy:
    overview, in flight, live tail, jobs, database, errors, traces and insights.
 8. **Commands.** `APP ops status|requests|fibers|metrics|tail|errors|error|traces|trace|
-   debug-token|console`, `APP jobs [stats|failed|show ID|retry ID|--class=NAME]` and
+   debug-token|console` (they read the key file), `APP jobs [stats|failed|show ID|retry ID|--class=NAME]` and
    `APP db diagnose` (`frappe db diagnose` runs it). `jobs` and `db diagnose` need no
    running application. `jobs show` is the one place a job's stored error is read, and it
    prints to the operator's terminal only. Registered commands extend `usage`.
@@ -94,10 +99,14 @@ nothing.
 - A Unix socket in the binary reaches the live fibers, pools and rings, which no sidecar
   can, and adds nothing to the public listener; Phoenix's remote shell and Go's pprof
   taught the same lesson, and the Host and Origin guards follow Tidewave's.
+- The key file is the boundary. A TCP forward discards socket permissions, but the key file
+  cannot be read from the operator's laptop.
 - A fixed command set replaces evaluating code, which Crystal cannot do at runtime.
 - Bounded, expiring probes follow `recon_trace`: every token has a time limit and every
   ring a size.
-- Rejected: error messages, backtraces or traces in PostgreSQL (the database keeps
+- Rejected: a Unix-socket forward, because a browser cannot open one and a relay is a TCP
+  port again; a token for browsers only, because any local process can send the CLI's
+  headers; error messages, backtraces or traces in PostgreSQL (the database keeps
   aggregates only); a web console on the public listener; an MCP daemon (principle 6).
 - Deferred: CPU profiling and `-Dtracing` builds.
 - Research: [observability](https://github.com/caramelizedev/caramel-notes/blob/main/research/observability.md).

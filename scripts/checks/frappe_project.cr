@@ -326,7 +326,8 @@ module Caramel::Checks
         assert!(started && File.exists?(ops_socket), "serve did not open its production sockets")
         status, body = unix_get(socket, "/marker.txt", "bookshelf.caramel")
         assert!(status == 200 && body == "production root\n", "#{status}: #{body}")
-        status, body = unix_get(ops_socket, "/v1/status", "ops")
+        key = File.read(ops_socket + ".key").strip
+        status, body = unix_get(ops_socket, "/v1/status", "ops", key)
         document = JSON.parse(body)
         idle = status == 200 && document["workers"].as_a.empty? &&
                document["scheduler"].as_s == "off"
@@ -342,11 +343,13 @@ module Caramel::Checks
       puts "PASS: serve sizes its web pool from CARAMEL_POOL_SIZE"
     end
 
-    private def unix_get(socket : String, path : String, host : String) : {Int32, String}
+    private def unix_get(socket : String, path : String, host : String,
+                         bearer : String? = nil) : {Int32, String}
       connection = Socket.unix
       connection.connect(Socket::UNIXAddress.new(socket), timeout: 5.seconds)
       client = HTTP::Client.new(connection, host)
       headers = HTTP::Headers{"Host" => host, "Connection" => "close"}
+      headers["Authorization"] = "Bearer #{bearer}" if bearer
       response = client.get(path, headers)
       {response.status_code, response.body}
     ensure

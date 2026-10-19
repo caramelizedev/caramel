@@ -27,9 +27,13 @@ private def ops(path : String,
                 method : String,
                 target : String,
                 headers : Hash(String, String) = {} of String => String,
-                body : String? = nil) : HTTP::Client::Response
+                body : String? = nil,
+                authorized : Bool = true) : HTTP::Client::Response
   client = HTTP::Client.new(UNIXSocket.new(path), "ops")
   sent = HTTP::Headers{"Host" => "ops"}
+  if authorized
+    sent["Authorization"] = "Bearer #{Caramel::Crema::OpsKey.read(path)}"
+  end
   headers.each { |name, value| sent[name] = value }
   client.exec(method, target, sent, body)
 ensure
@@ -179,6 +183,114 @@ describe Caramel::Crema::Ops do
   end
 end
 
+describe "The ops socket's key" do
+  it "answers 401 without the key" do
+    with_ops do |path, _|
+      response = ops(path, "GET", "/v1/status", authorized: false)
+      response.status_code.should eq(401)
+      error = JSON.parse(response.body)["error"]
+      error["code"].as_s.should eq("unauthorized")
+      error["message"].as_s.should eq(Caramel::Crema::Ops::UNAUTHORIZED)
+      response.headers["WWW-Authenticate"].should eq(%(Bearer realm="ops"))
+    end
+  end
+
+  it "refuses a wrong key and a malformed scheme" do
+    with_ops do |path, _|
+      wrong = {"Authorization" => "Bearer " + "a" * 64}
+      ops(path, "GET", "/v1/status", wrong, authorized: false).status_code.should eq(401)
+      basic = {"Authorization" => "Basic x"}
+      ops(path, "GET", "/v1/status", basic, authorized: false).status_code.should eq(401)
+    end
+  end
+
+  it "checks the Host before the key" do
+    with_ops do |path, _|
+      ops(path, "GET", "/v1/status", {"Host" => "evil.example"}, authorized: false)
+        .status_code.should eq(421)
+      ops(path, "GET", "/v1/status", {"Host" => "localhost:8765"}).status_code.should eq(200)
+    end
+  end
+
+  it "writes a 0600 key file that stops with the socket and changes at each start" do
+    directory = private_directory
+    path = File.join(directory, "ops.sock")
+    env = {"CARAMEL_OPS_SOCKET" => path}
+    runtime = Caramel::Crema::Runtime.new("serve", "Bookshelf")
+    begin
+      first = Caramel::Crema::Ops.start(runtime, env) || fail("no ops socket")
+      key_path = path + ".key"
+      File.info(key_path).permissions.value.should eq(0o600)
+      File.read(key_path).should match(/\A[0-9a-f]{64}\n\z/)
+      key = File.read(key_path)
+      Caramel::Crema::Ops.start(runtime, env).should be_nil
+      File.read(key_path).should eq(key)
+      first.call
+      File.exists?(key_path).should be_false
+      second = Caramel::Crema::Ops.start(runtime, env) || fail("no ops socket")
+      File.read(key_path).should_not eq(key)
+      second.call
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+
+  it "leaves no key file when the socket path is not ours" do
+    directory = private_directory
+    path = File.join(directory, "ops.sock")
+    File.write(path, "keep me")
+    begin
+      runtime = Caramel::Crema::Runtime.new("serve", "Bookshelf")
+      Caramel::Crema::Ops.start(runtime, {"CARAMEL_OPS_SOCKET" => path}).should be_nil
+      File.exists?(path + ".key").should be_false
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+
+  it "trades GET /?key= for a cookie in a 303" do
+    with_ops do |path, _|
+      key = Caramel::Crema::OpsKey.read(path).not_nil!
+      response = ops(path, "GET", "/?key=#{key}", authorized: false)
+      response.status_code.should eq(303)
+      response.headers["Location"].should eq("/")
+      response.headers["Referrer-Policy"].should eq("no-referrer")
+      cookie = response.headers["Set-Cookie"]
+      ["caramel_ops=#{key}", "HttpOnly", "SameSite=Strict", "path=/"].each do |part|
+        cookie.should contain(part)
+      end
+    end
+  end
+
+  it "refuses a bad exchange and a query key elsewhere" do
+    with_ops do |path, _|
+      key = Caramel::Crema::OpsKey.read(path).not_nil!
+      bad = ops(path, "GET", "/?key=bad", authorized: false)
+      bad.status_code.should eq(401)
+      bad.headers["Set-Cookie"]?.should be_nil
+      ops(path, "GET", "/errors?key=#{key}", authorized: false).status_code.should eq(401)
+    end
+  end
+
+  it "lets the cookie authenticate GET only" do
+    with_ops do |path, _|
+      key = Caramel::Crema::OpsKey.read(path).not_nil!
+      cookie = {"Cookie" => "caramel_ops=#{key}", "Content-Type" => "application/json"}
+      ops(path, "GET", "/", cookie, authorized: false).status_code.should eq(200)
+      ops(path, "GET", "/v1/status", cookie, authorized: false).status_code.should eq(200)
+      post = ops(path, "POST", "/v1/debug-tokens", cookie, "{}", authorized: false)
+      post.status_code.should eq(401)
+    end
+  end
+
+  it "still refuses a write that carries an Origin" do
+    with_ops do |path, _|
+      ops(path, "POST", "/v1/debug-tokens", {"Origin" => "http://evil.example"}, "{}")
+        .status_code.should eq(403)
+    end
+  end
+end
+
 describe Caramel::Crema::DebugToken do
   key = Bytes.new(32, 3_u8)
 
@@ -262,6 +374,29 @@ describe Caramel::Crema::OpsClient do
   exit_status = ->(arguments : Array(String)) do
     socket = "--socket=/private/tmp/caramel-no-such-ops.sock"
     Caramel::Crema::OpsClient.new(arguments + [socket], IO::Memory.new, IO::Memory.new).run
+  end
+
+  it "reads the key file for its commands and prints the console URL with the key" do
+    with_ops do |path, _|
+      output = IO::Memory.new
+      errors = ["errors", "--json", "--socket=#{path}"]
+      Caramel::Crema::OpsClient.new(errors, output, IO::Memory.new).run.should eq(0)
+      JSON.parse(output.to_s)
+
+      key = Caramel::Crema::OpsKey.read(path)
+      console = IO::Memory.new
+      arguments = ["console", "--socket=#{path}"]
+      Caramel::Crema::OpsClient.new(arguments, console, IO::Memory.new).run.should eq(0)
+      console.to_s.should eq("ssh -N -L 8765:#{File.expand_path(path)} #{System.hostname}\n" \
+                             "then open http://localhost:8765/?key=#{key}\n")
+
+      File.delete(path + ".key")
+      error = IO::Memory.new
+      Caramel::Crema::OpsClient.new(["errors", "--socket=#{path}"], IO::Memory.new, error)
+        .run.should eq(1)
+      error.to_s.should eq("No ops key at #{path}.key. " \
+                           "Run ops as the user that runs the application.\n")
+    end
   end
 
   it "refuses a value on a reason flag of traces instead of reading it as no filter" do

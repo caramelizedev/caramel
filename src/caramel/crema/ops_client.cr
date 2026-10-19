@@ -2,6 +2,7 @@ require "http/client"
 require "json"
 require "socket"
 require "./ops"
+require "./ops_key"
 require "./render"
 
 module Caramel::Crema
@@ -9,6 +10,7 @@ module Caramel::Crema
   # console does, over the Unix socket, so it works from the machine the app runs on.
   class OpsClient
     MISSING      = "No ops socket at %s. Is the application running with CARAMEL_OPS_SOCKET?"
+    NO_KEY       = "No ops key at %s. Run ops as the user that runs the application."
     FORWARD      = 8765
     READ_TIMEOUT = 10.seconds
     COMMANDS     = %w[status requests fibers metrics tail errors error traces trace debug-token
@@ -45,13 +47,14 @@ module Caramel::Crema
     def initialize(arguments : Array(String), @output : IO = STDOUT, @error : IO = STDERR)
       @options = Options.new(arguments)
       @path = @options["--socket"]? || Ops.path || ""
+      @key = ""
     end
 
     def run : Int32
       command = @options.words.first? || return usage
       return usage unless COMMANDS.includes?(command) && valid_arguments?(command)
-      return console if command == "console"
       return missing if @path.empty? || !File.exists?(@path)
+      @key = OpsKey.read(@path) || return no_key
 
       dispatch(command)
     rescue error : Socket::Error | File::Error
@@ -105,6 +108,15 @@ module Caramel::Crema
       1
     end
 
+    private def no_key : Int32
+      @error.puts(NO_KEY % OpsKey.path(@path))
+      1
+    end
+
+    private def headers : HTTP::Headers
+      HTTP::Headers{"Host" => "ops", "Authorization" => "Bearer #{@key}"}
+    end
+
     private def argument : String
       @options.words[1]? || ""
     end
@@ -116,7 +128,6 @@ module Caramel::Crema
     end
 
     private def get(path : String) : HTTP::Client::Response
-      headers = HTTP::Headers{"Host" => "ops"}
       connect.get(path, headers)
     end
 
@@ -245,7 +256,7 @@ module Caramel::Crema
         @options["--slow"]?.try { |limit| io << "&slow=" << URI.encode_www_form(limit) }
       end
       status = 0
-      connect(nil).get(query, HTTP::Headers{"Host" => "ops"}) do |response|
+      connect(nil).get(query, headers) do |response|
         if response.success?
           response.body_io.each_line { |line| show_event(line) }
         else
@@ -276,8 +287,9 @@ module Caramel::Crema
 
     private def debug_token : Int32
       minutes = @options["--minutes"]?.try(&.to_i?) || Ops::DEFAULT_MINUTES
-      headers = HTTP::Headers{"Host" => "ops", "Content-Type" => "application/json"}
-      response = connect.post("/v1/debug-tokens", headers, {minutes: minutes}.to_json)
+      post_headers = headers
+      post_headers["Content-Type"] = "application/json"
+      response = connect.post("/v1/debug-tokens", post_headers, {minutes: minutes}.to_json)
       return failure(response) unless response.success?
 
       document = JSON.parse(response.body)
@@ -301,7 +313,7 @@ module Caramel::Crema
     private def console : Int32
       path = File.expand_path(@path)
       @output.puts("ssh -N -L #{FORWARD}:#{path} #{System.hostname}")
-      @output.puts("then open http://localhost:#{FORWARD}/")
+      @output.puts("then open http://localhost:#{FORWARD}/?key=#{@key}")
       0
     end
   end
