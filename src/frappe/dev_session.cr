@@ -121,6 +121,8 @@ module Caramel::Frappe
         @pending = observed.source
         changed_at = Time.instant - 1.second
         @output.puts("Watching #{@project.name} at #{@project.origin}. Ctrl-C stops this project.")
+        @output.puts("Toolbar and inspector sign-in (single use): " \
+                     "#{@project.origin}#{@gateway.sign_in_path}")
         @output.flush
         until @stopping
           @retirement.check!
@@ -442,8 +444,9 @@ module Caramel::Frappe
               end
             end
             if @open_browser && !@opened
-              @opened = Process.run("/usr/bin/open", [@project.origin]).success?
-              @error.puts("Could not open the browser. Visit #{@project.origin}.") unless @opened
+              url = @project.origin + @gateway.sign_in_path
+              @opened = Process.run("/usr/bin/open", [url]).success?
+              @error.puts("Could not open the browser. Visit #{url}.") unless @opened
             end
             return true
           end

@@ -22,10 +22,17 @@ private def inspected(root : String) : Caramel::Frappe::DevGateway
   gateway
 end
 
-# The session cookie the gateway sets on any page.
+# The session cookie that a single-use sign-in link sets.
 private def session_cookie(gateway : Caramel::Frappe::DevGateway) : String
-  gateway.failed("x")
-  gateway.handle(HTTP::Request.new("GET", "/", HOST)).headers["Set-Cookie"].split(';').first
+  signed = gateway.handle(HTTP::Request.new("GET", gateway.sign_in_path, HOST))
+  signed.headers["Set-Cookie"].split(';').first
+end
+
+# A GET of *path* from a browser that signed in with the single-use link.
+private def signed_get(gateway : Caramel::Frappe::DevGateway, path : String) : Caramel::Response
+  headers = HOST.dup
+  headers["Cookie"] = session_cookie(gateway)
+  gateway.handle(HTTP::Request.new("GET", path, headers))
 end
 
 describe Caramel::Frappe::Inspector do
@@ -51,7 +58,7 @@ describe Caramel::Frappe::Inspector do
   it "links a query's source to the editor on the trace page" do
     root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
     gateway = inspected(root)
-    page = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector/traces/111111", HOST))
+    page = signed_get(gateway, "/__caramel/dev/inspector/traces/111111")
     page.status.should eq(200)
     page.body.should contain("zed://file/proj/app/books.cr:12:7")
     page.body.should contain("Copy as Markdown")
@@ -62,7 +69,7 @@ describe Caramel::Frappe::Inspector do
   it "offers a colour theme: a blocking script in the head, a button, and the stored choice" do
     root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
     gateway = inspected(root)
-    page = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector", HOST))
+    page = signed_get(gateway, "/__caramel/dev/inspector")
     head = page.body.partition("</head>")[0]
     head.should contain(%(<script src="/__caramel/dev/theme.js"></script>))
     head.should contain(%(<meta name="color-scheme" content="light dark">))
@@ -112,9 +119,9 @@ describe Caramel::Frappe::Inspector do
     root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
     gateway = inspected(root)
     nothing = "/__caramel/dev/inspector/traces/nothing"
-    missing = gateway.handle(HTTP::Request.new("GET", nothing, HOST))
+    missing = signed_get(gateway, nothing)
     missing.status.should eq(404)
-    index = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/inspector", HOST))
+    index = signed_get(gateway, "/__caramel/dev/inspector")
     index.body.should contain("GET /books/:id")
     index.body.should contain("/__caramel/dev/client.js")
   ensure
@@ -161,7 +168,7 @@ describe Caramel::Frappe::Inspector do
       end
       gateway.events = gateway.events
       address = "/__caramel/dev/inspector/traces/111111"
-      page = gateway.handle(HTTP::Request.new("GET", address, HOST))
+      page = signed_get(gateway, address)
       page.status.should eq(200)
       page.body.should contain("Across services")
       page.body.should contain("billing")
@@ -171,5 +178,36 @@ describe Caramel::Frappe::Inspector do
       FileUtils.rm_rf(paths.run_dir) if paths
       FileUtils.rm_rf(root)
     end
+  end
+
+  it "refuses every inspector page to a browser that has not signed in" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    inspector = "/__caramel/dev/inspector"
+    ["", "/traces/111111", "/errors", "/builds"].each do |page|
+      response = gateway.handle(HTTP::Request.new("GET", inspector + page, HOST))
+      response.status.should eq(403)
+      response.body.should eq(Caramel::Frappe::DevGateway::SIGNED_OUT)
+      response.headers["Set-Cookie"]?.should be_nil
+      response.body.should_not contain("GET /books/:id")
+    end
+    other = inspected("#{root}-other")
+    stale = HOST.dup
+    stale["Cookie"] = session_cookie(other)
+    gateway.handle(HTTP::Request.new("GET", inspector, stale)).status.should eq(403)
+  ensure
+    FileUtils.rm_rf(root) if root
+    FileUtils.rm_rf("#{root}-other") if root
+  end
+
+  it "gives the inspector pages to the cookie alone, but the JSON endpoints need the header too" do
+    root = "/private/tmp/caramel-inspector-#{Random::Secure.hex(6)}"
+    gateway = inspected(root)
+    signed_get(gateway, "/__caramel/dev/inspector").status.should eq(200)
+    signed_get(gateway, "/__caramel/dev/inspector/errors").status.should eq(200)
+    signed_get(gateway, "/__caramel/dev/traces.json").status.should eq(403)
+    signed_get(gateway, "/__caramel/dev/trace.md?id=111111").status.should eq(403)
+  ensure
+    FileUtils.rm_rf(root) if root
   end
 end

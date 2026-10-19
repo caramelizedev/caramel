@@ -41,7 +41,8 @@ belong.
    Latte.app ask for version 2; a Latte that serves only version 1 is refused with
    `latte stop` as the remedy.
 5. **Latte.app raises alerts.** A site's menu title shows its error count, its submenu the
-   newest error, and an Open inspector item opens `/__caramel/dev/inspector`. A build
+   newest error, and an Open inspector item opens `/__caramel/dev/inspector`, which needs a browser that
+   `frappe dev` or `frappe open` signed in and answers 403 otherwise. A build
    that turns to `build-error`, or an error fingerprint not yet seen for that site in this
    run, adds to a count beside the status item and, when macOS allows, posts a
    notification that opens the inspector. The first snapshot after launch seeds what is

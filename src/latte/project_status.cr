@@ -53,6 +53,22 @@ module Caramel::Latte
       true
     end
 
+    # The socket and owner token of the `frappe dev` that wrote the session in
+    # *directory*, or nil when there is none or its metadata is not valid.
+    def self.owner_session(directory : String) : {socket: String, token: String}?
+      StateSecurity.validate_owned_directory(directory)
+      path = File.join(directory, FILE_NAME)
+      return unless File.info?(path, follow_symlinks: false)
+
+      saved = session(path)
+      socket = saved["socket"].as_s
+      return unless File.dirname(socket) == directory
+
+      {socket: socket, token: saved["token"].as_s}
+    rescue ArgumentError | JSON::ParseException | KeyError | TypeCastError | IO::Error
+      nil
+    end
+
     # ameba:disable Metrics/CyclomaticComplexity -- validates each status source separately
     def self.read(paths : Paths, site : Site)
       path = site.upstream

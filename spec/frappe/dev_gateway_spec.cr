@@ -1,6 +1,8 @@
 require "spec"
 require "../../src/frappe/dev_gateway"
 
+private HOST = HTTP::Headers{"Host" => "bookshelf.caramel"}
+
 describe Caramel::Frappe::DevGateway do
   it "redacts a secret before cutting a long diagnostic at the output limit" do
     secret = "b" * 64
@@ -22,20 +24,23 @@ describe Caramel::Frappe::DevGateway do
     page.body.should_not contain("very-private-secret")
     page.headers["Cache-Control"].should eq("no-store")
     page.headers["Content-Security-Policy"].should contain("script-src 'self'")
-    cookie = page.headers["Set-Cookie"]
-    cookie.should contain("Secure")
-    cookie.should contain("HttpOnly")
-    cookie.should contain("SameSite=Strict")
+    page.headers["Set-Cookie"]?.should be_nil
     endpoint = "/__caramel/dev/status"
-    gateway.handle(HTTP::Request.new("GET", endpoint, headers)).status.should eq(403)
-    headers["Cookie"] = cookie.split(';').first
-    gateway.handle(HTTP::Request.new("GET", endpoint, headers)).status.should eq(403)
+    minimal = %w[generation state]
+    full = %w[errors generation last_error latest state]
+    keys = ->(request : HTTP::Headers) do
+      response = gateway.handle(HTTP::Request.new("GET", endpoint, request))
+      response.status.should eq(200)
+      JSON.parse(response.body).as_h.keys.sort!
+    end
+    keys.call(headers).should eq(minimal)
+    signed = gateway.handle(HTTP::Request.new("GET", gateway.sign_in_path, headers))
+    headers["Cookie"] = signed.headers["Set-Cookie"].split(';').first
+    keys.call(headers).should eq(minimal)
     headers["X-Caramel-Dev"] = "1"
-    response = gateway.handle(HTTP::Request.new("GET", endpoint, headers))
-    response.status.should eq(200)
-    JSON.parse(response.body)["state"].as_s.should eq("failed")
+    keys.call(headers).should eq(full)
     headers["Origin"] = "https://evil.caramel"
-    gateway.handle(HTTP::Request.new("GET", endpoint, headers)).status.should eq(403)
+    keys.call(headers).should eq(minimal)
     headers["Host"] = "evil.caramel"
     gateway.handle(HTTP::Request.new("GET", "/", headers)).status.should eq(421)
   end
@@ -81,7 +86,7 @@ describe Caramel::Frappe::DevGateway do
       response.body.should contain("POST /example?x=1 payload")
       response.body.should contain("/__caramel/dev/client.js")
       response.headers["Set-Cookie"].should contain("app_session=keep")
-      response.headers["Set-Cookie"].should contain("__Host-caramel_dev")
+      response.headers["Set-Cookie"].should_not contain("__Host-caramel_dev")
       headers["HX-Request-Type"] = "partial"
       fragment = gateway.handle(HTTP::Request.new("GET", "/example", headers))
       fragment.body.should_not contain("/__caramel/dev/client.js")
@@ -227,5 +232,76 @@ describe Caramel::Frappe::DevGateway do
       File.delete?(socket_path)
       Dir.delete(directory)
     end
+  end
+
+  it "hands out a sign-in link whose cookie it sets once and never on a page" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    path = gateway.sign_in_path
+    path.should match(/\A\/__caramel\/dev\/sign-in\?nonce=[0-9a-f]{64}\z/)
+    signed = gateway.handle(HTTP::Request.new("GET", path, HOST))
+    signed.status.should eq(303)
+    signed.headers["Location"].should eq("/")
+    cookie = signed.headers["Set-Cookie"]
+    ["__Host-caramel_dev=", "Secure", "HttpOnly", "SameSite=Strict", "path=/"].each do |part|
+      cookie.should contain(part)
+    end
+    cookie.should_not contain("Max-Age")
+    cookie.should_not contain("Expires")
+    again = gateway.handle(HTTP::Request.new("GET", path, HOST))
+    again.status.should eq(403)
+    again.body.should eq(Caramel::Frappe::DevGateway::SIGN_IN_REFUSED)
+    again.headers["Set-Cookie"]?.should be_nil
+  end
+
+  it "refuses a sign-in with a wrong or missing nonce" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    gateway.sign_in_path
+    sign_in = Caramel::Frappe::DevGateway::SIGN_IN
+    ["", "?nonce=", "?nonce=#{"0" * 64}", "?nonce=short"].each do |query|
+      response = gateway.handle(HTTP::Request.new("GET", sign_in + query, HOST))
+      response.status.should eq(403)
+      response.headers["Set-Cookie"]?.should be_nil
+    end
+  end
+
+  it "keeps at most eight sign-in links, retiring the oldest" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    paths = Array.new(9) { gateway.sign_in_path }
+    first = gateway.handle(HTTP::Request.new("GET", paths.first, HOST))
+    first.status.should eq(403)
+    paths.skip(1).each do |path|
+      gateway.handle(HTTP::Request.new("GET", path, HOST)).status.should eq(303)
+    end
+  end
+
+  it "mints a sign-in link for the owner token and for nothing else" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    link = Caramel::Frappe::DevGateway::SIGN_IN_LINK
+    owner = HOST.dup
+    owner["X-Caramel-Owner-Token"] = gateway.owner_token
+    minted = gateway.handle(HTTP::Request.new("GET", link, owner))
+    minted.status.should eq(200)
+    path = JSON.parse(minted.body)["path"].as_s
+    gateway.handle(HTTP::Request.new("GET", path, HOST)).status.should eq(303)
+    cookie = gateway.handle(HTTP::Request.new("GET", gateway.sign_in_path, HOST))
+    session = HOST.dup
+    session["Cookie"] = cookie.headers["Set-Cookie"].split(';').first
+    session["X-Caramel-Dev"] = "1"
+    gateway.handle(HTTP::Request.new("GET", link, session)).status.should eq(403)
+    gateway.handle(HTTP::Request.new("GET", link, HOST)).status.should eq(403)
+    wrong = HOST.dup
+    wrong["X-Caramel-Owner-Token"] = "0" * 64
+    gateway.handle(HTTP::Request.new("GET", link, wrong)).status.should eq(403)
+  end
+
+  it "serves its assets without a sign-in and sets no cookie on a build page" do
+    gateway = Caramel::Frappe::DevGateway.new("https://bookshelf.caramel")
+    ["inspector.css", "theme.js", "client.js", "toolbar.css", "style.css"].each do |asset|
+      response = gateway.handle(HTTP::Request.new("GET", "/__caramel/dev/#{asset}", HOST))
+      response.status.should eq(200)
+    end
+    building = gateway.handle(HTTP::Request.new("GET", "/", HOST))
+    building.status.should eq(503)
+    building.headers["Set-Cookie"]?.should be_nil
   end
 end
