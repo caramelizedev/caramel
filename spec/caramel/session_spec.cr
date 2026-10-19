@@ -93,6 +93,15 @@ describe Caramel::Session do
     end
   end
 
+  it "reads a cookie signed under one APP_SECRET as empty under another" do
+    secret_a = Caramel::CSRF.new("a" * 64, "https://bookshelf.caramel")
+    secret_b = Caramel::CSRF.new("b" * 64, "https://bookshelf.caramel")
+    cookie = Caramel::Session.new(secret_a.derive_key("session")).encode({"user_id" => "42"})
+    same = Caramel::Session.new(secret_a.derive_key("session"))
+    same.decode(cookie).should eq({"user_id" => "42"})
+    Caramel::Session.new(secret_b.derive_key("session")).decode(cookie).should be_nil
+  end
+
   it "refuses to write a session over 4 KB and ignores oversized cookies" do
     session = Caramel::Session.new(SESSION_SPEC_CSRF.derive_key("session"))
     fits = session.encode({"note" => "x" * 2900})
