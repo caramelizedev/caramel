@@ -102,6 +102,28 @@ module Caramel::Checks
     path
   end
 
+  # Where checks that generate applications keep their roots, one fixed path
+  # per check, so the generated programs' compiler caches persist from run to
+  # run (scripts/crystal gives a program under here a cache root of its own).
+  CHECK_ROOTS = "/private/tmp/caramel-checks"
+
+  # The fixed root for *prefix*, emptied. A process a crashed run left behind
+  # in it is stopped first, so its sockets do not collide with this run's.
+  def self.check_root(prefix : String) : String
+    Dir.mkdir(CHECK_ROOTS, 0o700) unless Dir.exists?(CHECK_ROOTS)
+    path = File.join(CHECK_ROOTS, prefix.rchop("-"))
+    if Dir.exists?(path)
+      run(["/usr/bin/pkill", "-TERM", "-f", "#{path}/"], timeout: 5.seconds)
+      gone = wait_until(5.seconds, 100.milliseconds) do
+        !run(["/usr/bin/pgrep", "-f", "#{path}/"], timeout: 5.seconds).success?
+      end
+      run(["/usr/bin/pkill", "-KILL", "-f", "#{path}/"], timeout: 5.seconds) unless gone
+      FileUtils.rm_rf(path)
+    end
+    Dir.mkdir(path, 0o700)
+    path
+  end
+
   # A git repository of this working tree, committed and tagged
   # v<version>, standing in for github.com/caramelizedev/caramel. Its
   # shard.yml declares *version*.

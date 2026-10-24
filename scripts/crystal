@@ -160,12 +160,18 @@ PKG_CONFIG_LIBDIR=$RUNTIME
 CRYSTAL_CACHE_DIR=$BASE/crystal-cache
 export CRYSTAL_PATH CRYSTAL_LIBRARY_PATH PATH PKG_CONFIG_LIBDIR CRYSTAL_CACHE_DIR
 
-# The program a build or spec compiles; `crystal spec` names its program
+# `crystal file.cr` is shorthand for `crystal run file.cr`, including in
+# shard postinstall hooks. It needs the same runtime library paths.
+case ${1:-} in
+    *.cr) set -- run "$@" ;;
+esac
+
+# The program a build, run or spec compiles; `crystal spec` names its program
 # after <cwd>/spec, so its cache root also names the paths it runs. Type
 # checks create no program directory.
 PROGRAM=
 case ${1:-} in
-    build)
+    build|run)
         case " $* " in
             *" --no-codegen "*) ;;
             *)
@@ -211,6 +217,13 @@ if [ -n "$PROGRAM" ]; then
                         [ -d "$CRYSTAL_CACHE_DIR" ] || mkdir -p "$CRYSTAL_CACHE_DIR"
                     fi
                     ;;
+                # A check's generated application lives at a fixed path
+                # (scripts/checks/support/harness.cr CHECK_ROOTS), so its
+                # programs keep their objects from one run to the next.
+                /private/tmp/caramel-checks/*)
+                    CRYSTAL_CACHE_DIR=$BASE/crystal-cache-programs/$NAME
+                    [ -d "$CRYSTAL_CACHE_DIR" ] || mkdir -p "$CRYSTAL_CACHE_DIR"
+                    ;;
             esac
             ;;
     esac
@@ -223,12 +236,6 @@ if [ -n "$PROGRAM" ]; then
         touch "$PROGRAM_CACHE" "$CRYSTAL_CACHE_DIR"
     fi
 fi
-
-# `crystal file.cr` is shorthand for `crystal run file.cr`, including in
-# shard postinstall hooks. It needs the same runtime library paths.
-case ${1:-} in
-    *.cr) set -- run "$@" ;;
-esac
 
 case ${1:-} in
     build|run|spec)

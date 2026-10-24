@@ -15,7 +15,7 @@ module Caramel::Checks
 
     def initialize(prefix : String)
       @repo = REPO
-      @root = Checks.private_temp(prefix)
+      @root = Checks.check_root(prefix)
       @state = File.join(@root, "state")
       Dir.mkdir(@state, 0o700)
       @projects = File.join(@root, "projects")
@@ -237,7 +237,9 @@ module Caramel::Checks
       failed ||= !violation.nil?
       if cleanup_ok
         if failed
-          STDERR.puts "Services stopped; preserved failed fixture for inspection: #{@root}"
+          kept = "#{@root}.failed-#{Time.utc.to_s("%Y%m%dT%H%M%SZ")}"
+          File.rename(@root, kept)
+          STDERR.puts "Services stopped; preserved failed fixture for inspection: #{kept}"
         else
           FileUtils.rm_rf(@runtime)
           FileUtils.rm_rf(@root)
