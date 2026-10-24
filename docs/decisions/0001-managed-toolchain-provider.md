@@ -16,7 +16,7 @@ Each tool must install from prebuilt artifacts and run without touching the host
    explicit: GitHub for Crystal, aqua for Caddy, and conda-forge for prebuilt PostgreSQL,
    OpenSSL, GMP and pkgconf. Caramel does not write a general version manager and does not compile
    PostgreSQL during ordinary setup.
-2. **Tested set.** Crystal 1.21.1 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6,
+2. **Tested set.** Crystal 1.22.1 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6,
    OpenSSL 3.6.4, GMP 6.3.0 and pkgconf 3.0.7. The experiment lockfile preserves the concrete artifact
    URLs and SHA-256 checksums, including PostgreSQL's transitive dependency packages. Updating
    a tool version or backend is a reviewed dependency change.
@@ -66,6 +66,9 @@ Each tool must install from prebuilt artifacts and run without touching the host
 - Pinned versions with recorded checksums make every toolchain change a reviewed diff.
 - Crystal 1.21.1 fixes non-blocking `Socket#connect` on macOS 26.7 and later, `HTTP::Server`
   request smuggling, and automatic decompression of request bodies.
+- Crystal 1.22.1 fixes `OpenSSL::SSL::Options::ALL`, io_uring event loop hangs and the
+  `Content-Length` regressions of 1.22.0, and keeps the io_uring event loop that Linux release
+  builds can select.
 - Separate prefixes let several Crystal versions coexist and leave the host's shell, Homebrew
   and Herd untouched.
 - Bundling GMP lets an application use the standard library's exact arithmetic in every

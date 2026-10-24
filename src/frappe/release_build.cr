@@ -10,8 +10,8 @@ module Caramel::Frappe
   # `frappe build`: compiles the committed tree in a pinned Linux container and
   # writes a tarball of a static linux/amd64 binary and `public/` (ADR 0032).
   class ReleaseBuild
-    IMAGE = "crystallang/crystal:1.21.1-alpine@sha256:" \
-            "bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e"
+    IMAGE = "crystallang/crystal:1.22.1-alpine@sha256:" \
+            "9beda8a9d4a3659c29d185cc18f3fb9b382421bb6a4a59b8f266a6fb4ccc9f16"
     PLATFORM = "linux/amd64"
     ARTIFACT = /\A[a-z][a-z0-9_]*-\d{8}T\d{6}Z-[0-9a-f]{7}-linux-amd64\.tar\.gz\z/
     SHARD    = /\A[a-z][a-z0-9_]*\z/
@@ -140,7 +140,7 @@ module Caramel::Frappe
       mounts = self.class.path_mounts(File.read(File.join(root, "shard.yml")), root)
       arguments = self.class.container_arguments(work, mounts, @project.entrypoint, shard,
         artifact)
-      @log.puts "Building #{artifact} in crystallang/crystal:1.21.1-alpine for #{PLATFORM}"
+      @log.puts "Building #{artifact} in crystallang/crystal:1.22.1-alpine for #{PLATFORM}"
       status = Process.run(docker, arguments, output: @log, error: @log)
       return if status.success?
       raise Error.new("The container build failed (exit #{status.exit_code}); " \
