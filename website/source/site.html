@@ -2606,12 +2606,20 @@ end`)+
     snippet('Inside an action · leaving for a stored link','def handle(contract : Contract) : Caramel::Response\n  return not_found unless Caramel::ExternalURL.valid?(contract.url)\n  redirect_external contract.url\nend')+
     `<p><code>Caramel::Outbound.get</code>, <code>post</code> and <code>request</code> call third-party APIs under the same URL rule. They connect within 5 seconds and read within 30.</p>`+
     snippet('Inside an action · an outbound call','headers = HTTP::Headers{"Authorization" => "Bearer #{ENV["API_TOKEN"]}"}\nreply = Caramel::Outbound.get("https://api.example.com/status", headers)')+
-    `<h2 id="c-security-static">Static files stay inside public/</h2><p>Files in <code>public/</code> are served before routing, after the host check. Caramel refuses a path that would leave that directory or reveal a hidden file.</p>`+
+    `<h2 id="c-security-static">Static files stay inside public/</h2><p>Files in <code>public/</code> are served before routing, after the host check. Caramel refuses a path that would leave that directory, never serves a hidden file, and hands every other hidden path to the router. <a href="https://github.com/caramelizedev/caramel/blob/main/docs/decisions/0038-static-files.md" target="_blank" rel="noopener noreferrer">ADR 0038 ↗</a> records the rules.</p>`+
     rules([
       ['A malformed percent escape','answers 400'],
-      ['A decoded path with a NUL byte, a backslash or any segment starting with a dot, such as <code>..</code>, encoded traversal like <code>%2e%2e</code>, or <code>.env</code>','answers 404'],
+      ['A decoded path with a NUL byte, a backslash, or a <code>.</code> or <code>..</code> segment, such as encoded traversal like <code>%2e%2e</code>','answers 404'],
+      ['A path with a hidden segment, such as <code>.env</code> or <code>.git/config</code>, outside <code>.well-known</code>','routes to the router, which answers 404 unless a route matches'],
+      ['A first segment of exactly <code>.well-known</code>','is served from <code>public/.well-known/</code> like any file, or routed when no file matches','ok'],
       ['A file whose real path, after symbolic links, lies outside <code>public/</code>','answers 404'],
-      ['A method other than GET and HEAD','answers 405 with <code>Allow: GET, HEAD</code>']
+      ['A method other than GET and HEAD','answers 405 with <code>Allow: GET, HEAD</code>'],
+      ['A GET','sends the file as a stream with its <code>Content-Length</code>, <code>ETag</code> and <code>Last-Modified</code>','ok'],
+      ['A name with a three-part version, such as <code>htmx-4.0.0.min.js</code>','carries <code>Cache-Control: public, max-age=31536000, immutable</code>','ok'],
+      ['Any other file','carries <code>Cache-Control: no-cache</code>','ok'],
+      ['A request whose <code>If-None-Match</code> names the <code>ETag</code>, or whose <code>If-Modified-Since</code> is not older than the file','answers 304 with no body'],
+      ['A <code>Range</code> header','is ignored; the whole file is sent','ok'],
+      ['A file that cannot be read','answers 500 <code>Something went wrong.</code> with <code>Cache-Control: no-store</code>, reported to Crema']
     ])+
     `<h2 id="c-security-errors">Errors reveal a reference, not details</h2>`+
     rules([

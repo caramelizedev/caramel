@@ -26,6 +26,12 @@ module Caramel
     # are not HTTPS-only.
     STRICT_TRANSPORT_SECURITY = "max-age=31536000"
 
+    WELL_KNOWN = ".well-known"
+    # A name that carries a version, such as htmx-4.0.0.min.js, never changes.
+    VERSIONED_ASSET = /-\d+\.\d+\.\d+(?:\.min)?\.[A-Za-z0-9]+\z/
+    IMMUTABLE       = "public, max-age=31536000, immutable"
+    REVALIDATE      = "no-cache"
+
     getter csrf : CSRF
     getter sessions : Session
     @authority : String
@@ -201,7 +207,8 @@ module Caramel
       path = request.path
       return Response.new(400, "Malformed path") if path.matches?(/%(?![0-9a-fA-F]{2})/)
       decoded = URI.decode(path)
-      return Response.new(404, "Not found") if unsafe_path?(decoded)
+      return Response.new(404, "Not found") if forbidden_path?(decoded)
+      return unless servable_path?(decoded)
       candidate = File.expand_path(".#{decoded}", root)
       return unless candidate.starts_with?(root + "/") && File.file?(candidate)
       real = File.realpath(candidate)
@@ -209,18 +216,83 @@ module Caramel
       unless {"GET", "HEAD"}.includes?(request.method)
         return Response.new(405, "Method not allowed", HTTP::Headers{"Allow" => "GET, HEAD"})
       end
+      serve_file(request, real)
+    rescue File::NotFoundError
+      # The file vanished between the lookup and the open: the router answers 404.
+      nil
+    rescue error : IO::Error
+      Crema.report(error, handled: false, source: "static")
       headers = HTTP::Headers{
-        "Content-Type"   => MIME.from_filename(real, "application/octet-stream"),
-        "Content-Length" => File.size(real).to_s,
+        "Cache-Control" => "no-store",
+        "Content-Type"  => "text/plain; charset=utf-8",
       }
-      Response.new(200, request.method == "HEAD" ? "" : File.read(real), headers)
+      Response.new(500, "Something went wrong.", headers)
     end
 
-    # A decoded path with a NUL byte, a backslash or a segment that starts
-    # with a dot is never served.
-    private def unsafe_path?(decoded : String) : Bool
+    # Answers *real* with its validators: 304 when the client's copy is current, the
+    # headers alone for HEAD, and otherwise the file, streamed with its length.
+    private def serve_file(request : HTTP::Request, real : String) : Response
+      file = File.open(real)
+      begin
+        info = file.info
+        validators = static_validators(real, info)
+        if not_modified?(request, validators["ETag"], info.modification_time)
+          file.close
+          return Response.new(304, "", validators)
+        end
+        headers = validators.dup
+        headers["Content-Type"] = MIME.from_filename(real, "application/octet-stream")
+        headers["Content-Length"] = info.size.to_s
+        if request.method == "HEAD"
+          file.close
+          return Response.new(200, "", headers)
+        end
+        Response.stream(200, headers) do |io|
+          IO.copy(file, io, info.size)
+        ensure
+          file.close
+        end
+      rescue error
+        file.close
+        raise error
+      end
+    end
+
+    private def static_validators(real : String, info : File::Info) : HTTP::Headers
+      version = File.basename(real).matches?(VERSIONED_ASSET)
+      HTTP::Headers{
+        "ETag"          => %("#{info.size.to_s(16)}-#{info.modification_time.to_unix_ns.to_s(16)}"),
+        "Last-Modified" => HTTP.format_time(info.modification_time),
+        "Cache-Control" => version ? IMMUTABLE : REVALIDATE,
+      }
+    end
+
+    # If-None-Match decides when it is present; otherwise If-Modified-Since does
+    # (RFC 9110 section 13.2.2). A date that does not parse is ignored.
+    private def not_modified?(request : HTTP::Request, etag : String, modified : Time) : Bool
+      if tags = request.headers["If-None-Match"]?
+        return tags.split(',').any? do |tag|
+          tag = tag.strip.lchop("W/")
+          tag == "*" || tag == etag
+        end
+      end
+      since = request.headers["If-Modified-Since"]?.try { |value| HTTP.parse_time(value) }
+      !since.nil? && modified.to_unix <= since.to_unix
+    end
+
+    # A decoded path with a NUL byte, a backslash or a `.` or `..` segment is
+    # answered 404 here.
+    private def forbidden_path?(decoded : String) : Bool
       return true if decoded.includes?('\0') || decoded.includes?('\\')
-      decoded.split('/').any?(&.starts_with?('.'))
+      decoded.split('/').any? { |segment| segment == "." || segment == ".." }
+    end
+
+    # A hidden segment is never served, except a first segment of exactly
+    # `.well-known`. The router answers such a path, 404 when no route matches.
+    private def servable_path?(decoded : String) : Bool
+      decoded.split('/').skip(1).each_with_index.all? do |segment, index|
+        !segment.starts_with?('.') || (index == 0 && segment == WELL_KNOWN)
+      end
     end
   end
 end
