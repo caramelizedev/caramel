@@ -1118,6 +1118,16 @@ describe Caramel::ColdBrew::Scheduler do
     results.receive.should be_true
   end
 
+  it "starts no block after the scheduler halts, even with a free slot" do
+    ColdBrewSpec.reset
+    runs = Atomic(Int32).new(0)
+    schedule = Brew::Schedule.new(1.hour, "halted", -> { runs.add(1); nil })
+    scheduler = Brew::Scheduler.new([schedule], ColdBrewSpec.runtime)
+    scheduler.halt
+    20.times { scheduler.run_due(schedule).should be_false }
+    runs.get.should eq(0)
+  end
+
   it "ticks from fibers in two processes and runs a new schedule once" do
     ColdBrewSpec.reset
     runs = Atomic(Int32).new(0)

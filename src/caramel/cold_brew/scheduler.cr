@@ -91,6 +91,7 @@ module Caramel::ColdBrew
     end
 
     private def with_slot(& : -> Bool) : Bool
+      return false if @stopping.closed?
       select
       when @slots.send(nil)
         begin
