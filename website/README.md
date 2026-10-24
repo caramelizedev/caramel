@@ -1,6 +1,6 @@
 # caramelize.dev
 
-Marketing site and docs for Caramel 0.16.0.
+Marketing site and docs for Caramel 0.17.0.
 `source/site.html` holds the pages: templates, helpers and every page's content.
 `build.mjs` renders them through `shell.mjs` (header, rail, outline) into crawlable HTML.
 `source/site.css` is the look, and `source/site.js` the behaviour: theme toggle, search,
