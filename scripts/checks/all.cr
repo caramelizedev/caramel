@@ -4,10 +4,13 @@ require "./support/harness"
 # then runs the spec suite and every pass/fail check, and reports each
 # result. Once the build step passes, the checks reuse its binaries
 # (Checks::PREBUILT). The runs after the build step go to lanes that run side
-# by side, three unless --lanes says otherwise (ADR 0022): each lane beyond
-# the first uses a private toolchain prefix with its own compiler caches, and
-# within a lane the runs go one after another. A failed run's full output is
-# kept in a log named on its FAIL line. A release requires every run to pass.
+# by side, as many as the machine's cores and memory allow unless --lanes
+# says otherwise (ADR 0022): each lane beyond the first uses a private
+# toolchain prefix with its own compiler caches, and within a lane the runs
+# go one after another. The lanes are balanced by the durations the last
+# run recorded on this machine, and each prints its total and longest run.
+# A failed run's full output is kept in a log named on its FAIL line. A
+# release requires every run to pass.
 #
 #   scripts/check all [--lanes N] [--except NAME ...]
 #
@@ -18,6 +21,13 @@ module Caramel::Checks::All
 
   alias Run = {String, Array(String)}
 
+  # What a run took the last time it passed on this machine, and the lane it
+  # ran on: a run keeps its lane while loads allow, so its compiler cache
+  # there stays warm.
+  record Record, seconds : Int32, lane : Int32 do
+    include JSON::Serializable
+  end
+
   # Performance measurements, not pass/fail checks.
   EXEMPT = %w[all compiler-profile]
   SPECS  = %w[
@@ -25,36 +35,45 @@ module Caramel::Checks::All
     spec/cold_brew spec/corretto spec/release
   ]
   USAGE = "usage: scripts/check all [--lanes N] [--except NAME ...]"
-  # Lanes when --lanes is not given (ADR 0022).
-  LANES = 3
+  # The most lanes --lanes takes, and the default's ceiling (ADR 0022).
+  MAX_LANES = 8
+  # Where the toolchain root keeps the runs' durations and lanes.
+  DURATIONS = "check-durations.json"
   # Runs that stay on the first lane, which uses this checkout's toolchain
   # (ADR 0022): installations checks that a release reuses that toolchain,
   # editor-tools uses its editor tools, native rebuilds the installers in
   # bin/, and the `crystal spec` programs stay together.
   FIRST_LANE = %w[spec native integration latte-postgres installations editor-tools]
-  # Rough seconds per run in the v0.5.0 release gate, to balance the lanes.
-  # Other runs count as 6.
+  # Seconds per run on a 12-core Apple Silicon Mac in 2026-10, used to balance
+  # the lanes until this machine has recorded its own. Other runs count as 6.
   WEIGHTS = {
-    "frappe-project-dev" => 124, "installations" => 76, "schema-diff" => 43,
-    "spec" => 25, "browser" => 23, "native" => 18, "integration" => 17,
-    "latte-postgres" => 10, "page-boxoffice" => 83, "page-json" => 73, "page-jobs" => 59,
-    "page-webhooks" => 68, "page-sessions" => 72, "latte-daemon" => 44,
+    "frappe-project" => 298, "frappe-project-build" => 216, "frappe-project-dev" => 146,
+    "installations" => 91, "schema-diff" => 83, "integration" => 72, "page-boxoffice" => 55,
+    "page-forms" => 50, "page-json" => 47, "browser" => 44, "spec" => 41, "page-jobs" => 37,
+    "page-webhooks" => 32, "native" => 22, "editor-tools" => 22, "latte-postgres" => 15,
   }
 
   @@logs : String? = nil
+  @@records = {} of String => Record
 
   def main(args : Array(String)) : Int32
     skipped = [] of String
-    lanes = LANES
+    lanes, cores, gigabytes = default_lanes
+    chosen = false
     rest = args.dup
     while flag = rest.shift?
       case flag
       when "--except" then skipped << (rest.shift? || Checks.fail(USAGE))
-      when "--lanes"  then lanes = rest.shift?.try(&.to_i?) || Checks.fail(USAGE)
-      else                 Checks.fail(USAGE)
+      when "--lanes"
+        lanes = rest.shift?.try(&.to_i?) || Checks.fail(USAGE)
+        chosen = true
+      else Checks.fail(USAGE)
       end
     end
-    Checks.fail(USAGE) unless 1 <= lanes <= 4
+    Checks.fail(USAGE) unless 1 <= lanes <= MAX_LANES
+    memory = gigabytes ? ", #{gigabytes} GB" : ""
+    puts "Lanes: #{lanes}#{chosen ? "" : " (#{cores} cores#{memory})"}"
+    @@records = read_records
     unknown = skipped - targets.map(&.first)
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
     prune_program_caches
@@ -68,7 +87,7 @@ module Caramel::Checks::All
     runs = [{"spec", [script("crystal"), "spec"] + SPECS}] +
            targets.reject { |name, _| skipped.includes?(name) }
     failed = [] of String
-    if report("build", build, nil)
+    if report("build", build, nil)[0]
       ENV[Checks::PREBUILT] = "1"
     else
       failed << "build"
@@ -89,9 +108,19 @@ module Caramel::Checks::All
 
   # Runs each run in turn and returns the names of the failed ones.
   private def in_turn(runs : Array(Run)) : Array(String)
-    failed = [] of String
-    runs.each { |(name, argv)| failed << name unless report(name, argv, nil) }
-    failed
+    passed = {} of String => Record
+    failed = {} of String => Int32
+    runs.each do |(name, argv)|
+      ok, seconds = report(name, argv, nil)
+      if ok
+        passed[name] = Record.new(seconds, 0)
+      else
+        failed[name] = seconds
+      end
+    end
+    summarize(0, runs.map(&.first), passed, failed)
+    write_records(passed)
+    failed.keys
   end
 
   # Deals the runs to *count* lanes and runs the lanes side by side, each
@@ -104,25 +133,37 @@ module Caramel::Checks::All
     end
     real = File.realpath(Checks.toolchain_root)
     prefixes = (1...count).map { |index| lane_prefix(real, index + 1) }
-    failed = [] of String
+    passed = {} of String => Record
+    failed = {} of String => Int32
     done = Channel(Nil).new(count)
     lanes.each_with_index do |lane, index|
       prefix = index.zero? ? nil : prefixes[index - 1]
       env = prefix.try { |path| {"CARAMEL_TOOLCHAIN_ROOT" => path} of String => String? }
       spawn do
-        lane.each { |(name, argv)| failed << name unless report(name, argv, env) }
+        lane.each do |(name, argv)|
+          ok, seconds = report(name, argv, env)
+          if ok
+            passed[name] = Record.new(seconds, index)
+          else
+            failed[name] = seconds
+          end
+        end
       ensure
         done.send(nil)
       end
     end
     count.times { done.receive }
-    failed
+    lanes.each_with_index { |lane, index| summarize(index, lane.map(&.first), passed, failed) }
+    write_records(passed)
+    failed.keys
   end
 
   # Deals the runs to *count* lanes. FIRST_LANE's runs go to the first lane
-  # before the others are dealt, heaviest first, each to the lightest lane it
-  # may take: frappe-project-dev never to the first, and the timing-sensitive
-  # latte-ipc last, to the lightest lane. browser goes first in its lane.
+  # before the others are dealt, heaviest first, each to the lightest lane,
+  # and the timing-sensitive latte-ipc last. A run stays on the lane it last
+  # ran on while that lane is within a fifth of the lightest lane's load, or
+  # 30 s of it, so its compiler cache there stays warm. browser goes first in
+  # its lane.
   private def plan(runs : Array(Run), count : Int32) : Array(Array(Run))
     first, rest = runs.partition { |(name, _)| FIRST_LANE.includes?(name) }
     lanes = [first] + Array.new(count - 1) { [] of Run }
@@ -131,8 +172,11 @@ module Caramel::Checks::All
     dealt = others.sort_by { |(name, _)| {-weight(name), name} } + sensitive
     dealt.each do |run|
       name = run[0]
-      choices = name == "frappe-project-dev" ? (1...count).to_a : (0...count).to_a
-      lane = choices.min_by { |index| loads[index] }
+      lightest = loads.min
+      lane = (0...count).min_by { |index| loads[index] }
+      if (previous = @@records[name]?.try(&.lane)) && previous < count
+        lane = previous if loads[previous] - lightest <= {lightest // 5, 30}.max
+      end
       lanes[lane] << run
       loads[lane] += weight(name)
     end
@@ -142,8 +186,53 @@ module Caramel::Checks::All
     end
   end
 
+  # Seconds the run took the last time it passed on this machine, else the
+  # constant for its name, else 6.
   private def weight(name : String) : Int32
-    WEIGHTS[name]? || 6
+    @@records[name]?.try(&.seconds) || WEIGHTS[name]? || 6
+  end
+
+  # Lanes for this machine: the smaller of half its cores and a quarter of
+  # its memory in GB, from 2 to MAX_LANES. Without a readable memory size the
+  # cores alone decide.
+  private def default_lanes : {Int32, Int32, Int32?}
+    cores = System.cpu_count.to_i
+    memory = Checks.run(["/usr/sbin/sysctl", "-n", "hw.memsize"], timeout: 5.seconds)
+    bytes = memory.success? ? memory.stdout.strip.to_i64? : nil
+    gigabytes = bytes.try { |size| (size >> 30).to_i }
+    lanes = gigabytes ? {cores // 2, gigabytes // 4}.min : cores // 2
+    {lanes.clamp(2, MAX_LANES), cores, gigabytes}
+  end
+
+  # The durations and lanes recorded by the last runs on this machine, from
+  # DURATIONS in the toolchain root; empty when the file is missing or unreadable.
+  private def read_records : Hash(String, Record)
+    path = File.join(File.realpath(Checks.toolchain_root), DURATIONS)
+    return {} of String => Record unless File.file?(path)
+    Hash(String, Record).from_json(File.read(path))
+  rescue JSON::ParseException | IO::Error
+    {} of String => Record
+  end
+
+  # Records the passed runs' seconds and lanes over the earlier records; a
+  # failed run keeps its previous record.
+  private def write_records(passed : Hash(String, Record)) : Nil
+    path = File.join(File.realpath(Checks.toolchain_root), DURATIONS)
+    merged = @@records.merge(passed)
+    temp = "#{path}.#{Random::Secure.hex(4)}"
+    File.write(temp, merged.to_pretty_json, perm: 0o600)
+    File.rename(temp, path)
+  rescue IO::Error
+    puts "Could not record the runs' durations in #{path}"
+  end
+
+  # The lane's total and its longest run, from the runs that reported.
+  private def summarize(index : Int32, names : Array(String), passed : Hash(String, Record),
+                        failed : Hash(String, Int32)) : Nil
+    seconds = names.map { |name| {name, passed[name]?.try(&.seconds) || failed[name]? || 0} }
+    total = seconds.sum(&.[1])
+    longest = seconds.max_by(&.[1])
+    puts "Lane #{index + 1}: #{total} s (longest #{longest[0]} at #{longest[1]} s)"
   end
 
   # The private toolchain prefix of lane *number*, inside this toolchain:
@@ -172,9 +261,12 @@ module Caramel::Checks::All
     prefix
   end
 
-  # Runs one step and prints its PASS or FAIL line. A failure's output, or the
-  # exception that stopped it, goes to a log named on that line.
-  private def report(name : String, argv : Array(String), env : Hash(String, String?)?) : Bool
+  # Runs one step, prints its PASS or FAIL line and returns whether it passed
+  # and how long it took. A failure's output, or the exception that stopped
+  # it, goes to a log named on that line.
+  private def report(name : String,
+                     argv : Array(String),
+                     env : Hash(String, String?)?) : {Bool, Int32}
     started = Time.instant
     result = begin
       run(argv, env)
@@ -184,14 +276,14 @@ module Caramel::Checks::All
     seconds = (Time.instant - started).total_seconds.round.to_i
     if result.is_a?(Caramel::Latte::ProcessResult) && result.success?
       puts "PASS #{name} (#{seconds} s)"
-      return true
+      return {true, seconds}
     end
     output = result.is_a?(Exception) ? result.inspect_with_backtrace : result.stdout + result.stderr
     directory = @@logs ||= Checks.private_temp("caramel-check-all-")
     log = File.join(directory, "#{name}.log")
     File.write(log, output)
     puts "FAIL #{name} (#{seconds} s): #{log}"
-    false
+    {false, seconds}
   end
 
   # scripts/crystal gives each checkout program a compiler cache root of its
@@ -212,15 +304,11 @@ module Caramel::Checks::All
     end
   end
 
-  # Every check in scripts/checks. frappe-project runs once, with --dev: that
-  # run executes every step of the plain flow as well as its dev phase.
+  # Every check in scripts/checks, each run as `scripts/check NAME`.
   private def targets : Array(Run)
     paths = Dir.glob(File.join(Checks::REPO, "scripts/checks/*.cr"))
     names = paths.map { |path| File.basename(path, ".cr").tr("_", "-") }.sort!
-    plain = names - EXEMPT - ["frappe-project"]
-    checks = plain.map { |name| {name, [script("check"), name]} }
-    checks << {"frappe-project-dev", [script("check"), "frappe-project", "--dev"]}
-    checks
+    (names - EXEMPT).map { |name| {name, [script("check"), name]} }
   end
 
   private def script(name : String) : String
