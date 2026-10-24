@@ -161,7 +161,8 @@ CRYSTAL_CACHE_DIR=$BASE/crystal-cache
 export CRYSTAL_PATH CRYSTAL_LIBRARY_PATH PATH PKG_CONFIG_LIBDIR CRYSTAL_CACHE_DIR
 
 # The program a build or spec compiles; `crystal spec` names its program
-# after <cwd>/spec. Type checks create no program directory.
+# after <cwd>/spec, so its cache root also names the paths it runs. Type
+# checks create no program directory.
 PROGRAM=
 case ${1:-} in
     build)
@@ -179,6 +180,21 @@ case ${1:-} in
 esac
 if [ -n "$PROGRAM" ]; then
     NAME=$(printf '%s' "${PROGRAM#/}" | tr / -)
+    # Every `crystal spec` names its program <cwd>/spec, whatever it runs, so
+    # the spec paths join the name: programs for different directories would
+    # otherwise share one root and replace each other's objects on every run.
+    if [ "${1:-}" = spec ]; then
+        TARGETS=
+        shift
+        for ARG in "$@"; do
+            case $ARG in
+                -*) ;;
+                *) TARGETS=$TARGETS+$(printf '%s' "$ARG" | tr / -) ;;
+            esac
+        done
+        set -- spec "$@"
+        NAME=$NAME$TARGETS
+    fi
     # A developer checkout's programs each get a cache root of their own, so
     # the keep-10 cleanup that ends every build (codegen/cache_dir.cr) never
     # evicts them for applications and temporary projects in the shared
