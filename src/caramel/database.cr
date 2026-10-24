@@ -7,6 +7,7 @@ require "socket/tcp_socket"
 require "socket/unix_socket"
 require "system/user"
 require "uri"
+require "./tls"
 
 module Caramel
   # Creates a bounded PostgreSQL pool with an explicit transport policy.
@@ -438,7 +439,7 @@ module Caramel
       begin
         send_ssl_request(socket)
 
-        context = OpenSSL::SSL::Context::Client.new
+        context = TLS.client_context
         context.verify_mode = OpenSSL::SSL::VerifyMode::PEER
         config.sslrootcert.try { |path| context.ca_certificates = path }
         config.sslcert.try { |path| context.certificate_chain = path }

@@ -4,6 +4,7 @@ require "socket"
 require "uri"
 require "./crema"
 require "./external_url"
+require "./tls"
 
 module Caramel
   # The framework's outbound HTTP client for third-party APIs. It connects
@@ -83,7 +84,7 @@ module Caramel
                             uri : URI,
                             headers : HTTP::Headers,
                             body : String?) : HTTP::Client::Response
-      client = HTTP::Client.new(uri)
+      client = HTTP::Client.new(uri, tls: TLS.client_context(uri))
       client.connect_timeout = CONNECT_TIMEOUT
       client.read_timeout = READ_TIMEOUT
       begin

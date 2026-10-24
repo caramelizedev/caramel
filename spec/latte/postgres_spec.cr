@@ -59,7 +59,7 @@ describe Caramel::Latte::Toolchain do
         conda-postgresql/18.6/bin/psql
         conda-postgresql/18.6/bin/pg_dump
         conda-postgresql/18.6/bin/pg_restore
-        conda-openssl/3.6.4/bin/openssl
+        conda-openssl/3.6.5/bin/openssl
       ]
       scripts.each { |relative| install_tool(root, relative, "#!/bin/sh\n") }
       install_tool(root, "aqua-caddyserver-caddy/2.11.4/caddy", "")
@@ -72,7 +72,7 @@ describe Caramel::Latte::Toolchain do
       tools.pg_ctl.should end_with("/conda-postgresql/18.6/bin/pg_ctl")
       tools.pg_dump.should end_with("/conda-postgresql/18.6/bin/pg_dump")
       tools.pg_restore.should end_with("/conda-postgresql/18.6/bin/pg_restore")
-      tools.openssl.should end_with("/conda-openssl/3.6.4/bin/openssl")
+      tools.openssl.should end_with("/conda-openssl/3.6.5/bin/openssl")
       tools.caddy.should end_with("/aqua-caddyserver-caddy/2.11.4/caddy")
       tools.coredns.should end_with("/github-coredns-coredns/1.14.7/coredns")
     ensure

@@ -1,5 +1,6 @@
 require "http/client"
 require "uri"
+require "../tls"
 require "./otlp_json"
 require "./runtime"
 
@@ -139,7 +140,7 @@ module Caramel::Crema
       end
 
       private def post(body : String) : HTTP::Client::Response
-        client = HTTP::Client.new(@endpoint)
+        client = HTTP::Client.new(@endpoint, tls: TLS.client_context(@endpoint))
         client.connect_timeout = 5.seconds
         client.read_timeout = 10.seconds
         begin

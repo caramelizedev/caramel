@@ -6,6 +6,6 @@ lockfile_platforms = ["macos-arm64"]
 "github:crystal-lang/crystal" = "1.22.1"
 "aqua:caddyserver/caddy" = "2.11.4"
 "conda:postgresql" = { version = "18.6", channel = "conda-forge" }
-"conda:openssl" = { version = "3.6.4", channel = "conda-forge" }
+"conda:openssl" = { version = "3.6.5", channel = "conda-forge" }
 "conda:gmp" = { version = "6.3.0", channel = "conda-forge" }
 "conda:pkgconf" = { version = "3.0.7", channel = "conda-forge" }

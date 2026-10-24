@@ -10,7 +10,7 @@ module Caramel::Latte
     POSTGRES_MAJOR   = 18
     CADDY_VERSION    = "2.11.4"
     COREDNS_VERSION  = "1.14.7"
-    OPENSSL_VERSION  = "3.6.4"
+    OPENSSL_VERSION  = "3.6.5"
 
     class Unavailable < Exception
     end

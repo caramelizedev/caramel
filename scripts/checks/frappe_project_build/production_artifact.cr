@@ -77,7 +77,7 @@ module Caramel::Checks
     private def issue_certificates : Nil
       Dir.mkdir(@certs, 0o755)
       installs = File.join(File.realpath(Checks.toolchain_root), "data/installs")
-      openssl = File.join(installs, "conda-openssl/3.6.4/bin/openssl")
+      openssl = File.join(installs, "conda-openssl/3.6.5/bin/openssl")
       path = ->(name : String) { File.join(@certs, name) }
       @fixture.command([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                         "-subj", "/CN=Caramel artifact check ca",

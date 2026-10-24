@@ -5,6 +5,7 @@ require "./proxy"
 require "./collector"
 require "./deadline"
 require "./logs"
+require "../caramel/tls"
 require "openssl"
 
 module Caramel::Latte
@@ -535,7 +536,7 @@ module Caramel::Latte
       socket = TCPSocket.new("127.0.0.1", @proxy.https_port, seconds, seconds)
       socket.read_timeout = timeout
       socket.write_timeout = timeout
-      context = OpenSSL::SSL::Context::Client.new
+      context = Caramel::TLS.client_context
       context.verify_mode = OpenSSL::SSL::VerifyMode::PEER
       context.ca_certificates = @proxy.root_certificate
       tls = OpenSSL::SSL::Socket::Client.new(
