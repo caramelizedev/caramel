@@ -1,10 +1,10 @@
 module Caramel::Checks
-  class FrappeProject::Dev
+  class FrappeProjectDev::Dev
     FAILED  = "development fixture assertion failed"
     WELCOME = "A little less setup."
     HANDLE  = "def handle(contract : Contract)\n"
 
-    def initialize(@fixture : FrappeProject, @clone : String)
+    def initialize(@fixture : ProjectFixture, @clone : String)
       @processes = [] of Process
       @logs = [] of File
       @executable = File.join(@fixture.root, "dev-fixture")
@@ -110,7 +110,7 @@ module Caramel::Checks
 
     private def finish(process : Process, timeout : Time::Span = 20.seconds) : Nil
       process.terminate unless process.terminated?
-      status = FrappeProject.wait_exit(process, timeout, "dev session")
+      status = LatteFixture.wait_exit(process, timeout, "dev session")
       assert!(status.success?, "dev session did not exit cleanly")
       @processes.delete(process)
     end
@@ -179,7 +179,9 @@ module Caramel::Checks
 
           CR
         File.write(controller, "{{ run(#{probe.to_json}, #{marker.to_json}) }}\n" + original)
-        started = Checks.wait_until(30.seconds, 50.milliseconds) do
+        # The session must notice the edit and compile as far as the macro;
+        # under a full check all's lanes that can take over a minute.
+        started = Checks.wait_until(90.seconds, 50.milliseconds) do
           File.exists?(marker) || first.terminated?
         end
         probing = started && File.exists?(marker)
@@ -373,7 +375,7 @@ module Caramel::Checks
         end
         assert!(native_pids.size == 1, "expected one owned native app")
         restarted.terminate(graceful: false)
-        FrappeProject.wait_exit(restarted, 5.seconds, "killed terminal owner")
+        LatteFixture.wait_exit(restarted, 5.seconds, "killed terminal owner")
         @processes.delete(restarted)
         natives_gone = Checks.wait_until(8.seconds, 50.milliseconds) do
           native_pids.all? do |pid|

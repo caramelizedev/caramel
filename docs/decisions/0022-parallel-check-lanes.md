@@ -13,11 +13,12 @@ Status: accepted.
 
 ## Decision
 
-1. `scripts/check all --lanes N` (1 to 4) runs the build step first, then deals the spec run and the checks to N lanes that run side by side. Within a lane, runs go one after another. Without `--lanes`, `check all` uses 3 lanes.
+1. `scripts/check all --lanes N` (1 to 8) runs the build step first, then deals the spec run and the checks to N lanes that run side by side. Within a lane, runs go one after another. Without `--lanes`, `check all` uses the smaller of half the machine's cores and a quarter of its memory in GB, from 2 to 8, and prints its choice. After the runs it prints each lane's total and longest run.
 2. The first lane uses the checkout's toolchain. Each further lane uses the persistent prefix `lanes/lane-N` inside that toolchain, made on first use, with its shards cache cloned from the toolchain's. It persists so that its caches stay warm from one run to the next; a new toolchain's lanes start cold once.
 3. Placement:
    - The first lane takes installations, which checks that a release reuses this toolchain's selection; editor-tools, which uses its editor tools; native, which rebuilds the installers in `bin/`; and the four `crystal spec` programs (the spec run, native's, integration's and latte-postgres's).
-   - The other runs are dealt heaviest first to the lightest lane, weighted by their v0.5.0 gate times, with frappe-project-dev never on the first lane and the timing-sensitive latte-ipc dealt last.
+   - The other runs are dealt heaviest first to the lightest lane, weighted by the duration each took the last time it passed on this machine, which `check all` records with its lane in `check-durations.json` in the toolchain root, and until then by constants from a 2026-10 run. A run keeps the lane it last ran on while that lane's load is within a fifth of the lightest lane's, or 30 s of it, so its compiler cache there stays warm. The timing-sensitive latte-ipc is dealt last.
+   - `frappe-project`, `frappe-project-dev` and `frappe-project-build` each create their own application, so the longest flow no longer bounds one lane.
    - browser runs first in its lane.
    - latte-daemon keeps Latte's fixed ports, which no other check uses, so a full run still needs the user's own Latte stopped.
 4. When the build step fails, the checks run in one lane: without its binaries each check builds its own into `bin/`, and lanes would race to write them.
@@ -28,7 +29,7 @@ Status: accepted.
 ## Reasons
 
 - Contention is moderate: with warm prefixes, the heaviest checks slow by 10–40 % in a full three-lane run, and the lanes still more than halve the suite.
-- A third lane pays: the floor for two lanes is half the work, and three lanes finish a full run in well under half the serial time.
-- The first lane, with installations, is the longest, so a fourth lane adds little.
-- The compilers across three lanes peak at several GB resident; on a machine with less memory, `--lanes 1` keeps serial behaviour.
+- A run's wall time is the build step plus its heaviest lane. In 2026-10 one check, `frappe-project --dev`, took 391 s of a 540 s lane on a 12-core machine, and the planner, dealing by weights measured at v0.5.0, still put three other runs beside it. Recording each machine's own durations, splitting that check and letting the lane count follow the machine remove that floor without a fixed number for any machine.
+- A run that changes lane compiles cold in the new prefix, which can double its time, so a run keeps its lane while the loads stay close.
+- Each lane's compiler peaks at about 2 GB resident, so a quarter of the memory in GB bounds the lanes; `--lanes 1` keeps serial behaviour on any machine.
 - Rejected: a fresh prefix per run, because it compiles cold every time and costs more than the contention it avoids.
