@@ -1,6 +1,7 @@
 require "./project"
 require "./build_slot"
 require "./dev_files"
+require "./postinstall"
 require "../latte/toolchain"
 
 module Caramel::Frappe
@@ -30,8 +31,15 @@ module Caramel::Frappe
       values
     end
 
+    # Installs the locked dependencies, then runs their postinstall scripts
+    # through the toolchain's cache of what each wrote (Postinstall).
     def dependencies(project : Project) : Nil
-      run(File.join(@framework_root, "scripts/shards"), ["install", "--frozen"], project.root)
+      shards = File.join(@framework_root, "scripts/shards")
+      run(shards, ["install", "--frozen", "--skip-postinstall"], project.root)
+      postinstall = Postinstall.new(@framework_root, @toolchain.root, @output) do |script, dir, env|
+        run("/bin/sh", ["-c", script], dir, env)
+      end
+      postinstall.run(project.root)
     end
 
     def check_compiler : Nil

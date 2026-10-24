@@ -27,7 +27,11 @@ view through the same code would hide renderer defects.
    fragment parsing. An internal adapter owns native documents, chooses
    table/select fragment contexts, validates selectors and frees memory after
    each assertion. There is no global DOM cache. Dependency installation needs
-   `cc`, `ar` and network access for Lexbor's verified native source download.
+   `cc`, `ar` and network access for Lexbor's verified native source download,
+   once per toolchain: Frappé runs each dependency's postinstall script itself,
+   after `shards install --skip-postinstall`, and keeps the files the script
+   writes into its directory in the toolchain's `postinstall-cache`, keyed by
+   the dependency's name and version, so the next application copies them.
 3. Default patterns select requirements: extra markup, wrappers and attributes
    are allowed; siblings are unordered but must match distinct nodes within the
    same ancestor. Strings check exact decoded descendant text after HTML
