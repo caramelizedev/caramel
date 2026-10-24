@@ -30,3 +30,12 @@ under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
   - `crystal tool format --check FILES…` checks layout;
   - `crystal spec PATHS…` runs specs.
 - Say which checks you could not run, such as the macOS-only ones.
+
+## Other agents on this machine
+
+- Work in your own worktree: `git worktree add .claude/worktrees/<name> -b <branch> origin/main`, then install the toolchain, shards and builds there. A worktree with changes you did not make is another agent's: never edit, switch branches or stash in it.
+- Never `git stash` (shared by every worktree) or `git add -A`; stage by path.
+- One gate per machine: `scripts/check all` refuses while another checkout holds `/private/tmp/caramel-gate.lock`. Wait; never kill the holder.
+- Stop only your own processes, with `scripts/stop-checks`; never `pkill -f` a bare name.
+- A timing taken while anything else ran is not a gate time; say what else ran. A pull request names its gate run: commit, runs passed, any failure and why.
+- In caramel-notes write only your own file under `inbox/`; `index.md` and `log.md` are generated.
