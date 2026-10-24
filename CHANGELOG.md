@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-24
+
+### Upgrade notes
+
 - Public files are now streamed with `Content-Length`, `ETag` and `Last-Modified`, answer 304 to a current `If-None-Match` or `If-Modified-Since`, and carry `Cache-Control: public, max-age=31536000, immutable` when the name has a three-part version (`htmx-4.0.0.min.js`) and `no-cache` otherwise. `public/.well-known/` files are served, and any other path with a hidden segment (`/.env`, `/.something`) now goes to the router instead of answering 404 in the static layer, so a route such as `/.well-known/change-password` is reachable. A file that cannot be read answers a 500 with the security headers. Ranges are not supported ([ADR 0038](docs/decisions/0038-static-files.md)).
 - Caramel now pins Crystal 1.22.1, which fixes io_uring event loop hangs, `OpenSSL::SSL::Options::ALL` and the `Content-Length` regressions of 1.22.0. Installing this release sets up a new toolchain directory, so its first builds start with an empty compiler cache. If you use the editor tools, run `frappe lsp install` again after installing. New applications declare `crystal: ">= 1.22.1"` in `shard.yml`, and `frappe build` compiles in `crystallang/crystal:1.22.1-alpine`. The toolchain also moves to OpenSSL 3.6.5, which fixes the advisories of 3.6.4.
 - Cold Brew's pool now holds four spare connections beside the worker fibers instead of one: one for maintenance, two for schedule blocks, and one for Crema's recorder and console. A slow schedule block no longer makes maintenance and the other schedules fail their checkout. At most two schedule blocks run at once in a process, and a third due block waits for one to finish. A `serve` or `work` process may now hold three more connections, up to `CARAMEL_POOL_SIZE` + queues × `CARAMEL_WORKER_CONCURRENCY` + 5, so check the runtime role's limit of 24 against the processes you run during a deploy. The most worker fibers across all queues is 28, down from 31, and `CARAMEL_WORKER_CONCURRENCY` above that limit now stops the process at start ([ADR 0032](docs/decisions/0032-application-production-contract.md)).
@@ -18,6 +22,40 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - `frappe dev` no longer hands the development session cookie to any client on the machine. The gateway sets it only on a single-use link, `/__caramel/dev/sign-in?nonce=…`, that `frappe dev` prints as `Toolbar and inspector sign-in (single use): URL` (also with `--no-open`) and opens, and `frappe open` mints a new one while `frappe dev` runs. The inspector pages answer 403 without the cookie, the toolbar says `Not signed in`, and `/__caramel/dev/status` shows an unsigned client only `generation` and `state`; the build-error page stays public. Open a new link after restarting `frappe dev`; Latte.app's Open inspector item needs a signed-in browser ([ADR 0027](docs/decisions/0027-crema-tracing.md), [ADR 0029](docs/decisions/0029-latte-observes-local-sites.md)).
 - The TLS client contexts Caramel opens itself (the database connection, `Caramel::Outbound`, the OTLP exporter and Latte's proxy probe) now clear the legacy OpenSSL 1.0 `SSL_OP_ALL` options that Crystal before 1.22.1 gives every `OpenSSL::SSL::Context` (GHSA-7jw4-6xx8-g2r9), so an application built with an older compiler is covered too: Shards only warns about the `crystal:` floor. A TLS 1.2 connection now uses the extended master secret, and a peer that closes without `close_notify` is an error. A server that cannot do secure renegotiation is refused.
 - `frappe new` and `frappe setup` now run each dependency's postinstall script themselves, after `shards install --skip-postinstall`, and keep what it writes in the toolchain's `postinstall-cache`, keyed by the dependency's name and version. The first install on a toolchain still builds lexbor's parser (`cc`, `ar` and the network); the next application copies it, about 1.7 s instead of 11 s ([ADR 0023](docs/decisions/0023-html-expectations.md)).
+
+### Breaking changes
+
+- **sugar_orm:** write a record as JSON only with the columns its json line lists (c389d27)
+- **crema:** require a per-start key from the ops socket's key file on every request (bf70314)
+
+### Features
+
+- **core:** configure the Content-Security-Policy per application and response, add nonces, and send HSTS in production (0f5c9e7)
+- **frappe:** lint run-time reads of __DIR__ paths and say what a release artifact holds (6b6af0c)
+- **frappe:** add setup --no-migrate and say that setup applies migrations (ddfb1a3)
+
+### Fixes
+
+- **frappe:** report a nullable keyword where as NULLABLE_WHERE with its remedy (1235fcd)
+- **latte:** start with any number of sites, and remove a site while services are down (ff3bd47)
+- **core:** drain serve and work within CARAMEL_SHUTDOWN_TIMEOUT, end streams at the first signal and exit at a second (f296d62)
+- **core:** validate role names inside DatabaseRoles, keep passwords out of DO bodies, and refuse elevated existing roles (70f8b99)
+- **core:** refuse tenant-prefixed cache keys and channels from untenanted code, and scope Cache.clear (b130868)
+- **frappe:** hand out the development session cookie only through a single-use sign-in link (eab3a57)
+- **toolchain:** pin Crystal 1.22.1 for its io_uring event loop fixes (933cb94)
+- **checks:** plan check all from recorded durations, size lanes by the machine, split frappe-project (c0e3780)
+- **core:** stream public files with validators, serve .well-known, and route other hidden paths (fcd2e6f)
+- **core:** clear legacy SSL_OP_ALL options on the TLS client contexts Caramel opens (f70d0db)
+- **latte:** accept .localhost sites in Latte.app (3a7c2a3)
+- **core:** accept CSRF tokens from a clock up to a minute ahead (1d8978a)
+- **cold_brew:** give maintenance, schedule blocks and the recorder their own pool connections (a9f9316)
+- **checks:** give each crystal spec program its own cache root, and let the planner place them (5bcc87e)
+- **cold_brew:** start no schedule block after the scheduler halts (3a4ed8a)
+- **checks:** keep each check's application at a fixed root, so its compiles stay warm (abca3dc)
+- **frappe:** keep what a dependency's postinstall writes in the toolchain, once per version (074d3b6)
+- **checks:** key a check's root by its checkout and lock it while it runs (967fa2a)
+- **checks:** keep a run on its lane unless moving saves more than the run itself takes (ade497c)
+- **toolchain:** key a spec program's cache root by its directories, not its file arguments (80e8cbd)
 
 ## 0.16.0 - 2026-10-15
 
