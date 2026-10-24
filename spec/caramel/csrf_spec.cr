@@ -35,6 +35,14 @@ describe Caramel::CSRF do
     secret_b.valid_token?(token).should be_false
   end
 
+  it "accepts a token from a clock a little ahead and rejects one far ahead" do
+    csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
+    slightly_ahead = csrf.issue(Time.utc + 30.seconds)
+    far_ahead = csrf.issue(Time.utc + 10.minutes)
+    csrf.valid_token?(slightly_ahead).should be_true
+    csrf.valid_token?(far_ahead).should be_false
+  end
+
   it "rejects expired tokens and uses secure host-only cookies" do
     csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
     expired = csrf.issue(Time.utc - 2.days)
