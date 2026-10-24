@@ -102,16 +102,32 @@ module Caramel::Checks
     path
   end
 
-  # Where checks that generate applications keep their roots, one fixed path
-  # per check, so the generated programs' compiler caches persist from run to
-  # run (scripts/crystal gives a program under here a cache root of its own).
+  # Where checks that generate applications keep their roots: one fixed path
+  # per checkout and check, so the generated programs' compiler caches
+  # persist from run to run (scripts/crystal gives a program under here a
+  # cache root of its own), and two checkouts never share one.
   CHECK_ROOTS = "/private/tmp/caramel-checks"
 
-  # The fixed root for *prefix*, emptied. A process a crashed run left behind
-  # in it is stopped first, so its sockets do not collide with this run's.
+  @@check_locks = [] of File
+
+  # The fixed root for *prefix*, emptied, held by a lock for the life of
+  # this process. A run that finds the lock held fails at once rather than
+  # disturbing the run that holds it. With the lock free, a process a
+  # crashed run left behind in the root is stopped before the root is
+  # emptied, so its sockets do not collide with this run's.
   def self.check_root(prefix : String) : String
-    Dir.mkdir(CHECK_ROOTS, 0o700) unless Dir.exists?(CHECK_ROOTS)
-    path = File.join(CHECK_ROOTS, prefix.rchop("-"))
+    checkout = Digest::SHA256.hexdigest(File.realpath(REPO))[0, 8]
+    parent = File.join(CHECK_ROOTS, checkout)
+    Dir.mkdir_p(parent, 0o700)
+    path = File.join(parent, prefix.rchop("-"))
+    lock = File.open("#{path}.lock", "w")
+    begin
+      lock.flock_exclusive(blocking: false)
+    rescue IO::Error
+      lock.close
+      fail("Another check is using #{path}; wait for it to finish")
+    end
+    @@check_locks << lock
     if Dir.exists?(path)
       run(["/usr/bin/pkill", "-TERM", "-f", "#{path}/"], timeout: 5.seconds)
       gone = wait_until(5.seconds, 100.milliseconds) do
