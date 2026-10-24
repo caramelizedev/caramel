@@ -1072,6 +1072,52 @@ describe Caramel::ColdBrew::Scheduler do
     rows.map(&.[:label]).should eq(["attempt 2"])
   end
 
+  it "runs at most its slots of blocks at once and lets the others wait" do
+    ColdBrewSpec.reset
+    started = Atomic(Int32).new(0)
+    release = Channel(Nil).new
+    block = -> do
+      started.add(1)
+      release.receive
+      nil
+    end
+    schedules = (1..3).map { |index| Brew::Schedule.new(1.hour, "slot-#{index}", block) }
+    scheduler = Brew::Scheduler.new(schedules, ColdBrewSpec.runtime, slots: 2)
+    results = Channel(Bool).new(3)
+    schedules.each { |schedule| spawn { results.send(scheduler.run_due(schedule)) } }
+    ColdBrewSpec.eventually { started.get == 2 }
+    sleep 200.milliseconds
+    started.get.should eq(2)
+    release.send(nil)
+    ColdBrewSpec.eventually { started.get == 3 }
+    2.times { release.send(nil) }
+    3.times { results.receive.should be_true }
+  end
+
+  it "gives up waiting for a slot when the scheduler halts" do
+    ColdBrewSpec.reset
+    started = Atomic(Int32).new(0)
+    release = Channel(Nil).new
+    holding = -> do
+      started.add(1)
+      release.receive
+      nil
+    end
+    holder = Brew::Schedule.new(1.hour, "holder", holding)
+    waiter = Brew::Schedule.new(1.hour, "waiter", -> { started.add(10); nil })
+    scheduler = Brew::Scheduler.new([holder, waiter], ColdBrewSpec.runtime, slots: 1)
+    results = Channel(Bool).new(2)
+    spawn { results.send(scheduler.run_due(holder)) }
+    ColdBrewSpec.eventually { started.get == 1 }
+    spawn { results.send(scheduler.run_due(waiter)) }
+    sleep 100.milliseconds
+    scheduler.halt
+    results.receive.should be_false
+    started.get.should eq(1)
+    release.send(nil)
+    results.receive.should be_true
+  end
+
   it "ticks from fibers in two processes and runs a new schedule once" do
     ColdBrewSpec.reset
     runs = Atomic(Int32).new(0)

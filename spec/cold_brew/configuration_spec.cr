@@ -44,10 +44,10 @@ describe "Caramel::ColdBrew.start settings" do
       "CARAMEL_WORKER_CONCURRENCY" => "16",
     }
     [
-      { {"CARAMEL_WORKER_CONCURRENCY" => "0"}, "from 1 to 31 for 1 queue(s)" },
-      { {"CARAMEL_WORKER_CONCURRENCY" => "four"}, "from 1 to 31 for 1 queue(s)" },
-      { {"CARAMEL_WORKER_CONCURRENCY" => "32"}, "from 1 to 31 for 1 queue(s)" },
-      {two_queues, "from 1 to 15 for 2 queue(s)"},
+      { {"CARAMEL_WORKER_CONCURRENCY" => "0"}, "from 1 to 28 for 1 queue(s)" },
+      { {"CARAMEL_WORKER_CONCURRENCY" => "four"}, "from 1 to 28 for 1 queue(s)" },
+      { {"CARAMEL_WORKER_CONCURRENCY" => "29"}, "from 1 to 28 for 1 queue(s)" },
+      {two_queues, "from 1 to 14 for 2 queue(s)"},
       { {"CARAMEL_WORKER_QUEUES" => "default, default"}, "names a queue twice" },
       { {"CARAMEL_WORKER_QUEUES" => "default,,mailers"}, %(got "") },
       { {"CARAMEL_WORKER_QUEUES" => "Mailers"}, %(got "Mailers") },
@@ -93,7 +93,7 @@ describe WorkOptions do
       "CARAMEL_WORKER_CONCURRENCY" => "32",
       "APP_SECRET"                 => "kept",
     })
-    expect_raises(Caramel::ColdBrew::ConfigurationError, "from 1 to 31 for 1 queue(s)") do
+    expect_raises(Caramel::ColdBrew::ConfigurationError, "from 1 to 28 for 1 queue(s)") do
       Caramel::ColdBrew.start(UNREACHABLE, applied, scheduler: false)
     end
   end
