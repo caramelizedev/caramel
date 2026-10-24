@@ -1,0 +1,30 @@
+#!/bin/sh
+# Stops every process this checkout's checks started and nothing else: the
+# check programs built under bin/checks, the fixtures under the checkout's
+# roots in /private/tmp/caramel-checks and /private/tmp/caramel-check-all,
+# and the PostgreSQL, Latte and application processes they run. Other
+# checkouts' checks on the same machine are left alone.
+#
+# Usage: scripts/stop-checks
+set -eu
+
+CHECKOUT=$(cd "$(dirname "$0")/.." && pwd -P)
+ROOTS="/private/tmp/caramel-checks/$(printf '%s' "$CHECKOUT" | /usr/bin/shasum -a 256 | cut -c1-8)"
+
+stop() {
+    PIDS=$(/usr/bin/pgrep -f "$1" || true)
+    [ -n "$PIDS" ] || return 0
+    # shellcheck disable=SC2086
+    kill -TERM $PIDS 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        /usr/bin/pgrep -f "$1" >/dev/null || return 0
+        sleep 0.5
+    done
+    # shellcheck disable=SC2086
+    kill -KILL $(/usr/bin/pgrep -f "$1") 2>/dev/null || true
+}
+
+stop "$CHECKOUT/bin/checks/"
+stop "$CHECKOUT/scripts/check "
+stop "$ROOTS/"
+echo "Stopped this checkout's checks ($CHECKOUT)"

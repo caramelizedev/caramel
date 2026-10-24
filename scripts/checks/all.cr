@@ -39,6 +39,10 @@ module Caramel::Checks::All
   MAX_LANES = 8
   # Where the toolchain root keeps the runs' durations and lanes.
   DURATIONS = "check-durations.json"
+  # One gate per machine: a second check all, from any checkout, would share
+  # the cores, the toolchain caches and the Latte ports with the first and
+  # spoil both. The lock names its holder for the run that is refused.
+  GATE = "/private/tmp/caramel-gate.lock"
   # Runs that stay on the first lane, which uses this checkout's toolchain
   # (ADR 0022): installations checks that a release reuses that toolchain,
   # editor-tools uses its editor tools, and native rebuilds the installers
@@ -74,6 +78,7 @@ module Caramel::Checks::All
     Checks.fail(USAGE) unless 1 <= lanes <= MAX_LANES
     memory = gigabytes ? ", #{gigabytes} GB" : ""
     puts "Lanes: #{lanes}#{chosen ? "" : " (#{cores} cores#{memory})"}"
+    hold_gate
     @@records = read_records
     unknown = skipped - targets.map(&.first)
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
@@ -192,6 +197,25 @@ module Caramel::Checks::All
   # constant for its name, else 6.
   private def weight(name : String) : Int32
     @@records[name]?.try(&.seconds) || WEIGHTS[name]? || 6
+  end
+
+  @@gate : File? = nil
+
+  # Takes the machine's gate lock for the life of this process, or fails
+  # naming the checkout that holds it.
+  private def hold_gate : Nil
+    gate = File.open(GATE, "a+")
+    begin
+      gate.flock_exclusive(blocking: false)
+    rescue IO::Error
+      holder = File.read(GATE).strip
+      gate.close
+      Checks.fail("Another check all is running from #{holder}; wait for it to finish")
+    end
+    gate.truncate
+    gate.puts(Checks::REPO)
+    gate.flush
+    @@gate = gate
   end
 
   # Lanes for this machine: the smaller of half its cores and a quarter of
