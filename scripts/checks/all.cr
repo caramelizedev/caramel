@@ -41,16 +41,17 @@ module Caramel::Checks::All
   DURATIONS = "check-durations.json"
   # Runs that stay on the first lane, which uses this checkout's toolchain
   # (ADR 0022): installations checks that a release reuses that toolchain,
-  # editor-tools uses its editor tools, native rebuilds the installers in
-  # bin/, and the `crystal spec` programs stay together.
-  FIRST_LANE = %w[spec native integration latte-postgres installations editor-tools]
+  # editor-tools uses its editor tools, and native rebuilds the installers
+  # in bin/.
+  FIRST_LANE = %w[native installations editor-tools]
   # Seconds per run on a 12-core Apple Silicon Mac in 2026-10, used to balance
   # the lanes until this machine has recorded its own. Other runs count as 6.
   WEIGHTS = {
     "frappe-project" => 298, "frappe-project-build" => 216, "frappe-project-dev" => 146,
     "installations" => 91, "schema-diff" => 83, "integration" => 72, "page-boxoffice" => 55,
-    "page-forms" => 50, "page-json" => 47, "browser" => 44, "spec" => 41, "page-jobs" => 37,
-    "page-webhooks" => 32, "native" => 22, "editor-tools" => 22, "latte-postgres" => 15,
+    "page-forms" => 50, "page-json" => 47, "browser" => 44, "page-jobs" => 37,
+    "page-webhooks" => 32, "spec" => 66, "native" => 22, "editor-tools" => 22,
+    "latte-postgres" => 15,
   }
 
   @@logs : String? = nil
