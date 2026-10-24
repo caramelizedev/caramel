@@ -18,7 +18,7 @@ begin
   printed = output.success? && output.stdout.strip == "native path check 0.3"
   raise output.stdout + output.stderr unless printed
   loads = Caramel::Checks.run(["/usr/bin/otool", "-l", binary], timeout: 5.seconds)
-  expected = File.join(root, "data/installs/conda-openssl/3.6.4/lib")
+  expected = File.join(root, "data/installs/conda-openssl/3.6.5/lib")
   raise loads.stdout + loads.stderr unless loads.success? && loads.stdout.includes?(expected)
   gmp = File.join(root, "data/installs/conda-gmp/6.3.0/lib")
   raise loads.stdout + loads.stderr unless loads.stdout.includes?(gmp)

@@ -32,7 +32,7 @@ module Caramel::Checks::Integration
   def main : Int32
     installs = File.join(File.realpath(Checks.toolchain_root), "data/installs")
     pg = File.join(installs, "conda-postgresql/18.6/bin")
-    openssl = File.join(installs, "conda-openssl/3.6.4/bin/openssl")
+    openssl = File.join(installs, "conda-openssl/3.6.5/bin/openssl")
     unless File.file?(File.join(pg, "initdb")) && File.file?(openssl)
       STDERR.puts "Managed PostgreSQL or OpenSSL is missing; rerun scripts/install-toolchain."
       return 1

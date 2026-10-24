@@ -17,7 +17,7 @@ Each tool must install from prebuilt artifacts and run without touching the host
    OpenSSL, GMP and pkgconf. Caramel does not write a general version manager and does not compile
    PostgreSQL during ordinary setup.
 2. **Tested set.** Crystal 1.22.1 with bundled Shards 0.20.0, Caddy 2.11.4, PostgreSQL 18.6,
-   OpenSSL 3.6.4, GMP 6.3.0 and pkgconf 3.0.7. The experiment lockfile preserves the concrete artifact
+   OpenSSL 3.6.5, GMP 6.3.0 and pkgconf 3.0.7. The experiment lockfile preserves the concrete artifact
    URLs and SHA-256 checksums, including PostgreSQL's transitive dependency packages. Updating
    a tool version or backend is a reviewed dependency change.
 3. **Responsibilities.** Frappé is the application developer's interface. Shards owns Crystal

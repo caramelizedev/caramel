@@ -15,9 +15,9 @@ private let releaseCritical = [
     "data/installs/conda-postgresql/18.6/bin/initdb",
     "data/installs/conda-postgresql/18.6/bin/pg_ctl",
     "data/installs/conda-postgresql/18.6/bin/psql",
-    "data/installs/conda-openssl/3.6.4/bin/openssl",
-    "data/installs/conda-openssl/3.6.4/lib/libssl.3.dylib",
-    "data/installs/conda-openssl/3.6.4/lib/libcrypto.3.dylib",
+    "data/installs/conda-openssl/3.6.5/bin/openssl",
+    "data/installs/conda-openssl/3.6.5/lib/libssl.3.dylib",
+    "data/installs/conda-openssl/3.6.5/lib/libcrypto.3.dylib",
     "data/installs/conda-gmp/6.3.0/lib/libgmp.10.dylib",
     "data/installs/conda-pkgconf/3.0.7/bin/pkgconf",
     "data/installs/github-coredns-coredns/1.14.7/coredns"
@@ -433,7 +433,7 @@ private final class ToolchainInstallation {
             ([path(installs, "conda-postgresql/18.6/bin/initdb"), "--version"], "initdb (PostgreSQL) 18.6"),
             ([path(installs, "conda-postgresql/18.6/bin/pg_ctl"), "--version"], "pg_ctl (PostgreSQL) 18.6"),
             ([path(installs, "conda-postgresql/18.6/bin/psql"), "--version"], "psql (PostgreSQL) 18.6"),
-            ([path(installs, "conda-openssl/3.6.4/bin/openssl"), "version"], "OpenSSL 3.6.4"),
+            ([path(installs, "conda-openssl/3.6.5/bin/openssl"), "version"], "OpenSSL 3.6.5"),
             ([path(installs, "conda-pkgconf/3.0.7/bin/pkgconf"), "--version"], "3.0.7"),
             ([path(installs, "github-coredns-coredns/1.14.7/coredns"), "-version"], "CoreDNS-1.14.7"),
             ([path(root, "project/smoke")], "{\"message\":\"Caramel\",\"regex\":\"0\",\"decimal\":\"0.3\"}")
