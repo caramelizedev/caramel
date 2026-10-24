@@ -30,7 +30,8 @@ module Caramel::ColdBrew
 
   # One fiber per schedule. Each tick takes the lease: a
   # `pg_try_advisory_xact_lock(hashtext(name))` and the schedule's
-  # `caramel_schedules` row, updated only once the period has elapsed.
+  # `caramel_schedules` row, updated only once the period has elapsed. A tick holds
+  # one of SCHEDULE_SLOTS while it does, so the blocks never take more of the pool.
   class Scheduler
     Log = ::Log.for("cold_brew.scheduler")
 
@@ -51,7 +52,9 @@ module Caramel::ColdBrew
 
     def initialize(@schedules : Array(Schedule) = ColdBrew.schedules,
                    @db : DB::Database = SugarORM::Repo.database,
-                   @retry : Time::Span = 1.minute)
+                   @retry : Time::Span = 1.minute,
+                   slots : Int32 = SCHEDULE_SLOTS)
+      @slots = Channel(Nil).new(slots)
       @stopping = Channel(Nil).new
       @done = WaitGroup.new
     end
@@ -81,8 +84,27 @@ module Caramel::ColdBrew
 
     # Runs the block when this process wins the lease for the current
     # period; false when another process holds it or the period has not
-    # elapsed. The block's writes commit with the lease.
+    # elapsed. The block's writes commit with the lease. It first waits for a
+    # schedule slot, and returns false when the scheduler stops while it waits.
     def run_due(schedule : Schedule) : Bool
+      with_slot { run_leased(schedule) }
+    end
+
+    private def with_slot(& : -> Bool) : Bool
+      return false if @stopping.closed?
+      select
+      when @slots.send(nil)
+        begin
+          yield
+        ensure
+          @slots.receive
+        end
+      when @stopping.receive?
+        false
+      end
+    end
+
+    private def run_leased(schedule : Schedule) : Bool
       ran = false
       SugarORM::Repo.using(@db) do
         SugarORM::Repo.transaction do

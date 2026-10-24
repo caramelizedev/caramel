@@ -23,6 +23,15 @@ module Caramel::ColdBrew
                   "elsewhere set Caramel::ColdBrew.broker = " \
                   "Caramel::ColdBrew::Broker.new(database_url)."
 
+  # The pool holds a connection per worker fiber and these besides, so a busy worker
+  # never makes maintenance, a schedule block, Crema's recorder or its console wait.
+  # A schedule block holds a connection until it commits with its lease, so at most
+  # SCHEDULE_SLOTS of them run at once and the others wait their turn.
+  MAINTENANCE_CONNECTIONS = 1
+  SCHEDULE_SLOTS          = 2
+  OBSERVER_CONNECTIONS    = 1
+  SPARE_CONNECTIONS       = MAINTENANCE_CONNECTIONS + SCHEDULE_SLOTS + OBSERVER_CONNECTIONS
+
   class ConfigurationError < Exception
   end
 
@@ -178,7 +187,7 @@ module Caramel::ColdBrew
                  scheduler : Bool = true, workers : Bool = true) : Service
     queues = workers ? worker_queues(env) : [] of String
     concurrency = workers ? worker_concurrency(env, queues.size) : 0
-    pool_size = workers ? queues.size * concurrency + 1 : 1
+    pool_size = workers ? queues.size * concurrency + SPARE_CONNECTIONS : 1
     limits = Caramel::Database::Limits.from_env(false, env)
     checkout = Caramel::Database::PoolSettings.from_env(env).checkout_timeout
     db = Caramel::Database.open(database_url, pool_size, "caramel-cold-brew", limits, checkout)
@@ -210,7 +219,7 @@ module Caramel::ColdBrew
   # CARAMEL_WORKER_CONCURRENCY, default 4, within what the pool allows for
   # *queue_count* queues.
   private def self.worker_concurrency(env, queue_count : Int32) : Int32
-    limit = (Caramel::Database::Config::MAX_POOL_SIZE - 1) // queue_count
+    limit = (Caramel::Database::Config::MAX_POOL_SIZE - SPARE_CONNECTIONS) // queue_count
     concurrency = (env["CARAMEL_WORKER_CONCURRENCY"]? || "4").to_i?
     unless concurrency && (1..limit).includes?(concurrency)
       message = "CARAMEL_WORKER_CONCURRENCY must be a whole number from 1 to #{limit} " \
