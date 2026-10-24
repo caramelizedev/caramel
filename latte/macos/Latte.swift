@@ -148,7 +148,7 @@ private struct Site: Decodable {
               domainParts.count == 2,
               domainParts[0] == Substring(name),
               domainParts[1] == Substring(suffix),
-              suffix == "caramel" || suffix == "test",
+              ["caramel", "test", "localhost"].contains(suffix),
               Site.isValidProjectLabel(String(domainParts[0])) else {
             throw LatteError.invalidResponse("site domain is not a validated local hostname")
         }

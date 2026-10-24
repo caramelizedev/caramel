@@ -10,6 +10,8 @@ module Caramel
   class CSRF
     COOKIE_NAME = "__Host-caramel_csrf"
     LIFETIME    = 24.hours
+    # How far ahead of this host's clock another host's issue time may be.
+    CLOCK_SKEW = 1.minute
 
     getter origin : String
 
@@ -50,7 +52,8 @@ module Caramel
       timestamp, nonce, signature = token.split('.')
       issued = timestamp.to_i64? || return false
       age = now.to_unix - issued
-      return false unless issued <= now.to_unix && age <= LIFETIME.total_seconds
+      return false if issued > now.to_unix + CLOCK_SKEW.total_seconds
+      return false if age > LIFETIME.total_seconds
       Crypto::Subtle.constant_time_compare(sign("#{timestamp}.#{nonce}"), signature)
     end
 
