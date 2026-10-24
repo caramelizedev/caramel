@@ -187,19 +187,38 @@ esac
 if [ -n "$PROGRAM" ]; then
     NAME=$(printf '%s' "${PROGRAM#/}" | tr / -)
     # Every `crystal spec` names its program <cwd>/spec, whatever it runs, so
-    # the spec paths join the name: programs for different directories would
-    # otherwise share one root and replace each other's objects on every run.
+    # the spec directories join the name: programs for different directories
+    # would otherwise share one root and replace each other's objects on
+    # every run. A single file shares its directory's root, so running one
+    # spec file at a time does not compile the framework cold each time. An
+    # option's value (-e NAME, --tag TAG, --location FILE:LINE) is not a path.
     if [ "${1:-}" = spec ]; then
-        TARGETS=
+        DIRS=
+        VALUE=
         shift
         for ARG in "$@"; do
+            if [ -n "$VALUE" ]; then
+                VALUE=
+                continue
+            fi
             case $ARG in
+                -e|--example|--tag|--location|-l|--junit_output|--order) VALUE=1 ;;
                 -*) ;;
-                *) TARGETS=$TARGETS+$(printf '%s' "$ARG" | tr / -) ;;
+                *)
+                    DIR=${ARG%%/*}
+                    case $ARG in
+                        */*) DIR=$DIR/$(printf '%s' "${ARG#*/}" | cut -d/ -f1) ;;
+                    esac
+                    DIR=$(printf '%s' "$DIR" | sed 's/\.cr$//' | tr / -)
+                    case "+$DIRS+" in
+                        *"+$DIR+"*) ;;
+                        *) DIRS=$DIRS+$DIR ;;
+                    esac
+                    ;;
             esac
         done
         set -- spec "$@"
-        NAME=$NAME$TARGETS
+        NAME=$NAME$DIRS
     fi
     # A developer checkout's programs each get a cache root of their own, so
     # the keep-10 cleanup that ends every build (codegen/cache_dir.cr) never
