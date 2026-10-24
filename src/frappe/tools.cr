@@ -5,7 +5,7 @@ require "../latte/toolchain"
 
 module Caramel::Frappe
   class Tools
-    COMPILER = "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/crystal"
+    COMPILER = "data/installs/github-crystal-lang-crystal/1.22.1/embedded/bin/crystal"
 
     getter framework_root : String
     getter toolchain : Latte::Toolchain
@@ -39,8 +39,8 @@ module Caramel::Frappe
       result = Latte::ProcessRunner.run([compiler, "--version"],
         timeout: 5.seconds,
         output_limit: 4096)
-      managed = result.success? && result.stdout.starts_with?("Crystal 1.21.1")
-      raise Error.new("Managed Crystal 1.21.1 is unavailable") unless managed
+      managed = result.success? && result.stdout.starts_with?("Crystal 1.22.1")
+      raise Error.new("Managed Crystal 1.22.1 is unavailable") unless managed
     end
 
     def check_dependencies(project : Project) : Nil

@@ -21,7 +21,7 @@ Servers, proxies and hosting providers change on their own schedule, and deploy 
 2. **Release build.** `frappe build`:
    - refuses a dirty tree;
    - publishes `app/assets` into `public/` and refuses if that leaves tracked changes;
-   - installs Alpine's `gmp-static` from the image's package repository, then compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.21.1-alpine@sha256:bf35489a8273a606368bd6a7ab2e24d01f950ca919c85ba4fe4c5bf10cd7a67e` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
+   - installs Alpine's `gmp-static` from the image's package repository, then compiles the `shard.yml` target with `crystal build --release --static` in `crystallang/crystal:1.22.1-alpine@sha256:9beda8a9d4a3659c29d185cc18f3fb9b382421bb6a4a59b8f266a6fb4ccc9f16` for `linux/amd64`, keeping debug info and passing neither `-D caramel_development` nor `-Dpreview_mt`;
    - writes `.caramel/build/<shard>-<YYYYmmddTHHMMSSZ>-<sha7>-linux-amd64.tar.gz`, which holds `bin/<shard>` and `public/`. The time is the UTC build time; the sha is the commit's;
    - holds nothing else: no source tree and no Node or other external runtime. A file the binary reads at run time must be embedded when it compiles (`read_file`) or be a browser-fetched asset in `public/`;
    - prints the artifact's absolute path as its only line on standard output; progress goes to standard error.

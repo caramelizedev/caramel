@@ -23,7 +23,7 @@ private class ShardHookFixture
     executable(File.join(@provided, "check"), "echo provided-check")
     executable(File.join(@toolchain, "bin/crystal"), "echo stale-managed-compiler; exit 1")
     shards = File.join(@toolchain,
-      "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin/shards")
+      "data/installs/github-crystal-lang-crystal/1.22.1/embedded/bin/shards")
     executable(shards, <<-'SH')
       hooks=${PATH%%:*}
       printf '%s\n' "$hooks" > "$CARAMEL_SHARD_HOOK_REPORT"

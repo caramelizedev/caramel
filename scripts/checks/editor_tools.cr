@@ -11,7 +11,7 @@ module EditorCheck
                          "and bin/frappe lsp install first")
   end
   ROOT     = File.read(POINTER).lines.first.strip
-  CRYSTAL  = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.21.1")
+  CRYSTAL  = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.22.1")
   MANIFEST = JSON.parse(File.read(File.join(REPO, "tools/editor-darwin-arm64.json")))
   VERSIONS = {"ameba-ls"    => MANIFEST["ameba-ls"]["version"].as_s,
               "crystalline" => MANIFEST["crystalline"]["reported_version"].as_s}
@@ -88,7 +88,7 @@ module EditorCheck
         client.definition_until(navigation, at_puts, 180.seconds) do |item|
           item.starts_with?(stdlib)
         end
-        puts "PASS: crystalline definition into pinned Crystal 1.21.1 stdlib"
+        puts "PASS: crystalline definition into pinned Crystal 1.22.1 stdlib"
         at_argument = LSPClient.position(text, "puts response", 6)
         hover = client.at("textDocument/hover", navigation, at_argument, 60.seconds)
         unless hover.to_json.includes?("Response")

@@ -13,8 +13,8 @@ exec >&2
 
 # The Linux build of the compiler ADR 0001 pins. Moving the pin moves both
 # lines: the digest is the archive's SHA-256.
-VERSION=1.21.1
-SHA256=08b5779df8cf280c4a799599862bbe4d42103ba082aa73429562713c8a9f3b43
+VERSION=1.22.1
+SHA256=a4c4b7060bd7f44a17017442bf833e8e0638a495e9f6eec3781d9c63a0c1a128
 
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/caramel
 CRYSTAL=$CACHE/crystal-$VERSION-1

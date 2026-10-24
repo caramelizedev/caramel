@@ -23,7 +23,7 @@ if [ -z "${CARAMEL_TOOLCHAIN_ROOT:-}" ]; then
 fi
 
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
-CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.21.1
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.22.1
 BINARY=$CRYSTAL_ROOT/embedded/bin/shards
 # Dependency hooks invoke `crystal` too; use the managed compiler wrapper
 # so native shard builds receive the same OpenSSL paths as application builds.

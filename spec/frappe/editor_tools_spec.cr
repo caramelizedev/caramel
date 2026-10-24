@@ -21,7 +21,7 @@ private def editor_toolchain(base : String, name : String) : String
   root = File.join(base, name)
   Dir.mkdir(root, 0o700)
   File.write(File.join(root, ".caramel-toolchain.json"), %({"status":"complete"}))
-  compiler = File.join(root, "data/installs/github-crystal-lang-crystal/1.21.1/embedded/bin")
+  compiler = File.join(root, "data/installs/github-crystal-lang-crystal/1.22.1/embedded/bin")
   Dir.mkdir_p(compiler)
   File.touch(File.join(compiler, "crystal"))
   File.realpath(root)
@@ -98,7 +98,7 @@ describe Caramel::Frappe::EditorTools do
   it "pins the compiler source and PATH and removes loader overrides" do
     with_editor_fixture do |framework, root, _|
       tools = Caramel::Frappe::EditorTools.new(framework)
-      crystal = File.join(root, "data/installs/github-crystal-lang-crystal/1.21.1")
+      crystal = File.join(root, "data/installs/github-crystal-lang-crystal/1.22.1")
       server = Caramel::Frappe::EditorTools::Server.new(
         name: "ameba-ls",
         version: "0.2.0",
