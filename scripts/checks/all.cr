@@ -162,9 +162,10 @@ module Caramel::Checks::All
   # Deals the runs to *count* lanes. FIRST_LANE's runs go to the first lane
   # before the others are dealt, heaviest first, each to the lightest lane,
   # and the timing-sensitive latte-ipc last. A run stays on the lane it last
-  # ran on while that lane is within a fifth of the lightest lane's load, or
-  # 30 s of it, so its compiler cache there stays warm. browser goes first in
-  # its lane.
+  # ran on while that lane is no further above the lightest lane's load than
+  # the run's own duration: a move costs a cold compile in the new lane's
+  # prefix, which doubled a spec-heavy run, and can only save that much
+  # imbalance. browser goes first in its lane.
   private def plan(runs : Array(Run), count : Int32) : Array(Array(Run))
     first, rest = runs.partition { |(name, _)| FIRST_LANE.includes?(name) }
     lanes = [first] + Array.new(count - 1) { [] of Run }
@@ -176,7 +177,7 @@ module Caramel::Checks::All
       lightest = loads.min
       lane = (0...count).min_by { |index| loads[index] }
       if (previous = @@records[name]?.try(&.lane)) && previous < count
-        lane = previous if loads[previous] - lightest <= {lightest // 5, 30}.max
+        lane = previous if loads[previous] - lightest <= weight(name)
       end
       lanes[lane] << run
       loads[lane] += weight(name)
