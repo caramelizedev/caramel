@@ -61,8 +61,46 @@ module ApplicationSpecApp
     get "/broken", ApplicationSpecBroken
     get "/framed", ApplicationSpecFramed
     get "/nonced", ApplicationSpecNonced
+    get "/.well-known/change-password", ApplicationSpecHello
     get "/own", ApplicationSpecOwn
   end
+end
+
+# A public/ directory beside a file outside it, with the files the static specs read.
+private def with_public_root(& : String ->) : Nil
+  root = File.tempname("caramel-public")
+  Dir.mkdir(root)
+  Dir.mkdir("#{root}/public")
+  Dir.mkdir("#{root}/public/.well-known")
+  Dir.mkdir("#{root}/public/.git")
+  File.write("#{root}/public/app.css", "body{}")
+  File.write("#{root}/public/htmx-4.0.0.min.js", "//")
+  File.write("#{root}/public/.foo", "hidden")
+  File.write("#{root}/public/.git/config", "hidden")
+  File.write("#{root}/public/.well-known/security.txt", "Contact: x")
+  File.write("#{root}/public/.well-known/.hidden", "hidden")
+  File.write("#{root}/secret", "private")
+  File.symlink("#{root}/secret", "#{root}/public/link")
+  begin
+    yield root
+  ensure
+    FileUtils.rm_rf(root)
+  end
+end
+
+private def streamed_body(response : Caramel::Response) : String
+  streamer = response.streamer || return response.body
+  io = IO::Memory.new
+  streamer.call(io)
+  io.to_s
+end
+
+private def conditional(name : String,
+                        value : String,
+                        extra = {} of String => String) : HTTP::Request
+  headers = HTTP::Headers{"Host" => "bookshelf.caramel", name => value}
+  extra.each { |key, header| headers[key] = header }
+  HTTP::Request.new("GET", "/app.css", headers)
 end
 
 private def application_spec_app(root : String? = nil,
@@ -149,23 +187,97 @@ describe Caramel::Application do
   end
 
   it "serves only public regular files and refuses traversal or escaping symlinks" do
-    root = File.tempname("caramel-public")
-    Dir.mkdir(root)
-    Dir.mkdir("#{root}/public")
-    File.write("#{root}/public/app.css", "body{}")
-    File.write("#{root}/public/.foo", "hidden")
-    File.write("#{root}/secret", "private")
-    File.symlink("#{root}/secret", "#{root}/public/link")
-    begin
+    with_public_root do |root|
       app = application_spec_app("#{root}/public")
       ["/../secret", "/%2e%2e/secret", "/link", "/.env", "/app/"].each do |path|
         app.handle(hosted_request("GET", path)).status.should eq(404)
       end
       app.handle(hosted_request("GET", "foo")).status.should eq(400)
-      app.handle(hosted_request("GET", "/app.css")).body.should eq("body{}")
       app.handle(hosted_request("POST", "/app.css")).status.should eq(405)
-    ensure
-      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "streams a file with its length, and answers HEAD with the headers alone" do
+    with_public_root do |root|
+      app = application_spec_app("#{root}/public")
+      response = app.handle(hosted_request("GET", "/app.css"))
+      response.streamer.should_not be_nil
+      response.headers["Content-Length"].should eq("6")
+      response.headers["Content-Type"].should eq("text/css")
+      streamed_body(response).should eq("body{}")
+      head = app.handle(hosted_request("HEAD", "/app.css"))
+      head.status.should eq(200)
+      head.body.should eq("")
+      head.streamer.should be_nil
+      head.headers["Content-Length"].should eq("6")
+    end
+  end
+
+  it "serves .well-known files and routes every other hidden path" do
+    with_public_root do |root|
+      app = application_spec_app("#{root}/public")
+      known = app.handle(hosted_request("GET", "/.well-known/security.txt"))
+      streamed_body(known).should eq("Contact: x")
+      routed = app.handle(hosted_request("GET", "/.well-known/change-password"))
+      routed.status.should eq(200)
+      routed.body.should eq("hello")
+      ["/.well-known/.hidden", "/.git/config", "/.env"].each do |path|
+        app.handle(hosted_request("GET", path)).status.should eq(404)
+      end
+    end
+  end
+
+  it "sends validators, and revalidates unless the name carries a version" do
+    with_public_root do |root|
+      app = application_spec_app("#{root}/public")
+      stylesheet = app.handle(hosted_request("GET", "/app.css"))
+      stylesheet.headers["ETag"].should match(/\A"[0-9a-f]+-[0-9a-f]+"\z/)
+      modified = File.info("#{root}/public/app.css").modification_time
+      stylesheet.headers["Last-Modified"].should eq(HTTP.format_time(modified))
+      stylesheet.headers["Cache-Control"].should eq("no-cache")
+      script = app.handle(hosted_request("GET", "/htmx-4.0.0.min.js"))
+      script.headers["Cache-Control"].should eq("public, max-age=31536000, immutable")
+    end
+  end
+
+  it "answers 304 when the client's copy is current, and prefers If-None-Match" do
+    with_public_root do |root|
+      app = application_spec_app("#{root}/public")
+      etag = app.handle(hosted_request("GET", "/app.css")).headers["ETag"]
+      modified = File.info("#{root}/public/app.css").modification_time
+      future = HTTP.format_time(modified + 1.hour)
+      past = HTTP.format_time(modified - 1.hour)
+      not_modified = app.handle(conditional("If-None-Match", etag))
+      not_modified.status.should eq(304)
+      not_modified.body.should eq("")
+      not_modified.headers["ETag"].should eq(etag)
+      not_modified.headers.has_key?("Content-Length").should be_false
+      app.handle(conditional("If-None-Match", %(W/#{etag}, "other"))).status.should eq(304)
+      app.handle(conditional("If-None-Match", "*")).status.should eq(304)
+      app.handle(conditional("If-Modified-Since", future)).status.should eq(304)
+      app.handle(conditional("If-Modified-Since", past)).status.should eq(200)
+      app.handle(conditional("If-Modified-Since", "garbage")).status.should eq(200)
+      other = conditional("If-None-Match", %("x"), {"If-Modified-Since" => future})
+      app.handle(other).status.should eq(200)
+    end
+  end
+
+  it "answers a secured 500 for a file it cannot read" do
+    with_public_root do |root|
+      path = "#{root}/public/locked.css"
+      File.write(path, "body{}")
+      File.chmod(path, 0o000)
+      begin
+        pending!("running as root reads every file") if File::Info.readable?(path)
+        app = application_spec_app("#{root}/public")
+        response = app.handle(hosted_request("GET", "/locked.css"))
+        response.status.should eq(500)
+        response.body.should eq("Something went wrong.")
+        response.headers["Cache-Control"].should eq("no-store")
+        response.headers["X-Content-Type-Options"].should eq("nosniff")
+      ensure
+        File.chmod(path, 0o644)
+      end
     end
   end
 end

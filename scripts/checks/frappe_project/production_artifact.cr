@@ -162,9 +162,17 @@ module Caramel::Checks
       # The central resource index reads PostgreSQL as the runtime role.
       status = get("/tags").try(&.status_code)
       assert!(status == 200, "GET /tags: #{status}\n#{logs(@app)}")
-      # The artifact's public/ files, found through CARAMEL_ROOT.
-      status = get("/assets/htmx-4.0.0.min.js").try(&.status_code)
+      # The artifact's public/ files, found through CARAMEL_ROOT, with validators and
+      # the versioned name's immutable caching (ADR 0038).
+      script = get("/assets/htmx-4.0.0.min.js")
+      status = script.try(&.status_code)
       assert!(status == 200, "GET /assets/htmx-4.0.0.min.js: #{status}\n#{logs(@app)}")
+      headers = script.try(&.headers) || HTTP::Headers.new
+      etag = headers["ETag"]?
+      assert!(etag.try(&.matches?(/\A"[0-9a-f]+-[0-9a-f]+"\z/)) == true, "ETag: #{etag.inspect}")
+      assert!(!headers["Last-Modified"]?.nil?, "Last-Modified is missing")
+      cache = headers["Cache-Control"]?
+      assert!(cache == "public, max-age=31536000, immutable", "Cache-Control: #{cache.inspect}")
     end
 
     private def assert_tls : Nil
