@@ -5,7 +5,7 @@ module Caramel::Checks
   # ADR 0032 end to end on Linux: the artifact prints its roles with `db roles`,
   # migrates and serves over verify-full TLS to PostgreSQL in a container,
   # answers on its socket, and exits 0 on SIGTERM.
-  class FrappeProject::ProductionArtifact
+  class FrappeProjectBuild::ProductionArtifact
     FAILED   = "production artifact assertion failed"
     POSTGRES = "postgres:18-alpine"
     UBUNTU   = "ubuntu:24.04"
@@ -39,7 +39,7 @@ module Caramel::Checks
       WHERE usename = '#{RUNTIME}'
       SQL
 
-    def initialize(@fixture : FrappeProject, @docker : String, @unpacked : String)
+    def initialize(@fixture : LatteFixture, @docker : String, @unpacked : String)
       suffix = Random::Secure.hex(4)
       @network = "caramel-check-#{suffix}"
       @postgres = "caramel-check-postgres-#{suffix}"
@@ -159,9 +159,9 @@ module Caramel::Checks
       # The binary runs with CARAMEL_ENV unset, which is production.
       hsts = health.try(&.headers["Strict-Transport-Security"]?)
       assert!(hsts == "max-age=31536000", "Strict-Transport-Security: #{hsts.inspect}")
-      # The central resource index reads PostgreSQL as the runtime role.
-      status = get("/tags").try(&.status_code)
-      assert!(status == 200, "GET /tags: #{status}\n#{logs(@app)}")
+      # The Book index reads PostgreSQL as the runtime role.
+      status = get("/books").try(&.status_code)
+      assert!(status == 200, "GET /books: #{status}\n#{logs(@app)}")
       # The artifact's public/ files, found through CARAMEL_ROOT, with validators and
       # the versioned name's immutable caching (ADR 0038).
       script = get("/assets/htmx-4.0.0.min.js")
