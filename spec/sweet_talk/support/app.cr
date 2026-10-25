@@ -5,6 +5,7 @@ require "./rules"
 require "./renamed"
 require "./tea_house"
 require "./ledger"
+require "./library"
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
 private def owned_url(variable : String) : String

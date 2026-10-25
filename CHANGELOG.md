@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- SweetTalk: `value Day, Date, means: "a calendar day"` is a real calendar day, from year 1 to 9999, over `SugarORM::Date` (`day.raw`), stored in a `date` column through `SugarORM::DateCodec`, so `has settled_on : Day`, `has returned_on : Day?` and a `part` of a value with parts each get one, and a text column that held a day, such as a former string value, is retyped by the check-first migration `frappe db diff` already derives. A day is `YYYY-MM-DD` text in JSON, and a contract field binds it from that text with `Day must be a calendar day written YYYY-MM-DD, as in 2026-02-28` as its error. `Day.new("2026-02-30")` refuses, `Day.new(2026, 3, 1)` and `Day.of(time)` (the time's own calendar day, with no conversion to UTC) build one, `day + 7`, `day - 7` and `day - other` move and count by days, and days compare and sort. There is no `Day.today`: a command takes the day it means as an argument. A `has` reaches a codec through a value's `SWEETTALK_CODEC`; only `Date` names one so far ([ADR 0043](docs/decisions/0043-sweettalk-calendar-days.md)).
+
 ## 0.18.0 - 2026-10-25
 
 ### Upgrade notes

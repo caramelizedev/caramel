@@ -3,7 +3,8 @@
 Date: 2026-10-09
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and 6.
-Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md), decision 2 by
+Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md) and
+[ADR 0043](0043-sweettalk-calendar-days.md), decision 2 by
 [ADR 0039](0039-sweettalk-optional-attributes.md), decision 11 by
 [ADR 0033](0033-sweettalk-multi-tenancy.md), and decisions 3 and 11 by
 [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md).
@@ -25,6 +26,8 @@ aggregates over days and undo their work when a step is refused.
    - `value Name, means: "…" do part street : String; … end` is a composite value. A part
      is a column type or a value that wraps one. It is built with one keyword per part,
      checks its `never` and `always` when built, and equals another with the same parts.
+   - `value Name, Date, means: "…"` is a calendar day over `SugarORM::Date`, stored in a
+     `date` column ([ADR 0043](0043-sweettalk-calendar-days.md)).
    - Any other value does not compile.
 2. **Attributes and tables** (amends decision 4).
    - `has name : Type = expression` gives an aggregate's or an entity's attribute a default;

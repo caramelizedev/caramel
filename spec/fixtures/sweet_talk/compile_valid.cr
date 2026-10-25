@@ -14,11 +14,17 @@ module Shop
 
     value Roast, String, one_of: %w[light medium dark], means: "how far a tea is roasted"
     value Courier, String, length: 2..30, means: "who carries an order"
+    value Day, Date, means: "a calendar day"
 
     value Address, means: "where a parcel goes" do
       part street : String
       part city : String
       never "An address needs a street and a city." { street.blank? || city.blank? }
+    end
+
+    value Term, means: "the days a tea is held" do
+      part from_on : Day
+      part until_on : Day
     end
 
     aggregate Tea, means: "one tea we sell" do
@@ -46,6 +52,8 @@ module Shop
       has roast : Roast?
       has packer : Int64?
       has tea : Tea?
+      has shipped_on : Day?
+      has term : Term?
       # A carried name kept while `shipped_by` becomes `courier` (ADR 0041).
       the courier : Courier? = shipped_by
       moves open >> placed, open >> cancelled, placed >> cancelled
@@ -82,8 +90,9 @@ module Shop
         emit Placed, lines: lines
       end
 
-      to ship(by : Courier) do
+      to ship(by : Courier, on : Day) do
         @shipped_by = by
+        @shipped_on = on
         emit Shipped
       end
 
@@ -191,7 +200,8 @@ SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
 Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)
 Shop::Ordering::Order.all.each do |order|
-  order.ship(Shop::Ordering::Courier.new("post"))
+  order.ship(Shop::Ordering::Courier.new("post"), Shop::Ordering::Day.new(2026, 3, 1))
+  order.shipped_on.try { |day| day + 7 - 7 }
   order.unwrap_gift
 end
 Shop::Ordering::Bell.create.ring
