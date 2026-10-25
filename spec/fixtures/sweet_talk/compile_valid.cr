@@ -189,6 +189,7 @@ struct AddLine < Caramel::Action
     field order : Shop::Ordering::Order::Id
     field quantity : Shop::Ordering::Quantity
     field tags : Array(Shop::Ordering::Quantity), max: 3
+    field shipped_on : Shop::Ordering::Day?
   end
 
   def handle(contract : Contract) : Caramel::Response

@@ -341,3 +341,31 @@ describe "SweetTalk's calendar days in events" do
     end
   end
 end
+
+private struct Slip
+  include JSON::Serializable
+
+  getter lent_on : Library::Lending::Day
+  getter back_on : Library::Lending::Day?
+end
+
+describe "SweetTalk's calendar days as JSON" do
+  it "writes a day as its ISO text and reads it back" do
+    day = CalendarDaysSpec.day("2026-03-01")
+    day.to_json.should eq(%("2026-03-01"))
+    [day].to_json.should eq(%(["2026-03-01"]))
+    slip = Slip.from_json(%({"lent_on":"2026-03-01","back_on":null}))
+    slip.lent_on.should eq(day)
+    slip.back_on.should be_nil
+    slip.to_json.should eq(%({"lent_on":"2026-03-01"}))
+  end
+
+  it "refuses what is not a day, as the calendar words it" do
+    ["2026-02-30", "20260301", "1"].each do |text|
+      expect_raises(JSON::ParseException, "Day must be a calendar day written YYYY-MM-DD") do
+        Slip.from_json(%({"lent_on":"#{text}"}))
+      end
+    end
+    expect_raises(JSON::ParseException) { Slip.from_json(%({"lent_on":20260301})) }
+  end
+end
