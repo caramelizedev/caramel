@@ -132,6 +132,29 @@ module SweetTalk
       def self.__sweettalk_from_json(any : JSON::Any) : self
         new({{ reads.join(", ").id }})
       end
+      # {constraint suffix} of the check an optional attribute of this value gets, which
+      # keeps its columns all set or all nil; adding a part makes it a new constraint.
+      ::SweetTalk.__sweettalk_hashed(SWEETTALK_OPTIONAL_CHECK, {"all_or_none_@digest"},
+        {{ parts.map(&.[0]).sort.join(",") }})
+
+      {% names = parts.map(&.[0]) %}
+      {% given = parts.map { |part| "#{part[0].id} : #{part[3].id}?" } %}
+      {% built = parts.map do |part|
+           wrapped = part[4] == "value" ? "#{part[2].id}.new(#{part[0].id})" : part[0]
+           "#{part[0].id}: #{wrapped.id}"
+         end %}
+      {% none = names.map { |part| "#{part.id}.nil?" }.join(" && ") %}
+      {% all = names.map { |part| "!#{part.id}.nil?" }.join(" && ") %}
+      {% refusal = "#{@type.name.split("::").last.id} must have all of its parts or none: " +
+                   names.join(", ") %}
+
+      # The value an optional attribute stores in the columns of its parts: nil when every
+      # one is nil, refused when only some are.
+      def self.__sweettalk_from_columns(*, {{ given.join(", ").id }}) : self?
+        return nil if {{ none.id }}
+        return new({{ built.join(", ").id }}) if {{ all.id }}
+        raise ::SweetTalk::Refusal.new({{ refusal }})
+      end
     end
 
     # Runs every `never` and `always` of this value.

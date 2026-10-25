@@ -1,6 +1,7 @@
-# The tea shop's domain: values, aggregates, factories, queries, removal, a domain service,
-# projections, a process with a deadline and a compensation, a reference to the
-# application's own schema, and events that record who acted and when.
+# The tea shop's domain: values, a closed list, aggregates with optional attributes,
+# factories, queries, removal, a domain service, projections, a process with a deadline and
+# a compensation, a reference to the application's own schema, and events that record who
+# acted and when, or carry the aggregate's attributes.
 require "../../../src/caramel/sweet_talk"
 
 module TeaShop
@@ -17,12 +18,14 @@ module TeaShop
   context Catalogue, means: "the teas on our shelves" do
     value Tins, Int32, at_least: 0, means: "a count of tins on the shelf"
     value Cents, Int64, at_least: 0, means: "an amount of money"
+    value Roast, String, one_of: %w[light medium dark], means: "how far a tea is roasted"
 
     aggregate Tea, means: "one tea we sell" do
       has name : String
       has price : Cents
       has stock : Tins
       has held : Tins = Tins.zero
+      has roast : Roast = Roast.medium
       never "A tea cannot hold more tins than it has." { held > stock }
 
       event Restocked, tins : Tins, means: "fresh tins reached the shelf"
@@ -63,6 +66,7 @@ module TeaShop
       means: "an address we can write to"
     value Postcode, String, matches: /\A[A-Z0-9][A-Z0-9 ]{1,8}[A-Z0-9]\z/,
       means: "a postal code, in capitals"
+    value Courier, String, length: 2..30, means: "who carries an order"
 
     value Address, means: "where a parcel goes" do
       part street : String
@@ -82,6 +86,9 @@ module TeaShop
       has deliver_to : Address
       has lines : Array(Line)
       has late_parcel : Bool = false
+      has gift_to : Address?
+      has courier : Courier?
+      has packer : Account?
       moves open >> placed >> shipped, open >> cancelled, placed >> cancelled
       never "An order needs at least one tea." { placed? && lines.empty? }
 
@@ -96,7 +103,8 @@ module TeaShop
 
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), deliver_to : Address, means: "a member checked out"
-      event Shipped, means: "the order left in its parcel"
+      event Shipped, carries: [member, deliver_to, courier, total],
+        means: "an order left, with what it said when it left"
       event Cancelled, lines : Array(Line), reason : String?,
         means: "the order was given up, and why"
 
@@ -123,9 +131,18 @@ module TeaShop
         emit Placed, lines: lines, deliver_to: deliver_to
       end
 
-      to ship do
+      to ship(courier : Courier) do
         shipped!
+        @courier = courier
         emit Shipped
+      end
+
+      to pack_with(packer : Account?) do
+        self.packer = packer
+      end
+
+      to wrap_as_gift(gift_to : Address?) do
+        @gift_to = gift_to
       end
 
       to cancel(reason : String? = nil) do
@@ -160,6 +177,7 @@ module TeaShop
     projection Sales, means: "tins sold of one tea" do
       key tea : Catalogue::Tea
       has sold : Int32 = 0
+      has last_order : Order?
       finds best_sellers(count : Int32), order: {sold: :desc}, first: count
       finds selling(least : Int32), where: {sold: least..}, order: {sold: :desc}
       finds of(tea : Catalogue::Tea), where: {tea: tea}
@@ -170,7 +188,9 @@ module TeaShop
       end
 
       whenever Order::Placed, each: :lines do |placed, line|
-        Sales[line.tea].sold += line.quantity.to_i
+        row = Sales[line.tea]
+        row.sold += line.quantity.to_i
+        row.last_order = placed.order_id
       end
     end
 
@@ -223,7 +243,7 @@ module TeaShop
 
     border Fulfilment do
       whenever Fulfilment::Parcel::Dispatched do |dispatched|
-        Order.find(Order::Id.new(dispatched.order)).ship
+        Order.find(Order::Id.new(dispatched.order)).ship Courier.new("post")
       end
 
       compensate Fulfilment::Parcel::Dispatched do |dispatched, refusal|

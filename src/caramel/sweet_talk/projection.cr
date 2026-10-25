@@ -54,18 +54,36 @@ module SweetTalk
     {% columns = [] of Nil %}
     {% for attribute in attributes %}
       {% name = attribute[0].id %}
+      {% base = attribute[10].id %}
+      {% nilable = attribute[9] %}
       {% if attribute[2] == "value" %}
-        {% loads << "@#{name} = #{attribute[3].id}.new(row.#{attribute[4].id})" %}
-        {% columns << "#{attribute[4].id}: @#{name}.raw" unless attribute == key %}
+        {% if nilable %}
+          {% loads << "@#{name} = row.#{attribute[4].id}.try { |raw| #{base}.new(raw) }" %}
+          {% columns << "#{attribute[4].id}: @#{name}.try(&.raw)" unless attribute == key %}
+        {% else %}
+          {% loads << "@#{name} = #{attribute[3].id}.new(row.#{attribute[4].id})" %}
+          {% columns << "#{attribute[4].id}: @#{name}.raw" unless attribute == key %}
+        {% end %}
       {% elsif attribute[2] == "composite" %}
-        {% parts = attribute[7].map do |part|
-             read = "row.#{part[1].id}"
-             "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
-           end %}
-        {% loads << "@#{name} = #{attribute[3].id}.new(#{parts.join(", ").id})" %}
-        {% for part in attribute[7] %}
-          {% raw = part[4] == "value" ? ".raw" : "" %}
-          {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" unless attribute == key %}
+        {% if nilable %}
+          {% reads = attribute[7].map { |part| "#{part[0].id}: row.#{part[1].id}" } %}
+          {% loads << "@#{name} = #{base}.__sweettalk_from_columns(#{reads.join(", ").id})" %}
+          {% for part in attribute[7] %}
+            {% raw = part[4] == "value" ? ".raw" : "" %}
+            {% columns << "#{part[1].id}: @#{name}.try(&.#{part[0].id}#{raw.id})" %}
+          {% end %}
+        {% else %}
+          {% parts = attribute[7].map do |part|
+               read = "row.#{part[1].id}"
+               "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
+             end %}
+          {% loads << "@#{name} = #{attribute[3].id}.new(#{parts.join(", ").id})" %}
+          {% for part in attribute[7] %}
+            {% raw = part[4] == "value" ? ".raw" : "" %}
+            {% unless attribute == key %}
+              {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
+            {% end %}
+          {% end %}
         {% end %}
       {% else %}
         {% loads << "@#{attribute[4].id} = row.#{attribute[4].id}" %}

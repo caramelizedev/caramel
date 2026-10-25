@@ -20,20 +20,17 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - Name `Caramel::Outbound` or `HTTP::Client` only inside `border Name, outside: "…"`, call it from a `whenever`, and fake it in specs with `Corretto.stub_wire`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-outside
 - `subdomain: :core`, `:supporting` or `:generic` labels a context for readers and changes no rule. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-subdomains
 - Change one aggregate per command, service, policy or process step. For work across aggregates, write a `process`, or emit an event and react to it with `whenever`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
-- Change state only in the aggregate's commands (`to`), never through `Rows`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
-- `has tea : Catalogue::Tea` stores an id: load the aggregate with `find` when you need it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
-- Emit only the aggregate's own events. A handler reads the event's fields, which are facts as emitted, not the aggregate now. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-events
-- Stop a command with `refuse "message"`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-commands
-- State invariants with `never` and `always`, and move the lifecycle with its movers, such as `placed!`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-lifecycle
+- Change state only in the aggregate's commands (`to`), never through `Rows`. `has tea : Catalogue::Tea` stores an id: load the aggregate with `find` when you need it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
+- Say an optional part with `?` only for what may be absent: a column some kinds lack is a value with parts or a state; a rule tying attributes is a `never`. Set a reference with `self.owner = other`. `one_of: %w[…]` is a closed list. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-richer-values
+- Emit only the aggregate's own events, `carries: [kind]` for fields it holds. A handler reads the event's fields, which are facts as emitted, not the aggregate now. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-events
+- Stop a command with `refuse "message"`. State invariants with `never` and `always`, and move the lifecycle with its movers, such as `placed!`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-commands
 - Use a `factory` when an aggregate must start with an event; it then has no `create`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-factories
 - Read with `find`, `find?`, `all`, and the `finds` and `counts` an aggregate or a projection declares; sort and limit with `order:` and `first:`. A `finds` block is only for what `where:` cannot say. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-queries
 - State a rule once with `specification`, then use `name?` in guards and `satisfying:` in queries. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-specifications
 - Rename with `renamed_from:`, so tables, channels and queued jobs keep their stored names. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-renames
 - In a multi-tenant application, name the `tenant` before the first context, and mark a context `central: true` only when every tenant shares it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-tenancy
-- After changing what the domain stores, run `frappe db diff`, then `frappe migrate`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
-- After removing a lifecycle state, do the same; a row in that state stops the migration. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-lifecycle
-- A contract field may be a value or an aggregate's id: it binds from the type the value wraps, and its refusal is the field's error. A value with parts is one field per part. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
-- A refusal `handle` does not rescue answers 422, and `SweetTalk::Missing` answers 404; override `render_refusal` to answer otherwise. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
+- After changing what the domain stores, run `frappe db diff`, then `frappe migrate`; a row breaking a new CHECK or key stops it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
+- A contract field may be a value or an aggregate's id: it binds from the type the value wraps, and its refusal is the field's error. A value with parts is one field per part. A refusal `handle` does not rescue answers 422, and `SweetTalk::Missing` answers 404; override `render_refusal` to answer otherwise. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
 
 ## Not planned
 
