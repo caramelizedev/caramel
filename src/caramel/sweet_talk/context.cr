@@ -47,14 +47,17 @@ module SweetTalk
     # `value Tins, Int32, at_least: 0, means: "…"` is a value object. `+` and `-` take the
     # same value or an integer, `*` an integer, and `times: Quantity` lets `*` take a
     # quantity too. `value Email, String, matches: /…/, length: 3..254, means: "…"`
-    # wraps a string, and `value Address, means: "…" do part street : String; … end` is a
-    # value of several parts. Bounds and lengths are also CHECK constraints on every
-    # column that stores the value, and so are integer literals; `database_check: false`
-    # keeps them in Crystal only. A pattern is checked in Crystal only, because
-    # PostgreSQL reads regular expressions differently. `SWEETTALK_CHECK` records
-    # {"range", "lo..hi"} or {"length", name suffix, SQL condition}, or nil.
+    # wraps a string, `value Kind, String, one_of: %w[payment receipt], means: "…"` a string
+    # that is one of a closed list, and `value Address, means: "…" do part street : String; …
+    # end` is a value of several parts. Bounds, lengths and lists are also CHECK constraints
+    # on every column that stores the value, and so are integer literals; `database_check:
+    # false` keeps them in Crystal only. A pattern is checked in Crystal only, because
+    # PostgreSQL reads regular expressions differently. `SWEETTALK_CHECK` records {"range",
+    # "lo..hi"}, {"length", name suffix, SQL condition} or {"column", name suffix, SQL
+    # condition}, or nil.
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
-                matches = nil, length = nil, database_check = nil, means = nil, &block)
+                matches = nil, length = nil, one_of = nil, database_check = nil, means = nil,
+                &block)
       {% if block && !wraps.is_a?(NilLiteral) %}
         {% name.raise "value #{name} takes parts or a type to wrap, not both" %}
       {% elsif !block && wraps.is_a?(NilLiteral) %}
@@ -95,12 +98,61 @@ module SweetTalk
                       {"times", times}] %}
         {% for option in options %}
           {% unless option[1].is_a?(NilLiteral) %}
-            {% name.raise "value #{name} wraps String, so it takes matches: and length:, " +
-                          "not #{option[0].id}:" %}
+            {% name.raise "value #{name} wraps String, so it takes matches:, length: and " +
+                          "one_of:, not #{option[0].id}:" %}
+          {% end %}
+        {% end %}
+        {% listed = !one_of.is_a?(NilLiteral) %}
+        {% members = [] of Nil %}
+        {% if listed %}
+          {% unless matches.is_a?(NilLiteral) && length.is_a?(NilLiteral) %}
+            {% name.raise "value #{name} lists its members with one_of:, so it takes neither " +
+                          "matches: nor length:" %}
+          {% end %}
+          {% unless one_of.is_a?(ArrayLiteral) && one_of.size > 0 &&
+                      one_of.all?(&.is_a?(StringLiteral)) %}
+            {% one_of.raise "value #{name} takes one_of: a list of words, as in one_of: " +
+                            "%w[payment receipt], not #{one_of}" %}
+          {% end %}
+          {% members = one_of.map(&.id.stringify) %}
+          {% methods = [] of Nil %}
+          # A member `receipt` defines `Kind.receipt` and `kind.receipt?`, so it may not be a
+          # class method the value has (or every Class and Object has), a predicate every
+          # Object has, or a keyword.
+          {% taken = %w[all new allocate includes zero from_field name hash class inspect] %}
+          {% taken = taken + %w[to_s object_id itself dup clone tap try not_nil pretty_inspect] %}
+          {% taken = taken + %w[crystal_type_id instance_sizeof to_json from_json to_yaml] %}
+          {% taken = taken + %w[nil same equal is_a responds_to in unsafe_as] %}
+          {% taken = taken + %w[abstract alias annotation as asm begin break case def do else] %}
+          {% taken = taken + %w[elsif end ensure enum extend false for fun if include lib] %}
+          {% taken = taken + %w[macro module next of out pointerof private protected require] %}
+          {% taken = taken + %w[rescue return select self sizeof struct super then true] %}
+          {% taken = taken + %w[typeof uninitialized union unless until verbatim when while] %}
+          {% taken = taken + %w[yield offsetof] %}
+          {% for member in members %}
+            {% unless member =~ /\A[A-Za-z][A-Za-z0-9_]*\z/ %}
+              {% name.raise "value #{name} lists #{member.id} in one_of:, which is not a word of " +
+                            "letters, digits and underscores that starts with a letter" %}
+            {% end %}
+            {% method = member.underscore %}
+            {% if methods.includes?(method) %}
+              {% name.raise "value #{name} lists #{method.id} twice in one_of:, and each member " +
+                            "names #{name}.#{method.id} and #{name}##{method.id}?" %}
+            {% elsif taken.includes?(method) %}
+              {% name.raise "value #{name} lists #{method.id} in one_of:, which would define " +
+                            "#{name}.#{method.id} and #{name}##{method.id}?, names #{name} " +
+                            "already has: choose another word" %}
+            {% end %}
+            {% methods << method %}
           {% end %}
         {% end %}
         {% check = nil %}
-        {% if checked && !length.is_a?(NilLiteral) %}
+        {% if checked && listed %}
+          # The check's name carries the hash of the members, so a changed list is a new
+          # constraint, as a lifecycle's states are (`__sweettalk_hashed` defines it).
+          {% quoted = members.map { |member| "'#{member.id}'" } %}
+          {% check = {"column", "one_of_@digest", "IN (#{quoted.join(", ").id})"} %}
+        {% elsif checked && !length.is_a?(NilLiteral) %}
           {% unless length.is_a?(RangeLiteral) %}
             {% length.raise literal + length.stringify + literally %}
           {% end %}
@@ -129,11 +181,25 @@ module SweetTalk
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = "String"
-          SWEETTALK_CHECK = {{ check }}
+          {% if check && check[1] =~ /@digest/ %}
+            ::SweetTalk.__sweettalk_hashed(SWEETTALK_CHECK, {{ check }},
+              {{ members.sort.join(",") }})
+          {% else %}
+            SWEETTALK_CHECK = {{ check }}
+          {% end %}
+          {% if listed %}
+            SWEETTALK_ONE_OF = {{ members }}
+          {% end %}
 
           getter raw : String
 
           def initialize(@raw : String)
+            {% if listed %}
+              unless SWEETTALK_ONE_OF.includes?(@raw)
+                raise ::SweetTalk::Refusal.new(
+                  {{ "#{name} must be one of #{members.join(", ").id}" }})
+              end
+            {% end %}
             {% unless matches.is_a?(NilLiteral) %}
               unless {{ matches }}.matches?(@raw)
                 raise ::SweetTalk::Refusal.new({{ "#{name} must match #{matches}" }})
@@ -146,6 +212,28 @@ module SweetTalk
               end
             {% end %}
           end
+
+          {% if listed %}
+            # Every member, in the order one_of: lists them.
+            def self.all : Array(self)
+              SWEETTALK_ONE_OF.map { |member| new(member) }
+            end
+
+            # Whether *raw* is one of the members.
+            def self.includes?(raw : String) : Bool
+              SWEETTALK_ONE_OF.includes?(raw)
+            end
+
+            {% for member, index in members %}
+              def self.{{ methods[index].id }} : self
+                new({{ member }})
+              end
+
+              def {{ methods[index].id }}? : Bool
+                @raw == {{ member }}
+              end
+            {% end %}
+          {% end %}
 
           def self.__sweettalk_from_json(any : JSON::Any) : self
             new(any.as_s)
@@ -168,7 +256,7 @@ module SweetTalk
           end
         end
       {% else %}
-        {% for option in [{"matches", matches}, {"length", length}] %}
+        {% for option in [{"matches", matches}, {"length", length}, {"one_of", one_of}] %}
           {% unless option[1].is_a?(NilLiteral) %}
             {% name.raise "value #{name} wraps #{wraps}, so it takes at_least:, at_most:, " +
                           "within: and times:, not #{option[0].id}:" %}

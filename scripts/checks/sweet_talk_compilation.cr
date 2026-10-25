@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036 and 0039). Each declaration
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 and 0040). Each declaration
 # mistake fails to compile with a fixed problem text, naming its file where the mistake has a
 # line; a valid domain compiles, with and without caramel/tenancy; and an application that does
 # not require caramel/sweet_talk holds none of its code. spec/sweet_talk and
@@ -47,9 +47,32 @@ PROBLEMS = [
    "finds of asks for state shipping, which Order does not have; states: open, placed"},
   {"finds_entities", "finds of cannot filter on lines, a list of entities"},
   {"value_string_bounds",
-   "value Email wraps String, so it takes matches: and length:, not at_least:"},
+   "value Email wraps String, so it takes matches:, length: and one_of:, not at_least:"},
   {"value_int_matches",
    "value Tins wraps Int32, so it takes at_least:, at_most:, within: and times:, not matches:"},
+  {"value_int_one_of",
+   "value Tins wraps Int32, so it takes at_least:, at_most:, within: and times:, not one_of:"},
+  {"one_of_not_list",
+   "value Roast takes one_of: a list of words, as in one_of: %w[payment receipt], not \"light\""},
+  {"one_of_with_matches",
+   "value Roast lists its members with one_of:, so it takes neither matches: nor length:"},
+  {"one_of_word",
+   "value Roast lists dark-roast in one_of:, which is not a word of letters, digits and " \
+   "underscores that starts with a letter"},
+  {"one_of_duplicate",
+   "value Roast lists light twice in one_of:, and each member names Roast.light and Roast#light?"},
+  {"one_of_reserved",
+   "value Roast lists all in one_of:, which would define Roast.all and Roast#all?, names Roast " \
+   "already has: choose another word"},
+  {"one_of_class_method",
+   "value Roast lists name in one_of:, which would define Roast.name and Roast#name?, names " \
+   "Roast already has: choose another word"},
+  {"one_of_object_method",
+   "value Roast lists inspect in one_of:, which would define Roast.inspect and Roast#inspect?, " \
+   "names Roast already has: choose another word"},
+  {"one_of_keyword",
+   "value Roast lists end in one_of:, which would define Roast.end and Roast#end?, names " \
+   "Roast already has: choose another word"},
   {"key_optional", "key tea cannot be optional: every row has its key"},
   {"stray_reference_write",
    "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \

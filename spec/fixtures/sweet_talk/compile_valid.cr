@@ -12,6 +12,7 @@ module Shop
     value Parcels, Int32, at_least: 1, at_most: MOST_PARCELS, database_check: false,
       means: "how many parcels an order ships in"
 
+    value Roast, String, one_of: %w[light medium dark], means: "how far a tea is roasted"
     value Courier, String, length: 2..30, means: "who carries an order"
 
     value Address, means: "where a parcel goes" do
@@ -27,6 +28,7 @@ module Shop
       has parcels : Parcels = Parcels.new(1)
       has gift_to : Address?
       has shipped_by : Courier?
+      has roast : Roast?
       has packer : Int64?
       moves open >> placed, open >> cancelled, placed >> cancelled
 
@@ -38,7 +40,7 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
-      event Shipped, receipt_to : Email, gift_to : Address?, shipped_by : Courier?,
+      event Shipped, receipt_to : Email, gift_to : Address?, shipped_by : Courier?, roast : Roast?,
         means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
@@ -64,7 +66,8 @@ module Shop
 
       to ship(by : Courier) do
         @shipped_by = by
-        emit Shipped, receipt_to: receipt_to, gift_to: gift_to, shipped_by: shipped_by
+        emit Shipped, receipt_to: receipt_to, gift_to: gift_to, shipped_by: shipped_by,
+          roast: roast
       end
 
       to unwrap_gift do

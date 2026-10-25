@@ -219,7 +219,9 @@ module SweetTalk
           {% line = "check #{entry[0].id}: #{check[1].id}" %}
         {% else %}
           {% suffix = "#{entry[0].id}_#{check[1].id}" %}
-          {% sql = "char_length(\"#{entry[0].id}\") #{check[2].id}" %}
+          {% subject = "\"#{entry[0].id}\"" %}
+          {% subject = "char_length(#{subject.id})" if check[0] == "length" %}
+          {% sql = "#{subject.id} #{check[2].id}" %}
           {% line = "check :#{suffix.id}, #{sql.stringify.id}" %}
         {% end %}
         {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{suffix.id}" %}

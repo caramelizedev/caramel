@@ -1,7 +1,8 @@
-# What SweetTalk lets a model say without a type-code switch: optional attributes of every
-# stored kind, in an aggregate, an entity, a projection and a process, kept in nullable
-# columns that PostgreSQL also holds to their values' checks and, for a value with parts, to
-# all or none; and events that hold them.
+# What SweetTalk lets a model say without a type-code switch: a closed-set string value
+# with its members as methods, and optional attributes of every stored kind, in an
+# aggregate, an entity, a projection and a process, kept in nullable columns that PostgreSQL
+# also holds to their values' checks and, for a value with parts, to all or none; and events
+# that hold them.
 require "./support/app"
 
 module ExpressiveModelsSpec
@@ -35,6 +36,49 @@ module ExpressiveModelsSpec
   end
 end
 
+describe "SweetTalk's closed-set values" do
+  it "lists its members once, and gives each a constructor and a predicate" do
+    Ledger::Counter::Kind.all.map(&.raw).should eq(%w[payment receipt net_settlement])
+    kind = Ledger::Counter::Kind.receipt
+    kind.raw.should eq("receipt")
+    kind.receipt?.should be_true
+    kind.payment?.should be_false
+    Ledger::Counter::Kind.net_settlement.net_settlement?.should be_true
+    Ledger::Counter::Kind.includes?("payment").should be_true
+    Ledger::Counter::Kind.includes?("refund").should be_false
+  end
+
+  it "refuses a text outside its list, naming the list" do
+    expect_raises(SweetTalk::Refusal, "Kind must be one of payment, receipt, net_settlement") do
+      Ledger::Counter::Kind.new("refund")
+    end
+    expect_raises(SweetTalk::Refusal, "Currency must be one of USD, EUR, UZS") do
+      Ledger::Counter::Currency.new("usd")
+    end
+  end
+
+  it "compares and sorts as text, and builds a contract field or its message" do
+    (Ledger::Counter::Kind.payment < Ledger::Counter::Kind.receipt).should be_true
+    Ledger::Counter::Kind.from_field("receipt") { |_| fail "no refusal expected" }
+      .try(&.receipt?).should be_true
+    refusal = nil
+    Ledger::Counter::Kind.from_field("refund") { |message| refusal = message }
+      .should be_nil
+    refusal.should eq("Kind must be one of payment, receipt, net_settlement")
+  end
+
+  it "checks the list in PostgreSQL, under a name that changes with the list" do
+    SweetTalkSpec.rolled_back do
+      transfer = ExpressiveModelsSpec.transfer
+      ExpressiveModelsSpec.broken("UPDATE counter_transfers SET kind = 'refund' WHERE id = $1",
+        transfer.id.raw).to_s.should start_with("check_counter_transfers_kind_one_of_")
+      ExpressiveModelsSpec.broken("UPDATE counter_transfers SET kind = 'receipt' WHERE id = $1",
+        transfer.id.raw).should be_nil
+      Ledger::Counter::Transfer.find(transfer.id).kind.receipt?.should be_true
+    end
+  end
+end
+
 describe "SweetTalk's optional attributes" do
   it "starts every optional attribute as nil and stores it in a nullable column" do
     SweetTalkSpec.rolled_back do
@@ -42,12 +86,13 @@ describe "SweetTalk's optional attributes" do
       transfer.owner.should be_nil
       transfer.account.should be_nil
       transfer.settled_by.should be_nil
+      transfer.channel.should be_nil
       transfer.leg.should be_nil
       transfer.reason.should be_nil
       transfer.note.should be_nil
       stored = Ledger::Counter::Transfer.find(transfer.id)
-      {stored.owner, stored.account, stored.settled_by, stored.leg, stored.reason, stored.note}
-        .should eq({nil, nil, nil, nil, nil, nil})
+      {stored.owner, stored.account, stored.settled_by, stored.channel, stored.leg, stored.reason,
+       stored.note}.should eq({nil, nil, nil, nil, nil, nil, nil})
       row = SugarORM.sql(<<-SQL, as: {owner_id: Int64?, leg_currency: String?, leg_cents: Int64?})
         SELECT owner_id, leg_currency, leg_cents FROM counter_transfers
         SQL
@@ -64,7 +109,7 @@ describe "SweetTalk's optional attributes" do
         ORDER BY column_name
         SQL
       nullable = columns.select { |column| column[:nullable] == "YES" }.map(&.[:name])
-      nullable.should eq(%w[account_id leg_cents leg_currency note owner_id reason
+      nullable.should eq(%w[account_id channel leg_cents leg_currency note owner_id reason
         removed_at settled_by])
       keys = SugarORM.sql(<<-SQL, as: {name: String, target: String})
         SELECT conname AS name, confrelid::regclass::text AS target FROM pg_constraint
@@ -98,7 +143,7 @@ describe "SweetTalk's optional attributes" do
       owner = Ledger::Counter::Owner.create(name: "Ada")
       amount = ExpressiveModelsSpec.money(5_i64)
       opened_by = ExpressiveModelsSpec.teller("Ada")
-      kind = Ledger::Counter::Kind.new("payment")
+      kind = Ledger::Counter::Kind.payment
       by_aggregate = Ledger::Counter::Transfer.create(kind: kind, amount: amount,
         opened_by: opened_by, owner: owner)
       by_id = Ledger::Counter::Transfer.create(kind: kind, amount: amount, opened_by: opened_by,
@@ -119,7 +164,7 @@ describe "SweetTalk's optional attributes" do
       Ledger::Counter::Transfer.find(transfer.id).account.should eq(expected)
       transfer.use_account(nil)
       Ledger::Counter::Transfer.find(transfer.id).account.should be_nil
-      with_record = Ledger::Counter::Transfer.create(kind: Ledger::Counter::Kind.new("payment"),
+      with_record = Ledger::Counter::Transfer.create(kind: Ledger::Counter::Kind.payment,
         amount: ExpressiveModelsSpec.money(1_i64), opened_by: ExpressiveModelsSpec.teller("Ada"),
         account: account)
       with_record.account.should eq(expected)
@@ -146,6 +191,20 @@ describe "SweetTalk's optional attributes" do
         other.id.raw).should eq("check_counter_transfers_reason_length_3_40")
       ExpressiveModelsSpec.broken("UPDATE counter_transfers SET reason = NULL WHERE id = $1",
         other.id.raw).should be_nil
+    end
+  end
+
+  it "stores an optional closed-set value, which PostgreSQL holds to its list or to null" do
+    SweetTalkSpec.rolled_back do
+      transfer = ExpressiveModelsSpec.transfer
+      Ledger::Counter::Transfer.without_channel.map(&.id).should eq([transfer.id])
+      transfer.arrive_by(Ledger::Counter::Channel.new("post"))
+      Ledger::Counter::Transfer.find(transfer.id).channel.try(&.post?).should be_true
+      Ledger::Counter::Transfer.without_channel.should be_empty
+      ExpressiveModelsSpec.broken("UPDATE counter_transfers SET channel = 'fax' WHERE id = $1",
+        transfer.id.raw).to_s.should start_with("check_counter_transfers_channel_one_of_")
+      transfer.arrive_by(nil)
+      Ledger::Counter::Transfer.find(transfer.id).channel.should be_nil
     end
   end
 
@@ -194,20 +253,20 @@ describe "SweetTalk's optional attributes" do
     expect_raises(SweetTalk::Refusal, half) do
       money.__sweettalk_from_columns(currency: nil, cents: 7_i64)
     end
-    expect_raises(SweetTalk::Refusal, "Currency must be between 3 and 3 characters") do
-      money.__sweettalk_from_columns(currency: "US", cents: 7_i64)
+    expect_raises(SweetTalk::Refusal, "Currency must be one of USD, EUR, UZS") do
+      money.__sweettalk_from_columns(currency: "GBP", cents: 7_i64)
     end
   end
 
   it "holds the parts of an optional value to their own checks" do
     SweetTalkSpec.rolled_back do
       transfer = ExpressiveModelsSpec.transfer
-      expect_raises(SweetTalk::Refusal, "Currency must be between 3 and 3 characters") do
-        ExpressiveModelsSpec.money(5_i64, "US")
+      expect_raises(SweetTalk::Refusal, "Currency must be one of USD, EUR, UZS") do
+        ExpressiveModelsSpec.money(5_i64, "GBP")
       end
       ExpressiveModelsSpec.broken(
-        "UPDATE counter_transfers SET leg_currency = 'US', leg_cents = 1 WHERE id = $1",
-        transfer.id.raw).should eq("check_counter_transfers_leg_currency_length_3_3")
+        "UPDATE counter_transfers SET leg_currency = 'GBP', leg_cents = 1 WHERE id = $1",
+        transfer.id.raw).to_s.should start_with("check_counter_transfers_leg_currency_one_of_")
       ExpressiveModelsSpec.broken(
         "UPDATE counter_transfers SET leg_currency = 'USD', leg_cents = -1 WHERE id = $1",
         transfer.id.raw).should eq("check_counter_transfers_leg_cents")
@@ -225,7 +284,7 @@ describe "SweetTalk's optional attributes" do
       settled.assign(owner)
       Ledger::Counter::Transfer.without_leg.map(&.id).should eq([plain.id, settled.id])
       Ledger::Counter::Transfer.unassigned.map(&.id).should eq([plain.id, legged.id])
-      Ledger::Counter::Transfer.of_kind(Ledger::Counter::Kind.new("receipt")).map(&.id)
+      Ledger::Counter::Transfer.of_kind(Ledger::Counter::Kind.receipt).map(&.id)
         .should eq([legged.id, settled.id])
       Ledger::Counter::Transfer.opened_by_teller(ExpressiveModelsSpec.teller("Ada")).map(&.id)
         .should eq([plain.id, settled.id])
@@ -283,7 +342,7 @@ describe "SweetTalk's optional attributes" do
   it "builds by a factory an aggregate whose optional attributes come before a required one" do
     SweetTalkSpec.rolled_back do
       issuer = ExpressiveModelsSpec.teller("Ada")
-      kind = Ledger::Counter::Kind.new("receipt")
+      kind = Ledger::Counter::Kind.receipt
       by_position = Ledger::Counter::Voucher.issue(issuer, kind)
       by_name = Ledger::Counter::Voucher.issue(kind: kind, issuer: issuer)
       [by_position, by_name].each do |voucher|

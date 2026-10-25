@@ -1,6 +1,7 @@
-# A counter where money changes hands, for optional attributes of each stored kind (an
-# aggregate, a value, a value with parts, an application's schema record), the same inside an
-# entity, a projection and a process, and events that hand them to their handlers.
+# A counter where money changes hands, for the expressive models: closed-set values, optional
+# attributes of each stored kind (an aggregate, a value, a closed-set value, a value with
+# parts, an application's schema record), the same inside an entity, a projection and a
+# process, and events that hand them to their handlers.
 require "../../../src/caramel/sweet_talk"
 
 module Ledger
@@ -15,8 +16,10 @@ module Ledger
   end
 
   context Counter, means: "a counter where money changes hands" do
-    value Currency, String, length: 3..3, means: "a currency the counter holds"
-    value Kind, String, length: 3..20, means: "what a transfer does with the money"
+    value Currency, String, one_of: %w[USD EUR UZS], means: "a currency the counter holds"
+    value Kind, String, one_of: %w[payment receipt net_settlement],
+      means: "what a transfer does with the money"
+    value Channel, String, one_of: %w[desk online post], means: "how a transfer reached us"
     value Teller, String, length: 2..20, means: "who works at the desk"
     value Cents, Int64, at_least: 0, means: "an amount in minor units"
     value Reason, String, length: 3..40, means: "why a transfer was undone"
@@ -37,6 +40,7 @@ module Ledger
       has owner : Owner?
       has account : Account?
       has settled_by : Teller?
+      has channel : Channel?
       has leg : Money?
       has reason : Reason?
       has note : String?
@@ -64,6 +68,7 @@ module Ledger
       finds opened_by_teller(teller : Teller), where: {opened_by: teller}
       finds by_reason_desc, order: {reason: :desc}
       finds by_reason_asc, order: {reason: :asc}
+      finds without_channel, where: {channel: nil}
       counts settled_unattended, where: {settled_by: nil, state: :settled}
 
       to assign(owner : Owner) do
@@ -84,6 +89,10 @@ module Ledger
 
       to use_account(account : Account?) do
         self.account = account
+      end
+
+      to arrive_by(channel : Channel?) do
+        @channel = channel
       end
 
       to give_back(leg : Money) do

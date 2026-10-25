@@ -1,10 +1,11 @@
 # What PostgreSQL checks of SweetTalk's values and lifecycles: every integer bound and
-# string length is a CHECK constraint on each column that stores it, and every lifecycle one
-# on its state column, so a write that goes around the domain is refused too; an optional
-# value with parts has one that keeps its columns all set or all nil, named by its parts so
-# that a part added is a new constraint; a pattern, and a value with database_check: false,
-# are checked in Crystal only. And the tables as PostgreSQL holds them match the declared
-# ones, so `frappe db diff` derives no further migration.
+# string length is a CHECK constraint on each column that stores it, a closed list of
+# words too, and every lifecycle one on its state column, so a write that goes around the
+# domain is refused too; an optional value with parts has one that keeps its columns all
+# set or all nil, named by its parts so that a part added is a new constraint; a pattern,
+# and a value with database_check: false, are checked in Crystal only. And the tables as
+# PostgreSQL holds them match the declared ones, so `frappe db diff` derives no further
+# migration.
 require "./support/app"
 
 # Two values with parts that differ by one part, to see how their checks are named.
@@ -58,22 +59,24 @@ describe "SweetTalk's database checks" do
         check_counter_followups_followed_by_length_2_20
         check_counter_followups_followed_with_all_or_none_437ba1f3
         check_counter_followups_followed_with_cents
-        check_counter_followups_followed_with_currency_length_3_3
+        check_counter_followups_followed_with_currency_one_of_3910bcb7
         check_counter_standings_last_leg_all_or_none_437ba1f3
         check_counter_standings_last_leg_cents
-        check_counter_standings_last_leg_currency_length_3_3
+        check_counter_standings_last_leg_currency_one_of_3910bcb7
         check_counter_standings_last_settled_by_length_2_20
         check_counter_transfer_lines_paid_by_length_2_20
         check_counter_transfer_lines_share_all_or_none_437ba1f3
         check_counter_transfer_lines_share_cents
-        check_counter_transfer_lines_share_currency_length_3_3
-        check_counter_transfers_amount_cents check_counter_transfers_amount_currency_length_3_3
-        check_counter_transfers_kind_length_3_20
+        check_counter_transfer_lines_share_currency_one_of_3910bcb7
+        check_counter_transfers_amount_cents
+        check_counter_transfers_amount_currency_one_of_3910bcb7
+        check_counter_transfers_channel_one_of_3c7434c3
+        check_counter_transfers_kind_one_of_897bbc40
         check_counter_transfers_leg_all_or_none_437ba1f3 check_counter_transfers_leg_cents
-        check_counter_transfers_leg_currency_length_3_3
+        check_counter_transfers_leg_currency_one_of_3910bcb7
         check_counter_transfers_opened_by_length_2_20 check_counter_transfers_reason_length_3_40
         check_counter_transfers_settled_by_length_2_20 check_counter_transfers_state_2d0246c7
-        check_counter_vouchers_issuer_length_2_20 check_counter_vouchers_kind_length_3_20
+        check_counter_vouchers_issuer_length_2_20 check_counter_vouchers_kind_one_of_897bbc40
         check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
         check_ordering_holds_state_a8664243 check_ordering_order_lines_price
         check_ordering_order_lines_quantity check_ordering_orders_receipt_to_length_3_254
