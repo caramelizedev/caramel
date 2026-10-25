@@ -197,3 +197,147 @@ describe "SweetTalk's calendar days" do
       %(ALTER TABLE "lending_loans" ALTER COLUMN "borrowed_on" TYPE date USING "borrowed_on"::date))
   end
 end
+
+module CalendarDaysSpec
+  # One loan for each day, made in that order, as the days of one ledger.
+  def self.loans(*days : String) : Array(Lending::Loan)
+    days.map { |text| loan(text) }.to_a
+  end
+
+  def self.ids(loans : Array(Lending::Loan)) : Array(Lending::Loan::Id)
+    loans.map(&.id)
+  end
+
+  # Checks that *rule* picks the loans at *positions* of *loans*, asked of PostgreSQL by
+  # `all(satisfying:)` and of each aggregate in *everything* by `satisfied_by?`.
+  def self.agree(rule : T.class, everything : Array(Lending::Loan),
+                 loans : Array(Lending::Loan), positions : Array(Int32)) : Nil forall T
+    expected = positions.map { |position| loans[position].id.raw }.sort!
+    Lending::Loan.all(satisfying: rule).map(&.id.raw).sort!.should eq(expected)
+    everything.select { |loan| rule.satisfied_by?(loan) }.map(&.id.raw).sort!.should eq(expected)
+  end
+
+  def self.jobs_fields : Array(String)
+    SugarORM.sql("SELECT payload->>'fields' AS fields FROM caramel_jobs ORDER BY id",
+      as: {fields: String}).map(&.[:fields])
+  end
+end
+
+describe "SweetTalk's calendar days in queries" do
+  it "finds a closed range of days, both ends in, across a leap day" do
+    SweetTalkSpec.rolled_back do
+      loans = CalendarDaysSpec.loans("2028-02-27", "2028-02-28", "2028-02-29", "2028-03-01",
+        "2028-03-02")
+      found = Library::Lending::Loan.borrowed_in(CalendarDaysSpec.day("2028-02-28"),
+        CalendarDaysSpec.day("2028-03-01"))
+      CalendarDaysSpec.ids(found).should eq(CalendarDaysSpec.ids(loans[1..3]))
+      Library::Lending::Loan.borrowed_in(CalendarDaysSpec.day("2028-03-01"),
+        CalendarDaysSpec.day("2028-02-28")).should be_empty
+    end
+  end
+
+  it "finds the days before, from and on a day, and a day not yet given" do
+    SweetTalkSpec.rolled_back do
+      loans = CalendarDaysSpec.loans("2026-02-28", "2026-03-01", "2026-03-01", "2026-03-02")
+      march = CalendarDaysSpec.day("2026-03-01")
+      CalendarDaysSpec.ids(Library::Lending::Loan.borrowed_before(march))
+        .should eq(CalendarDaysSpec.ids(loans[0, 1]))
+      CalendarDaysSpec.ids(Library::Lending::Loan.borrowed_from(march))
+        .should eq(CalendarDaysSpec.ids(loans[1..]))
+      CalendarDaysSpec.ids(Library::Lending::Loan.borrowed_on_day(march))
+        .should eq(CalendarDaysSpec.ids(loans[1, 2]))
+      loans[1].give_back(CalendarDaysSpec.day("2026-03-05"))
+      CalendarDaysSpec.ids(Library::Lending::Loan.still_out)
+        .should eq(CalendarDaysSpec.ids([loans[0], loans[2], loans[3]]))
+      fifth = CalendarDaysSpec.day("2026-03-05")
+      CalendarDaysSpec.ids(Library::Lending::Loan.returned_on_day(fifth))
+        .should eq([loans[1].id])
+      Library::Lending::Loan.returned_since(CalendarDaysSpec.day("2026-03-05")).should eq(1)
+      Library::Lending::Loan.returned_since(CalendarDaysSpec.day("2026-03-06")).should eq(0)
+    end
+  end
+
+  it "sorts by day, id breaking ties" do
+    SweetTalkSpec.rolled_back do
+      loans = CalendarDaysSpec.loans("2026-03-02", "2026-01-15", "2026-03-02", "2025-12-31")
+      CalendarDaysSpec.ids(Library::Lending::Loan.newest_first)
+        .should eq([loans[0].id, loans[2].id, loans[1].id, loans[3].id])
+      CalendarDaysSpec.ids(Library::Lending::Loan.oldest_first)
+        .should eq([loans[3].id, loans[1].id, loans[0].id, loans[2].id])
+    end
+  end
+
+  it "combines a range, a missing day, an order and a limit" do
+    SweetTalkSpec.rolled_back do
+      loans = CalendarDaysSpec.loans("2026-03-04", "2026-03-02", "2026-03-03", "2026-02-01",
+        "2026-03-05")
+      loans[1].give_back(CalendarDaysSpec.day("2026-03-06"))
+      found = Library::Lending::Loan.still_out_oldest(CalendarDaysSpec.day("2026-03-01"),
+        CalendarDaysSpec.day("2026-03-31"))
+      CalendarDaysSpec.ids(found).should eq([loans[2].id, loans[0].id])
+      Library::Lending::Loan.borrowed_count(CalendarDaysSpec.day("2026-03-01"),
+        CalendarDaysSpec.day("2026-03-31")).should eq(4)
+    end
+  end
+
+  it "reads a day in a specification the same in Crystal and PostgreSQL" do
+    SweetTalkSpec.rolled_back do
+      loans = CalendarDaysSpec.loans("2026-02-28", "2026-03-01", "2026-05-31", "2026-06-01",
+        "2026-01-01")
+      loans[1].give_back(CalendarDaysSpec.day("2026-06-01"))
+      loans[2].give_back(CalendarDaysSpec.day("2026-05-31"))
+      everything = Library::Lending::Loan.all
+      CalendarDaysSpec.agree(Library::Lending::InSpring, everything, loans, [1, 2])
+      CalendarDaysSpec.agree(Library::Lending::OnNewYear, everything, loans, [4])
+      CalendarDaysSpec.agree(Library::Lending::Unreturned, everything, loans, [0, 3, 4])
+      CalendarDaysSpec.agree(Library::Lending::ReturnedLate, everything, loans, [1])
+      CalendarDaysSpec.agree(Library::Lending::BeforeSpring, everything, loans, [0, 4])
+    end
+  end
+end
+
+describe "SweetTalk's calendar days in events" do
+  it "carries days in an event as ISO text, and hands them to a handler as emitted" do
+    SweetTalkSpec.rolled_back do |connection|
+      Library::Lending.returns.clear
+      Library::Lending.renewals.clear
+      loan = CalendarDaysSpec.loan("2026-03-01")
+      loan.renew(CalendarDaysSpec.day("2026-03-29"))
+      loan.give_back(CalendarDaysSpec.day("2026-03-09"))
+      CalendarDaysSpec.jobs_fields.first.should eq(%({"until_day":"2026-03-29"}))
+      CalendarDaysSpec.jobs_fields.last.should eq(
+        %({"borrowed_on":"2026-03-01","returned_on":"2026-03-09"}))
+      Caramel::ColdBrew.drain_queue(connection).should eq(3)
+      Library::Lending.returns.should eq(["2026-03-01|2026-03-09"])
+      Library::Lending.renewals.should eq(["2026-03-29"])
+    end
+  end
+
+  it "carries an optional day as nil, and refuses a queued event whose day is not one" do
+    meta = %({"id":"e1","at":"2026-03-01T00:00:00.000000Z","by":null,"cause":null,"flow":"f1"})
+    returned = Library::Lending::Loan::Returned
+    fields = %({"borrowed_on":"2026-03-01","returned_on":null})
+    queued = returned.__sweettalk_load(7_i64, fields, meta)
+    queued.returned_on.should be_nil
+    queued.borrowed_on.to_s.should eq("2026-03-01")
+    expect_raises(SweetTalk::Refusal, "Day must be a calendar day") do
+      returned.__sweettalk_load(7_i64, %({"borrowed_on":"2026-02-30","returned_on":null}), meta)
+    end
+  end
+
+  it "keeps a projection by day, whose key is a date column" do
+    SweetTalkSpec.rolled_back do |connection|
+      CalendarDaysSpec.column_type("lending_returns", "on_day").should eq("date")
+      first = CalendarDaysSpec.loan("2026-03-01")
+      second = CalendarDaysSpec.loan("2026-03-02")
+      third = CalendarDaysSpec.loan("2026-03-02")
+      first.give_back(CalendarDaysSpec.day("2026-03-09"))
+      second.give_back(CalendarDaysSpec.day("2026-03-09"))
+      third.give_back(CalendarDaysSpec.day("2026-03-10"))
+      Caramel::ColdBrew.drain_queue(connection)
+      rows = Library::Lending::Returns.all
+      rows.map { |row| {row.on_day.to_s, row.books} }
+        .should eq([{"2026-03-09", 2}, {"2026-03-10", 1}])
+    end
+  end
+end

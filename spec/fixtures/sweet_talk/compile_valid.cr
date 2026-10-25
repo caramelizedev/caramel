@@ -66,7 +66,7 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
-      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast, courier, tea],
+      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast, courier, tea, shipped_on],
         means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
@@ -76,6 +76,9 @@ module Shop
       finds placed_to(receipt_to : Email), where: {receipt_to: receipt_to, state: :placed}
       finds newest(count : Int32), order: {id: :desc}, first: count
       counts placed_count, where: {state: :placed}
+      finds shipped_between(from : Day, to : Day), where: {shipped_on: from..to},
+        order: {shipped_on: :desc}
+      counts shipped_since(day : Day), where: {shipped_on: day..}
       finds holding(tea : Int64) do |orders|
         orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea = ?)", tea)
       end
@@ -119,6 +122,9 @@ module Shop
 
     specification Settled, on: Order, where: {state: [:placed, :cancelled]},
       means: "an order no longer being filled"
+    specification ShippedInSpring, on: Order,
+      where: {shipped_on: Day.new(2026, 3, 1)..Day.new(2026, 5, 31)},
+      means: "an order that left between 1 March and 31 May 2026"
 
     projection Sales, means: "tins sold of one tea" do
       key tea : Int64
@@ -202,6 +208,8 @@ Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)
 Shop::Ordering::Order.all.each do |order|
   order.ship(Shop::Ordering::Courier.new("post"), Shop::Ordering::Day.new(2026, 3, 1))
   order.shipped_on.try { |day| day + 7 - 7 }
+  Shop::Ordering::Order.shipped_between(Shop::Ordering::Day.of(Time.utc),
+    Shop::Ordering::Day.new("2026-12-31"))
   order.unwrap_gift
 end
 Shop::Ordering::Bell.create.ring

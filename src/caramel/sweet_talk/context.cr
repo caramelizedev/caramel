@@ -761,7 +761,12 @@ module SweetTalk
                   {% have = "@#{attribute[0].id}.try(&.#{part[0].id}#{raw.id})" if attribute[9] %}
                   {% want = "::SweetTalk.column((#{value}).#{part[0].id})" %}
                   {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
-                  {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% if part[6] %}
+                    {% encoded = "#{row}.__sugar_encode_#{part[1].id}(#{want.id})" %}
+                    {% wheres << "::SweetTalk.__sweettalk_coded(#{part[1]}, #{encoded.id})" %}
+                  {% else %}
+                    {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% end %}
                   {% typings << "typeof(#{row}.query.where(#{part[1].id}: #{want.id}))" %}
                 {% end %}
               {% else %}
@@ -772,7 +777,12 @@ module SweetTalk
                 {% end %}
                 {% want = "::SweetTalk.column(#{value})" %}
                 {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
-                {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% if attribute[11] %}
+                  {% encoded = "#{row}.__sugar_encode_#{attribute[4].id}(#{want.id})" %}
+                  {% wheres << "::SweetTalk.__sweettalk_coded(#{attribute[4]}, #{encoded.id})" %}
+                {% else %}
+                  {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% end %}
                 {% typings << "typeof(#{row}.query.where(#{attribute[4].id}: #{want.id}))" %}
               {% end %}
             {% end %}
