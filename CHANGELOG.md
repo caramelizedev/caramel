@@ -4,6 +4,9 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- A codec may now name the `date` column type, and `SugarORM::Date` with `SugarORM::DateCodec` stores a calendar day in it: `field due_on : SugarORM::Date, codec: SugarORM::DateCodec`. A `Date` is a year, a month and a day with no time of day and no zone; `Date.parse` reads only `YYYY-MM-DD`. A `date` column read in a session whose `DateStyle` is not ISO, or holding `infinity` or a BC date, raises ArgumentError instead of guessing a day. `frappe db diff` creates and compares the column like any other. A codec that declares `ORDERABLE = true` before its schema, as `DateCodec` does, lets keyword `where` take a Range on that column (`where(due_on: first..last)`); the numeric, `jsonb` and `text` codecs still take only a value or `nil` ([ADR 0042](docs/decisions/0042-sugar-orm-date-codec.md)).
+- A text column that the schema now declares `date` (a field with `SugarORM::DateCodec`) no longer halts `frappe db diff`: the diff derives a migration that locks the table, counts the values that are not a calendar day written `YYYY-MM-DD` and stops with that count and up to five of them if there are any, then drops the column’s default and runs `ALTER COLUMN … TYPE date USING "col"::date`. The retype rewrites the table under an exclusive lock, and the check needs PostgreSQL 16 or newer. Every other type change, including `date` back to `text`, still halts ([ADR 0042](docs/decisions/0042-sugar-orm-date-codec.md)).
+
 ## 0.17.0 - 2026-10-24
 
 ### Upgrade notes

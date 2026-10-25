@@ -15,6 +15,9 @@ module SugarORM
     record AlterNull, table : String, column : String, nullable : Bool
     record AlterDefault, table : String, column : String, default : String?
     record AlterType, table : String, column : String, sql_type : String
+    # Raises, naming the rows it found, unless every value of the text column is a
+    # calendar day written YYYY-MM-DD; it runs before the column becomes a date.
+    record AssertDateText, table : String, column : String
     record AddIndex, table : String, index : Catalog::Index, concurrently : Bool
     record DropIndex, table : String, name : String
     record RenameIndex, table : String, from : String, to : String
@@ -25,10 +28,14 @@ module SugarORM
     record DropCheck, table : String, name : String
 
     alias Operation = CreateTable | AddColumn | RenameColumn | DropColumn |
-                      AlterNull | AlterDefault | AlterType |
+                      AlterNull | AlterDefault | AlterType | AssertDateText |
                       AddIndex | DropIndex | RenameIndex |
                       AddForeignKey | ValidateConstraint | DropForeignKey |
                       AddCheck | DropCheck
+
+    # The column types of the one retype the differ derives instead of halting.
+    TEXT = "text"
+    DATE = "date"
 
     # A changed index is built under this suffix first, then renamed.
     SWAP_SUFFIX = "_swap"
@@ -400,10 +407,9 @@ module SugarORM
         plan.halts << key_changed(table, column, actual)
         return
       end
+      live_default = actual.default
       if column.sql_type != actual.sql_type
-        halt(plan, dev_override, type_changed(table, column, actual)) do
-          changes << AlterType.new(table, column.name, column.sql_type)
-        end
+        live_default = change_type(table, column, actual, plan, dev_override, changes)
       end
       if column.nullable && !actual.nullable
         changes << AlterNull.new(table, column.name, nullable: true)
@@ -412,8 +418,40 @@ module SugarORM
           changes << AlterNull.new(table, column.name, nullable: false)
         end
       end
-      return if column.identity || column.default == actual.default
+      return if column.identity || column.default == live_default
       changes << AlterDefault.new(table, column.name, column.default)
+    end
+
+    # A text column declared date is checked and retyped; every other type change
+    # halts. Returns the default the live column has once the change has run.
+    private def self.change_type(table : String,
+                                 column : Catalog::Column,
+                                 actual : Catalog::Column,
+                                 plan : Plan,
+                                 dev_override : Bool,
+                                 changes : Array(Operation)) : String?
+      if column.sql_type == DATE && actual.sql_type == TEXT
+        retype_text_to_date(table, column, actual, plan, changes)
+        return
+      end
+      halt(plan, dev_override, type_changed(table, column, actual)) do
+        changes << AlterType.new(table, column.name, column.sql_type)
+      end
+      actual.default
+    end
+
+    # The check goes first, so a value that is not a day stops the migration before
+    # anything changes. A default of the text column is dropped before its type changes.
+    private def self.retype_text_to_date(table : String,
+                                         column : Catalog::Column,
+                                         actual : Catalog::Column,
+                                         plan : Plan,
+                                         changes : Array(Operation)) : Nil
+      changes << AssertDateText.new(table, column.name)
+      changes << AlterDefault.new(table, column.name, nil) if actual.default
+      changes << AlterType.new(table, column.name, DATE)
+      plan.notes << "retyping #{table}.#{column.name} from text to date rewrites #{table} " \
+                    "under an exclusive lock; its migration first checks every value"
     end
 
     private def self.halt(plan : Plan, dev_override : Bool, halt : Halt, &) : Nil

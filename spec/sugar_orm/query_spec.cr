@@ -47,6 +47,27 @@ describe SugarORM::Query do
     query.binds.should eq([at] of SugarORM::Value)
   end
 
+  it "renders a Range on a column whose codec is ORDERABLE, binding the encoded days" do
+    first = SugarORM::Date.new(2026, 10, 1)
+    last = SugarORM::Date.new(2026, 10, 31)
+    deadlines = SugarUnit::Deadline.query
+    closed = deadlines.where(due_on: first..last)
+    closed.to_sql.should end_with(%(WHERE "due_on" BETWEEN $1 AND $2))
+    closed.binds.should eq(["2026-10-01", "2026-10-31"] of SugarORM::Value)
+    half_open = deadlines.where(due_on: first...last)
+    half_open.to_sql.should end_with(%(WHERE "due_on" >= $1 AND "due_on" < $2))
+    half_open.binds.should eq(["2026-10-01", "2026-10-31"] of SugarORM::Value)
+    from = deadlines.where(due_on: first..)
+    from.to_sql.should end_with(%(WHERE "due_on" >= $1))
+    from.binds.should eq(["2026-10-01"] of SugarORM::Value)
+    until_last = deadlines.where(due_on: ..last)
+    until_last.to_sql.should end_with(%(WHERE "due_on" <= $1))
+    deadlines.where(due_on: ...last).to_sql.should end_with(%(WHERE "due_on" < $1))
+    nullable = deadlines.where(done_on: first..last, due_on: first)
+    nullable.to_sql.should end_with(%(WHERE "due_on" = $1 AND "done_on" BETWEEN $2 AND $3))
+    nullable.binds.should eq(["2026-10-01", "2026-10-01", "2026-10-31"] of SugarORM::Value)
+  end
+
   it "numbers raw fragment binds after keyword binds and checks their count" do
     fragment = "seats > ? AND ratio < ?"
     query = SugarUnit::Team.query.where(name: "Acme").where(fragment, 3, 1.5)

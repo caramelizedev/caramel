@@ -278,6 +278,11 @@ module SugarORM
             {% renamed = source.id.stringify %}
           {% end %}
           {% column_type = codec ? alias_type : "::#{scalar.id}" %}
+          {% resolved = codec ? (codec.is_a?(Generic) ? codec.name : codec).resolve? : nil %}
+          {% orderable = false %}
+          {% if resolved && resolved.has_constant?("ORDERABLE") %}
+            {% orderable = resolved.constant("ORDERABLE").stringify == "true" %}
+          {% end %}
           {% columns << {
                node:         declaration,
                name:         name,
@@ -292,6 +297,7 @@ module SugarORM
                system:       is_primary,
                renamed_from: renamed,
                codec:        codec,
+               orderable:    orderable,
                written:      written,
              } %}
 
@@ -322,6 +328,7 @@ module SugarORM
                  system:       true,
                  renamed_from: nil,
                  codec:        nil,
+                 orderable:    false,
                  written:      nil,
                } %}
           {% end %}
@@ -422,6 +429,7 @@ module SugarORM
                  system:       tenant_key,
                  renamed_from: nil,
                  codec:        nil,
+                 orderable:    false,
                  written:      nil,
                } %}
             {% foreign_keys << {
@@ -922,12 +930,40 @@ module SugarORM
 
       {% for column in columns %}
         {% if column[:codec] %}
+          {% sugar = "::#{@type}::SugarType#{column[:name].camelcase.id}" %}
           # :nodoc:
           def self.__sugar_encode_{{ column[:name].id }}(
-            value : ::{{ @type }}::SugarType{{ column[:name].camelcase.id }} | ::Nil
+            value : {{ sugar.id }} | ::Nil
           ) : ::String?
             value.nil? ? nil : {{ column[:codec] }}.encode(value)
           end
+
+          {% if column[:orderable] %}
+            # :nodoc:
+            def self.__sugar_encode_{{ column[:name].id }}(
+              value : ::Range({{ sugar.id }}, {{ sugar.id }})
+            ) : ::Range(::String, ::String)
+              ::Range.new(
+                {{ column[:codec] }}.encode(value.begin),
+                {{ column[:codec] }}.encode(value.end),
+                value.excludes_end?,
+              )
+            end
+
+            # :nodoc:
+            def self.__sugar_encode_{{ column[:name].id }}(
+              value : ::Range({{ sugar.id }}, ::Nil)
+            ) : ::Range(::String, ::Nil)
+              ::Range.new({{ column[:codec] }}.encode(value.begin), nil, value.excludes_end?)
+            end
+
+            # :nodoc:
+            def self.__sugar_encode_{{ column[:name].id }}(
+              value : ::Range(::Nil, {{ sugar.id }})
+            ) : ::Range(::Nil, ::String)
+              ::Range.new(nil, {{ column[:codec] }}.encode(value.end), value.excludes_end?)
+            end
+          {% end %}
         {% else %}
           # :nodoc:
           def self.__sugar_encode_{{ column[:name].id }}(value)
@@ -1047,6 +1083,7 @@ module SugarORM
       struct QueryOf(P) < ::SugarORM::Query(::{{ @type }}, P)
         {% signature = columns.map do |column|
              scalar = "::#{column[:scalar].id}"
+             sugar = "::#{@type}::SugarType#{column[:name].camelcase.id}"
              closed = "Range(#{scalar.id}, #{scalar.id})"
              open_end = "Range(#{scalar.id}, ::Nil)"
              open_start = "Range(::Nil, #{scalar.id})"
@@ -1055,7 +1092,12 @@ module SugarORM
              nilable = column[:nullable] ? ["::Nil"] : [] of Nil
              accepted = [scalar, "Array(#{scalar.id})"] + ranges + nilable
              if column[:codec]
-               accepted = ["::#{@type}::SugarType#{column[:name].camelcase.id}"] + nilable
+               ranges = column[:orderable] ? [
+                 "Range(#{sugar.id}, #{sugar.id})",
+                 "Range(#{sugar.id}, ::Nil)",
+                 "Range(::Nil, #{sugar.id})",
+               ] : [] of Nil
+               accepted = [sugar] + ranges + nilable
              end
              unset = "::SugarORM::Unset = ::SugarORM::UNSET"
              "#{column[:name].id} : #{accepted.join(" | ").id} | #{unset.id}"

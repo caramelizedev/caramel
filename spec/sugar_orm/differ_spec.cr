@@ -206,6 +206,21 @@ describe SugarORM::Differ do
     sql(overridden.transactional).last.should eq(added)
   end
 
+  it "adds a nullable date column, halts a required one, and finds a live date column matching" do
+    optional = books([nullable("done_on", "date")])
+    plan = Differ.diff([optional], [books])
+    sql(plan.transactional).should eq([%(ALTER TABLE "books" ADD COLUMN "done_on" date)])
+    plan.halts.should be_empty
+
+    mandatory = books([required("due_on", "date")])
+    halt = Differ.diff([mandatory], [books]).halts.first
+    halt.subject.should eq("books.due_on")
+    halt.to_s.should contain("declare the field nilable (a codec field takes no default)")
+
+    Differ.diff([optional], [optional]).clean?.should be_true
+    Differ.diff([mandatory], [mandatory]).clean?.should be_true
+  end
+
   it "renames a column declared renamed_from and still reconciles its other attributes" do
     billing = nullable("billing_email", default: "'none'", renamed_from: "email")
     declared = books([billing])
@@ -298,6 +313,69 @@ describe SugarORM::Differ do
     retyped = %(ALTER TABLE "books" ALTER COLUMN "pages" TYPE bigint USING "pages"::bigint)
     statements.should contain(retyped)
     statements.should contain(%(ALTER TABLE "books" ALTER COLUMN "pages" SET NOT NULL))
+  end
+
+  it "derives a text to date retype: a check of every value, then the type, with no halt" do
+    declared = books([nullable("published_on", "date")])
+    actual = books([nullable("published_on", "text")])
+    [false, true].each do |dev_override|
+      plan = Differ.diff([declared], [actual], dev_override)
+      plan.halts.should be_empty
+      plan.overridden.should be_empty
+      plan.online.should be_empty
+      statements = sql(plan.transactional)
+      statements.size.should eq(2)
+      statements[0].should start_with("DO $caramel$\n")
+      statements[0].should contain(%(WHERE "published_on" IS NOT NULL))
+      alter = %(ALTER TABLE "books" ALTER COLUMN "published_on" ) +
+              %(TYPE date USING "published_on"::date)
+      statements[1].should eq(alter)
+      plan.notes.should eq([
+        "retyping books.published_on from text to date rewrites books under an exclusive " \
+        "lock; its migration first checks every value",
+      ])
+    end
+    Differ.diff([declared], [books([nullable("published_on", "date")])]).clean?.should be_true
+  end
+
+  it "drops the text column's default before the retype, and a CHECK no schema declares first" do
+    declared = books([nullable("published_on", "date")])
+    shape = Catalog::Check.new("check_books_day_shape", expression: "((published_on ~ '^[0-9]'))")
+    actual = books([nullable("published_on", "text", default: "'2026-01-01'")], checks: [shape])
+    statements = sql(Differ.diff([declared], [actual]).transactional)
+    statements.size.should eq(4)
+    statements[0].should eq(%(ALTER TABLE "books" DROP CONSTRAINT "check_books_day_shape"))
+    statements[1].should start_with("DO $caramel$\n")
+    statements[2].should eq(%(ALTER TABLE "books" ALTER COLUMN "published_on" DROP DEFAULT))
+    statements[3].should end_with(%(TYPE date USING "published_on"::date))
+  end
+
+  it "checks and retypes a renamed column under its new name, after the rename" do
+    declared = books([nullable("published_on", "date", renamed_from: "published")])
+    actual = books([nullable("published", "text")])
+    statements = sql(Differ.diff([declared], [actual]).transactional)
+    statements.size.should eq(3)
+    statements[0].should end_with(%(RENAME COLUMN "published" TO "published_on"))
+    statements[1].should contain(%("published_on" IS NOT NULL))
+    statements[2].should end_with(%(TYPE date USING "published_on"::date))
+  end
+
+  it "still halts every other type change, including date back to text" do
+    to_text = Differ.diff([books([nullable("on", "text")])], [books([nullable("on", "date")])])
+    to_text.halts.map(&.subject).should eq(["books.on"])
+    to_text.halts.first.message.should contain("declared type text differs from date")
+    to_text.transactional.should be_empty
+    {"integer", "timestamp with time zone", "bigint"}.each do |live|
+      plan = Differ.diff([books([nullable("on", "date")])], [books([nullable("on", live)])])
+      plan.halts.map(&.subject).should eq(["books.on"])
+      plan.transactional.should be_empty
+    end
+    overridden = Differ.diff(
+      [books([nullable("on", "text")])], [books([nullable("on", "date")])], dev_override: true
+    )
+    sql(overridden.transactional).should eq([
+      %(ALTER TABLE "books" ALTER COLUMN "on" TYPE text USING "on"::text),
+    ])
   end
 
   it "never rewrites a primary key, even with --dev-override" do

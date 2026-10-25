@@ -112,6 +112,15 @@ module SugarUnit
     end
   end
 
+  struct Deadline < SugarORM::Schema
+    schema "unit_deadlines" do
+      field id : Int64, primary: true
+      field due_on : SugarORM::Date, codec: SugarORM::DateCodec
+      field done_on : SugarORM::Date?, codec: SugarORM::DateCodec
+      json :id, :due_on, :done_on
+    end
+  end
+
   struct Shelf < SugarORM::Schema
     schema "unit_shelves" do
       field id : Int64, primary: true

@@ -88,6 +88,27 @@ cases = {
     "no overload matches 'Priced::QueryOf(NamedTuple()).where', price: Range(Int32, Int32)",
     "price : ::Priced::SugarTypePrice | ::SugarORM::Unset",
   ],
+  "compile_orderable_codec_range" => nil,
+  "compile_orderable_codec_array" => [
+    "compile_orderable_codec_array.cr:10:13",
+    "no overload matches 'Task::QueryOf(NamedTuple()).where', due_on: Array(SugarORM::Date)",
+    "due_on : ::Task::SugarTypeDueOn | Range(::Task::SugarTypeDueOn, ::Task::SugarTypeDueOn)",
+  ],
+  "compile_orderable_codec_range_type" => [
+    "compile_orderable_codec_range_type.cr:10:13",
+    "no overload matches 'Task::QueryOf(NamedTuple()).where', due_on: Range(Int32, Int32)",
+    "due_on : ::Task::SugarTypeDueOn | Range(::Task::SugarTypeDueOn, ::Task::SugarTypeDueOn)",
+  ],
+  "compile_codec_not_orderable" => [
+    "compile_codec_not_orderable.cr:27:13",
+    "no overload matches 'Task::QueryOf(NamedTuple()).where', due_on: Range(SugarORM::Date, Nil)",
+    "due_on : ::Task::SugarTypeDueOn | ::SugarORM::Unset",
+  ],
+  "compile_codec_defined_late" => [
+    "compile_codec_defined_late.cr:27:13",
+    "no overload matches 'Task::QueryOf(NamedTuple()).where', due_on: Range(SugarORM::Date, Nil)",
+    "due_on : ::Task::SugarTypeDueOn | ::SugarORM::Unset",
+  ],
   "compile_non_literal_default" => [
     "compile_non_literal_default.cr:6:11",
     "Default `Time.utc.year` for field 'year : Int32' " \

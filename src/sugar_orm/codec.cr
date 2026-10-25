@@ -4,7 +4,7 @@ module SugarORM
   # The contract for `field name : T, codec: C`. A codec for type `T` is any
   # type with these class methods:
   #
-  #     def self.sql_type : String          # "numeric", "numeric(P,S)", "jsonb" or "text"
+  #     def self.sql_type : String          # "numeric", "numeric(P,S)", "jsonb", "text" or "date"
   #     def self.encode(value : T) : String
   #     def self.decode(text : String) : T
   #
@@ -15,8 +15,13 @@ module SugarORM
   # value or nil for it. The changeset number validators do not apply to it,
   # because its encoded value is a String. `validate_inclusion` encodes its
   # list through the codec, so it takes values of the field's type.
+  #
+  # A codec whose column orders the way its values do, as a `date` does, may
+  # also declare `ORDERABLE = true`, written before the schema that names it.
+  # `where` then takes a Range of the field's type for the column, and binds
+  # the encoded ends. Without the constant a Range fails compilation.
   module Codec
-    SQL_TYPE = /\A(?:numeric(?:\(([1-9]\d{0,3}),(\d{1,4})\))?|jsonb|text)\z/
+    SQL_TYPE = /\A(?:numeric(?:\(([1-9]\d{0,3}),(\d{1,4})\))?|jsonb|text|date)\z/
 
     # Returns *type* when it is a column type a codec may name, with
     # `S <= P <= 1000` for `numeric(P,S)`.
@@ -28,7 +33,7 @@ module SugarORM
         return type if scale.to_i <= precision.to_i && precision.to_i <= 1000
       end
       raise ArgumentError.new(
-        "codec sql_type #{type.inspect} must be numeric, numeric(P,S), jsonb or text"
+        "codec sql_type #{type.inspect} must be numeric, numeric(P,S), jsonb, text or date"
       )
     end
   end
