@@ -121,9 +121,9 @@ module SweetTalk
     # returns nil when it is not set, and it starts as nil unless given a default. A
     # composite value that is optional also gets a check that every part is set or none is.
     # `SWEETTALK_HAS_<NAME>` records {name, line, kind, declared type, column, schema
-    # lines, raw column type, parts, default, optional, base type} for the storage macros,
+    # lines, raw column type, parts, default, optional, base type, codec} for the storage macros,
     # the base type being the declared one without its `?`; a composite's parts are {part,
-    # column, raw type, part type, part kind, check}, the raw type ending in `?` when the
+    # column, raw type, part type, part kind, check, codec}, the raw type ending in `?` when the
     # composite is optional. An index name over PostgreSQL's 63 bytes is refused, and under
     # caramel/tenancy so are the tenant's column and a central context's reference to rows
     # that belong to one tenant (ADR 0033).
@@ -141,6 +141,7 @@ module SweetTalk
       {% column = name.stringify %}
       {% lines = nil %}
       {% raw = nil %}
+      {% codec = nil %}
       {% parts = nil %}
       {% nilable = false %}
       {% base = type.stringify %}
@@ -169,7 +170,8 @@ module SweetTalk
         {% if single && members[0] < ::SweetTalk::Value %}
           {% kind = "value" %}
           {% raw = "#{members[0].constant("SWEETTALK_WRAPS").id}#{optional.id}" %}
-          {% lines = "field #{name} : #{raw.id}" %}
+          {% codec = members[0].constant("SWEETTALK_CODEC") %}
+          {% lines = "field #{name} : #{raw.id}" + (codec ? ", codec: #{codec.id}" : "") %}
         {% elsif single && members[0] < ::SweetTalk::Composite %}
           {% kind = "composite" %}
           {% column = nil %}
@@ -179,9 +181,11 @@ module SweetTalk
                .map { |constant| composite.constant(constant) }.sort_by { |part| part[1] } %}
           {% for part in declared %}
             {% parts << {part[0], "#{name}_#{part[0].id}", "#{part[3].id}#{optional.id}", part[2],
-                         part[4], part[5]} %}
+                         part[4], part[5], part[6]} %}
           {% end %}
-          {% lines = parts.map { |part| "field #{part[1].id} : #{part[2].id}" }.join("\n") %}
+          {% lines = parts.map do |part|
+               "field #{part[1].id} : #{part[2].id}" + (part[6] ? ", codec: #{part[6].id}" : "")
+             end.join("\n") %}
         {% elsif single && members[0] < ::SweetTalk::Aggregate %}
           {% kind = "reference" %}
           {% raw = "Int64#{optional.id}" %}
@@ -293,7 +297,7 @@ module SweetTalk
         {% end %}
       {% end %}
       {% attribute = {name.stringify, decl.line_number, kind, type.stringify, column, lines, raw,
-                      parts, nilable && !default ? "nil" : default, nilable, base} %}
+                      parts, nilable && !default ? "nil" : default, nilable, base, codec} %}
       SWEETTALK_HAS_{{ name.upcase }} = {{ attribute }}
 
       {% if kind == "reference" || kind == "record" %}

@@ -48,13 +48,16 @@ module SweetTalk
     # same value or an integer, `*` an integer, and `times: Quantity` lets `*` take a
     # quantity too. `value Email, String, matches: /…/, length: 3..254, means: "…"`
     # wraps a string, `value Kind, String, one_of: %w[payment receipt], means: "…"` a string
-    # that is one of a closed list, and `value Address, means: "…" do part street : String; …
-    # end` is a value of several parts. Bounds, lengths and lists are also CHECK constraints
+    # that is one of a closed list, `value Day, Date, means: "…"` a real calendar day (a
+    # `SugarORM::Date`, stored in a `date` column through `SugarORM::DateCodec`), and `value
+    # Address, means: "…" do part street : String; … end` is a value of several parts.
+    # Bounds, lengths and lists are also CHECK constraints
     # on every column that stores the value, and so are integer literals; `database_check:
     # false` keeps them in Crystal only. A pattern is checked in Crystal only, because
     # PostgreSQL reads regular expressions differently. `SWEETTALK_CHECK` records {"range",
     # "lo..hi"}, {"length", name suffix, SQL condition} or {"column", name suffix, SQL
-    # condition}, or nil.
+    # condition}, or nil. `SWEETTALK_WRAPS` is the raw type's name and `SWEETTALK_CODEC` the
+    # codec that stores it, or nil for a type a column holds as it is.
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
                 matches = nil, length = nil, one_of = nil, database_check = nil, means = nil,
                 &block)
@@ -62,8 +65,9 @@ module SweetTalk
         {% name.raise "value #{name} takes parts or a type to wrap, not both" %}
       {% elsif !block && wraps.is_a?(NilLiteral) %}
         {% name.raise "value #{name} needs parts, as in part street : String" %}
-      {% elsif !block && !["Int32", "Int64", "String"].includes?(wraps.stringify) %}
-        {% wraps.raise "value #{name} wraps Int32, Int64 or String, or takes parts, not #{wraps}" %}
+      {% elsif !block && !["Int32", "Int64", "String", "Date"].includes?(wraps.stringify) %}
+        {% wraps.raise "value #{name} wraps Int32, Int64, String or Date, or takes parts, " +
+                       "not #{wraps}" %}
       {% end %}
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -181,6 +185,7 @@ module SweetTalk
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = "String"
+          SWEETTALK_CODEC = nil
           {% if check && check[1] =~ /@digest/ %}
             ::SweetTalk.__sweettalk_hashed(SWEETTALK_CHECK, {{ check }},
               {{ members.sort.join(",") }})
@@ -255,6 +260,120 @@ module SweetTalk
             io << raw
           end
         end
+      {% elsif wraps.stringify == "Date" %}
+        {% options = [{"at_least", at_least}, {"at_most", at_most}, {"within", within},
+                      {"times", times}, {"matches", matches}, {"length", length},
+                      {"one_of", one_of}, {"database_check", database_check}] %}
+        {% for option in options %}
+          {% unless option[1].is_a?(NilLiteral) %}
+            {% name.raise "value #{name} wraps Date, a real calendar day, so it takes no " +
+                          "#{option[0].id}:" %}
+          {% end %}
+        {% end %}
+        {% refusal = "#{name} must be a calendar day written YYYY-MM-DD, as in 2026-02-28" %}
+        struct {{ name }} < ::SweetTalk::Value
+          include Comparable({{ name }})
+          include ::Caramel::FieldValue(String)
+
+          SWEETTALK_MEANS   = {{ means }}
+          SWEETTALK_WRAPS   = "::SugarORM::Date"
+          SWEETTALK_CODEC   = "::SugarORM::DateCodec"
+          SWEETTALK_CHECK   = nil
+          SWEETTALK_REFUSAL = {{ refusal }}
+
+          getter raw : ::SugarORM::Date
+
+          def initialize(@raw : ::SugarORM::Date)
+          end
+
+          # Reads `YYYY-MM-DD`, and refuses any other text or a day the calendar lacks.
+          def self.new(text : String) : self
+            date = ::SugarORM::Date.parse?(text)
+            raise ::SweetTalk::Refusal.new(SWEETTALK_REFUSAL) unless date
+            new(date)
+          end
+
+          def self.new(year : Int, month : Int, day : Int) : self
+            new(::SugarORM::Date.new(year.to_i32, month.to_i32, day.to_i32))
+          rescue ArgumentError | OverflowError
+            raise ::SweetTalk::Refusal.new(SWEETTALK_REFUSAL)
+          end
+
+          # The calendar day *time* shows in its own zone, with no conversion.
+          def self.of(time : Time) : self
+            new(::SugarORM::Date.of(time))
+          end
+
+          def self.__sweettalk_from_json(any : JSON::Any) : self
+            new(any.as_s)
+          end
+
+          def self.new(pull : JSON::PullParser) : self
+            text = pull.read_string
+            date = ::SugarORM::Date.parse?(text)
+            pull.raise(SWEETTALK_REFUSAL) unless date
+            new(date)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : String, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
+          end
+
+          def year : Int32
+            raw.year
+          end
+
+          def month : Int32
+            raw.month
+          end
+
+          def day : Int32
+            raw.day
+          end
+
+          # Midnight UTC of this day.
+          def to_time : Time
+            raw.to_time
+          end
+
+          # The day *days* after this one.
+          def +(days : Int) : {{ name }}
+            moved(days, 1)
+          end
+
+          # The day *days* before this one.
+          def -(days : Int) : {{ name }}
+            moved(days, -1)
+          end
+
+          # How many days this one is after *other*, negative when before it.
+          def -(other : self) : Int32
+            other.raw.days_until(raw)
+          end
+
+          private def moved(days : Int, direction : Int32) : {{ name }}
+            count = days.to_i64.clamp(-4_000_000_i64, 4_000_000_i64) * direction
+            {{ name }}.new(raw.plus_days(count))
+          rescue ArgumentError | OverflowError
+            raise ::SweetTalk::Refusal.new(SWEETTALK_REFUSAL)
+          end
+
+          def <=>(other : self)
+            raw <=> other.raw
+          end
+
+          def to_s(io : IO) : Nil
+            raw.to_s(io)
+          end
+
+          def to_json(json : JSON::Builder) : Nil
+            json.string(to_s)
+          end
+        end
       {% else %}
         {% for option in [{"matches", matches}, {"length", length}, {"one_of", one_of}] %}
           {% unless option[1].is_a?(NilLiteral) %}
@@ -291,6 +410,7 @@ module SweetTalk
 
           SWEETTALK_MEANS = {{ means }}
           SWEETTALK_WRAPS = {{ wraps.stringify }}
+          SWEETTALK_CODEC = nil
           SWEETTALK_CHECK = {{ check }}
 
           getter raw : {{ wraps }}
@@ -641,7 +761,12 @@ module SweetTalk
                   {% have = "@#{attribute[0].id}.try(&.#{part[0].id}#{raw.id})" if attribute[9] %}
                   {% want = "::SweetTalk.column((#{value}).#{part[0].id})" %}
                   {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
-                  {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% if part[6] %}
+                    {% encoded = "#{row}.__sugar_encode_#{part[1].id}(#{want.id})" %}
+                    {% wheres << "::SweetTalk.__sweettalk_coded(#{part[1]}, #{encoded.id})" %}
+                  {% else %}
+                    {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                  {% end %}
                   {% typings << "typeof(#{row}.query.where(#{part[1].id}: #{want.id}))" %}
                 {% end %}
               {% else %}
@@ -652,7 +777,12 @@ module SweetTalk
                 {% end %}
                 {% want = "::SweetTalk.column(#{value})" %}
                 {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
-                {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% if attribute[11] %}
+                  {% encoded = "#{row}.__sugar_encode_#{attribute[4].id}(#{want.id})" %}
+                  {% wheres << "::SweetTalk.__sweettalk_coded(#{attribute[4]}, #{encoded.id})" %}
+                {% else %}
+                  {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                {% end %}
                 {% typings << "typeof(#{row}.query.where(#{attribute[4].id}: #{want.id}))" %}
               {% end %}
             {% end %}

@@ -1,10 +1,10 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036 and 0039 to 0041). Each declaration
-# mistake fails to compile with a fixed problem text, naming its file where the mistake has a
-# line; a valid domain compiles, with and without caramel/tenancy; and an application that does
-# not require caramel/sweet_talk holds none of its code. spec/sweet_talk and
-# spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043). Each
+# declaration mistake fails to compile with a fixed problem text, naming its file where the
+# mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
+# application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
+# and spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
 ABSENT   = "SweetTalk code must be absent from an application that does not require " \
@@ -21,7 +21,8 @@ PROBLEMS = [
   {"foreign_event", "emits only its own events"},
   {"unknown_state", "undefined local variable or method 'shipped!'"},
   {"the_without_type", "the total needs a type"},
-  {"value_type", "value Grams wraps Int32, Int64 or String, or takes parts, not Float64"},
+  {"value_type",
+   "value Grams wraps Int32, Int64, String or Date, or takes parts, not Float64"},
   {"whenever_in_aggregate", "whenever belongs in a context, a border or a projection"},
   {"hash_attribute", "has teas : Hash(Int64, Int32) cannot be stored: use an entity"},
   {"unsupported_type", "has weight : Float32 cannot be stored"},
@@ -52,6 +53,16 @@ PROBLEMS = [
    "value Tins wraps Int32, so it takes at_least:, at_most:, within: and times:, not matches:"},
   {"value_int_one_of",
    "value Tins wraps Int32, so it takes at_least:, at_most:, within: and times:, not one_of:"},
+  {"date_option",
+   "value Day wraps Date, a real calendar day, so it takes no at_least:"},
+  {"date_database_check",
+   "value Day wraps Date, a real calendar day, so it takes no database_check:"},
+  {"day_today", "undefined method 'today' for Shop::Ordering::Day.class"},
+  {"day_plus_day", "expected argument #1 to 'Shop::Ordering::Day#+' to be Int, not " \
+                   "Shop::Ordering::Day"},
+  {"day_query_text",
+   "no overload matches 'Shop::Ordering::Rows::Parcel::QueryOf(NamedTuple())#where', " \
+   "shipped_on: Range(String, String)"},
   {"one_of_not_list",
    "value Roast takes one_of: a list of words, as in one_of: %w[payment receipt], not \"light\""},
   {"one_of_with_matches",
@@ -329,8 +340,8 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_unknown_border compile_each_not_list compile_event_union_field
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
   compile_job_alias_taken compile_all_satisfying_other compile_finds_value_type
-  compile_loader_outside compile_published_after_use compile_call_outside_border
-  compile_outside_is_a_context]
+  compile_day_query_text compile_loader_outside compile_published_after_use
+  compile_call_outside_border compile_outside_is_a_context]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

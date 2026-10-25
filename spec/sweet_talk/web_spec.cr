@@ -21,6 +21,12 @@ module WebSpec
     APPLICATION.handle(HTTP::Request.new("POST", path, headers, body))
   end
 
+  def self.post_json(path : String, body : String) : Caramel::Response
+    headers = HTTP::Headers{"Host" => "teashop.caramel", "Accept" => "application/json",
+                            "Content-Type" => "application/json"}
+    APPLICATION.handle(HTTP::Request.new("POST", path, headers, body))
+  end
+
   def self.accepting(type : String) : HTTP::Headers
     HTTP::Headers{"Accept" => type}
   end
@@ -156,5 +162,41 @@ describe "SweetTalk at the web boundary" do
     route.contract.should eq("order:Order::Id(Int64) quantity:Ordering::Quantity(Int32) " \
                              "receipt_to:Ordering::Email(String)? " \
                              "tags:Array(Ordering::Quantity(Int32))(max=3)")
+  end
+
+  it "binds a calendar day from YYYY-MM-DD, and answers days as JSON text" do
+    form = "lent_on=2026-03-01&back_by=2026-03-22&holidays=2026-03-05&holidays=2026-03-06"
+    response = WebSpec.post("/loans/lend", form, "application/json")
+    response.status.should eq(200)
+    response.body.should eq(<<-JSON.gsub(/\s+/, ""))
+      {"lent_on":"2026-03-01","back_by":"2026-03-22",
+       "holidays":["2026-03-05","2026-03-06"],"days":21}
+      JSON
+    WebSpec.post("/loans/lend", "lent_on=2028-02-29", "application/json").body
+      .should eq(%({"lent_on":"2028-02-29","back_by":null,"holidays":[],"days":null}))
+  end
+
+  it "binds a calendar day from a JSON body too" do
+    body = %({"lent_on":"2026-03-01","back_by":"2026-03-08","holidays":["2026-03-02"]})
+    response = WebSpec.post_json("/loans/lend", body)
+    response.status.should eq(200)
+    response.body.should contain(%("days":7))
+    WebSpec.post_json("/loans/lend", %({"lent_on":20260301})).status.should eq(422)
+  end
+
+  it "answers the refusal of a day, as the calendar words it, under its field" do
+    refusal = "Day must be a calendar day written YYYY-MM-DD, as in 2026-02-28"
+    form = "lent_on=2026-02-30&back_by=tomorrow"
+    response = WebSpec.post("/loans/lend", form, "application/json")
+    response.status.should eq(422)
+    response.body.should eq(%({"errors":{"lent_on":["#{refusal}"],"back_by":["#{refusal}"]}}))
+    list = "lent_on=2026-03-01&holidays=2026-03-05&holidays=2026-04-31"
+    WebSpec.post("/loans/lend", list).body.should contain("FIELD holidays[1]: #{refusal}\n")
+  end
+
+  it "lists a day field by its type and its wire type" do
+    route = TeaShopWeb::AppRouter.routes.find! { |entry| entry.path == "/loans/lend" }
+    route.contract.should eq("lent_on:Lending::Day(String) back_by:Lending::Day(String)? " \
+                             "holidays:Array(Lending::Day(String))(max=3)")
   end
 end

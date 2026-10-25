@@ -27,6 +27,18 @@ module SweetTalk
     have == wanted
   end
 
+  # The condition on a codec column, from *encoded*: what the row's encoder made of the
+  # value, a text, a range of texts or nil. SugarORM's typed `where` encodes for itself; a
+  # specification builds the condition directly, so it binds the encoded text.
+  def self.__sweettalk_coded(column : String, encoded) : ::SugarORM::Condition
+    ::SugarORM::Condition.column(column, encoded)
+  end
+
+  def self.__sweettalk_coded(column : String, encoded : String?) : ::SugarORM::Condition
+    return ::SugarORM::Condition.column(column, nil) unless encoded
+    ::SugarORM::Condition.column(column, encoded)
+  end
+
   # Every condition holds: `(a) AND (b)`.
   def self.__sweettalk_all(conditions : Array(::SugarORM::Condition)) : ::SugarORM::Condition
     joined(conditions, " AND ")

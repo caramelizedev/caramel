@@ -90,11 +90,34 @@ module TeaShopWeb
     end
   end
 
+  # Binds calendar days, one required, one optional and a list, from YYYY-MM-DD, and answers
+  # them as JSON.
+  struct Lend < PageAction
+    ingress csrf: false, authenticate: :allowed?
+
+    contract do
+      field lent_on : Library::Lending::Day
+      field back_by : Library::Lending::Day?
+      field holidays : Array(Library::Lending::Day), max: 3
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      between = contract.back_by.try { |day| day - contract.lent_on }
+      json({lent_on: contract.lent_on, back_by: contract.back_by, holidays: contract.holidays,
+            days: between})
+    end
+
+    private def allowed? : Bool
+      true
+    end
+  end
+
   Caramel::Router.draw do
     get "/teas/:tea/hold", Hold
     get "/teas/:tea/form", HoldForm
     get "/teas/:tea/claim", HoldOrConflict
     get "/boxes/:box/fill", FillWith
     post "/orders/:order/lines", AddLine
+    post "/loans/lend", Lend
   end
 end

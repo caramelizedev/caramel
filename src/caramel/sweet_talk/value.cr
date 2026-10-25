@@ -77,7 +77,8 @@ module SweetTalk
 
     # `part street : String` is one part: a column type, or a value that wraps one.
     # `SWEETTALK_PART_<NAME>` records {name, line, part type, raw column type, kind,
-    # check}, where check is the wrapped value's `SWEETTALK_CHECK`.
+    # check, codec}, where check and codec are the wrapped value's `SWEETTALK_CHECK` and
+    # `SWEETTALK_CODEC`.
     macro part(decl)
       {% unless decl.is_a?(TypeDeclaration) && decl.value.is_a?(Nop) %}
         {% decl.raise "part takes a name and a type, as in part street : String" %}
@@ -85,11 +86,11 @@ module SweetTalk
       {% resolved = decl.type.resolve? %}
       {% if resolved && %w[String Int32 Int64 Bool Float64 Time].includes?(resolved.stringify) %}
         {% part = {decl.var.stringify, decl.line_number, resolved.stringify, resolved.stringify,
-                   "column", nil} %}
+                   "column", nil, nil} %}
       {% elsif resolved && resolved < ::SweetTalk::Value %}
         {% part = {decl.var.stringify, decl.line_number, "::#{resolved}",
                    resolved.constant("SWEETTALK_WRAPS"), "value",
-                   resolved.constant("SWEETTALK_CHECK")} %}
+                   resolved.constant("SWEETTALK_CHECK"), resolved.constant("SWEETTALK_CODEC")} %}
       {% else %}
         {% decl.raise "part #{decl} cannot be stored: a part is String, Int32, Int64, Bool, " +
                       "Float64, Time or a value that wraps one" %}

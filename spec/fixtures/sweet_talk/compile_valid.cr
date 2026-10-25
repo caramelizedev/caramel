@@ -14,11 +14,17 @@ module Shop
 
     value Roast, String, one_of: %w[light medium dark], means: "how far a tea is roasted"
     value Courier, String, length: 2..30, means: "who carries an order"
+    value Day, Date, means: "a calendar day"
 
     value Address, means: "where a parcel goes" do
       part street : String
       part city : String
       never "An address needs a street and a city." { street.blank? || city.blank? }
+    end
+
+    value Term, means: "the days a tea is held" do
+      part from_on : Day
+      part until_on : Day
     end
 
     aggregate Tea, means: "one tea we sell" do
@@ -46,6 +52,8 @@ module Shop
       has roast : Roast?
       has packer : Int64?
       has tea : Tea?
+      has shipped_on : Day?
+      has term : Term?
       # A carried name kept while `shipped_by` becomes `courier` (ADR 0041).
       the courier : Courier? = shipped_by
       moves open >> placed, open >> cancelled, placed >> cancelled
@@ -58,7 +66,7 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
-      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast, courier, tea],
+      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast, courier, tea, shipped_on],
         means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
@@ -68,6 +76,9 @@ module Shop
       finds placed_to(receipt_to : Email), where: {receipt_to: receipt_to, state: :placed}
       finds newest(count : Int32), order: {id: :desc}, first: count
       counts placed_count, where: {state: :placed}
+      finds shipped_between(from : Day, to : Day), where: {shipped_on: from..to},
+        order: {shipped_on: :desc}
+      counts shipped_since(day : Day), where: {shipped_on: day..}
       finds holding(tea : Int64) do |orders|
         orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea = ?)", tea)
       end
@@ -82,8 +93,9 @@ module Shop
         emit Placed, lines: lines
       end
 
-      to ship(by : Courier) do
+      to ship(by : Courier, on : Day) do
         @shipped_by = by
+        @shipped_on = on
         emit Shipped
       end
 
@@ -110,6 +122,9 @@ module Shop
 
     specification Settled, on: Order, where: {state: [:placed, :cancelled]},
       means: "an order no longer being filled"
+    specification ShippedInSpring, on: Order,
+      where: {shipped_on: Day.new(2026, 3, 1)..Day.new(2026, 5, 31)},
+      means: "an order that left between 1 March and 31 May 2026"
 
     projection Sales, means: "tins sold of one tea" do
       key tea : Int64
@@ -174,6 +189,7 @@ struct AddLine < Caramel::Action
     field order : Shop::Ordering::Order::Id
     field quantity : Shop::Ordering::Quantity
     field tags : Array(Shop::Ordering::Quantity), max: 3
+    field shipped_on : Shop::Ordering::Day?
   end
 
   def handle(contract : Contract) : Caramel::Response
@@ -191,7 +207,10 @@ SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
 Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)
 Shop::Ordering::Order.all.each do |order|
-  order.ship(Shop::Ordering::Courier.new("post"))
+  order.ship(Shop::Ordering::Courier.new("post"), Shop::Ordering::Day.new(2026, 3, 1))
+  order.shipped_on.try { |day| day + 7 - 7 }
+  Shop::Ordering::Order.shipped_between(Shop::Ordering::Day.of(Time.utc),
+    Shop::Ordering::Day.new("2026-12-31"))
   order.unwrap_gift
 end
 Shop::Ordering::Bell.create.ring
