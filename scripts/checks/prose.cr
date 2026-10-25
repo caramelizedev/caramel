@@ -2,7 +2,7 @@ require "./support/harness"
 
 # Every kind of writing has one home (ADR 0026): markdown lives only in the files
 # that state a contract, each ADR keeps its three sections, every relative link
-# resolves, and every file stays within its byte cap.
+# resolves, and every file except a skill stays within its byte cap.
 module Caramel::Checks::Prose
   extend self
 
@@ -26,9 +26,8 @@ module Caramel::Checks::Prose
     "templates/application/README.md"        => 3_000,
     "templates/application/AGENTS.md"        => 2_000,
     "templates/application/CLAUDE.md"        => 200,
-    "templates/skills/sweettalk/SKILL.md"    => 5_000,
-    ".claude/skills/caramel-docs/SKILL.md"   => 6_000,
-    ".claude/skills/caramel-triage/SKILL.md" => 4_000,
+    # A skill has no cap: it is read when its task matches, and the link check keeps it
+    # from becoming a second source (ADR 0026).
   }
   ADR_CAP = 12_000
 
