@@ -91,9 +91,12 @@ module Shop
         @gift_to = nil
       end
 
-      # Neither a comparison nor a string is a stray write of the reference.
+      # Neither a comparison, a hash rocket, an argument before a comparison nor a string is
+      # a stray write of the reference.
       to choose(tea : Tea) do
         refuse "@tea = tea is how a stray write looks" if @tea_id == tea.id.raw
+        seen = {@tea_id => lines.size}
+        refuse "Too many teas." if seen.fetch(@tea_id, lines.size >= 9 ? 1 : 0) > 0
         self.tea = tea
       end
 

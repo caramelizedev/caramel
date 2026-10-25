@@ -355,8 +355,8 @@ module SweetTalk
     # body's source; its string literals are dropped before the scan.
     macro __sweettalk_no_stray_writes(verb, text)
       {% scanned = text.gsub(/"(?:[^"\\]|\\.)*"/, "")
-           .gsub(/(?<![@\w])(@\w+)\s*(?:\|\||&&|<<|>>|[-+*\/%&|^])?=(?![=~])/, "\\1 = ")
-           .gsub(/(?<![@\w])(@\w+)\s*,(?=[^\n=]*=(?![=~]))/, "\\1 = ,") %}
+           .gsub(/(?<![@\w])(@\w+)\s*(?:\|\||&&|<<|>>|[-+*\/%&|^])?=(?![=~>])/, "\\1 = ")
+           .gsub(/(?<![@\w])(@\w+)\s*,(?=[^\n=<>!]*=(?![=~>]))/, "\\1 = ,") %}
       {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
         {% attribute = @type.constant(constant) %}
         {% if %w[reference record].includes?(attribute[2]) &&
