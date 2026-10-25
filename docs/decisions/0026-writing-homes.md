@@ -41,13 +41,15 @@ half of the repository's markdown and most of what a repository-wide grep return
    no rule the website does not, and each rule ends with a link to its section in the
    release's Markdown edition, which the website check verifies.
 9. `scripts/check prose` enforces where markdown lives, the ADR sections, relative links
-   and a byte cap per file.
+   and a byte cap per file. A skill has no byte cap.
 
 ## Reasons
 
 - Every byte in the tagged tree reaches every application and every repository search.
 - A rule stated once cannot drift. A Markdown edition generated from the pages, and a skill
-  whose every rule links the page that states it, add no second source.
+  whose every rule links the page that states it, add no second source. That link, which
+  the website check verifies, is what keeps a skill from drifting; a byte cap on it only
+  pushed rules out of the skill or made reviewers trade one rule for another.
 - Rejected: moving all documentation to another repository, because contracts must change
   in the same commit as the code, and the website's checks read the source at that commit.
 - Rejected: hiding prose from search with ignore files, because it would still ship in
