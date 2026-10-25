@@ -80,6 +80,13 @@ PROBLEMS = [
   {"stray_reference_write_factory",
    "open assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \
    "takes the aggregate, the record or its id"},
+  {"stray_reference_write_process",
+   "whenever Order::Placed assigns @first_tea, but first_tea is a reference stored as " \
+   "first_tea_id: use self.first_tea = ..., which takes the aggregate, the record or its id"},
+  {"stray_reference_write_multiple",
+   "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \
+   "takes the aggregate, the record or its id"},
+  {"projection_key_write", "undefined method 'tea=' for Shop::Ordering::Sales"},
   {"where_nil_required_scalar",
    "unnoted asks for note: nil, but note is not optional: nil is a value of an optional " \
    "attribute, as in has note : String?"},

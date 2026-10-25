@@ -58,13 +58,17 @@ holds. An event is stored, as JSON, in the job that delivers it to the handlers,
   holds a value of the old type. Nothing fails when the aggregate is compiled; the job
   fails, or reads nil, when a worker runs it. This is a deliberate coupling: the event is
   the aggregate's own, and in exchange no declaration is repeated.
-- **To rename safely**, keep the old field in the event for as long as jobs may still be
-  queued: when `owner` becomes `account`, declare `the owner : Account::Id? = account` above
-  the event, a derived value with the old name, and carry `[account, owner]`, so a job
-  queued under either name reads. Drop the old name once the queue has drained. Or emit a
-  new event for the new shape and keep handling the old event until its jobs are done.
-  `renamed_from:` renames a stored table or event, not a carried field. An optional field
-  that a queued job lacks reads as nil, so adding a carried optional attribute is safe.
+- **An attribute is renamed safely only when the new one is optional.** A job queued under
+  the old name holds only the old name, and the worker reads every field of the event
+  before a handler runs, so a required field the job lacks fails it. When `owner` becomes
+  `account : Account::Id?`, declare `the owner : Account::Id? = account` above the event,
+  a derived value with the old name, and carry `[account, owner]`: a job queued under the
+  old name reads `account` as nil, one queued since reads both. Drop the old name once
+  the queue has drained. When the new attribute is required, emit a new event for the new
+  shape and keep handling the old event until its jobs are done. `renamed_from:` renames a
+  stored table or event, not a carried field. An optional field that a queued job lacks
+  reads as nil, so adding a carried optional attribute is safe; adding a required one is
+  not until the queue has drained.
 - An event of 17 fields that are all the aggregate's is the case this serves. An event that
   should stay stable while the aggregate changes shape should declare its own fields.
 

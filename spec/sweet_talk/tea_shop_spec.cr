@@ -171,7 +171,9 @@ describe "The tea shop on PostgreSQL" do
   it "refuses a move the lifecycle does not allow" do
     SweetTalkSpec.rolled_back do
       order = TeaShopSpec.order
-      expect_raises(SweetTalk::Refusal, "Order cannot become shipped while open") { order.ship }
+      expect_raises(SweetTalk::Refusal, "Order cannot become shipped while open") do
+        order.ship Ordering::Courier.new("post")
+      end
     end
   end
 
@@ -204,7 +206,8 @@ describe "The tea shop on PostgreSQL" do
       SugarORM::Repo.update(Ordering::Rows::Order::Line::Changeset.new(line, quantity: 5))
       TeaShopSpec.drain(connection).should eq(3)
 
-      Ordering::Sales.all.map { |row| {row.tea.raw, row.sold} }.should eq([{tea.id.raw, 2}])
+      sales = Ordering::Sales.all.map { |row| {row.tea.raw, row.sold, row.last_order} }
+      sales.should eq([{tea.id.raw, 2, order.id}])
       TeaShopSpec.parcel.packings.map(&.tins.raw).should eq([2])
       Catalogue::Tea.find(tea.id).held.raw.should eq(2)
     end
@@ -252,7 +255,8 @@ describe "The tea shop on PostgreSQL" do
       TeaShopSpec.drain(connection)
       taken = Catalogue::Tea.find(tea.id)
       {taken.held.raw, taken.stock.raw}.should eq({0, 3})
-      Ordering::Order.find(order.id).shipped?.should be_true
+      shipped = Ordering::Order.find(order.id)
+      {shipped.shipped?, shipped.courier.try(&.raw)}.should eq({true, "post"})
       TeaShopSpec.holds.should eq([{"Sencha", "taken"}])
     end
   end
@@ -286,7 +290,7 @@ describe "The tea shop on PostgreSQL" do
       TeaShopSpec.drain(connection)
       order.cancel
       expect_raises(SweetTalk::Refusal, "Order cannot become shipped while cancelled") do
-        order.ship
+        order.ship Ordering::Courier.new("post")
       end
 
       TeaShopSpec.drain(connection)
@@ -464,7 +468,7 @@ describe "The tea shop on PostgreSQL" do
       {"Catalogue", "a count of tins on the shelf"},
       {"Fulfilment", "tins of one tea packed in a parcel"},
     ])
-    glossary.size.should eq(28)
+    glossary.size.should eq(30)
     terms = glossary.map { |term| {term.kind, term.name, term.context} }
     terms.should contain({"service", "requote", "Ordering"})
     terms.should contain({"process", "Hold", "Ordering"})

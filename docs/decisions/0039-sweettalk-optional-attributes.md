@@ -40,9 +40,12 @@ many attributes and many `never` lines that said only "this set goes together".
    the aggregate, the record or its id, and nil for an optional attribute. The writer is
    private to an aggregate, an entity and a process, which change themselves; a
    projection's is public, because its `whenever` handler assigns the row it reads
-   (`row.last_transfer = settled.transfer_id`). `@owner = owner` would only declare an
-   unrelated instance variable, since the reference is stored in `@owner_id`, so a `to` or a
-   `factory` that assigns it does not compile, and the message names `self.owner =`.
+   (`row.last_transfer = settled.transfer_id`), except its key, which has no writer, since
+   the row is found by it. `@owner = owner` would only declare an unrelated instance
+   variable, since the reference is stored in `@owner_id`, so a `to`, a `factory`, a
+   process's `whenever`, `compensate` or `deadline` body that assigns it, with `=`, an
+   operator assignment or a multiple assignment, does not compile, and the message names
+   `self.owner =`. The body's string literals are not scanned.
 4. **Entities, projections and processes take the same attributes.** Their constructors
    accept `owner : Owner | Owner::Id | Nil`, and an entity's facts in an event carry them
    as null.

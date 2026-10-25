@@ -207,21 +207,6 @@ module SweetTalk
       @__sweettalk_events << {{ event }}.new(self{{ given.id }})
     end
 
-    # Refuses `@owner = other` in the body of command or factory *verb* when `owner` is a
-    # reference: the reference is stored in `@owner_id`, so that line would declare a stray
-    # instance variable and change nothing. `self.owner = other` is the way.
-    macro __sweettalk_no_stray_writes(verb, text)
-      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
-        {% attribute = @type.constant(constant) %}
-        {% if %w[reference record].includes?(attribute[2]) &&
-                text.includes?("@#{attribute[0].id} = ") %}
-          {% raise "#{verb.id} assigns @#{attribute[0].id}, but #{attribute[0].id} is a " +
-                   "reference stored as #{attribute[4].id}: use self.#{attribute[0].id} = ..., " +
-                   "which takes the aggregate, the record or its id" %}
-        {% end %}
-      {% end %}
-    end
-
     # `to restock(tins : Tins) do … end` is a command, timed as a domain span named
     # `Catalogue::Tea#restock`.
     macro to(call, &block)
@@ -438,8 +423,10 @@ module SweetTalk
       end
 
       # The aggregate `create` and a factory start from: every attribute by name, each that has
-      # a default or is optional left out when not given, wherever it is declared.
-      protected def self.__sweettalk_assemble(*, {{ keywords.join(", ").id }}) : self
+      # a default or is optional left out when not given, wherever it is declared. An aggregate
+      # without attributes takes none, since a bare `*` needs a name after it.
+      {% named = keywords.empty? ? "" : "*, #{keywords.join(", ").id}" %}
+      protected def self.__sweettalk_assemble({{ named.id }}) : self
         new({{ attributes.map(&.[0].id).splat }})
       end
 
@@ -447,7 +434,7 @@ module SweetTalk
         {% span = "#{@type.name.split("::")[-2].id}::#{short.id}.create" %}
         # Checks the invariants and inserts the root, then its entities, in one transaction,
         # timed as a domain span named `Catalogue::Tea.create`.
-        def self.create(*, {{ keywords.join(", ").id }}) : self
+        def self.create({{ named.id }}) : self
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
             ::SweetTalk.__sweettalk_enter(nil)
             aggregate = new({{ attributes.map(&.[0].id).splat }})

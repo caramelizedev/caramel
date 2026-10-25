@@ -240,8 +240,7 @@ describe "SweetTalk's optional attributes" do
   end
 
   it "refuses a half-set value with parts when its columns are read, as a loaded row would be" do
-    # The runtime role cannot drop the CHECK, so a half-set row cannot be written to read back:
-    # this is the function a load runs on the part columns, called with what such a row holds.
+    # The function a load runs on the part columns, called with what such a row holds.
     money = Ledger::Counter::Money
     money.__sweettalk_from_columns(currency: nil, cents: nil).should be_nil
     money.__sweettalk_from_columns(currency: "EUR", cents: 7_i64)
@@ -255,6 +254,32 @@ describe "SweetTalk's optional attributes" do
     end
     expect_raises(SweetTalk::Refusal, "Currency must be one of USD, EUR, UZS") do
       money.__sweettalk_from_columns(currency: "GBP", cents: 7_i64)
+    end
+  end
+
+  it "refuses to load a half-set value with parts that reached the table without its check" do
+    # The owner drops the CHECK, so a row only PostgreSQL would have stopped can be read back.
+    owner = SweetTalkSpec.owner
+    all_or_none = ExpressiveModelsSpec.all_or_none("counter_transfers", "leg")
+    definition = owner.query_one(
+      "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1",
+      all_or_none, as: String)
+    SweetTalkSpec.committed do
+      owner.exec(%(ALTER TABLE counter_transfers DROP CONSTRAINT "#{all_or_none}"))
+      begin
+        transfer = ExpressiveModelsSpec.transfer
+        owner.exec("UPDATE counter_transfers SET leg_currency = 'EUR' WHERE id = $1",
+          transfer.id.raw)
+        expect_raises(SweetTalk::Refusal, "Money must have all of its parts or none") do
+          Ledger::Counter::Transfer.find(transfer.id)
+        end
+        expect_raises(SweetTalk::Refusal, "Money must have all of its parts or none") do
+          Ledger::Counter::Transfer.all
+        end
+      ensure
+        owner.exec("UPDATE counter_transfers SET leg_currency = NULL")
+        owner.exec(%(ALTER TABLE counter_transfers ADD CONSTRAINT "#{all_or_none}" #{definition}))
+      end
     end
   end
 

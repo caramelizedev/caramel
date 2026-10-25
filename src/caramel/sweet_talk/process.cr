@@ -25,6 +25,7 @@ module SweetTalk
         {% event.raise "whenever #{event} in process #{process.id} needs key:, " +
                        "the expression that picks its row" %}
       {% end %}
+      __sweettalk_no_stray_writes({{ "whenever #{event}" }}, {{ block.body.stringify }})
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "process",
         {{ key }}, {{ block.args.splat }}) do
         {{ block.body }}
@@ -34,6 +35,7 @@ module SweetTalk
     # `compensate Order::Placed do |placed, line, refusal| … end` runs on the same row
     # when the step for that event is refused.
     macro compensate(event, &block)
+      __sweettalk_no_stray_writes({{ "compensate #{event}" }}, {{ block.body.stringify }})
       ::SweetTalk.__sweettalk_compensation({{ @type }}, {{ event }}, nil, "process",
         {{ block.args.splat }}) do
         {{ block.body }}
@@ -73,6 +75,7 @@ module SweetTalk
         __sweettalk_deadline_{{ name.id }}
       end
 
+      __sweettalk_no_stray_writes({{ "deadline #{name.id}" }}, {{ block.body.stringify }})
       private def __sweettalk_deadline_{{ name.id }} : Nil
         {{ block.body }}
       end

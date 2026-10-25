@@ -21,6 +21,21 @@ module Shop
       never "An address needs a street and a city." { street.blank? || city.blank? }
     end
 
+    aggregate Tea, means: "one tea we sell" do
+      has name : String
+    end
+
+    # An aggregate with a lifecycle and no attributes still builds.
+    aggregate Bell, means: "the bell by the door" do
+      moves silent >> rung
+      event Rung, means: "someone rang"
+
+      to ring do
+        rung!
+        emit Rung
+      end
+    end
+
     aggregate Order, means: "what a member buys at one checkout" do
       has receipt_to : Email
       has deliver_to : Address
@@ -30,6 +45,9 @@ module Shop
       has shipped_by : Courier?
       has roast : Roast?
       has packer : Int64?
+      has tea : Tea?
+      # A carried name kept while `shipped_by` becomes `courier` (ADR 0041).
+      the courier : Courier? = shipped_by
       moves open >> placed, open >> cancelled, placed >> cancelled
 
       entity Line, means: "one tea in an order and how many tins" do
@@ -40,7 +58,7 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
-      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast],
+      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast, courier, tea],
         means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
@@ -71,6 +89,12 @@ module Shop
 
       to unwrap_gift do
         @gift_to = nil
+      end
+
+      # Neither a comparison nor a string is a stray write of the reference.
+      to choose(tea : Tea) do
+        refuse "@tea = tea is how a stray write looks" if @tea_id == tea.id.raw
+        self.tea = tea
       end
 
       to cancel(reason : String? = nil) do
@@ -167,3 +191,4 @@ Shop::Ordering::Order.all.each do |order|
   order.ship(Shop::Ordering::Courier.new("post"))
   order.unwrap_gift
 end
+Shop::Ordering::Bell.create.ring

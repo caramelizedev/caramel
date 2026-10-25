@@ -317,12 +317,15 @@ module SweetTalk
         # `self.{{ name }} = other` in a command points this attribute at another row, given as
         # the aggregate, the record or its id, or as nil when the attribute is optional. It is
         # private, so only the command changes it, except in a projection, whose `whenever`
-        # handler assigns the row it holds (`row.{{ name }} = other`).
-        {% visibility = @type < ::SweetTalk::Projection ? "" : "private" %}
-        {{ visibility.id }} def {{ name }}=(other : {{ accepted.id }})
-          @{{ name }}_id = ::SweetTalk.raw_id(other)
-        end
-      {% elsif @type < ::SweetTalk::Projection %}
+        # handler assigns the row it holds (`row.{{ name }} = other`). A key has no writer:
+        # the row is found by it, and the save never writes it.
+        {% unless keyed && key == name.stringify %}
+          {% visibility = @type < ::SweetTalk::Projection ? "" : "private" %}
+          {{ visibility.id }} def {{ name }}=(other : {{ accepted.id }})
+            @{{ name }}_id = ::SweetTalk.raw_id(other)
+          end
+        {% end %}
+      {% elsif @type < ::SweetTalk::Projection && !(keyed && key == name.stringify) %}
         property {{ decl }}
       {% else %}
         getter {{ decl }}
@@ -342,6 +345,26 @@ module SweetTalk
         {% name = decl.is_a?(TypeDeclaration) ? decl.var : decl %}
         {% name = decl.target if decl.is_a?(Assign) %}
         {% decl.raise "the #{name} needs a type, as in the #{name} : Cents = …" %}
+      {% end %}
+    end
+
+    # Refuses `@owner = other`, `@owner ||= other` or `@owner, @x = …` in the body of
+    # *verb*, a command, factory, step, compensation or deadline, when `owner` is a
+    # reference: the reference is stored in `@owner_id`, so that line would declare a stray
+    # instance variable and change nothing. `self.owner = other` is the way. *text* is the
+    # body's source; its string literals are dropped before the scan.
+    macro __sweettalk_no_stray_writes(verb, text)
+      {% scanned = text.gsub(/"(?:[^"\\]|\\.)*"/, "")
+           .gsub(/(?<![@\w])(@\w+)\s*(?:\|\||&&|<<|>>|[-+*\/%&|^])?=(?![=~])/, "\\1 = ")
+           .gsub(/(?<![@\w])(@\w+)\s*,(?=[^\n=]*=(?![=~]))/, "\\1 = ,") %}
+      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
+        {% attribute = @type.constant(constant) %}
+        {% if %w[reference record].includes?(attribute[2]) &&
+                scanned.includes?("@#{attribute[0].id} = ") %}
+          {% raise "#{verb.id} assigns @#{attribute[0].id}, but #{attribute[0].id} is a " +
+                   "reference stored as #{attribute[4].id}: use self.#{attribute[0].id} = ..., " +
+                   "which takes the aggregate, the record or its id" %}
+        {% end %}
       {% end %}
     end
 
