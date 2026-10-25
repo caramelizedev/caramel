@@ -206,6 +206,21 @@ describe SugarORM::Differ do
     sql(overridden.transactional).last.should eq(added)
   end
 
+  it "adds a nullable date column, halts a required one, and finds a live date column matching" do
+    optional = books([nullable("done_on", "date")])
+    plan = Differ.diff([optional], [books])
+    sql(plan.transactional).should eq([%(ALTER TABLE "books" ADD COLUMN "done_on" date)])
+    plan.halts.should be_empty
+
+    mandatory = books([required("due_on", "date")])
+    halt = Differ.diff([mandatory], [books]).halts.first
+    halt.subject.should eq("books.due_on")
+    halt.to_s.should contain("declare the field nilable (a codec field takes no default)")
+
+    Differ.diff([optional], [optional]).clean?.should be_true
+    Differ.diff([mandatory], [mandatory]).clean?.should be_true
+  end
+
   it "renames a column declared renamed_from and still reconciles its other attributes" do
     billing = nullable("billing_email", default: "'none'", renamed_from: "email")
     declared = books([billing])

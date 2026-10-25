@@ -95,6 +95,23 @@ describe SugarORM::DDL do
     DDL.render(widened).should eq(%(#{alter} TYPE bigint USING "seats"::bigint))
   end
 
+  it "renders a date column, required or nullable, with no default" do
+    table = Catalog::Table.new("deadlines", [
+      Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+      Catalog::Column.new("due_on", "date", false, nil),
+      Catalog::Column.new("done_on", "date", true, nil),
+    ])
+    DDL.create_table(table).should eq(<<-SQL)
+      CREATE TABLE "deadlines" (
+        "id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        "due_on" date NOT NULL,
+        "done_on" date
+      )
+      SQL
+    added = Differ::AddColumn.new("deadlines", Catalog::Column.new("done_on", "date", true, nil))
+    DDL.render(added).should eq(%(ALTER TABLE "deadlines" ADD COLUMN "done_on" date))
+  end
+
   it "adds a foreign key without validating it, then validates it separately" do
     key = Catalog::ForeignKey.new(
       name: "fk_users_team_id",

@@ -69,15 +69,31 @@ describe SugarORM::Schema do
     quote.__sugar_get("snapshot").should eq(%({"total":3}))
   end
 
-  it "accepts only numeric, numeric(P,S), jsonb and text codec column types" do
-    ["numeric", "numeric(20,8)", "numeric(5,5)", "jsonb", "text"].each do |type|
+  it "accepts only numeric, numeric(P,S), jsonb, text and date codec column types" do
+    ["numeric", "numeric(20,8)", "numeric(5,5)", "jsonb", "text", "date"].each do |type|
       SugarORM::Codec.checked_sql_type(type).should eq(type)
     end
-    ["decimal", "numeric(3,4)", "json", "numeric(1001,2)"].each do |type|
-      expect_raises(ArgumentError, "must be numeric, numeric(P,S), jsonb or text") do
+    ["decimal", "numeric(3,4)", "json", "numeric(1001,2)", "timestamp", "Date", "date(3)",
+     "date "].each do |type|
+      expect_raises(ArgumentError, "must be numeric, numeric(P,S), jsonb, text or date") do
         SugarORM::Codec.checked_sql_type(type)
       end
     end
+  end
+
+  it "stores a SugarORM::Date in a nullable or required date column read as text" do
+    SugarUnit::Deadline.__sugar_table.columns.should eq([
+      Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+      Catalog::Column.new("due_on", "date", false, nil),
+      Catalog::Column.new("done_on", "date", true, nil),
+    ])
+    SugarUnit::Deadline.__sugar_select_list.should eq(
+      %("id", "due_on"::text, "done_on"::text)
+    )
+    deadline = SugarUnit::Deadline.new(id: 1_i64, due_on: SugarORM::Date.new(2026, 10, 24))
+    deadline.__sugar_get("due_on").should eq("2026-10-24")
+    deadline.__sugar_get("done_on").should be_nil
+    deadline.to_json.should eq(%({"id":1,"due_on":"2026-10-24","done_on":null}))
   end
 
   it "makes a NOT NULL belongs_to column, foreign key and index" do

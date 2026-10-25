@@ -75,6 +75,14 @@ module SugarSpec
     end
   end
 
+  struct Deadline < SugarORM::Schema
+    schema "sugar_deadlines" do
+      field id : Int64, primary: true
+      field due_on : SugarORM::Date, codec: SugarORM::DateCodec
+      field done_on : SugarORM::Date?, codec: SugarORM::DateCodec
+    end
+  end
+
   struct Shelf < SugarORM::Schema
     schema "sugar_shelves" do
       field id : Int64, primary: true
@@ -183,6 +191,7 @@ module SugarSpec
                "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
                "rate numeric(30,10) NOT NULL, fee numeric(30,10), snapshot jsonb NOT NULL)"
       owner.exec(quotes)
+      owner.exec(SugarORM::DDL.create_table(SugarSpec::Deadline.__sugar_table))
       owner.exec(SugarORM::DDL.create_table(SugarSpec::Shelf.__sugar_table))
       owner.exec(SugarORM::DDL.create_table(SugarSpec::Sale.__sugar_table))
       SugarSpec::Sale.__sugar_table.indexes.each do |index|
@@ -190,15 +199,16 @@ module SugarSpec
         owner.exec(SugarORM::DDL.render(add))
       end
       tables = "sugar_teams, sugar_users, sugar_profiles, sugar_quotes, sugar_shelves, " \
-               "sugar_sales"
+               "sugar_sales, sugar_deadlines"
       sequences = "sugar_teams_id_seq, sugar_users_id_seq, sugar_profiles_id_seq, " \
-                  "sugar_quotes_id_seq, sugar_shelves_id_seq, sugar_sales_id_seq"
+                  "sugar_quotes_id_seq, sugar_shelves_id_seq, sugar_sales_id_seq, " \
+                  "sugar_deadlines_id_seq"
       owner.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{tables} TO caramel_model_spec")
       owner.exec("GRANT USAGE, SELECT ON SEQUENCE #{sequences} TO caramel_model_spec")
       yield owner, runtime
     ensure
-      owner.exec("DROP TABLE IF EXISTS sugar_sales, sugar_shelves, sugar_quotes, " \
-                 "sugar_profiles, sugar_users, sugar_teams")
+      owner.exec("DROP TABLE IF EXISTS sugar_deadlines, sugar_sales, sugar_shelves, " \
+                 "sugar_quotes, sugar_profiles, sugar_users, sugar_teams")
       runtime.close
       owner.close
     end
@@ -609,6 +619,80 @@ describe "SugarORM with PostgreSQL" do
         "SELECT rate::text AS rate FROM sugar_quotes", as: {rate: String}
       )
       rows.should eq([{rate: exact}])
+    end
+  end
+
+  it "stores a calendar day in a date column and reads it back as the same day" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      day = SugarORM::Date.new(2026, 10, 24)
+      deadline = SugarSpec::Deadline.create!(due_on: day)
+      deadline.due_on.should eq(day)
+      deadline.done_on.should be_nil
+
+      found = SugarSpec::Deadline.query.find!(deadline.id)
+      found.due_on.should eq(day)
+      SugarSpec::Deadline.query.where(due_on: day).to_a.map(&.id).should eq([deadline.id])
+      next_day = SugarORM::Date.new(2026, 10, 25)
+      SugarSpec::Deadline.query.where(due_on: next_day).to_a.should be_empty
+      SugarSpec::Deadline.query.where(done_on: nil).to_a.size.should eq(1)
+
+      finished = found.update!(done_on: day.plus_days(2))
+      finished.done_on.should eq(SugarORM::Date.new(2026, 10, 26))
+      SugarSpec::Deadline.query.find!(deadline.id).done_on.should eq(finished.done_on)
+      finished.update!(done_on: nil).done_on.should be_nil
+
+      edges = [SugarORM::Date.new(1, 1, 1), SugarORM::Date.new(2024, 2, 29),
+               SugarORM::Date.new(9999, 12, 31)]
+      edges.each do |edge|
+        SugarSpec::Deadline.create!(due_on: edge)
+        SugarSpec::Deadline.query.where(due_on: edge).first!.due_on.should eq(edge)
+      end
+
+      shape = {due: String, same: Bool, type: String}
+      rows = SugarORM.sql(<<-SQL, as: shape)
+        SELECT due_on::text AS due, due_on = DATE '2026-10-24' AS same,
+               pg_typeof(due_on)::text AS type
+        FROM sugar_deadlines WHERE id = #{deadline.id}
+        SQL
+      rows.should eq([{due: "2026-10-24", same: true, type: "date"}])
+    end
+  end
+
+  it "refuses to read a date that is not YYYY-MM-DD, naming the session's DateStyle" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      SugarSpec::Deadline.create!(due_on: SugarORM::Date.new(2026, 10, 24))
+      SugarORM::Repo.transaction do
+        SugarORM.sql_exec("SET LOCAL datestyle = 'German'")
+        error = expect_raises(ArgumentError, "is not a YYYY-MM-DD day") do
+          SugarSpec::Deadline.query.to_a
+        end
+        error.message.not_nil!.should contain("24.10.2026")
+        error.message.not_nil!.should contain("DateStyle")
+      end
+      SugarSpec::Deadline.query.to_a.size.should eq(1)
+
+      owner.exec("INSERT INTO sugar_deadlines (due_on) VALUES ('infinity')")
+      expect_raises(ArgumentError, "infinity") { SugarSpec::Deadline.query.to_a }
+    end
+  end
+
+  it "creates a date column the differ finds matching, and adds one to an existing table" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      declared = [SugarSpec::Deadline.__sugar_table]
+      snapshot = SugarORM::Introspection.read(owner)
+      live = snapshot.tables.find! { |table| table.name == "sugar_deadlines" }
+      live.columns.map { |column| {column.name, column.sql_type, column.nullable} }.should eq([
+        {"id", "bigint", false}, {"due_on", "date", false}, {"done_on", "date", true},
+      ])
+      SugarORM::Differ.diff(declared, snapshot).clean?.should be_true
+
+      owner.exec("ALTER TABLE sugar_deadlines DROP COLUMN done_on")
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(owner))
+      plan.halts.should be_empty
+      statements = SugarORM::DDL.statements(plan.transactional)
+      statements.should eq([%(ALTER TABLE "sugar_deadlines" ADD COLUMN "done_on" date)])
+      statements.each { |sql| owner.exec(sql) }
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(owner)).clean?.should be_true
     end
   end
 
