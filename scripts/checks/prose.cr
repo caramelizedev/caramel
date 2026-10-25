@@ -17,15 +17,15 @@ module Caramel::Checks::Prose
   ]
 
   CAPS = {
-    "README.md"                              => 3_000,
-    "AGENTS.md"                              => 3_000,
-    "CLAUDE.md"                              => 200,
-    "CONTRIBUTING.md"                        => 12_000,
-    "SECURITY.md"                            => 2_000,
-    "website/README.md"                      => 6_000,
-    "templates/application/README.md"        => 3_000,
-    "templates/application/AGENTS.md"        => 2_000,
-    "templates/application/CLAUDE.md"        => 200,
+    "README.md"                       => 3_000,
+    "AGENTS.md"                       => 3_000,
+    "CLAUDE.md"                       => 200,
+    "CONTRIBUTING.md"                 => 12_000,
+    "SECURITY.md"                     => 2_000,
+    "website/README.md"               => 6_000,
+    "templates/application/README.md" => 3_000,
+    "templates/application/AGENTS.md" => 2_000,
+    "templates/application/CLAUDE.md" => 200,
     # A skill has no cap: it is read when its task matches, and the link check keeps it
     # from becoming a second source (ADR 0026).
   }
