@@ -251,12 +251,28 @@ module SweetTalk
               \{% attribute = attributes.find { |attribute|
                    attribute[0] == {{ key.stringify }}
                  } %}
+              {% if value.is_a?(NilLiteral) %}
+                \{% if attribute && !attribute[9] %}
+                  \{% raise "{{ call.name.id }} asks for {{ key.id }}: nil, but {{ key.id }} is " +
+                           "not optional: nil is a value of an optional attribute, as in " +
+                           "has {{ key.id }} : #{attribute[3].id}?\n  --> {{ call.filename.id }}:" +
+                           "{{ call.line_number }}:{{ call.column_number }}" %}
+                \{% end %}
+              {% end %}
               \{% if attribute[2] == "composite" %}
                 composite_{{ key.id }} = ({{ value }})
                 \{% parts = attribute[7].map do |part|
                      "#{part[1].id}: ::SweetTalk.column(composite_{{ key.id }}.#{part[0].id})"
                    end %}
-                query = query.where(\{{ parts.join(", ").id }})
+                \{% if attribute[9] %}
+                  if composite_{{ key.id }}.nil?
+                    query = query.where(\{{ attribute[7][0][1].id }}: nil)
+                  else
+                    query = query.where(\{{ parts.join(", ").id }})
+                  end
+                \{% else %}
+                  query = query.where(\{{ parts.join(", ").id }})
+                \{% end %}
               \{% else %}
                 query = query.where(\{{ attribute[4].id }}: ::SweetTalk.column({{ value }}))
               \{% end %}

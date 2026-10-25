@@ -1,10 +1,31 @@
 # What PostgreSQL checks of SweetTalk's values and lifecycles: every integer bound and
-# string length is a CHECK constraint on each column that stores it, and every lifecycle
-# one on its state column, so a write that goes around the domain is refused too; a
-# pattern, and a value with database_check: false, are checked in Crystal only. And the
-# tables as PostgreSQL holds them match the declared ones, so `frappe db diff` derives no
-# further migration.
+# string length is a CHECK constraint on each column that stores it, and every lifecycle one
+# on its state column, so a write that goes around the domain is refused too; an optional
+# value with parts has one that keeps its columns all set or all nil, named by its parts so
+# that a part added is a new constraint; a pattern, and a value with database_check: false,
+# are checked in Crystal only. And the tables as PostgreSQL holds them match the declared
+# ones, so `frappe db diff` derives no further migration.
 require "./support/app"
+
+# Two values with parts that differ by one part, to see how their checks are named.
+module DatabaseChecksProbe
+  include SweetTalk
+
+  context Probe, means: "values with parts, only to compare how their checks are named" do
+    value Size, Int32, at_least: 0, means: "a measure"
+
+    value Pair, means: "two measures" do
+      part width : Size
+      part depth : Size
+    end
+
+    value Triple, means: "the same two measures and a third" do
+      part width : Size
+      part depth : Size
+      part height : Size
+    end
+  end
+end
 
 module DatabaseChecksSpec
   def self.bin(code = "AB") : Rules::Shelf::Bin
@@ -32,8 +53,27 @@ describe "SweetTalk's database checks" do
         WHERE contype = 'c' AND conname LIKE 'check\\_%' ORDER BY conname
         SQL
       checks.map(&.[:name]).should eq(%w[
-        check_billing_bills_amount check_billing_bills_state_16e92b19
-        check_catalogue_teas_held check_catalogue_teas_price check_catalogue_teas_stock
+        check_billing_bills_amount check_billing_bills_state_16e92b19 check_catalogue_teas_held
+        check_catalogue_teas_price check_catalogue_teas_stock
+        check_counter_followups_followed_by_length_2_20
+        check_counter_followups_followed_with_all_or_none_437ba1f3
+        check_counter_followups_followed_with_cents
+        check_counter_followups_followed_with_currency_length_3_3
+        check_counter_standings_last_leg_all_or_none_437ba1f3
+        check_counter_standings_last_leg_cents
+        check_counter_standings_last_leg_currency_length_3_3
+        check_counter_standings_last_settled_by_length_2_20
+        check_counter_transfer_lines_paid_by_length_2_20
+        check_counter_transfer_lines_share_all_or_none_437ba1f3
+        check_counter_transfer_lines_share_cents
+        check_counter_transfer_lines_share_currency_length_3_3
+        check_counter_transfers_amount_cents check_counter_transfers_amount_currency_length_3_3
+        check_counter_transfers_kind_length_3_20
+        check_counter_transfers_leg_all_or_none_437ba1f3 check_counter_transfers_leg_cents
+        check_counter_transfers_leg_currency_length_3_3
+        check_counter_transfers_opened_by_length_2_20 check_counter_transfers_reason_length_3_40
+        check_counter_transfers_settled_by_length_2_20 check_counter_transfers_state_2d0246c7
+        check_counter_vouchers_issuer_length_2_20 check_counter_vouchers_kind_length_3_20
         check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
         check_ordering_holds_state_a8664243 check_ordering_order_lines_price
         check_ordering_order_lines_quantity check_ordering_orders_receipt_to_length_3_254
@@ -86,5 +126,15 @@ describe "SweetTalk's database checks" do
         Rules::Shelf::Bin.find(bin.id)
       end
     end
+  end
+
+  it "names the check of an optional value's parts by those parts, so a part added is a new one" do
+    pair = DatabaseChecksProbe::Probe::Pair::SWEETTALK_OPTIONAL_CHECK[0]
+    triple = DatabaseChecksProbe::Probe::Triple::SWEETTALK_OPTIONAL_CHECK[0]
+    pair.should match(/\Aall_or_none_[0-9a-f]{8}\z/)
+    triple.should match(/\Aall_or_none_[0-9a-f]{8}\z/)
+    triple.should_not eq(pair)
+    # FNV-1a of the sorted part names, "cents,currency", as a lifecycle's states are named.
+    Ledger::Counter::Money::SWEETTALK_OPTIONAL_CHECK[0].should eq("all_or_none_437ba1f3")
   end
 end

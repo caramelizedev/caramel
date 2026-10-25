@@ -140,6 +140,21 @@ module SweetTalk
       @__sweettalk_events << {{ event }}.new(self{{ given.id }})
     end
 
+    # Refuses `@owner = other` in the body of command or factory *verb* when `owner` is a
+    # reference: the reference is stored in `@owner_id`, so that line would declare a stray
+    # instance variable and change nothing. `self.owner = other` is the way.
+    macro __sweettalk_no_stray_writes(verb, text)
+      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
+        {% attribute = @type.constant(constant) %}
+        {% if %w[reference record].includes?(attribute[2]) &&
+                text.includes?("@#{attribute[0].id} = ") %}
+          {% raise "#{verb.id} assigns @#{attribute[0].id}, but #{attribute[0].id} is a " +
+                   "reference stored as #{attribute[4].id}: use self.#{attribute[0].id} = ..., " +
+                   "which takes the aggregate, the record or its id" %}
+        {% end %}
+      {% end %}
+    end
+
     # `to restock(tins : Tins) do … end` is a command, timed as a domain span named
     # `Catalogue::Tea#restock`.
     macro to(call, &block)
@@ -151,6 +166,7 @@ module SweetTalk
       {% end %}
       {% parts = @type.name.split("::") %}
       {% span = "#{parts[-2].id}::#{parts[-1].id}##{call.name}" %}
+      __sweettalk_no_stray_writes({{ call.name.stringify }}, {{ block.body.stringify }})
       def {{ call.name }}({{ call.args.splat }}) : Nil
         ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
           __sweettalk_command do
@@ -183,6 +199,8 @@ module SweetTalk
       {% at = "\n  --> #{call.filename.id}:#{call.line_number}:#{call.column_number}" %}
       {% given = call.args.map(&.var.stringify) %}
       {% factory = {verb.stringify, call.line_number} %}
+      __sweettalk_no_stray_writes({{ verb.stringify }},
+        {{ block.body.stringify }})
       SWEETTALK_FACTORY_{{ verb.upcase }} = {{ factory }}
 
       def self.{{ verb }}({{ call.args.splat }}) : self
@@ -202,7 +220,7 @@ module SweetTalk
                .map { |attribute| "#{attribute[0].id}: #{attribute[0].id}" } %}
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
             ::SweetTalk.__sweettalk_enter(nil)
-            aggregate = new(\{{ named.join(", ").id }})
+            aggregate = __sweettalk_assemble(\{{ named.join(", ").id }})
             aggregate.__sweettalk_make_{{ verb }}({{ call.args.map(&.var).splat }})
             aggregate
           end
@@ -239,6 +257,8 @@ module SweetTalk
       {% for attribute in attributes %}
         {% name = attribute[0].id %}
         {% type = attribute[3].id %}
+        {% base = attribute[10] %}
+        {% nilable = attribute[9] %}
         {% default = attribute[8] %}
         {% default = "[] of #{attribute[3][6..-2].id}" if attribute[2] == "entities" %}
         {% trailing = true %}
@@ -246,29 +266,45 @@ module SweetTalk
           {% unset = !later[8] && later[2] != "entities" %}
           {% trailing = false if later[1] >= attribute[1] && unset %}
         {% end %}
-        {% if attribute[2] == "reference" %}
-          {% positional << "#{name} : #{type} | #{type}::Id" %}
-          {% keywords << "#{name} : #{type} | #{type}::Id" %}
-        {% elsif attribute[2] == "record" %}
-          {% positional << "#{name} : #{type} | ::SweetTalk::RecordId(#{type})" %}
-          {% keywords << "#{name} : #{type} | ::SweetTalk::RecordId(#{type})" %}
+        {% if attribute[2] == "reference" || attribute[2] == "record" %}
+          {% target = "#{base.id}::Id" %}
+          {% target = "::SweetTalk::RecordId(#{base.id})" if attribute[2] == "record" %}
+          {% accepted = "#{base.id} | #{target.id}" %}
+          {% accepted = "#{accepted.id} | Nil" if nilable %}
+          {% positional << "#{name} : #{accepted.id}" +
+                           (trailing && nilable ? " = #{default.id}" : "") %}
+          {% keywords << "#{name} : #{accepted.id}" + (nilable ? " = #{default.id}" : "") %}
         {% else %}
           {% positional << "@#{name} : #{type}" + (trailing && default ? " = #{default.id}" : "") %}
           {% keywords << "#{name} : #{type}" + (default ? " = #{default.id}" : "") %}
         {% end %}
         {% if attribute[2] == "value" %}
-          {% loads << "@#{name} = #{type}.new(row.#{attribute[4].id})" %}
-          {% columns << "#{attribute[4].id}: @#{name}.raw" %}
+          {% if nilable %}
+            {% loads << "@#{name} = row.#{attribute[4].id}.try { |raw| #{base.id}.new(raw) }" %}
+            {% columns << "#{attribute[4].id}: @#{name}.try(&.raw)" %}
+          {% else %}
+            {% loads << "@#{name} = #{type}.new(row.#{attribute[4].id})" %}
+            {% columns << "#{attribute[4].id}: @#{name}.raw" %}
+          {% end %}
           {% copies << "@#{name} = fresh.@#{name}" %}
         {% elsif attribute[2] == "composite" %}
-          {% parts = attribute[7].map do |part|
-               read = "row.#{part[1].id}"
-               "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
-             end %}
-          {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
-          {% for part in attribute[7] %}
-            {% raw = part[4] == "value" ? ".raw" : "" %}
-            {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
+          {% if nilable %}
+            {% reads = attribute[7].map { |part| "#{part[0].id}: row.#{part[1].id}" } %}
+            {% loads << "@#{name} = #{base.id}.__sweettalk_from_columns(#{reads.join(", ").id})" %}
+            {% for part in attribute[7] %}
+              {% raw = part[4] == "value" ? ".raw" : "" %}
+              {% columns << "#{part[1].id}: @#{name}.try(&.#{part[0].id}#{raw.id})" %}
+            {% end %}
+          {% else %}
+            {% parts = attribute[7].map do |part|
+                 read = "row.#{part[1].id}"
+                 "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
+               end %}
+            {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
+            {% for part in attribute[7] %}
+              {% raw = part[4] == "value" ? ".raw" : "" %}
+              {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
+            {% end %}
           {% end %}
           {% copies << "@#{name} = fresh.@#{name}" %}
         {% elsif attribute[2] == "entities" %}
@@ -332,6 +368,12 @@ module SweetTalk
 
       def id : Id
         Id.new(__sweettalk_raw_id)
+      end
+
+      # The aggregate `create` and a factory start from: every attribute by name, each that has
+      # a default or is optional left out when not given, wherever it is declared.
+      protected def self.__sweettalk_assemble(*, {{ keywords.join(", ").id }}) : self
+        new({{ attributes.map(&.[0].id).splat }})
       end
 
       {% if factories.empty? %}

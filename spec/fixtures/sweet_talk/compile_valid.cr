@@ -12,6 +12,8 @@ module Shop
     value Parcels, Int32, at_least: 1, at_most: MOST_PARCELS, database_check: false,
       means: "how many parcels an order ships in"
 
+    value Courier, String, length: 2..30, means: "who carries an order"
+
     value Address, means: "where a parcel goes" do
       part street : String
       part city : String
@@ -23,6 +25,9 @@ module Shop
       has deliver_to : Address
       has lines : Array(Line)
       has parcels : Parcels = Parcels.new(1)
+      has gift_to : Address?
+      has shipped_by : Courier?
+      has packer : Int64?
       moves open >> placed, open >> cancelled, placed >> cancelled
 
       entity Line, means: "one tea in an order and how many tins" do
@@ -33,6 +38,8 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
+      event Shipped, receipt_to : Email, gift_to : Address?, shipped_by : Courier?,
+        means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
         emit Opened, receipt_to: receipt_to
@@ -53,6 +60,15 @@ module Shop
       to place do
         placed!
         emit Placed, lines: lines
+      end
+
+      to ship(by : Courier) do
+        @shipped_by = by
+        emit Shipped, receipt_to: receipt_to, gift_to: gift_to, shipped_by: shipped_by
+      end
+
+      to unwrap_gift do
+        @gift_to = nil
       end
 
       to cancel(reason : String? = nil) do
@@ -145,3 +161,7 @@ end
 SweetTalk.boot
 Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)
 Shop::Ordering::Order.all(satisfying: Shop::Ordering::Settled)
+Shop::Ordering::Order.all.each do |order|
+  order.ship(Shop::Ordering::Courier.new("post"))
+  order.unwrap_gift
+end

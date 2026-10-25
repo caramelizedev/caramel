@@ -538,10 +538,19 @@ module SweetTalk
                 {% value.raise "specification #{name} cannot filter on #{key.id}, a list of " +
                                "entities: PostgreSQL reads one #{short.id} row; keep a rule " +
                                "over #{key.id} in a never, an always or a method" %}
+              {% elsif value.is_a?(NilLiteral) && !attribute[9] %}
+                {% value.raise "specification #{name} asks for #{key.id}: nil, but #{key.id} is " +
+                               "not optional: nil is a value of an optional attribute, as in " +
+                               "has #{key.id} : #{attribute[3].id}?" %}
+              {% elsif attribute[2] == "composite" && attribute[9] && value.is_a?(NilLiteral) %}
+                {% checks << "@#{attribute[0].id}.nil?" %}
+                {% wheres << "::SugarORM::Condition.column(#{attribute[7][0][1]}, nil)" %}
+                {% typings << "typeof(#{row}.query.where(#{attribute[7][0][1].id}: nil))" %}
               {% elsif attribute[2] == "composite" %}
                 {% for part in attribute[7] %}
                   {% raw = part[4] == "value" ? ".raw" : "" %}
                   {% have = "@#{attribute[0].id}.#{part[0].id}#{raw.id}" %}
+                  {% have = "@#{attribute[0].id}.try(&.#{part[0].id}#{raw.id})" if attribute[9] %}
                   {% want = "::SweetTalk.column((#{value}).#{part[0].id})" %}
                   {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
                   {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
@@ -550,6 +559,9 @@ module SweetTalk
               {% else %}
                 {% have = "@#{attribute[4].id}" %}
                 {% have = "@#{attribute[0].id}.raw" if attribute[2] == "value" %}
+                {% if attribute[2] == "value" && attribute[9] %}
+                  {% have = "@#{attribute[0].id}.try(&.raw)" %}
+                {% end %}
                 {% want = "::SweetTalk.column(#{value})" %}
                 {% checks << "::SweetTalk.__sweettalk_holds?(#{have.id}, #{want.id})" %}
                 {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}

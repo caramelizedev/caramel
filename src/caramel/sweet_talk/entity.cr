@@ -19,37 +19,57 @@ module SweetTalk
       {% for attribute, index in attributes %}
         {% name = attribute[0].id %}
         {% type = attribute[3].id %}
+        {% base = attribute[10] %}
+        {% nilable = attribute[9] %}
         {% trailing = true %}
         {% for later in attributes %}
           {% trailing = false if later[1] >= attribute[1] && !later[8] %}
         {% end %}
-        {% if attribute[2] == "reference" %}
-          {% positional << "#{name} : #{type} | #{type}::Id" %}
-        {% elsif attribute[2] == "record" %}
-          {% positional << "#{name} : #{type} | ::SweetTalk::RecordId(#{type})" %}
+        {% if attribute[2] == "reference" || attribute[2] == "record" %}
+          {% target = "#{base.id}::Id" %}
+          {% target = "::SweetTalk::RecordId(#{base.id})" if attribute[2] == "record" %}
+          {% accepted = "#{base.id} | #{target.id}" %}
+          {% accepted = "#{accepted.id} | Nil" if nilable %}
+          {% positional << "#{name} : #{accepted.id}" +
+                           (trailing && nilable ? " = #{attribute[8].id}" : "") %}
         {% else %}
           {% default = trailing && attribute[8] ? " = #{attribute[8].id}" : "" %}
           {% positional << "@#{name} : #{type}" + default %}
         {% end %}
         {% if attribute[2] == "value" %}
-          {% loads << "@#{name} = #{type}.new(row.#{attribute[4].id})" %}
-          {% columns << "#{attribute[4].id}: @#{name}.raw" %}
+          {% if nilable %}
+            {% loads << "@#{name} = row.#{attribute[4].id}.try { |raw| #{base.id}.new(raw) }" %}
+            {% columns << "#{attribute[4].id}: @#{name}.try(&.raw)" %}
+          {% else %}
+            {% loads << "@#{name} = #{type}.new(row.#{attribute[4].id})" %}
+            {% columns << "#{attribute[4].id}: @#{name}.raw" %}
+          {% end %}
         {% elsif attribute[2] == "composite" %}
-          {% parts = attribute[7].map do |part|
-               read = "row.#{part[1].id}"
-               "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
-             end %}
-          {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
-          {% for part in attribute[7] %}
-            {% raw = part[4] == "value" ? ".raw" : "" %}
-            {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
+          {% if nilable %}
+            {% reads = attribute[7].map { |part| "#{part[0].id}: row.#{part[1].id}" } %}
+            {% loads << "@#{name} = #{base.id}.__sweettalk_from_columns(#{reads.join(", ").id})" %}
+            {% for part in attribute[7] %}
+              {% raw = part[4] == "value" ? ".raw" : "" %}
+              {% columns << "#{part[1].id}: @#{name}.try(&.#{part[0].id}#{raw.id})" %}
+            {% end %}
+          {% else %}
+            {% parts = attribute[7].map do |part|
+                 read = "row.#{part[1].id}"
+                 "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
+               end %}
+            {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
+            {% for part in attribute[7] %}
+              {% raw = part[4] == "value" ? ".raw" : "" %}
+              {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
+            {% end %}
           {% end %}
         {% else %}
           {% loads << "@#{attribute[4].id} = row.#{attribute[4].id}" %}
           {% columns << "#{attribute[4].id}: @#{attribute[4].id}" %}
         {% end %}
         {% if attribute[2] == "reference" || attribute[2] == "record" %}
-          {% facts << "@#{attribute[4].id} = fact[#{attribute[4]}].as_i64" %}
+          {% read = nilable ? "as_i64?" : "as_i64" %}
+          {% facts << "@#{attribute[4].id} = fact[#{attribute[4]}].#{read.id}" %}
           {% packs << "json.field(#{attribute[4]}, @#{attribute[4].id})" %}
         {% else %}
           {% facts << "@#{name} = ::SweetTalk.unpack(#{type}, fact[#{attribute[0]}])" %}

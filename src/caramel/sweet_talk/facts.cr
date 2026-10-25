@@ -25,6 +25,11 @@ module SweetTalk
     record.__sugar_primary_value
   end
 
+  # An optional reference that is not set stores no id.
+  def self.raw_id(target : Nil) : Nil
+    nil
+  end
+
   # The value a query compares a column with: a value's raw, an id's number, an
   # aggregate's or a record's id, and lists and ranges of them.
   def self.column(value : Value)

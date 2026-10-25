@@ -1,9 +1,9 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033 and 0034 to 0036). Each declaration mistake
-# fails to compile with a fixed problem text, naming its file where the mistake has a line;
-# a valid domain compiles, with and without caramel/tenancy; and an application that does not
-# require caramel/sweet_talk holds none of its code. spec/sweet_talk and
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036 and 0039). Each declaration
+# mistake fails to compile with a fixed problem text, naming its file where the mistake has a
+# line; a valid domain compiles, with and without caramel/tenancy; and an application that does
+# not require caramel/sweet_talk holds none of its code. spec/sweet_talk and
 # spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
@@ -50,6 +50,22 @@ PROBLEMS = [
    "value Email wraps String, so it takes matches: and length:, not at_least:"},
   {"value_int_matches",
    "value Tins wraps Int32, so it takes at_least:, at_most:, within: and times:, not matches:"},
+  {"key_optional", "key tea cannot be optional: every row has its key"},
+  {"stray_reference_write",
+   "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \
+   "takes the aggregate, the record or its id"},
+  {"stray_reference_write_factory",
+   "open assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \
+   "takes the aggregate, the record or its id"},
+  {"where_nil_required_scalar",
+   "unnoted asks for note: nil, but note is not optional: nil is a value of an optional " \
+   "attribute, as in has note : String?"},
+  {"where_nil_required_composite",
+   "without_total asks for total: nil, but total is not optional: nil is a value of an " \
+   "optional attribute, as in has total : Money?"},
+  {"where_nil_required_specification",
+   "specification Unnoted asks for note: nil, but note is not optional: nil is a value of an " \
+   "optional attribute, as in has note : String?"},
   {"composite_part_type",
    "part weight : Float32 cannot be stored: a part is String, Int32, Int64, Bool, Float64, Time " \
    "or a value that wraps one"},
