@@ -352,6 +352,8 @@ const compileRows = {
   'A compensate without its whenever': ['compensate_without_whenever'],
   'arm of a deadline the process lacks': ['arm_unknown_deadline'],
   'An event field named like its metadata, or typed as a union of other types': ['event_reserved_field', 'event_reserved_flow', 'event_union_field'],
+  'An event that carries: something that is not a list of names, a name that is not an attribute or derived value declared above it, a name twice, or one named like its metadata': ['event_carries_not_list', 'event_carries_unknown', 'event_carries_twice', 'event_carries_reserved'],
+  'An emit that gives a field its event carries': ['emit_carried_field'],
   'renamed_from: naming its own name, or a rename whose old job name another job has': ['renamed_from_itself', 'job_alias_taken'],
   'A value with parts as a contract field': ['composite_field'],
   'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_index_long', 'tenant_column_taken', 'tenant_parent_column'],

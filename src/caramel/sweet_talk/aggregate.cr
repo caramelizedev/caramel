@@ -45,27 +45,81 @@ module SweetTalk
 
     # `event Placed, lines : Array(Line), means: "…"` is one of this aggregate's events. It
     # records its subject and its fields when it is emitted, with an id, the time and the
-    # actor. Its channel fits PostgreSQL's 63 characters, or 42 in a program that requires
-    # caramel/tenancy, which prefixes a tenant's `t<id>:`.
-    macro event(name, *fields, means = nil, renamed_from = nil)
+    # actor. `carries: [member, total]` adds one field for each attribute or derived value
+    # it names, of that attribute's type, which `emit` reads from the aggregate and a command
+    # cannot give; the attribute is declared above the event. Its channel fits
+    # PostgreSQL's 63 characters, or 42 in a program that requires caramel/tenancy, which
+    # prefixes a tenant's `t<id>:`. `SWEETTALK_CARRIES` lists the names it carries.
+    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
       ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
       {% subject = @type.name.split("::").last.underscore.id %}
       {% reserved = %w[event_id occurred_at actor cause_id flow_id] + ["#{subject}_id"] %}
+      {% short = @type.name.split("::").last %}
+      {% names = [] of Nil %}
+      {% types = [] of Nil %}
       {% for field in fields %}
         {% if reserved.includes?(field.var.stringify) %}
           {% field.raise "event #{name} cannot have a field named #{field.var}: " +
                          "SweetTalk records it" %}
+        {% end %}
+        {% names << field.var.stringify %}
+        {% types << field.type.stringify %}
+      {% end %}
+      {% carried = [] of Nil %}
+      {% unless carries.is_a?(NilLiteral) %}
+        {% unless carries.is_a?(ArrayLiteral) && carries.size > 0 %}
+          {% carries.raise "event #{name} takes carries: a list of #{short.id}'s attributes or " +
+                           "derived values, as in carries: [member, total], not #{carries}" %}
+        {% end %}
+        {% attributes = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |constant| @type.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+        {% deriveds = @type.constants.select(&.starts_with?("SWEETTALK_THE_"))
+             .map { |constant| @type.constant(constant) }.sort_by { |derived| derived[1] } %}
+        {% for item in carries %}
+          {% label = item.id.stringify %}
+          {% attribute = attributes.find { |candidate| candidate[0] == label } %}
+          {% derived = deriveds.find { |candidate| candidate[0] == label } %}
+          {% unless attribute || derived %}
+            {% have = (attributes.map(&.[0]) + deriveds.map(&.[0])).join(", ") %}
+            {% item.raise "event #{name} carries #{label.id}, which #{short.id} does not have " +
+                          "above it; it has #{have.id}: declare #{label.id} before the event" %}
+          {% end %}
+          {% if reserved.includes?(label) %}
+            {% item.raise "event #{name} cannot have a field named #{label.id}: SweetTalk " +
+                          "records it" %}
+          {% end %}
+          {% if names.includes?(label) %}
+            {% item.raise "event #{name} has a field named #{label.id} twice: carry it, or " +
+                          "declare it, not both" %}
+          {% end %}
+          {% type = derived ? derived[2] : attribute[3] %}
+          {% if attribute && attribute[2] == "reference" %}
+            {% optional = attribute[9] ? "?" : "" %}
+            {% type = "#{attribute[10].id}::Id#{optional.id}" %}
+          {% elsif attribute && attribute[2] == "record" %}
+            {% optional = attribute[9] ? "?" : "" %}
+            {% type = "::SweetTalk::RecordId(#{attribute[10].id})#{optional.id}" %}
+          {% end %}
+          {% names << label %}
+          {% types << type %}
+          {% carried << label %}
         {% end %}
       {% end %}
       {% stored = (renamed_from || name).stringify.underscore %}
       {% context = @type.constant("SWEETTALK_CONTEXT") %}
       {% aggregate = @type.constant("SWEETTALK_STORED") %}
       {% channel = "sweettalk.#{context.id}.#{aggregate.id}.#{stored.id}" %}
-      {% given = fields.map { |field| "@#{field}" }.join(", ") %}
-      {% facts = fields.map do |field|
-           "#{field.var}: ::SweetTalk.unpack(#{field.type}, data[#{field.var.stringify}])"
+      {% given = names.map_with_index { |field, index| "@#{field.id} : #{types[index].id}" } %}
+      {% given = given.join(", ") %}
+      {% after_subject = names.empty? ? "" : ", *, #{given.id}" %}
+      {% after_meta = names.empty? ? "" : ", #{given.id}" %}
+      {% facts = names.map_with_index do |field, index|
+           # A job queued before an optional field existed holds no such key: nil.
+           key = "data[#{field.id.stringify}]"
+           key = "(#{key.id}? || ::JSON::Any.new(nil))" if types[index] =~ /(\?|Nil)\z/
+           "#{field.id}: ::SweetTalk.unpack(#{types[index].id}, #{key.id})"
          end %}
       {% if ::Caramel.has_constant?("Tenancy") && channel.size > 42 %}
         {% name.raise "event #{name}'s channel #{channel.id} is longer than 42 characters: a " +
@@ -79,19 +133,20 @@ module SweetTalk
         SWEETTALK_MEANS   = {{ means }}
         SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
         SWEETTALK_CHANNEL = {{ channel }}
+        SWEETTALK_CARRIES = [{{ carried.splat }}] of String
 
-        {% for field in fields %}
-          getter {{ field }}
+        {% for field, index in names %}
+          getter {{ field.id }} : {{ types[index].id }}
         {% end %}
 
-        def initialize(subject : ::{{ @type }}{{ (fields.empty? ? "" : ", *, #{given.id}").id }})
+        def initialize(subject : ::{{ @type }}{{ after_subject.id }})
           @__sweettalk_subject = subject
           __sweettalk_stamp
           @__sweettalk_fields = __sweettalk_record
         end
 
         def initialize(*, subject_id : Int64, fields_json : String,
-                       meta_json : String{% unless fields.empty? %}, {{ given.id }}{% end %})
+                       meta_json : String{{ after_meta.id }})
           @__sweettalk_subject_id = subject_id
           @__sweettalk_fields = fields_json
           __sweettalk_restore(meta_json)
@@ -108,15 +163,15 @@ module SweetTalk
         private def __sweettalk_record : String
           JSON.build do |json|
             json.object do
-              {% for field in fields %}
-                json.field({{ field.var.stringify }}) { ::SweetTalk.pack(json, @{{ field.var }}) }
+              {% for field in names %}
+                json.field({{ field.id.stringify }}) { ::SweetTalk.pack(json, @{{ field.id }}) }
               {% end %}
             end
           end
         end
 
         def self.__sweettalk_load(subject : Int64, fields : String, meta : String) : self
-          {% if fields.empty? %}
+          {% if names.empty? %}
             new(subject_id: subject, fields_json: fields, meta_json: meta)
           {% else %}
             data = JSON.parse(fields)
@@ -128,7 +183,8 @@ module SweetTalk
     end
 
     # `emit Placed, lines: lines` records an event; the command dispatches it when it
-    # commits.
+    # commits. A field the event carries is read from the aggregate as it is now, and a
+    # command cannot give it.
     macro emit(event, **fields)
       {% own = event.is_a?(Path) && event.names.size == 1 &&
                @type.has_constant?(event.names[0].stringify) %}
@@ -137,6 +193,17 @@ module SweetTalk
                        "and #{event} is not one of them" %}
       {% end %}
       {% given = fields.map { |key, value| ", #{key}: #{value}" }.join("") %}
+      {% given_names = fields.keys.map(&.stringify) %}
+      {% for label in @type.constant(event.names[0].stringify).constant("SWEETTALK_CARRIES") %}
+        {% if given_names.includes?(label) %}
+          {% event.raise "emit #{event} gives #{label.id}, which the event carries from " +
+                         "#{@type.name.split("::").last.id}: it is read from the aggregate, so " +
+                         "an event cannot say what the aggregate does not hold; change " +
+                         "#{label.id} before the emit, or declare a field of another name " +
+                         "instead of carrying it" %}
+        {% end %}
+        {% given = "#{given.id}, #{label.id}: self.#{label.id}" %}
+      {% end %}
       @__sweettalk_events << {{ event }}.new(self{{ given.id }})
     end
 

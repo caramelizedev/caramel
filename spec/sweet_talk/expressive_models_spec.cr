@@ -2,7 +2,7 @@
 # with its members as methods, and optional attributes of every stored kind, in an
 # aggregate, an entity, a projection and a process, kept in nullable columns that PostgreSQL
 # also holds to their values' checks and, for a value with parts, to all or none; and events
-# that hold them.
+# that carry attributes by name.
 require "./support/app"
 
 module ExpressiveModelsSpec
@@ -356,8 +356,8 @@ describe "SweetTalk's optional attributes" do
   end
 end
 
-describe "SweetTalk's events that hold optional attributes" do
-  it "hands optional fields to a handler as emitted" do
+describe "SweetTalk's events that carry attributes" do
+  it "takes the carried fields from the aggregate, and hands them to a handler as emitted" do
     SweetTalkSpec.rolled_back do |connection|
       Ledger::Counter.settlements.clear
       Ledger::Counter.undoings.clear
@@ -375,7 +375,7 @@ describe "SweetTalk's events that hold optional attributes" do
     end
   end
 
-  it "hands an unset optional attribute to a handler as nil" do
+  it "carries an unset optional attribute as nil" do
     SweetTalkSpec.rolled_back do |connection|
       Ledger::Counter.settlements.clear
       transfer = ExpressiveModelsSpec.transfer
@@ -383,6 +383,16 @@ describe "SweetTalk's events that hold optional attributes" do
       Caramel::ColdBrew.drain_queue(connection).should eq(3)
       Ledger::Counter.settlements.should eq(["payment|500|Ada||Bo|||0"])
     end
+  end
+
+  it "reads a field of a queued event that did not exist when it was queued as nil if optional" do
+    meta = %({"id":"e1","at":"2026-03-01T00:00:00.000000Z","by":null,"cause":null,"flow":"f1"})
+    undone = Ledger::Counter::Transfer::Undone
+    queued_before = undone.__sweettalk_load(7_i64, %({"note":"older"}), meta)
+    queued_before.note.should eq("older")
+    queued_before.owner.should be_nil
+    queued_before.reason.should be_nil
+    expect_raises(KeyError) { undone.__sweettalk_load(7_i64, %({"owner":null}), meta) }
   end
 
   it "keeps optional attributes in a projection a handler fills from carried fields" do

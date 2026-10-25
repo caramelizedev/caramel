@@ -1,7 +1,7 @@
 # A counter where money changes hands, for the expressive models: closed-set values, optional
 # attributes of each stored kind (an aggregate, a value, a closed-set value, a value with
 # parts, an application's schema record), the same inside an entity, a projection and a
-# process, and events that hand them to their handlers.
+# process, and events that take their fields from the aggregate by name.
 require "../../../src/caramel/sweet_talk"
 
 module Ledger
@@ -56,10 +56,9 @@ module Ledger
 
       the line_count : Int32 = lines.size
 
-      event Settled, kind : Kind, amount : Money, opened_by : Teller, owner : Owner::Id?,
-        settled_by : Teller?, leg : Money?, lines : Array(Line), line_count : Int32,
+      event Settled, carries: [kind, amount, opened_by, owner, settled_by, leg, lines, line_count],
         means: "a transfer was settled, with everything it said when it was"
-      event Undone, note : String, owner : Owner::Id?, reason : Reason?,
+      event Undone, note : String, carries: [owner, reason],
         means: "a transfer was undone, and what the desk wrote about it"
 
       finds unassigned, where: {owner: nil}
@@ -83,8 +82,7 @@ module Ledger
         refuse "A teller does not settle what they opened." if by == opened_by
         settled!
         @settled_by = by
-        emit Settled, kind: kind, amount: amount, opened_by: opened_by, owner: owner,
-          settled_by: settled_by, leg: leg, lines: lines, line_count: line_count
+        emit Settled
       end
 
       to use_account(account : Account?) do
@@ -102,7 +100,7 @@ module Ledger
       to undo(reason : Reason?) do
         undone!
         @reason = reason
-        emit Undone, note: "undone by the desk", owner: owner, reason: reason
+        emit Undone, note: "undone by the desk"
       end
 
       to pay_line(label : String, payee : Owner?, paid_by : Teller?, share : Money?) do

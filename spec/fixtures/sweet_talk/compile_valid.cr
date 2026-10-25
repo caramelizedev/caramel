@@ -40,7 +40,7 @@ module Shop
       event Opened, receipt_to : Email, means: "a member started an order"
       event Placed, lines : Array(Line), means: "a member checked out"
       event Cancelled, reason : String?, means: "the order was given up, and why"
-      event Shipped, receipt_to : Email, gift_to : Address?, shipped_by : Courier?, roast : Roast?,
+      event Shipped, carries: [receipt_to, gift_to, shipped_by, roast],
         means: "an order left, with what it said when it left"
 
       factory open(receipt_to : Email, deliver_to : Address) do
@@ -66,8 +66,7 @@ module Shop
 
       to ship(by : Courier) do
         @shipped_by = by
-        emit Shipped, receipt_to: receipt_to, gift_to: gift_to, shipped_by: shipped_by,
-          roast: roast
+        emit Shipped
       end
 
       to unwrap_gift do

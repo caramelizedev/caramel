@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 and 0040). Each declaration
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036 and 0039 to 0041). Each declaration
 # mistake fails to compile with a fixed problem text, naming its file where the mistake has a
 # line; a valid domain compiles, with and without caramel/tenancy; and an application that does
 # not require caramel/sweet_talk holds none of its code. spec/sweet_talk and
@@ -89,6 +89,19 @@ PROBLEMS = [
   {"where_nil_required_specification",
    "specification Unnoted asks for note: nil, but note is not optional: nil is a value of an " \
    "optional attribute, as in has note : String?"},
+  {"emit_carried_field",
+   "emit Noted gives note, which the event carries from Order: it is read from the aggregate, " \
+   "so an event cannot say what the aggregate does not hold"},
+  {"event_carries_not_list",
+   "event Placed takes carries: a list of Order's attributes or derived values, as in carries: " \
+   "[member, total], not member"},
+  {"event_carries_unknown",
+   "event Placed carries membr, which Order does not have above it; it has member: declare " \
+   "membr before the event"},
+  {"event_carries_twice",
+   "event Placed has a field named member twice: carry it, or declare it, not both"},
+  {"event_carries_reserved",
+   "event Placed cannot have a field named actor: SweetTalk records it"},
   {"composite_part_type",
    "part weight : Float32 cannot be stored: a part is String, Int32, Int64, Bool, Float64, Time " \
    "or a value that wraps one"},
