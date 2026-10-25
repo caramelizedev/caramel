@@ -6,6 +6,11 @@ module SugarORM
   module DDL
     ON_DELETE = {"NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"}
 
+    # What a date column prints under an ISO DateStyle, as a pattern for a text column.
+    DAY_TEXT   = "'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'"
+    OLD_SERVER = "retyping % from text to date needs PostgreSQL 16 or newer"
+    NOT_DAYS   = "% holds % rows that are not days written YYYY-MM-DD; first distinct values: %"
+
     def self.quote(identifier : String) : String
       %("#{identifier.gsub('"', "\"\"")}")
     end
@@ -86,6 +91,44 @@ module SugarORM
       column = quote(operation.column)
       type = operation.sql_type
       "#{alter} TYPE #{type} USING #{column}::#{type}"
+    end
+
+    # A DO block, because the check must read the rows. It locks the table first, so no row
+    # arrives between the check and the retype. A value passes when it is written
+    # YYYY-MM-DD and PostgreSQL (16 and later: pg_input_is_valid) accepts it as a day.
+    # The message counts the rows and shows up to five distinct values, cut to 40 characters.
+    def self.render(operation : Differ::AssertDateText) : String
+      table = quote(operation.table)
+      column = quote(operation.column)
+      subject = "#{operation.table}.#{operation.column}".gsub("'", "''")
+      <<-SQL
+        DO $caramel$
+        DECLARE
+          counted bigint;
+          samples text;
+        BEGIN
+          IF current_setting('server_version_num')::int < 160000 THEN
+            RAISE EXCEPTION '#{OLD_SERVER}', '#{subject}';
+          END IF;
+          LOCK TABLE #{table} IN ACCESS EXCLUSIVE MODE;
+          WITH refused AS (
+            SELECT #{column} AS value FROM #{table}
+            WHERE #{column} IS NOT NULL
+              AND NOT (#{column} ~ #{DAY_TEXT}
+                       AND pg_input_is_valid(#{column}, 'date'))
+          )
+          SELECT (SELECT count(*) FROM refused),
+                 (SELECT string_agg(sample, ', ' ORDER BY sample) FROM (
+                    SELECT DISTINCT format('%L', left(value, 40)) AS sample
+                    FROM refused ORDER BY 1 LIMIT 5) AS offending)
+          INTO counted, samples;
+          IF counted > 0 THEN
+            RAISE EXCEPTION '#{NOT_DAYS}', '#{subject}', counted, samples
+              USING ERRCODE = '22007';
+          END IF;
+        END
+        $caramel$
+        SQL
     end
 
     # Online builds are idempotent so an interrupted autocommit migration can

@@ -245,6 +245,70 @@ describe SugarORM::Migrator do
     end
   end
 
+  it "retypes a text column to date after checking its values, and the re-diff is empty" do
+    id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+    published = Catalog::Column.new("published_on", "date", true, nil)
+    declared = [Catalog::Table.new("books", [id, published])]
+    create = migration(1, "Create books",
+      "CREATE TABLE books (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
+      "published_on text DEFAULT '2026-01-01')",
+      "INSERT INTO books (published_on) VALUES ('2026-10-24'), ('2024-02-29'), " \
+      "('0001-01-01'), ('9999-12-31'), (NULL)")
+    with_scratch_database do |db|
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
+      plan.halts.should be_empty
+      statements = SugarORM::DDL.statements(plan.transactional)
+      retype = SugarORM::Migration.new(2_i64, "retype", statements)
+      SugarORM::Migrator.new(db, [create, retype]).migrate.should eq(1)
+
+      journal(db).should eq([1_i64, 2_i64])
+      days = db.query_all("SELECT published_on::text FROM books ORDER BY id", as: String?)
+      days.should eq(["2026-10-24", "2024-02-29", "0001-01-01", "9999-12-31", nil])
+      type = db.query_one("SELECT pg_typeof(published_on)::text FROM books LIMIT 1", as: String)
+      type.should eq("date")
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db)).clean?.should be_true
+    end
+  end
+
+  it "stops a text to date retype that finds values which are not days, " \
+     "counting them, showing the first and changing nothing" do
+    id = Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true)
+    published = Catalog::Column.new("published_on", "date", true, nil)
+    declared = [Catalog::Table.new("books", [id, published])]
+    create = migration(1, "Create books",
+      "CREATE TABLE books (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, " \
+      "published_on text)",
+      "INSERT INTO books (published_on) VALUES ('2026-10-24'), ('2026-02-30'), ('2026-02-30'), " \
+      "('2025-02-29'), ('soon'), ('today'), ('infinity'), ('10/11/2026'), (' 2026-10-24'), " \
+      "(''), ('2026-1-5'), (NULL)")
+    with_scratch_database do |db|
+      SugarORM::Migrator.new(db, [create]).migrate.should eq(1)
+      plan = SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db))
+      statements = SugarORM::DDL.statements(plan.transactional)
+      retype = SugarORM::Migration.new(2_i64, "retype", statements)
+
+      error = expect_raises(PQ::PQError, "books.published_on holds 10 rows") do
+        SugarORM::Migrator.new(db, [create, retype]).migrate
+      end
+      shown = "first distinct values: ' 2026-10-24', '', '10/11/2026', '2025-02-29', '2026-02-30'"
+      error.message.to_s.should contain(shown)
+      error.message.to_s.should_not contain("today")
+      error.field_message(:code).should eq("22007")
+
+      journal(db).should eq([1_i64])
+      type = db.query_one("SELECT pg_typeof(published_on)::text FROM books LIMIT 1", as: String)
+      type.should eq("text")
+      db.scalar("SELECT count(*) FROM books").should eq(12_i64)
+      db.scalar("SELECT count(*) FROM books WHERE published_on = 'soon'").should eq(1_i64)
+
+      db.exec("DELETE FROM books WHERE published_on IS NOT NULL AND published_on <> '2026-10-24'")
+      SugarORM::Migrator.new(db, [create, retype]).migrate.should eq(1)
+      journal(db).should eq([1_i64, 2_i64])
+      SugarORM::Differ.diff(declared, SugarORM::Introspection.read(db)).clean?.should be_true
+    end
+  end
+
   it "applies transactional migrations once, rolls back a failed batch " \
      "and detects checksum drift" do
     with_scratch_database do |db|

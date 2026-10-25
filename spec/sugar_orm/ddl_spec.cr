@@ -112,6 +112,30 @@ describe SugarORM::DDL do
     DDL.render(added).should eq(%(ALTER TABLE "deadlines" ADD COLUMN "done_on" date))
   end
 
+  it "renders the check that every text value is a day as one DO block that locks first" do
+    sql = DDL.render(Differ::AssertDateText.new("books", "published_on"))
+    lines = sql.lines.map(&.strip)
+    lines.first.should eq("DO $caramel$")
+    lines.last.should eq("$caramel$")
+    lines.should contain(%(LOCK TABLE "books" IN ACCESS EXCLUSIVE MODE;))
+    sql.should contain(%("published_on" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+    sql.should contain(%(pg_input_is_valid("published_on", 'date')))
+    sql.should contain(%(RAISE EXCEPTION '% holds % rows that are not days written YYYY-MM-DD; ))
+    sql.should contain(%('books.published_on', counted, samples))
+    sql.should contain(%(LIMIT 5))
+    sql.should contain("USING ERRCODE = '22007'")
+    sql.should_not contain("--")
+    sql.should_not contain("\\")
+  end
+
+  it "quotes the table and column of the date check, and escapes them in its message" do
+    sql = DDL.render(Differ::AssertDateText.new("o'brien", %(day"s)))
+    sql.should contain(%(LOCK TABLE "o'brien" IN ACCESS EXCLUSIVE MODE;))
+    sql.should contain(%(SELECT "day""s" AS value FROM "o'brien"))
+    sql.should contain(%(WHERE "day""s" IS NOT NULL))
+    sql.should contain(%('o''brien.day"s', counted, samples))
+  end
+
   it "adds a foreign key without validating it, then validates it separately" do
     key = Catalog::ForeignKey.new(
       name: "fk_users_team_id",

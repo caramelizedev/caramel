@@ -38,6 +38,22 @@ field is a `timestamptz`, which carries a time of day and a zone a calendar day 
    Range fails compilation. No codec takes an Array. `order_by` takes every field and never
    needed the constant. The codec must be defined before the schema that names it, or the
    schema cannot read the constant and refuses ranges.
+5. **Text to date.** When a field is declared `date` and the live column is `text`, the
+   differ derives the change instead of halting, with or without `--dev-override`. The
+   transactional migration holds these statements, in order:
+   - a `DO` block that locks the table, counts the rows whose text is not a calendar day
+     written `YYYY-MM-DD` (a `NULL` passes), and raises with that count and up to five
+     distinct values, each cut to 40 characters, when there are any; the migration rolls back
+     and changes nothing;
+   - `DROP DEFAULT`, when the text column has one;
+   - `ALTER TABLE … ALTER COLUMN … TYPE date USING "col"::date`.
+
+   A `CHECK` on the table that no schema declares is dropped before all of them, as the
+   differ already orders it, and the diff prints a note that the change rewrites the table
+   under an exclusive lock. The check runs in the migration, so each environment checks its
+   own rows.
+6. **Every other type change** keeps its halt. In particular `date` to `text` halts, and
+   `--dev-override` alters it in development only.
 
 ## Reasons
 
@@ -50,5 +66,15 @@ field is a `timestamptz`, which carries a time of day and a zone a calendar day 
   application did not choose. A `date` compares the same way in both. Binding the encoded
   `YYYY-MM-DD` text lets PostgreSQL read it as a `date`, so the comparison is by day.
 - **Strict text.** A date that prints as `24.10.2026`, `infinity` or `0044-03-15 BC` has no
-  `Date`, so `decode` says so and names `DateStyle` instead of guessing a day.
-- **Rejected:** a `Time` field with a date codec, which hides the zone.
+  `Date`, so `decode` says so and names `DateStyle` instead of guessing a day. On the way in,
+  `'10/11/2026'` casts to a different day under each `DateStyle`, `'today'` is a different day
+  on each run and `'infinity'` has no `Date`. Requiring `YYYY-MM-DD` and
+  `pg_input_is_valid` (PostgreSQL 16 and later; the block raises a clear error on an older
+  server) reports each of them as a row instead of changing it.
+- **The check in the migration.** `frappe db diff` sees only a scratch branch of the
+  development database, not the rows a deploy will meet. Locking first means no row arrives
+  between the check and the rewrite.
+- **Rejected:** a `Time` field with a date codec, which hides the zone; deriving text to date
+  with no check, which stops at the first bad value and does not count the rest; and halting
+  every text to date change, which sends every application through add, backfill and drop for
+  a change the check makes safe.
