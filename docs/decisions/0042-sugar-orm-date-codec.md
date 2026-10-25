@@ -8,9 +8,9 @@ Status: accepted. Amends [ADR 0007](0007-sugarorm-schemas-changesets-preload.md)
 
 A codec could name only `numeric`, `numeric(P,S)`, `jsonb` or `text`, so an application that
 needed a calendar day, a due date or a birthday kept it as validated text: a regular
-expression `CHECK`, a string in the model, and no range query. Crystal has no date type
-without a clock, and a `Time` field is a `timestamptz`, which carries a time of day and a zone
-a calendar day does not have.
+expression `CHECK`, a string in the model, and no range query, because a codec column took
+only a value or `nil` in `where`. Crystal has no date type without a clock, and a `Time`
+field is a `timestamptz`, which carries a time of day and a zone a calendar day does not have.
 
 ## Decision
 
@@ -30,11 +30,25 @@ a calendar day does not have.
 3. **The column type.** `format_type` spells the type `date`, with no modifier, so the
    declared and the live type compare equal as strings. The DDL, the introspection and the
    differ create and compare the column with no other change.
+4. **Ranges.** A codec declares `ORDERABLE = true` when its column orders the way its values
+   do. Keyword `where` then takes a closed, beginless or endless `Range` of the field's type
+   (`due_on: first..last`, `due_on: first...next_first`, `due_on: first..`) on that column,
+   and `SugarORM::DateCodec` declares it. A codec without the constant, or with it `false`,
+   such as the numeric, `jsonb` and `text` codecs, still takes only a value or `nil`, and a
+   Range fails compilation. No codec takes an Array. `order_by` takes every field and never
+   needed the constant. The codec must be defined before the schema that names it, or the
+   schema cannot read the constant and refuses ranges.
 
 ## Reasons
 
 - **A struct, not `Time`.** A `Time` carries a zone, so a day read in one zone and written in
   another moves by one. A `Date` has no zone to disagree about.
+- **A constant, not a method.** `where` is checked at compile time, and a macro can read a
+  constant's value but cannot call a method. A codec opts in by writing the constant.
+- **Opt-in ranges.** A numeric codec's values are text in Crystal and numbers in SQL, and
+  `text` compares by the database's collation, so a range there would answer by rules the
+  application did not choose. A `date` compares the same way in both. Binding the encoded
+  `YYYY-MM-DD` text lets PostgreSQL read it as a `date`, so the comparison is by day.
 - **Strict text.** A date that prints as `24.10.2026`, `infinity` or `0044-03-15 BC` has no
   `Date`, so `decode` says so and names `DateStyle` instead of guessing a day.
 - **Rejected:** a `Time` field with a date codec, which hides the zone.

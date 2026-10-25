@@ -676,6 +676,37 @@ describe "SugarORM with PostgreSQL" do
     end
   end
 
+  it "bounds and orders a date column by day, with a Range in where and order_by" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      day = ->(number : Int32) { SugarORM::Date.new(2026, 10, number) }
+      [24, 21, 25, 22, 23].each do |number|
+        done = number.odd? ? day.call(number + 1) : nil
+        SugarSpec::Deadline.create!(due_on: day.call(number), done_on: done)
+      end
+      due = ->(query : SugarSpec::Deadline::Query) { query.to_a.map(&.due_on.day) }
+      ordered = SugarSpec::Deadline.query.order_by(:due_on)
+
+      due.call(ordered).should eq([21, 22, 23, 24, 25])
+      due.call(SugarSpec::Deadline.query.order_by(:due_on, :desc)).should eq([25, 24, 23, 22, 21])
+      due.call(ordered.where(due_on: day.call(22)..day.call(24))).should eq([22, 23, 24])
+      due.call(ordered.where(due_on: day.call(22)...day.call(24))).should eq([22, 23])
+      due.call(ordered.where(due_on: day.call(24)..)).should eq([24, 25])
+      due.call(ordered.where(due_on: ..day.call(22))).should eq([21, 22])
+      due.call(ordered.where(due_on: ...day.call(22))).should eq([21])
+      due.call(ordered.where(due_on: day.call(25)..day.call(21))).should be_empty
+      due.call(ordered.where(done_on: day.call(22)..day.call(24))).should eq([21, 23])
+      due.call(ordered.where(done_on: nil)).should eq([22, 24])
+      both = ordered.where(due_on: day.call(22)..day.call(25), done_on: day.call(24)..)
+      due.call(both).should eq([23, 25])
+
+      SugarSpec::Deadline.query.where(due_on: ..day.call(22)).count.should eq(2)
+      SugarSpec::Deadline.query.where(due_on: day.call(26)..).exists?.should be_false
+      ordered.first!.due_on.should eq(day.call(21))
+      SugarSpec::Deadline.query.where(due_on: day.call(25)..).delete_all.should eq(1)
+      SugarSpec::Deadline.query.count.should eq(4)
+    end
+  end
+
   it "creates a date column the differ finds matching, and adds one to an existing table" do
     SugarSpec.with_tables(owner_url, runtime_url) do |owner|
       declared = [SugarSpec::Deadline.__sugar_table]

@@ -15,6 +15,11 @@ module SugarORM
   # value or nil for it. The changeset number validators do not apply to it,
   # because its encoded value is a String. `validate_inclusion` encodes its
   # list through the codec, so it takes values of the field's type.
+  #
+  # A codec whose column orders the way its values do, as a `date` does, may
+  # also declare `ORDERABLE = true`, written before the schema that names it.
+  # `where` then takes a Range of the field's type for the column, and binds
+  # the encoded ends. Without the constant a Range fails compilation.
   module Codec
     SQL_TYPE = /\A(?:numeric(?:\(([1-9]\d{0,3}),(\d{1,4})\))?|jsonb|text|date)\z/
 
