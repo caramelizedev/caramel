@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sell every seat once. · Caramel 0.19.0</title><meta name="description" content="Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove the refusal, the timer and the waitlist."><link rel="canonical" href="https://caramelize.dev/docs/0.19.0/box-office/"><meta property="og:title" content="Sell every seat once. · Caramel 0.19.0"><meta property="og:description" content="Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove the refusal, the timer and the waitlist."><meta property="og:url" content="https://caramelize.dev/docs/0.19.0/box-office/"><meta property="og:type" content="website"><meta name="color-scheme" content="light dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><script>try{const t=localStorage.getItem('caramel-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script><link rel="stylesheet" href="/assets/site.css"><script src="/assets/site.js" defer></script><link rel="alternate" type="text/markdown" href="/docs/0.19.0/box-office/index.md"></head><body data-page="boxoffice"><a class="c-skip" href="#c-main">Skip to content</a><header class="c-header"><a class="c-brand" href="/" aria-label="Caramel home"><span class="c-mark" aria-hidden="true"><svg viewBox="51 51 410 410"><defs><linearGradient id="c-mark-crema" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b07440"/><stop offset=".5" stop-color="#83492a"/><stop offset="1" stop-color="#5c301a"/></linearGradient><radialGradient id="c-mark-foam" cx=".42" cy=".36" r=".72"><stop offset="0" stop-color="#fff8ea"/><stop offset=".6" stop-color="#f7e8cd"/><stop offset="1" stop-color="#e6cfa6"/></radialGradient><linearGradient id="c-mark-syrup" gradientUnits="userSpaceOnUse" x1="127" y1="0" x2="396" y2="0"><stop offset="0" stop-color="#975024"/><stop offset=".4" stop-color="#e7b564"/><stop offset=".65" stop-color="#c78638"/><stop offset="1" stop-color="#8a411e"/></linearGradient><filter id="c-mark-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter><path id="c-mark-drizzle" d="M127.3 271.8 L127.5 262.8 L128.3 253.8 L129.6 244.9 L131.4 236.0 L133.7 227.2 L136.6 218.6 L140.1 210.1 L144.1 201.8 L148.7 193.8 L153.8 186.0 L159.5 178.6 L165.8 171.5 L172.5 164.9 L179.8 158.7 L187.5 153.1 L195.7 148.1 L204.2 143.6 L213.1 139.9 L222.3 136.8 L231.8 134.4 L241.4 132.9 L251.1 132.1 L260.9 132.1 L270.6 132.8 L280.3 134.1 L289.8 136.2 L299.2 138.8 L308.4 142.2 L317.3 146.1 L325.9 150.7 L334.1 155.9 L342.0 161.6 L349.5 167.9 L356.5 174.7 L363.1 181.9 L369.1 189.6 L374.5 197.7 L379.4 206.1 L383.7 214.9 L387.3 224.0 L390.3 233.2 L392.7 242.7 L394.4 252.3 L395.4 262.0 L395.8 271.8 L395.5 279.3 L394.7 286.8 L393.4 294.3 L391.6 301.6 L389.2 308.8 L386.4 315.8 L383.1 322.6 L379.3 329.1 L375.1 335.4 L370.4 341.3 L365.3 346.9 L359.9 352.1 L354.1 357.0 L348.0 361.4 L341.5 365.4 L334.9 368.9 L328.0 371.9 L320.9 374.4 L313.6 376.4 L306.2 378.0 L298.8 378.9 L291.3 379.4 L283.7 379.3 L276.3 378.7 L268.8 377.6 L261.5 376.0 L254.3 373.8 L247.3 371.2 L240.5 368.1 L234.0 364.5 L227.7 360.5 L221.7 356.0 L216.0 351.1 L210.7 345.9 L205.8 340.3 L201.3 334.4 L197.2 328.1 L193.6 321.7 L190.5 315.0 L187.8 308.0 L185.6 301.0 L183.9 293.8 L182.7 286.5 L182.1 279.1 L181.9 271.8 L182.2 266.6 L182.8 261.5 L183.7 256.4 L185.1 251.4 L186.7 246.5 L188.7 241.8 L191.0 237.2 L193.7 232.8 L196.6 228.6 L199.8 224.6 L203.3 220.8 L207.0 217.3 L211.0 214.1 L215.1 211.2 L219.5 208.5 L224.0 206.2 L228.7 204.2 L233.5 202.5 L238.4 201.2 L243.4 200.2 L248.4 199.6 L253.5 199.3 L258.5 199.3 L263.6 199.7 L268.6 200.5 L273.5 201.6 L278.3 203.1 L283.0 204.9 L287.6 207.0 L292.0 209.4 L296.2 212.1 L300.3 215.1 L304.1 218.4 L307.6 221.9 L311.0 225.6 L314.0 229.6 L316.7 233.8 L319.2 238.1 L321.3 242.7 L323.2 247.3 L324.7 252.1 L325.8 256.9 L326.6 261.8 L327.1 266.8 L327.2 271.8 L327.1 274.5 L326.8 277.3 L326.3 280.0 L325.6 282.7 L324.8 285.3 L323.7 287.9 L322.5 290.3 L321.1 292.7 L319.5 295.0 L317.8 297.2 L316.0 299.2 L314.0 301.1 L311.8 302.9 L309.6 304.5 L307.2 305.9 L304.8 307.2 L302.3 308.3 L299.7 309.3 L297.0 310.0 L294.3 310.6 L291.6 310.9 L288.9 311.1 L286.1 311.1 L283.4 310.9 L280.7 310.5 L278.0 309.9 L275.3 309.2 L272.8 308.2 L270.3 307.1 L267.8 305.8 L265.5 304.3 L263.3 302.7 L261.2 301.0 L259.2 299.0 L257.4 297.0 L255.7 294.8 L254.2 292.6 L252.8 290.2 L251.6 287.7 L250.6 285.2 L249.8 282.6 L249.1 279.9 L248.6 277.2 L248.3 274.5 L248.2 271.8 A9.77 9.77 0 0 1 267.8 271.8 L267.8 273.1 L268.0 274.5 L268.2 275.9 L268.5 277.2 L269.0 278.5 L269.5 279.8 L270.1 281.0 L270.8 282.2 L271.6 283.3 L272.4 284.4 L273.3 285.4 L274.3 286.4 L275.4 287.3 L276.5 288.1 L277.7 288.8 L278.9 289.4 L280.1 290.0 L281.4 290.4 L282.7 290.8 L284.1 291.1 L285.4 291.3 L286.8 291.3 L288.2 291.3 L289.5 291.2 L290.9 291.0 L292.2 290.7 L293.5 290.3 L294.8 289.9 L296.1 289.3 L297.3 288.6 L298.4 287.9 L299.5 287.1 L300.5 286.2 L301.5 285.3 L302.4 284.2 L303.2 283.2 L304.0 282.0 L304.6 280.8 L305.2 279.6 L305.7 278.4 L306.1 277.1 L306.4 275.8 L306.6 274.4 L306.7 273.1 L306.8 271.8 L306.6 268.2 L306.2 264.7 L305.5 261.2 L304.6 257.8 L303.5 254.5 L302.1 251.2 L300.5 248.1 L298.7 245.1 L296.7 242.2 L294.5 239.4 L292.1 236.9 L289.6 234.5 L286.8 232.3 L284.0 230.3 L281.0 228.5 L277.9 226.9 L274.7 225.5 L271.4 224.4 L268.0 223.5 L264.6 222.8 L261.2 222.4 L257.7 222.2 L254.3 222.3 L250.8 222.6 L247.4 223.2 L244.1 223.9 L240.8 225.0 L237.6 226.2 L234.5 227.7 L231.5 229.3 L228.6 231.2 L225.9 233.3 L223.4 235.5 L221.0 237.9 L218.7 240.5 L216.7 243.2 L214.9 246.1 L213.2 249.0 L211.8 252.1 L210.6 255.2 L209.7 258.5 L208.9 261.7 L208.4 265.1 L208.1 268.4 L208.1 271.8 L208.4 277.3 L209.1 282.8 L210.1 288.2 L211.6 293.5 L213.4 298.7 L215.5 303.8 L218.0 308.7 L220.9 313.4 L224.0 317.9 L227.5 322.1 L231.2 326.1 L235.2 329.8 L239.4 333.3 L243.9 336.4 L248.5 339.2 L253.4 341.7 L258.4 343.8 L263.5 345.6 L268.7 347.0 L274.0 348.1 L279.4 348.7 L284.8 349.1 L290.2 349.0 L295.6 348.5 L300.9 347.7 L306.2 346.6 L311.3 345.0 L316.3 343.1 L321.2 340.9 L326.0 338.4 L330.5 335.5 L334.8 332.3 L338.9 328.8 L342.7 325.1 L346.3 321.1 L349.6 316.9 L352.6 312.4 L355.3 307.8 L357.6 303.0 L359.6 298.0 L361.3 292.9 L362.6 287.7 L363.5 282.4 L364.1 277.1 L364.2 271.8 L364.0 264.2 L363.2 256.7 L361.9 249.2 L360.1 241.9 L357.7 234.7 L354.9 227.7 L351.6 220.9 L347.8 214.4 L343.6 208.1 L338.9 202.2 L333.9 196.6 L328.4 191.3 L322.6 186.4 L316.5 182.0 L310.1 178.0 L303.5 174.5 L296.6 171.4 L289.5 168.8 L282.2 166.7 L274.8 165.1 L267.3 164.1 L259.8 163.6 L252.2 163.6 L244.7 164.0 L237.1 164.8 L229.7 166.1 L222.2 167.8 L214.9 169.9 L207.6 172.5 L200.5 175.6 L193.5 179.2 L186.8 183.2 L180.3 187.7 L174.1 192.7 L168.2 198.1 L162.7 204.0 L157.6 210.3 L153.0 217.0 L148.8 224.0 L145.2 231.4 L142.2 239.1 L139.9 247.1 L138.1 255.2 L137.1 263.4 L136.7 271.8 A4.72 4.72 0 0 1 127.3 271.8 Z"/></defs><circle cx="256" cy="256" r="205" fill="url(#c-mark-crema)"/><circle cx="256" cy="256" r="185" fill="url(#c-mark-foam)" stroke="#a8784c" stroke-opacity=".45" stroke-width="2"/><use href="#c-mark-drizzle" fill="#5a2a12" fill-opacity=".3" transform="translate(0 7)" filter="url(#c-mark-soft)"/><use href="#c-mark-drizzle" fill="url(#c-mark-syrup)"/><g fill="none" stroke="#f8d595" stroke-linecap="round" stroke-opacity=".8"><path d="M147.9 204.2 L152.6 196.6 L157.8 189.4 L163.6 182.5 L169.8 176.0 L176.5 170.0 L183.6 164.5 L191.1 159.4 L199.0 154.9 L207.2 151.0 L215.7 147.7 L224.4 145.0 L233.3 142.9" stroke-width="4.5"/><path d="M195.2 244.7 L197.3 240.5 L199.6 236.5 L202.2 232.7 L205.1 229.0 L208.2 225.6 L211.6 222.4 L215.2 219.5 L218.9 216.8 L222.9 214.3 L227.0 212.2 L231.2 210.4 L235.5 208.8 L240.0 207.6" stroke-width="3.5"/></g></svg></span>caramel</a><span class="c-edition">docs · 0.19.0</span><div class="c-search" role="search"><label class="c-field"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="c-search" type="search" autocomplete="off" placeholder="Search the docs" aria-label="Search Caramel 0.19.0 documentation" aria-controls="c-search-results" aria-expanded="false"><kbd>⌘K</kbd></label><div class="c-search-results" id="c-search-results" hidden></div></div><nav class="c-nav" aria-label="Primary"><a href="/docs/0.19.0/getting-started/" aria-current="true">Docs</a><a href="/cookbook/0.19.0/">Cookbook</a><a href="/docs/0.19.0/agents/">For agents</a><a href="https://github.com/caramelizedev/caramel">GitHub</a></nav><button class="c-theme" type="button" aria-label="Switch theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button></header><div class="c-layout"><details class="c-railnav" open><summary>Browse documentation</summary><nav class="c-rail" aria-label="Documentation"><h3>Start here</h3><a href="/docs/0.19.0/releases/">Current release</a><a href="/docs/0.19.0/getting-started/">Your first application</a><a href="/docs/0.19.0/project-map/">Project map</a><a href="/docs/0.19.0/best-practices/">Best practices</a><h3>Build something</h3><a href="/cookbook/0.19.0/">All recipes</a><a href="/cookbook/0.19.0/create-a-resource/">Create a resource</a><a href="/cookbook/0.19.0/rendered-forms/">Submit a rendered form</a><a href="/cookbook/0.19.0/return-json/">Read and write JSON</a><a href="/cookbook/0.19.0/uploads/">Upload a file</a><a href="/cookbook/0.19.0/background-jobs/">Run a background job</a><a href="/cookbook/0.19.0/third-party-components/">Mount a component</a><h3>Go further</h3><a href="/docs/0.19.0/internationalization/">Internationalization</a><a href="/docs/0.19.0/multi-tenancy/">Multi-tenancy</a><a href="/docs/0.19.0/sweettalk/">SweetTalk</a><a href="/docs/0.19.0/box-office/" class="c-child" aria-current="page">Build a box office</a><a href="/docs/0.19.0/observability/">Observability</a><a href="/docs/0.19.0/testing-html/">Test rendered HTML</a><a href="/cookbook/0.19.0/webhooks/">Receive a webhook</a><a href="/cookbook/0.19.0/revocable-sessions/">Revocable sessions</a><a href="/docs/0.19.0/agents/">Work with an agent</a><a href="/docs/0.19.0/deployment/">Production</a><h3>Reference</h3><a href="/docs/0.19.0/routes-and-contracts/">Routes and contracts</a><a href="/docs/0.19.0/actions-and-responses/">Actions and responses</a><a href="/docs/0.19.0/views/">Views</a><a href="/docs/0.19.0/sugarorm/">SugarORM</a><a href="/docs/0.19.0/cold-brew/">Cold Brew</a><a href="/docs/0.19.0/corretto/">Corretto</a><a href="/docs/0.19.0/crema/">Crema</a><a href="/docs/0.19.0/security/">Security defaults</a><a href="/docs/0.19.0/commands/">Commands</a><a href="/docs/0.19.0/local-environment/">Local environment</a></nav></details><main id="c-main" class="c-doc" tabindex="-1"><article class="c-article"><div class="c-eyebrow">Learn / The Box Office path</div><h1>Sell every seat once.</h1><p class="c-lede">Build a box office in SweetTalk: seats held for ten minutes, sold once, and offered to a waitlist when a hold runs out, with specs that prove the refusal, the timer and the waitlist.</p><table class="c-contract"><thead><tr><th>Contract</th><th>Value</th></tr></thead><tbody><tr><th scope="row">Needs</th><td>A Caramel installation set up as in <a class="c-secondary cursor-interaction" data-page="learn" href="/docs/0.19.0/getting-started/">Your first application</a></td></tr><tr><th scope="row">You will have</th><td>A <code>boxoffice</code> application whose SweetTalk domain holds, sells and releases seats and keeps a waitlist, with two pages and passing specs</td></tr><tr><th scope="row">Status</th><td>Run end to end by <code>scripts/check page-boxoffice</code>; SweetTalk itself is experimental</td></tr><tr><th scope="row">Proved by</th><td><code>frappe check</code> · <code>frappe corretto</code> · <code>frappe lint</code></td></tr></tbody></table><p>Two guests see the last two seats of a show at the same moment. Code that reads the free seats, checks them and writes a hold lets both through, and the show is oversold. A SweetTalk command locks its aggregate’s row and reads it again before it runs, so the second guest is refused; Caramel’s own specs prove that lock. This path builds a box office on that rule.</p><a class="c-secondary cursor-interaction" data-page="sweettalk" href="/docs/0.19.0/sweettalk/">Read how a command runs →</a><h2 id="c-boxoffice-create">01 · Create the application and its domain</h2><p>Create the application, then start its SweetTalk domain with one context, Seating.</p><div class="c-snippet"><header>Terminal · after machine setup</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> new boxoffice
+<span class="hljs-built_in">cd</span> boxoffice</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Created boxoffice.</code>, then <code>boxoffice is configured at https://boxoffice.caramel</code>.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> make domain BoxOffice Seating --means=<span class="hljs-string">&quot;selling the seats of each show&quot;</span></code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Generated</code> for each of the four files it writes, <code>app/domain/box_office.cr</code> first, then a <code>Next:</code> line that names <code>frappe db diff --name create_box_office</code>.</p><h2 id="c-boxoffice-show">02 · Give each show its seats</h2><p>Replace <code>app/domain/box_office.cr</code> with the five parts in steps 02 to 05, pasted in page order with a blank line between them. Each caption says where its part goes. A snippet drops the indentation of its place; <code>frappe format</code> puts it back. A show owns its capacity, the holds still waiting for payment and the tickets already paid for, so one aggregate sees every seat.</p><div class="c-snippet"><header>app/domain/box_office.cr · part 1 of 5 · opens the module, context Seating and aggregate Show</header><pre><code class="hljs language-crystal"><span class="hljs-comment"># The BoxOffice domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as</span>
+<span class="hljs-comment"># context, value, aggregate, event and whenever, exist only inside this module.</span>
+<span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::BoxOffice</span></span>
+  <span class="hljs-keyword">include</span> <span class="hljs-type">SweetTalk</span>
+
+  context <span class="hljs-type">Seating</span>, <span class="hljs-attr">subdomain:</span> :core, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;selling the seats of each show&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">HOLD_FOR</span> = <span class="hljs-number">10</span>.minutes
+
+    value <span class="hljs-type">Capacity</span>, <span class="hljs-type">Int32</span>, <span class="hljs-attr">within:</span> <span class="hljs-number">1</span>..<span class="hljs-number">5000</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;the seats a show can sell&quot;</span>
+    value <span class="hljs-type">Seats</span>, <span class="hljs-type">Int32</span>, <span class="hljs-attr">within:</span> <span class="hljs-number">1</span>..<span class="hljs-number">8</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;the seats one guest takes at one checkout&quot;</span>
+    value <span class="hljs-type">Email</span>, <span class="hljs-type">String</span>, <span class="hljs-attr">matches:</span> /\<span class="hljs-type">A</span>[^@\s]+<span class="hljs-meta">@[^@\s]</span>+\z/, <span class="hljs-attr">length:</span> <span class="hljs-number">3</span>..<span class="hljs-number">254</span>,
+      <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;where we send a guest&#x27;s tickets&quot;</span>
+
+    aggregate <span class="hljs-type">Show</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;one performance and the seats it sells&quot;</span> <span class="hljs-keyword">do</span>
+      has title : <span class="hljs-type">String</span>
+      has starts_at : <span class="hljs-type">Time</span>
+      has capacity : <span class="hljs-type">Capacity</span>
+      has issued : <span class="hljs-type">Int32</span> = <span class="hljs-number">0</span>
+      has holds : <span class="hljs-type">Array</span>(<span class="hljs-type">Hold</span>)
+      has tickets : <span class="hljs-type">Array</span>(<span class="hljs-type">Ticket</span>)
+      moves on_sale &gt;&gt; closed
+      never <span class="hljs-string">&quot;A show cannot sell more seats than it has.&quot;</span> { sold + held &gt; capacity.to_i }
+
+      entity <span class="hljs-type">Hold</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;seats kept for one guest while they pay&quot;</span> <span class="hljs-keyword">do</span>
+        has number : <span class="hljs-type">Int32</span>
+        has guest : <span class="hljs-type">Email</span>
+        has seats : <span class="hljs-type">Seats</span>
+        has expires_at : <span class="hljs-type">Time</span>
+      <span class="hljs-keyword">end</span>
+
+      entity <span class="hljs-type">Ticket</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;seats one guest paid for&quot;</span> <span class="hljs-keyword">do</span>
+        has number : <span class="hljs-type">Int32</span>
+        has guest : <span class="hljs-type">Email</span>
+        has seats : <span class="hljs-type">Seats</span>
+      <span class="hljs-keyword">end</span>
+
+      the held : <span class="hljs-type">Int32</span> = holds.sum(&amp;.seats.to_i)
+      the sold : <span class="hljs-type">Int32</span> = tickets.sum(&amp;.seats.to_i)
+      the left : <span class="hljs-type">Int32</span> = capacity.to_i - sold - held</code></pre></div><p>Values name the capacity, the seats and the email, with their bounds. <code>the</code> derives what is held, sold and left from what the show stores. <code>moves</code> gives the show two states, on sale and closed, and <code>never</code> is the rule every command keeps; a command’s own <code>refuse</code> tells the guest why first. The guide states each word’s rules.</p><a class="c-secondary cursor-interaction" data-page="sweettalk" href="/docs/0.19.0/sweettalk/">Read the SweetTalk guide →</a><h2 id="c-boxoffice-hold">03 · Hold, sell and release seats</h2><div class="c-snippet"><header>app/domain/box_office.cr · part 2 of 5 · inside aggregate Show, after the left; its last end closes the aggregate</header><pre><code class="hljs language-crystal">  event <span class="hljs-type">Scheduled</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;a show went on sale&quot;</span>
+  event <span class="hljs-type">Held</span>, number : <span class="hljs-type">Int32</span>, guest : <span class="hljs-type">Email</span>, seats : <span class="hljs-type">Seats</span>, expires_at : <span class="hljs-type">Time</span>,
+    <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;seats were kept for a guest until a time&quot;</span>
+  event <span class="hljs-type">Sold</span>, number : <span class="hljs-type">Int32</span>, guest : <span class="hljs-type">Email</span>, seats : <span class="hljs-type">Seats</span>,
+    <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;a guest paid for the seats held for them&quot;</span>
+  event <span class="hljs-type">Released</span>, number : <span class="hljs-type">Int32</span>, seats : <span class="hljs-type">Seats</span>, reason : <span class="hljs-type">String</span>,
+    <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;held seats went back on sale, and why&quot;</span>
+
+  factory schedule(title : <span class="hljs-type">String</span>, starts_at : <span class="hljs-type">Time</span>, capacity : <span class="hljs-type">Capacity</span>) <span class="hljs-keyword">do</span>
+    emit <span class="hljs-type">Scheduled</span>
+  <span class="hljs-keyword">end</span>
+
+  to hold(guest : <span class="hljs-type">Email</span>, seats : <span class="hljs-type">Seats</span>) <span class="hljs-keyword">do</span>
+    refuse <span class="hljs-string">&quot;Sales for <span class="hljs-subst">#{title}</span> have closed.&quot;</span> <span class="hljs-keyword">if</span> closed?
+    refuse <span class="hljs-string">&quot;<span class="hljs-subst">#{title}</span> is sold out.&quot;</span> <span class="hljs-keyword">if</span> left.zero?
+    refuse <span class="hljs-string">&quot;Only <span class="hljs-subst">#{left}</span> of <span class="hljs-subst">#{capacity.to_i}</span> seats left for <span class="hljs-subst">#{title}</span>.&quot;</span> <span class="hljs-keyword">if</span> seats.to_i &gt; left
+    <span class="hljs-variable">@issued</span> += <span class="hljs-number">1</span>
+    expires_at = <span class="hljs-type">Time</span>.utc + <span class="hljs-type">HOLD_FOR</span>
+    <span class="hljs-variable">@holds</span> &lt;&lt; <span class="hljs-type">Hold</span>.new(<span class="hljs-variable">@issued</span>, guest, seats, expires_at)
+    emit <span class="hljs-type">Held</span>, <span class="hljs-attr">number:</span> <span class="hljs-variable">@issued</span>, <span class="hljs-attr">guest:</span> guest, <span class="hljs-attr">seats:</span> seats, <span class="hljs-attr">expires_at:</span> expires_at
+  <span class="hljs-keyword">end</span>
+
+  to sell(number : <span class="hljs-type">Int32</span>) <span class="hljs-keyword">do</span>
+    hold = holds.find { |kept| kept.number == number }
+    refuse <span class="hljs-string">&quot;Hold <span class="hljs-subst">#{number}</span> is no longer held.&quot;</span> <span class="hljs-keyword">unless</span> hold
+    <span class="hljs-variable">@holds</span>.reject! { |kept| kept.number == number }
+    <span class="hljs-variable">@tickets</span> &lt;&lt; <span class="hljs-type">Ticket</span>.new(number, hold.guest, hold.seats)
+    emit <span class="hljs-type">Sold</span>, <span class="hljs-attr">number:</span> number, <span class="hljs-attr">guest:</span> hold.guest, <span class="hljs-attr">seats:</span> hold.seats
+  <span class="hljs-keyword">end</span>
+
+  to release(number : <span class="hljs-type">Int32</span>, reason : <span class="hljs-type">String</span>) <span class="hljs-keyword">do</span>
+    <span class="hljs-keyword">if</span> hold = holds.find { |kept| kept.number == number }
+      <span class="hljs-variable">@holds</span>.reject! { |kept| kept.number == number }
+      emit <span class="hljs-type">Released</span>, <span class="hljs-attr">number:</span> number, <span class="hljs-attr">seats:</span> hold.seats, <span class="hljs-attr">reason:</span> reason
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  to close <span class="hljs-keyword">do</span>
+    closed!
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>Each command changes the one show it runs on. <code>hold</code> refuses with a reason the guest can act on, then keeps the seats for <code>HOLD_FOR</code>, the ten minutes at the top of the context. <code>sell</code> turns a hold into a ticket; the button that calls it stands in for a payment, which belongs in a border with the card gateway. <code>release</code> gives the seats back and does nothing when the hold has already ended, so a timer that fires late cannot undo a sale. <code>close</code> ends sales; no page calls it here, and the specs in step 10 do. Each event records the facts the next steps need.</p><h2 id="c-boxoffice-timer">04 · Release unpaid seats after ten minutes</h2><div class="c-snippet"><header>app/domain/box_office.cr · part 3 of 5 · inside context Seating, after aggregate Show</header><pre><code class="hljs language-crystal">value <span class="hljs-type">Claim</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;one hold on one show&quot;</span> <span class="hljs-keyword">do</span>
+  part show : <span class="hljs-type">Int64</span>
+  part number : <span class="hljs-type">Int32</span>
+<span class="hljs-keyword">end</span>
+
+process <span class="hljs-type">Checkout</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;the time one guest has to pay for the seats held for them&quot;</span> <span class="hljs-keyword">do</span>
+  key claim : <span class="hljs-type">Claim</span>
+
+  whenever <span class="hljs-type">Show::Held</span>,
+    <span class="hljs-attr">key:</span> <span class="hljs-type">Claim</span>.new(<span class="hljs-attr">show:</span> held.show_id.raw, <span class="hljs-attr">number:</span> held.number) <span class="hljs-keyword">do</span> |held|
+    arm lapse, <span class="hljs-attr">after:</span> held.expires_at - <span class="hljs-type">Time</span>.utc
+  <span class="hljs-keyword">end</span>
+
+  whenever <span class="hljs-type">Show::Sold</span>,
+    <span class="hljs-attr">key:</span> <span class="hljs-type">Claim</span>.new(<span class="hljs-attr">show:</span> sold.show_id.raw, <span class="hljs-attr">number:</span> sold.number) <span class="hljs-keyword">do</span> |sold|
+    disarm lapse
+  <span class="hljs-keyword">end</span>
+
+  whenever <span class="hljs-type">Show::Released</span>,
+    <span class="hljs-attr">key:</span> <span class="hljs-type">Claim</span>.new(<span class="hljs-attr">show:</span> released.show_id.raw, <span class="hljs-attr">number:</span> released.number) <span class="hljs-keyword">do</span> |released|
+    disarm lapse
+  <span class="hljs-keyword">end</span>
+
+  deadline lapse, <span class="hljs-attr">after:</span> <span class="hljs-type">HOLD_FOR</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Show</span>.find(<span class="hljs-type">Show::Id</span>.new(claim.show)).release(claim.number, <span class="hljs-string">&quot;not paid in time&quot;</span>)
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>The process keeps one row per hold, picked by its claim; its steps are the jobs the guide’s Run processes section describes. A hold arms the deadline for its expiry time, and a sale or a release disarms it. When the ten minutes pass first, the deadline releases the seats.</p><h2 id="c-boxoffice-waitlist">05 · Offer released seats to the waitlist</h2><p>Seating answers an offer from the waitlist inside <code>border Waitlist</code>, reading only the event’s facts. Naming <code>Waitlist::Line</code> there would draw a dependency edge back to Waitlist, a cycle the guide’s context rules refuse. When someone else took the seats first, the hold is refused and the compensation leaves the guest in the line.</p><div class="c-snippet"><header>app/domain/box_office.cr · part 4 of 5 · inside context Seating, after process Checkout; its last end closes the context</header><pre><code class="hljs language-crystal">  border <span class="hljs-type">Waitlist</span> <span class="hljs-keyword">do</span>
+    whenever <span class="hljs-type">Waitlist::Line::Offered</span> <span class="hljs-keyword">do</span> |offered|
+      <span class="hljs-type">Show</span>.find(offered.show).hold(offered.email, offered.seats)
+    <span class="hljs-keyword">end</span>
+
+    compensate <span class="hljs-type">Waitlist::Line::Offered</span> <span class="hljs-keyword">do</span> |offered, refusal|
+      <span class="hljs-comment"># The seats went to someone else first: the guest stays in the line.</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>The waitlist is a second context that follows Seating. Its policies react to Seating’s events: a scheduled show gets an empty line, a new hold seats its guest if they were waiting, and released seats are offered to the first guest they fit. An offer sends the guest nothing yet: it holds the seats for them at once, and the hold page of step 07 shows them.</p><div class="c-snippet"><header>app/domain/box_office.cr · part 5 of 5 · after context Seating; its last end closes the module</header><pre><code class="hljs language-crystal">  context <span class="hljs-type">Waitlist</span>, <span class="hljs-attr">follows:</span> <span class="hljs-type">Seating</span>, <span class="hljs-attr">subdomain:</span> :supporting,
+    <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;guests waiting for the seats a show gives back&quot;</span> <span class="hljs-keyword">do</span>
+    aggregate <span class="hljs-type">Line</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;the guests waiting for one show, first come, first served&quot;</span> <span class="hljs-keyword">do</span>
+      has show : <span class="hljs-type">Seating::Show</span>
+      has guests : <span class="hljs-type">Array</span>(<span class="hljs-type">Guest</span>)
+
+      entity <span class="hljs-type">Guest</span>, <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;one guest in the line, and the seats they want&quot;</span> <span class="hljs-keyword">do</span>
+        has email : <span class="hljs-type">Seating::Email</span>
+        has seats : <span class="hljs-type">Seating::Seats</span>
+      <span class="hljs-keyword">end</span>
+
+      event <span class="hljs-type">Offered</span>, show : <span class="hljs-type">Seating::Show::Id</span>, email : <span class="hljs-type">Seating::Email</span>, seats : <span class="hljs-type">Seating::Seats</span>,
+        <span class="hljs-attr">means:</span> <span class="hljs-string">&quot;seats came free for the first guest in the line they fit&quot;</span>
+
+      finds for_show(show : <span class="hljs-type">Seating::Show::Id</span>), <span class="hljs-attr">where:</span> {<span class="hljs-attr">show:</span> show}
+
+      to join(email : <span class="hljs-type">Seating::Email</span>, seats : <span class="hljs-type">Seating::Seats</span>) <span class="hljs-keyword">do</span>
+        waiting = guests.any? { |guest| guest.email.raw == email.raw }
+        refuse <span class="hljs-string">&quot;<span class="hljs-subst">#{email.raw}</span> is already waiting.&quot;</span> <span class="hljs-keyword">if</span> waiting
+        <span class="hljs-variable">@guests</span> &lt;&lt; <span class="hljs-type">Guest</span>.new(email, seats)
+      <span class="hljs-keyword">end</span>
+
+      to offer(free : <span class="hljs-type">Int32</span>) <span class="hljs-keyword">do</span>
+        <span class="hljs-keyword">if</span> first = guests.find { |guest| guest.seats.to_i &lt;= free }
+          emit <span class="hljs-type">Offered</span>, <span class="hljs-attr">show:</span> show, <span class="hljs-attr">email:</span> first.email, <span class="hljs-attr">seats:</span> first.seats
+        <span class="hljs-keyword">end</span>
+      <span class="hljs-keyword">end</span>
+
+      to seat(email : <span class="hljs-type">Seating::Email</span>) <span class="hljs-keyword">do</span>
+        <span class="hljs-variable">@guests</span>.reject! { |guest| guest.email.raw == email.raw }
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+
+    whenever <span class="hljs-type">Seating::Show::Scheduled</span> <span class="hljs-keyword">do</span> |scheduled|
+      <span class="hljs-type">Line</span>.create(<span class="hljs-attr">show:</span> scheduled.show_id)
+    <span class="hljs-keyword">end</span>
+
+    whenever <span class="hljs-type">Seating::Show::Held</span> <span class="hljs-keyword">do</span> |held|
+      <span class="hljs-type">Line</span>.for_show(held.show_id).first?.try(&amp;.seat(held.guest))
+    <span class="hljs-keyword">end</span>
+
+    whenever <span class="hljs-type">Seating::Show::Released</span> <span class="hljs-keyword">do</span> |released|
+      free = <span class="hljs-type">Seating::Show</span>.find(released.show_id).left
+      <span class="hljs-type">Line</span>.for_show(released.show_id).first?.try(&amp;.offer(free))
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><p>The domain is complete. Compile it before it touches the database.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> format
+<span class="hljs-built_in">frappe</span> check</code></pre></div><p class="c-expect"><strong>Expect:</strong> <code>frappe format</code> restores each part’s indentation. <code>frappe check</code> prints <code>✓ Type check passed</code>.</p><h2 id="c-boxoffice-tables">06 · Derive the tables</h2><p>Let SugarORM derive the tables, review the migration, then apply it.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> db diff --name create_box_office</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Wrote</code> and the path of one migration ending in <code>_create_box_office.cr</code>. It creates <code>seating_shows</code>, <code>seating_show_holds</code>, <code>seating_show_tickets</code>, <code>seating_checkouts</code>, <code>waitlist_lines</code> and <code>waitlist_line_guests</code>, with <code>CHECK</code> constraints for the capacity, the seats, the email’s length and the show’s states.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> migrate</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Applied 1 migrations.</code>, then <code>The database matches the declared schema.</code></p><h2 id="c-boxoffice-views">07 · Let the show choose the buttons</h2><p>The pages read the show. A closed show offers nothing, a show with seats left offers Hold seats, and a sold-out show offers Join the waitlist. The hold page offers payment while the hold lasts; afterwards it shows the tickets, or says that the seats went back on sale.</p><div class="c-snippet"><header>app/views/shows/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Views::Shows</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationView</span></span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">initialize</span></span>(<span class="hljs-variable">@show</span> : <span class="hljs-type">BoxOffice::Seating::Show</span>, <span class="hljs-variable">@csrf_token</span> : <span class="hljs-type">String</span>)
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">blueprint</span></span>
+      section <span class="hljs-attr">class:</span> <span class="hljs-string">&quot;show&quot;</span> <span class="hljs-keyword">do</span>
+        h1 { <span class="hljs-variable">@show</span>.title }
+        p { <span class="hljs-variable">@show</span>.starts_at.to_s(<span class="hljs-string">&quot;%A %d %B %Y, %H:%M UTC&quot;</span>) }
+        p { <span class="hljs-string">&quot;<span class="hljs-subst">#{<span class="hljs-variable">@show</span>.left}</span> of <span class="hljs-subst">#{<span class="hljs-variable">@show</span>.capacity.to_i}</span> seats left&quot;</span> }
+        <span class="hljs-keyword">if</span> <span class="hljs-variable">@show</span>.closed?
+          p { <span class="hljs-string">&quot;Sales for this show have closed.&quot;</span> }
+        <span class="hljs-keyword">elsif</span> <span class="hljs-variable">@show</span>.left &gt; <span class="hljs-number">0</span>
+          seats_form(<span class="hljs-string">&quot;holds&quot;</span>, <span class="hljs-string">&quot;Hold seats&quot;</span>)
+        <span class="hljs-keyword">else</span>
+          seats_form(<span class="hljs-string">&quot;waitlist&quot;</span>, <span class="hljs-string">&quot;Join the waitlist&quot;</span>)
+        <span class="hljs-keyword">end</span>
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">seats_form</span></span>(path : <span class="hljs-type">String</span>, submit : <span class="hljs-type">String</span>) : <span class="hljs-type">Nil</span>
+      form <span class="hljs-attr">action:</span> <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{<span class="hljs-variable">@show</span>.id.raw}</span>/<span class="hljs-subst">#{path}</span>&quot;</span>, <span class="hljs-attr">method:</span> <span class="hljs-string">&quot;post&quot;</span> <span class="hljs-keyword">do</span>
+        input <span class="hljs-attr">type:</span> <span class="hljs-string">&quot;hidden&quot;</span>, <span class="hljs-attr">name:</span> <span class="hljs-string">&quot;_csrf&quot;</span>, <span class="hljs-attr">value:</span> <span class="hljs-variable">@csrf_token</span>
+        label(<span class="hljs-attr">for:</span> <span class="hljs-string">&quot;guest&quot;</span>) { <span class="hljs-string">&quot;Email&quot;</span> }
+        input <span class="hljs-attr">id:</span> <span class="hljs-string">&quot;guest&quot;</span>, <span class="hljs-attr">type:</span> <span class="hljs-string">&quot;email&quot;</span>, <span class="hljs-attr">name:</span> <span class="hljs-string">&quot;guest&quot;</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+        label(<span class="hljs-attr">for:</span> <span class="hljs-string">&quot;seats&quot;</span>) { <span class="hljs-string">&quot;Seats&quot;</span> }
+        input <span class="hljs-attr">id:</span> <span class="hljs-string">&quot;seats&quot;</span>, <span class="hljs-attr">type:</span> <span class="hljs-string">&quot;number&quot;</span>, <span class="hljs-attr">name:</span> <span class="hljs-string">&quot;seats&quot;</span>, <span class="hljs-attr">value:</span> <span class="hljs-string">&quot;1&quot;</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+        button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { submit }
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/views/holds/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Views::Holds</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationView</span></span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">initialize</span></span>(<span class="hljs-variable">@show</span> : <span class="hljs-type">BoxOffice::Seating::Show</span>, <span class="hljs-variable">@number</span> : <span class="hljs-type">Int32</span>, <span class="hljs-variable">@csrf_token</span> : <span class="hljs-type">String</span>)
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">blueprint</span></span>
+      section <span class="hljs-attr">class:</span> <span class="hljs-string">&quot;hold&quot;</span> <span class="hljs-keyword">do</span>
+        h1 { <span class="hljs-variable">@show</span>.title }
+        <span class="hljs-keyword">if</span> hold = <span class="hljs-variable">@show</span>.holds.find { |kept| kept.number == <span class="hljs-variable">@number</span> }
+          due = hold.expires_at.to_s(<span class="hljs-string">&quot;%H:%M&quot;</span>)
+          p { <span class="hljs-string">&quot;<span class="hljs-subst">#{hold.seats.to_i}</span> seats held for <span class="hljs-subst">#{hold.guest.raw}</span> until <span class="hljs-subst">#{due}</span> UTC.&quot;</span> }
+          form <span class="hljs-attr">action:</span> <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{<span class="hljs-variable">@show</span>.id.raw}</span>/holds/<span class="hljs-subst">#{<span class="hljs-variable">@number</span>}</span>/sale&quot;</span>, <span class="hljs-attr">method:</span> <span class="hljs-string">&quot;post&quot;</span> <span class="hljs-keyword">do</span>
+            input <span class="hljs-attr">type:</span> <span class="hljs-string">&quot;hidden&quot;</span>, <span class="hljs-attr">name:</span> <span class="hljs-string">&quot;_csrf&quot;</span>, <span class="hljs-attr">value:</span> <span class="hljs-variable">@csrf_token</span>
+            button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { <span class="hljs-string">&quot;Pay for the seats&quot;</span> }
+          <span class="hljs-keyword">end</span>
+        <span class="hljs-keyword">elsif</span> ticket = <span class="hljs-variable">@show</span>.tickets.find { |sold| sold.number == <span class="hljs-variable">@number</span> }
+          p { <span class="hljs-string">&quot;Paid: <span class="hljs-subst">#{ticket.seats.to_i}</span> seats. The tickets go to <span class="hljs-subst">#{ticket.guest.raw}</span>.&quot;</span> }
+        <span class="hljs-keyword">else</span>
+          p { <span class="hljs-string">&quot;This hold has ended, and its seats went back on sale.&quot;</span> }
+          a(<span class="hljs-attr">href:</span> <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{<span class="hljs-variable">@show</span>.id.raw}</span>&quot;</span>) { <span class="hljs-string">&quot;Back to <span class="hljs-subst">#{<span class="hljs-variable">@show</span>.title}</span>&quot;</span> }
+        <span class="hljs-keyword">end</span>
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> check</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>✓ Type check passed</code>: the views compile before anything routes to them.</p><h2 id="c-boxoffice-actions">08 · Answer guests from actions</h2><p>Add the routes to <code>config/routes.cr</code>, inside <code>Caramel::Router.draw</code> and above the <code># Frappé resource routes</code> comment, then one action per route. A contract field may be a SweetTalk value or a show’s id, so a bad value is refused before <code>handle</code> runs and a refused hold answers 422; the guide’s Call the domain from actions section lists what each client gets.</p><div class="c-snippet"><header>config/routes.cr · inside Caramel::Router.draw</header><pre><code class="hljs language-crystal">get <span class="hljs-string">&quot;/shows/:show&quot;</span>, <span class="hljs-type">App::Shows::Show</span>
+post <span class="hljs-string">&quot;/shows/:show/holds&quot;</span>, <span class="hljs-type">App::Holds::Create</span>
+get <span class="hljs-string">&quot;/shows/:show/holds/:hold&quot;</span>, <span class="hljs-type">App::Holds::Show</span>
+post <span class="hljs-string">&quot;/shows/:show/holds/:hold/sale&quot;</span>, <span class="hljs-type">App::Holds::Sell</span>
+post <span class="hljs-string">&quot;/shows/:show/waitlist&quot;</span>, <span class="hljs-type">App::Waitlists::Join</span></code></pre></div><div class="c-snippet"><header>app/actions/shows/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Shows</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+      field show : <span class="hljs-type">BoxOffice::Seating::Show::Id</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      show = <span class="hljs-type">BoxOffice::Seating::Show</span>.find(contract.show)
+      page show.title, <span class="hljs-type">Views::Shows::Show</span>.new(show, csrf_token)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/actions/holds/create.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Holds</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Create</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+      field show : <span class="hljs-type">BoxOffice::Seating::Show::Id</span>
+      field guest : <span class="hljs-type">BoxOffice::Seating::Email</span>
+      field seats : <span class="hljs-type">BoxOffice::Seating::Seats</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      show = <span class="hljs-type">BoxOffice::Seating::Show</span>.find(contract.show)
+      show.hold(contract.guest, contract.seats)
+      redirect_to(<span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>/holds/<span class="hljs-subst">#{show.issued}</span>&quot;</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/actions/holds/show.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Holds</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Show</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+      field show : <span class="hljs-type">BoxOffice::Seating::Show::Id</span>
+      field hold : <span class="hljs-type">Int32</span>, <span class="hljs-attr">min:</span> <span class="hljs-number">1</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      show = <span class="hljs-type">BoxOffice::Seating::Show</span>.find(contract.show)
+      page <span class="hljs-string">&quot;Your seats&quot;</span>, <span class="hljs-type">Views::Holds::Show</span>.new(show, contract.hold, csrf_token)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/actions/holds/sell.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Holds</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Sell</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+      field show : <span class="hljs-type">BoxOffice::Seating::Show::Id</span>
+      field hold : <span class="hljs-type">Int32</span>, <span class="hljs-attr">min:</span> <span class="hljs-number">1</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      <span class="hljs-type">BoxOffice::Seating::Show</span>.find(contract.show).sell(contract.hold)
+      redirect_to(<span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{contract.show.raw}</span>/holds/<span class="hljs-subst">#{contract.hold}</span>&quot;</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>app/actions/waitlists/join.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App::Waitlists</span></span>
+  <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Join</span> &lt; <span class="hljs-title">App::ApplicationAction</span></span>
+    contract <span class="hljs-keyword">do</span>
+      field show : <span class="hljs-type">BoxOffice::Seating::Show::Id</span>
+      field guest : <span class="hljs-type">BoxOffice::Seating::Email</span>
+      field seats : <span class="hljs-type">BoxOffice::Seating::Seats</span>
+    <span class="hljs-keyword">end</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">handle</span></span>(contract : <span class="hljs-type">Contract</span>)
+      line = <span class="hljs-type">BoxOffice::Waitlist::Line</span>.for_show(contract.show).first?
+      <span class="hljs-keyword">return</span> not_found <span class="hljs-keyword">unless</span> line
+      line.join(contract.guest, contract.seats)
+      redirect_to(<span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{contract.show.raw}</span>&quot;</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> routes shows</code></pre></div><p class="c-expect"><strong>Expect:</strong> Lists the five routes with their contracts, such as <code>POST /shows/:show/holds App::Holds::Create show:Show::Id(Int64) guest:Seating::Email(String) seats:Seating::Seats(Int32)</code>.</p><h2 id="c-boxoffice-open">09 · Open the box office</h2><p>Seed one show, then serve the application.</p><div class="c-snippet"><header>db/seeds.cr</header><pre><code class="hljs language-crystal"><span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">App</span></span>
+  <span class="hljs-comment"># Schedules one show the first time it runs; a second run finds it and does nothing.</span>
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">self</span></span>.seed(db : <span class="hljs-type">DB::Database</span>) : <span class="hljs-type">Nil</span>
+    <span class="hljs-keyword">return</span> <span class="hljs-keyword">unless</span> <span class="hljs-type">BoxOffice::Seating::Show</span>.all.empty?
+
+    <span class="hljs-type">BoxOffice::Seating::Show</span>.schedule(<span class="hljs-string">&quot;The Tempest&quot;</span>, <span class="hljs-type">Time</span>.utc + <span class="hljs-number">30</span>.days,
+      <span class="hljs-type">BoxOffice::Seating::Capacity</span>.new(<span class="hljs-number">120</span>))
+    puts <span class="hljs-string">&quot;Scheduled The Tempest with 120 seats.&quot;</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> seed</code></pre></div><p class="c-expect"><strong>Expect:</strong> Prints <code>Scheduled The Tempest with 120 seats.</code> A second run does not print it, and schedules nothing.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> dev</code></pre></div><p class="c-expect"><strong>Expect:</strong> Builds the application and serves it at <code>https://boxoffice.caramel</code>; Ctrl-C stops it. <code>/shows/1</code> shows The Tempest, 120 of 120 seats left and a Hold seats button, and <code>/shows/2</code> answers 404.</p><h2 id="c-boxoffice-specs">10 · Specify the rules</h2><p>Add the builders both specs share, replace the generated domain spec and add a request spec. A spec starts no worker: <code>Caramel::ColdBrew.drain_queue!(db)</code> runs the jobs a command enqueued, and <code>include_scheduled: true</code> runs the deadline whose time has not come. The Cold Brew reference states both.</p><a class="c-secondary cursor-interaction" data-page="coldbrew" href="/docs/0.19.0/cold-brew/">Read how a spec drains the queue →</a><div class="c-snippet"><header>spec/support/box_office.cr</header><pre><code class="hljs language-crystal"><span class="hljs-comment"># Builders and readers that the box office&#x27;s specs share.</span>
+<span class="hljs-class"><span class="hljs-keyword">module</span> <span class="hljs-title">BoxOfficeSpec</span></span>
+  <span class="hljs-keyword">extend</span> <span class="hljs-keyword">self</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">show</span></span>(capacity : <span class="hljs-type">Int32</span>) : <span class="hljs-type">App::BoxOffice::Seating::Show</span>
+    <span class="hljs-type">App::BoxOffice::Seating::Show</span>.schedule(<span class="hljs-string">&quot;The Tempest&quot;</span>, <span class="hljs-type">Time</span>.utc(<span class="hljs-number">2026</span>, <span class="hljs-number">11</span>, <span class="hljs-number">20</span>, <span class="hljs-number">19</span>, <span class="hljs-number">30</span>),
+      <span class="hljs-type">App::BoxOffice::Seating::Capacity</span>.new(capacity))
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">email</span></span>(text : <span class="hljs-type">String</span>) : <span class="hljs-type">App::BoxOffice::Seating::Email</span>
+    <span class="hljs-type">App::BoxOffice::Seating::Email</span>.new(text)
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">seats</span></span>(count : <span class="hljs-type">Int32</span>) : <span class="hljs-type">App::BoxOffice::Seating::Seats</span>
+    <span class="hljs-type">App::BoxOffice::Seating::Seats</span>.new(count)
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">reload</span></span>(show : <span class="hljs-type">App::BoxOffice::Seating::Show</span>) : <span class="hljs-type">App::BoxOffice::Seating::Show</span>
+    <span class="hljs-type">App::BoxOffice::Seating::Show</span>.find(show.id)
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">line</span></span>(show : <span class="hljs-type">App::BoxOffice::Seating::Show</span>) : <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>
+    <span class="hljs-type">App::BoxOffice::Waitlist::Line</span>.for_show(show.id).first
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>spec/domain/box_office_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+<span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../support/box_office&quot;</span>
+
+describe <span class="hljs-type">App::BoxOffice</span> <span class="hljs-keyword">do</span>
+  it <span class="hljs-string">&quot;refuses a hold for more seats than are left&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |_client, _db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">3</span>)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      expect_raises(<span class="hljs-type">SweetTalk::Refusal</span>, <span class="hljs-string">&quot;Only 1 of 3 seats left for The Tempest.&quot;</span>) <span class="hljs-keyword">do</span>
+        show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;bo@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      <span class="hljs-keyword">end</span>
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).left.should eq(<span class="hljs-number">1</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;refuses a hold once sales have closed&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |_client, _db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      show.close
+      expect_raises(<span class="hljs-type">SweetTalk::Refusal</span>, <span class="hljs-string">&quot;Sales for The Tempest have closed.&quot;</span>) <span class="hljs-keyword">do</span>
+        show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">1</span>))
+      <span class="hljs-keyword">end</span>
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;releases unpaid seats when the ten minutes run out&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |_client, db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
+      due = db.query_one(<span class="hljs-string">&quot;SELECT run_at FROM caramel_jobs WHERE class_name = $1&quot;</span>,
+        <span class="hljs-string">&quot;App::BoxOffice::Seating::Checkout::LapseDeadline&quot;</span>, <span class="hljs-attr">as:</span> <span class="hljs-type">Time</span>)
+      (due - <span class="hljs-type">Time</span>.utc - <span class="hljs-number">10</span>.minutes).abs.should be &lt; <span class="hljs-number">1</span>.minute
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db, <span class="hljs-attr">include_scheduled:</span> <span class="hljs-literal">true</span>)
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).left.should eq(<span class="hljs-number">2</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;keeps paid seats when the timer runs out after payment&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |_client, db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
+      show.sell(<span class="hljs-number">1</span>)
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db, <span class="hljs-attr">include_scheduled:</span> <span class="hljs-literal">true</span>)
+      sold = <span class="hljs-type">BoxOfficeSpec</span>.reload(show)
+      sold.tickets.map(&amp;.guest.raw).should eq([<span class="hljs-string">&quot;ada@example.com&quot;</span>])
+      sold.left.should eq(<span class="hljs-number">0</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;offers released seats to the first guest in the line they fit&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |_client, db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      line = <span class="hljs-type">BoxOfficeSpec</span>.line(show)
+      line.join(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;cy@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">3</span>))
+      line.join(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;di@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">2</span>))
+      show.release(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;changed plans&quot;</span>)
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
+      <span class="hljs-type">BoxOfficeSpec</span>.reload(show).holds.map(&amp;.guest.raw).should eq([<span class="hljs-string">&quot;di@example.com&quot;</span>])
+      <span class="hljs-type">BoxOfficeSpec</span>.line(show).guests.map(&amp;.email.raw).should eq([<span class="hljs-string">&quot;cy@example.com&quot;</span>])
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>spec/requests/box_office_spec.cr</header><pre><code class="hljs language-crystal"><span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../spec_helper&quot;</span>
+<span class="hljs-keyword">require</span> <span class="hljs-string">&quot;../support/box_office&quot;</span>
+
+describe <span class="hljs-string">&quot;The box office&quot;</span> <span class="hljs-keyword">do</span>
+  it <span class="hljs-string">&quot;holds seats, sells them, and offers the waitlist once the show is sold out&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      <span class="hljs-type">Caramel::ColdBrew</span>.drain_queue!(db)
+      path = <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>&quot;</span>
+      client.get(path).should have_html {
+        section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;show&quot;</span>) { button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { <span class="hljs-string">&quot;Hold seats&quot;</span> } }
+      }
+      held = client.post(<span class="hljs-string">&quot;<span class="hljs-subst">#{path}</span>/holds&quot;</span>, <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;guest&quot;</span> =&gt; <span class="hljs-string">&quot;ada@example.com&quot;</span>, <span class="hljs-string">&quot;seats&quot;</span> =&gt; <span class="hljs-string">&quot;2&quot;</span>})
+      held.should redirect_to(<span class="hljs-string">&quot;<span class="hljs-subst">#{path}</span>/holds/1&quot;</span>)
+      client.follow_redirect.should have_html {
+        section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;hold&quot;</span>) { button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { <span class="hljs-string">&quot;Pay for the seats&quot;</span> } }
+      }
+      client.get(path).should have_html {
+        section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;show&quot;</span>) { button(<span class="hljs-attr">type:</span> <span class="hljs-string">&quot;submit&quot;</span>) { <span class="hljs-string">&quot;Join the waitlist&quot;</span> } }
+      }
+      joined = client.post(<span class="hljs-string">&quot;<span class="hljs-subst">#{path}</span>/waitlist&quot;</span>,
+        <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;guest&quot;</span> =&gt; <span class="hljs-string">&quot;bo@example.com&quot;</span>, <span class="hljs-string">&quot;seats&quot;</span> =&gt; <span class="hljs-string">&quot;1&quot;</span>})
+      joined.should redirect_to(path)
+      <span class="hljs-type">BoxOfficeSpec</span>.line(show).guests.map(&amp;.email.raw).should eq([<span class="hljs-string">&quot;bo@example.com&quot;</span>])
+      client.post(<span class="hljs-string">&quot;<span class="hljs-subst">#{path}</span>/holds/1/sale&quot;</span>).should redirect_to(<span class="hljs-string">&quot;<span class="hljs-subst">#{path}</span>/holds/1&quot;</span>)
+      client.follow_redirect.should have_html {
+        section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;hold&quot;</span>) { p { <span class="hljs-string">&quot;Paid: 2 seats. The tickets go to ada@example.com.&quot;</span> } }
+      }
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;answers 422 for a refusal or a bad value, and 404 for a show that is not a number&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, _db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">1</span>)
+      show.hold(<span class="hljs-type">BoxOfficeSpec</span>.email(<span class="hljs-string">&quot;ada@example.com&quot;</span>), <span class="hljs-type">BoxOfficeSpec</span>.seats(<span class="hljs-number">1</span>))
+      path = <span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>/holds&quot;</span>
+      json = {<span class="hljs-string">&quot;Accept&quot;</span> =&gt; <span class="hljs-string">&quot;application/json&quot;</span>}
+      sold_out = client.post(path, <span class="hljs-attr">headers:</span> json,
+        <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;guest&quot;</span> =&gt; <span class="hljs-string">&quot;bo@example.com&quot;</span>, <span class="hljs-string">&quot;seats&quot;</span> =&gt; <span class="hljs-string">&quot;1&quot;</span>})
+      sold_out.should have_status(<span class="hljs-number">422</span>)
+      sold_out.body.should eq(<span class="hljs-string">%({&quot;errors&quot;:{&quot;_base&quot;:[&quot;The Tempest is sold out.&quot;]}})</span>)
+      too_many = client.post(path, <span class="hljs-attr">headers:</span> json,
+        <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;guest&quot;</span> =&gt; <span class="hljs-string">&quot;bo@example.com&quot;</span>, <span class="hljs-string">&quot;seats&quot;</span> =&gt; <span class="hljs-string">&quot;9&quot;</span>})
+      too_many.should have_status(<span class="hljs-number">422</span>)
+      too_many.body.should eq(<span class="hljs-string">%({&quot;errors&quot;:{&quot;seats&quot;:[&quot;Seats must be between 1 and 8&quot;]}})</span>)
+      stray = client.post(<span class="hljs-string">&quot;/shows/abc/holds&quot;</span>,
+        <span class="hljs-attr">params:</span> {<span class="hljs-string">&quot;guest&quot;</span> =&gt; <span class="hljs-string">&quot;bo@example.com&quot;</span>, <span class="hljs-string">&quot;seats&quot;</span> =&gt; <span class="hljs-string">&quot;1&quot;</span>})
+      stray.should have_status(<span class="hljs-number">404</span>)
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+
+  it <span class="hljs-string">&quot;offers a closed show nothing&quot;</span> <span class="hljs-keyword">do</span>
+    <span class="hljs-type">Corretto</span>.session <span class="hljs-keyword">do</span> |client, _db|
+      show = <span class="hljs-type">BoxOfficeSpec</span>.show(<span class="hljs-number">2</span>)
+      show.close
+      client.get(<span class="hljs-string">&quot;/shows/<span class="hljs-subst">#{show.id.raw}</span>&quot;</span>).should have_html {
+        section(<span class="hljs-attr">class:</span> <span class="hljs-string">&quot;show&quot;</span>) { p { <span class="hljs-string">&quot;Sales for this show have closed.&quot;</span> } }
+      }
+    <span class="hljs-keyword">end</span>
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span></code></pre></div><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> corretto</code></pre></div><p class="c-expect"><strong>Expect:</strong> Runs every example, the box office’s eight included, and prints <code>examples, 0 failures</code> and <code>Corretto: 1 of 1 workers passed</code>.</p><div class="c-prove"><p class="c-kicker">Prove it</p><h2 id="c-boxoffice-prove">Prove the box office works</h2><p>Run the three checks.</p><div class="c-snippet"><header>Terminal · inside boxoffice</header><pre><code class="hljs language-bash"><span class="hljs-built_in">frappe</span> check
+<span class="hljs-built_in">frappe</span> corretto
+<span class="hljs-built_in">frappe</span> lint</code></pre></div><p class="c-passing"><strong>Passing:</strong> <code>frappe check</code> prints <code>✓ Type check passed</code>, <code>frappe corretto</code> prints <code>Corretto: 1 of 1 workers passed</code>, and <code>frappe lint</code> exits 0.</p></div><div class="c-next"><a class="cursor-interaction c-back" data-page="sweettalk" href="/docs/0.19.0/sweettalk/">← SweetTalk</a><a class="cursor-interaction" data-page="sweettalk" href="/docs/0.19.0/sweettalk/">Read every SweetTalk rule →</a></div></article></main><aside class="c-outline" aria-label="On this page"><p>On this page</p><a href="#c-boxoffice-create">01 · Create the application and its domain</a><a href="#c-boxoffice-show">02 · Give each show its seats</a><a href="#c-boxoffice-hold">03 · Hold, sell and release seats</a><a href="#c-boxoffice-timer">04 · Release unpaid seats after ten minutes</a><a href="#c-boxoffice-waitlist">05 · Offer released seats to the waitlist</a><a href="#c-boxoffice-tables">06 · Derive the tables</a><a href="#c-boxoffice-views">07 · Let the show choose the buttons</a><a href="#c-boxoffice-actions">08 · Answer guests from actions</a><a href="#c-boxoffice-open">09 · Open the box office</a><a href="#c-boxoffice-specs">10 · Specify the rules</a><a href="#c-boxoffice-prove">Prove the box office works</a><div class="c-outline-more"><a href="/docs/0.19.0/box-office/index.md">This page as Markdown</a><a href="https://github.com/caramelizedev/caramel/blob/main/website/source/site.html">Edit the source</a></div></aside></div></body></html>
