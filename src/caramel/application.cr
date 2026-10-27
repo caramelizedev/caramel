@@ -44,18 +44,21 @@ module Caramel
     @in_flight = Atomic(Int32).new(0)
     @draining = Atomic(Bool).new(false)
 
+    # *session_max_age* is how long a session cookie reads after its last
+    # write (`Session::MAX_AGE` by default).
     def initialize(@router : Router::Dispatcher,
                    @csrf : CSRF,
                    public_root : String? = nil,
                    policy : ContentSecurityPolicy = Caramel.content_security_policy,
-                   @hsts : Bool = false)
+                   @hsts : Bool = false,
+                   session_max_age : Time::Span = Session::MAX_AGE)
       @policy = policy.dup
       @policy_header = @policy.to_s
       @authority = URI.parse(@csrf.origin).authority ||
                    raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
       @authority_with_port = "#{@authority}:443"
       @public_root = public_root.try { |root| File.realpath(root) }
-      @sessions = Session.new(@csrf.derive_key("session"))
+      @sessions = Session.new(@csrf.derive_keys("session"), session_max_age)
     end
 
     def handle(request : HTTP::Request) : Response

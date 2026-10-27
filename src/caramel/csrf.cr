@@ -9,6 +9,9 @@ module Caramel
   # Exact Origin checking also prevents sibling local sites from submitting. The
   # configured origin is normalised once (lowercase scheme and host, no `:443`), and
   # a request's `Origin` matches it case-insensitively, with or without `:443`.
+  # Tokens and derived keys are made with the current secret and checked against
+  # the current secret and each previous one (`APP_SECRET_PREVIOUS`), so a secret
+  # rotates without ending every open form and session at once.
   class CSRF
     COOKIE_NAME = "__Host-caramel_csrf"
     LIFETIME    = 24.hours
@@ -18,9 +21,15 @@ module Caramel
     # The normalised origin: `https://Example.com:443` becomes `https://example.com`.
     getter origin : String
     @origin_with_port : String
+    # The current secret first, then the previous ones.
+    @secrets : Array(String)
 
-    def initialize(@secret : String, origin : String)
+    def initialize(@secret : String, origin : String, previous : Array(String) = [] of String)
       raise ArgumentError.new("CSRF secret must be at least 32 bytes") if @secret.bytesize < 32
+      if previous.any? { |old| old.bytesize < 32 }
+        raise ArgumentError.new("Each previous CSRF secret must be at least 32 bytes")
+      end
+      @secrets = [@secret] + previous
       uri = URI.parse(origin)
       unless https_origin?(uri)
         raise ArgumentError.new("CSRF origin must be an HTTPS origin without a path")
@@ -54,6 +63,8 @@ module Caramel
       valid_token?(stored, now)
     end
 
+    # Whether *token* was issued under the current secret or a previous one and
+    # has not expired.
     def valid_token?(token : String, now = Time.utc) : Bool
       return false unless token.matches?(/\A[0-9]{1,12}\.[0-9a-f]{64}\.[0-9a-f]{64}\z/)
       timestamp, nonce, signature = token.split('.')
@@ -61,17 +72,30 @@ module Caramel
       age = now.to_unix - issued
       return false if issued > now.to_unix + CLOCK_SKEW.total_seconds
       return false if age > LIFETIME.total_seconds
-      Crypto::Subtle.constant_time_compare(sign("#{timestamp}.#{nonce}"), signature)
+      payload = "#{timestamp}.#{nonce}"
+      @secrets.any? do |secret|
+        Crypto::Subtle.constant_time_compare(sign(payload, secret), signature)
+      end
     end
 
     # A key for another purpose (such as the session signature), derived from
-    # the application secret so that neither signature can stand in for the other.
+    # the current secret so that neither signature can stand in for the other.
     def derive_key(purpose : String) : Bytes
-      OpenSSL::HMAC.digest(:sha256, @secret, "caramel.#{purpose}")
+      derive(@secret, purpose)
     end
 
-    private def sign(payload : String) : String
-      OpenSSL::HMAC.hexdigest(:sha256, @secret, payload)
+    # The key for *purpose* under the current secret, then under each previous
+    # one: what a verifier accepts while a secret rotates out.
+    def derive_keys(purpose : String) : Array(Bytes)
+      @secrets.map { |secret| derive(secret, purpose) }
+    end
+
+    private def derive(secret : String, purpose : String) : Bytes
+      OpenSSL::HMAC.digest(:sha256, secret, "caramel.#{purpose}")
+    end
+
+    private def sign(payload : String, secret : String = @secret) : String
+      OpenSSL::HMAC.hexdigest(:sha256, secret, payload)
     end
 
     # Whether *header* names the configured origin, in any case and with or without `:443`.

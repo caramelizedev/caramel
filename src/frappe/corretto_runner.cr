@@ -45,7 +45,7 @@ module Caramel::Frappe
     # Keys Corretto, the toolchain or the dynamic loader own; .env.test may
     # not set them.
     RESERVED_TEST_KEYS = %w[
-      APP_ORIGIN APP_SECRET DATABASE_URL MIGRATION_DATABASE_URL
+      APP_ORIGIN APP_SECRET APP_SECRET_PREVIOUS DATABASE_URL MIGRATION_DATABASE_URL
       PATH HOME USER LOGNAME TMPDIR LANG
     ]
     RESERVED_TEST_PREFIXES = %w[SPEC_ CARAMEL_ CORRETTO_ CRYSTAL_ LD_ DYLD_]
