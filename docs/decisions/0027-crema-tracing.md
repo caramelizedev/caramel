@@ -27,6 +27,9 @@ secrets in logs and without a diagnostic that costs a production binary anything
      `/\A[A-Za-z0-9._:\-]{8,128}\z/`, else a UUID. It is returned as `X-Request-ID`.
    - A valid W3C `traceparent` (version `00`, lowercase hex, no all-zero id) supplies the
      trace id and `parent_id`; its sampled bit is kept as `parent_sampled`.
+   - `Crema.trust_trace_context = false` (or `CARAMEL_TRUST_TRACE_CONTEXT=0`) ignores both
+     inbound headers: every request gets fresh ids and no parent, so a client can neither
+     choose its trace nor force sampling.
 4. **Wire format version 1.** `TraceEvent`, `SpanEvent`, `RepeatEvent`, `ErrorEvent` and
    `BuildEvent` in `crema/event.cr` are the one definition the application, Frappé and
    `ErrorEvent.location`, a project-relative `file:line:column` of the fingerprint frame,
@@ -44,7 +47,8 @@ secrets in logs and without a diagnostic that costs a production binary anything
    never carry exception messages, SQL bind values, request paths or bodies. Redacted
    messages and backtraces exist only in the in-memory error ring and in
    development-only surfaces. `Crema::Redact` removes secret-looking environment values,
-   database URLs and `name=value` credentials.
+   database URLs, the userinfo of any URL, `Cookie` and `Set-Cookie` lines, the values of
+   PostgreSQL's `Key (…)=(…)` detail and `name=value` credentials.
 8. **Sinks.** A `Sink` says whether it wants spans (`records?`, asked once per trace) and
    receives `finished` and `reported` on the reporting fiber without blocking. The log,
    metric and tail sinks are built in. The thresholds `Crema.slow_request` (1 s),

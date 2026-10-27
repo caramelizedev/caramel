@@ -77,7 +77,9 @@ nothing.
     OTLP/HTTP JSON when `OTEL_EXPORTER_OTLP_ENDPOINT` (or
     `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, and does nothing otherwise; any
     `OTEL_EXPORTER_OTLP_PROTOCOL` other than `http/json` leaves it off. It honors
-    `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_SERVICE_NAME`.
+    `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_SERVICE_NAME`; headers bound for an `http://`
+    endpoint off the loopback interface are warned about once at start, since they
+    travel in clear.
 12. **Sampling is decided once per trace.** `OTEL_TRACES_SAMPLER` is `always_on`,
     `always_off`, `traceidratio` (the default), `parentbased_always_on`,
     `parentbased_always_off` or `parentbased_traceidratio`; an unknown name warns and
@@ -87,8 +89,11 @@ nothing.
 13. **The mapping.** A request is a server span, a job a consumer span and a schedule an
     internal span; each SQL statement and outbound call is a client child. Attributes
     follow OpenTelemetry's HTTP, messaging and database conventions and name the route
-    and the parameterized SQL, never a path, bind value or message; an error adds status
-    error and an `exception` event with `exception.type` only.
+    and the SQL, never a path, bind value or message. `db.query.text` is normalised
+    first: quoted and dollar-quoted strings and bare numbers become `?`, `$n` binds stay,
+    comments go, whitespace collapses and the text is cut to 500 bytes, so a literal
+    written into a statement is not exported. An error adds status error and an
+    `exception` event with `exception.type` only.
 14. **Failure never reaches the work.** A queue of 2 048 traces feeds one fiber that posts
     every five seconds or 512 spans with a plain `HTTP::Client`, so the exporter does not
     trace itself. A refused or failed post drops the batch, counts it in `dropped["otlp"]`

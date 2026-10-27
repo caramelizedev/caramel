@@ -7,7 +7,7 @@ require "./event"
 module Caramel::Crema
   # Traces as OTLP/HTTP JSON, a pure function of the wire-format events. The exporter
   # and Frappé's forwarding to Latte's collector share it, so it needs nothing but the
-  # standard library and the event structs. Attributes name the parameterized SQL and
+  # standard library and the event structs. Attributes name the normalised SQL and
   # the route, never a bind value, a path or a message.
   module OtlpJson
     SERVER   = 2
@@ -15,6 +15,23 @@ module Caramel::Crema
     INTERNAL = 1
     CONSUMER = 5
     ERROR    = 2
+
+    # The longest `db.query.text` sent.
+    SQL_LIMIT   = 500
+    SQL_COMMENT = /--[^\r\n]*|\/\*.*?\*\//m
+    SQL_STRING  = /(?:\bE)?'(?:[^']|'')*'|(\$[A-Za-z_]*\$).*?\1/m
+    SQL_NUMBER  = /(?<![\w$.])[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/
+
+    # *sql* with every quoted string, dollar-quoted string and standalone number as
+    # `?`, comments gone and whitespace collapsed, cut to 500 bytes. `$1` style binds
+    # stay as written, so a parameterized statement is exported unchanged.
+    def self.sql_text(sql : String) : String
+      text = sql.gsub(SQL_COMMENT, " ")
+      text = text.gsub(SQL_STRING, "?")
+      text = text.gsub(SQL_NUMBER, "?")
+      text = text.gsub(/\s+/, " ").strip
+      text.byte_slice(0, Math.min(text.bytesize, SQL_LIMIT)).scrub
+    end
 
     def self.encode(events : Array(TraceEvent), service : String, environment : String) : String
       JSON.build do |json|
@@ -137,7 +154,7 @@ module Caramel::Crema
         string(json, "db.system.name", "postgresql")
         operation = (span.detail || span.name).lstrip.partition(' ')[0].upcase
         string(json, "db.operation.name", operation)
-        span.detail.try { |sql| string(json, "db.query.text", sql) }
+        span.detail.try { |sql| string(json, "db.query.text", sql_text(sql)) }
       when "http"
         method, _, host = span.name.partition(' ')
         string(json, "http.request.method", method)

@@ -3,7 +3,8 @@ require "uri"
 module Caramel::Crema
   # Text that may leave the process (the in-memory error ring, development
   # pages) is scrubbed first: secret-looking environment values, database
-  # URLs and `name=value` credentials never survive.
+  # URLs, URL userinfo, cookies, PostgreSQL key details and `name=value`
+  # credentials never survive.
   module Redact
     # A credential written as `name=value`, `name: "value"` or `"name": "value"`, and a
     # bearer token on its own.
@@ -13,6 +14,12 @@ module Caramel::Crema
     BARE         = %q(\b(?-i:Bearer)\s+[A-Za-z0-9._~+/=-]+)
     CREDENTIAL   = /(?:\b[A-Za-z0-9_]*(?:#{NAMES})["']?\s*[=:]\s*#{VALUE})|#{BARE}/i
     DATABASE_URL = /postgres(?:ql)?:\/\/[^\s"'<>]+/
+    # `scheme://user:pass@` in any other URL; the scheme and host stay.
+    URL_USERINFO = /\b([a-z][a-z0-9+.\-]*:\/\/)[^\/\s"'<>@:]+:[^\/\s"'<>@]*@/i
+    # A `Cookie:` or `Set-Cookie:` header line, or a `cookie=` pair, to its end of line.
+    COOKIE = /\b(?:Set-)?Cookie["']?\s*[:=]\s*[^\r\n]+/i
+    # The values of PostgreSQL's `Key (email)=(a@b.c) already exists`; the columns stay.
+    KEY_DETAIL = /\bKey (\([^)]*\))=\([^)]*\)/
 
     # The values of secret-looking environment variables, and the password
     # in each PostgreSQL URL among them. A value that is not a valid URL stays a
@@ -37,9 +44,9 @@ module Caramel::Crema
       nil
     end
 
-    # *text* with every secret, database URL and credential removed, cut to
-    # at most *limit* bytes. Pass `credentials: false` for compiler output, whose
-    # `password=` style text is source code, not a leaked value.
+    # *text* with every secret, database URL, URL userinfo, cookie, key detail and
+    # credential removed, cut to at most *limit* bytes. Pass `credentials: false` for
+    # compiler output, whose `password=` style text is source code, not a leaked value.
     def self.text(text : String,
                   secrets : Array(String),
                   limit : Int32,
@@ -48,6 +55,9 @@ module Caramel::Crema
       known = secrets.reject(&.empty?).sort_by!(&.bytesize)
       known.reverse_each { |secret| safe = safe.gsub(secret, "[redacted]") }
       safe = safe.gsub(DATABASE_URL, "[database URL redacted]")
+      safe = safe.gsub(URL_USERINFO, "\\1[credential redacted]@")
+      safe = safe.gsub(COOKIE, "Cookie: [credential redacted]")
+      safe = safe.gsub(KEY_DETAIL, "Key \\1=([redacted])")
       safe = safe.gsub(CREDENTIAL, "[credential redacted]") if credentials
       safe.byte_slice(0, Math.min(safe.bytesize, limit)).scrub
     end

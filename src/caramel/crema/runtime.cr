@@ -117,6 +117,7 @@ module Caramel::Crema
     runtime = Runtime.new(role, app, database, cold_brew, application)
     @@runtime = runtime
     application.try { |found| Crema.debug_key = found.csrf.derive_key("crema-debug") }
+    Crema.trust_trace_context = false if ENV["CARAMEL_TRUST_TRACE_CONTEXT"]? == "0"
     @@starters.each do |starter|
       starter.call(runtime).try { |stopper| runtime.add_stopper(stopper) }
     rescue error

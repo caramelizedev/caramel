@@ -1,4 +1,5 @@
 require "spec"
+require "log/spec"
 require "../../../src/caramel"
 require "../../../src/caramel/crema/otlp"
 
@@ -74,6 +75,19 @@ describe Caramel::Crema::Otlp do
     child["parentSpanId"].should eq(root["spanId"])
   end
 
+  it "replaces interpolated literals in db.query.text with ? and cuts it at 500 bytes" do
+    sql_text = ->(sql : String) { Caramel::Crema::OtlpJson.sql_text(sql) }
+    written = "SELECT * FROM books WHERE title = 'It''s' AND E'x' = $$a@b$$ -- note\n" \
+              "  AND year > 1999 AND pages = 1.5e3 AND id = $1 /* tag */"
+    normalised = "SELECT * FROM books WHERE title = ? AND ? = ? AND year > ? AND pages = ? " \
+                 "AND id = $1"
+    sql_text.call(written).should eq(normalised)
+    parameterized = "SELECT * FROM books WHERE id = $1"
+    sql_text.call(parameterized).should eq(parameterized)
+    sql_text.call("SELECT '#{"x" * 600}' FROM t1").should eq("SELECT ? FROM t1")
+    sql_text.call("SELECT #{"a, " * 300}b").bytesize.should eq(500)
+  end
+
   it "exports a domain span as an internal span without attributes" do
     collector = Collector.new
     exporting(collector) do
@@ -128,6 +142,22 @@ describe Caramel::Crema::Otlp do
       Caramel::Crema.request(HTTP::Request.new("GET", "/")) { Caramel::Response.new(body: "ok") }
     end
     collector.headers.should eq(["a b"])
+  end
+
+  it "warns once about headers sent in clear to a host off the loopback, not to one on it" do
+    runtime = Caramel::Crema::Runtime.new("serve", "Bookshelf")
+    headers = {"OTEL_EXPORTER_OTLP_HEADERS" => "x-api-key=k"}
+    remote = headers.merge({"OTEL_EXPORTER_OTLP_ENDPOINT" => "http://collector.internal:4318"})
+    warning = "OTLP headers are sent in clear to collector.internal; use an https endpoint"
+    Log.capture("crema") do |logs|
+      Caramel::Crema::Otlp.activate(runtime, remote).try(&.call)
+      logs.check(:warn, warning)
+    end
+    collector = Collector.new
+    Log.capture("crema") do |logs|
+      exporting(collector, headers) { }
+      logs.empty
+    end
   end
 
   it "stays off without an endpoint and refuses a protocol it does not speak" do

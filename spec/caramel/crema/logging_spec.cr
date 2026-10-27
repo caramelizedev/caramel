@@ -66,6 +66,14 @@ describe Caramel::Crema::TextFormat do
                "request_id=8b1f"
     Caramel::Crema::TextFormat.line(entry).should eq(expected)
   end
+
+  it "escapes CR, LF and ESC in a value and quotes it" do
+    entry = entry_at("login failed", {user: "eve\r\n12:00:00.124 INFO   forged\e[31m"},
+      source: "app", severity: Log::Severity::Warn)
+    expected = "12:00:00.123 WARN   app: login failed " \
+               "user=\"eve\\r\\n12:00:00.124 INFO   forged\\e[31m\""
+    Caramel::Crema::TextFormat.line(entry).should eq(expected)
+  end
 end
 
 describe Caramel::Crema::JsonFormat do

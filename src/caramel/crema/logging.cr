@@ -41,7 +41,8 @@ module Caramel::Crema
   end
 
   # `HH:MM:SS.mmm LEVEL  message`, with the canonical lines in the shape the
-  # templates in ADR 0027 give.
+  # templates in ADR 0027 give. Control characters are escaped, so a value a client
+  # chose cannot forge a line or move the terminal.
   module TextFormat
     CANONICAL = {"request", "job", "schedule", "error"}
 
@@ -57,8 +58,10 @@ module Caramel::Crema
       end
 
       parts = [] of String
-      parts << (entry.source.empty? ? entry.message : "#{entry.source}: #{entry.message}")
-      fields.each { |key, value| parts << "#{key}=#{quote(value.raw.to_s)}" }
+      message = clean(entry.message)
+      source = clean(entry.source)
+      parts << (source.empty? ? message : "#{source}: #{message}")
+      fields.each { |key, value| parts << "#{clean(key)}=#{quote(value.raw.to_s)}" }
       entry.exception.try { |error| parts << "error_type=#{error.class}" }
       parts.join(' ')
     end
@@ -130,11 +133,11 @@ module Caramel::Crema
     end
 
     private def self.pair(parts : Array(String), fields, key : String) : Nil
-      text(fields, key).try { |value| parts << "#{key}=#{quote(value)}" }
+      fields[key]?.try { |value| parts << "#{key}=#{quote(value.raw.to_s)}" }
     end
 
     private def self.text(fields, key : String) : String?
-      fields[key]?.try(&.raw.to_s)
+      fields[key]?.try { |value| clean(value.raw.to_s) }
     end
 
     private def self.count(fields, key : String) : Int32
@@ -145,11 +148,28 @@ module Caramel::Crema
       "%.1f" % (fields[key]?.try(&.raw.as?(Float64)) || 0.0)
     end
 
-    # Values with a space or a quote are written in quotes.
+    # Values with a space, a quote or an escaped control character are written in quotes.
     def self.quote(value : String) : String
-      return value unless value.includes?(' ') || value.includes?('"')
+      cleaned = clean(value)
+      return value unless cleaned != value || value.includes?(' ') || value.includes?('"')
 
-      "\"#{value.gsub('"', "\\\"")}\""
+      "\"#{cleaned.gsub('"', "\\\"")}\""
+    end
+
+    CONTROL = /[\x00-\x1f\x7f]/
+
+    # *text* with each control character written as `\n`, `\r`, `\e` or `\xNN`.
+    def self.clean(text : String) : String
+      return text unless text.matches?(CONTROL)
+
+      text.gsub(CONTROL) do |char|
+        case char
+        when "\n" then "\\n"
+        when "\r" then "\\r"
+        when "\e" then "\\e"
+        else           "\\x%02x" % char.byte_at(0)
+        end
+      end
     end
   end
 
