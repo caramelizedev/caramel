@@ -120,15 +120,29 @@ module SugarORM
     end
 
     # Read-only: checking pending migrations must never create schema objects.
-    def pending : Array(Migration)
-      @db.using_connection { |connection| pending(connection) }
+    # A journaled version with no compiled migration is `Drift`, unless
+    # *allow_ahead*, which skips it so an older binary can start against a
+    # schema a newer one migrated. A changed checksum is always `Drift`.
+    def pending(allow_ahead : Bool = false) : Array(Migration)
+      @db.using_connection { |connection| pending(connection, allow_ahead) }
+    end
+
+    # Journaled versions this binary has no migration for, in order.
+    def ahead : Array(Int64)
+      @db.using_connection do |connection|
+        journaled(connection).keys.sort!.reject! do |version|
+          @migrations.any? { |migration| migration.version == version }
+        end
+      end
     end
 
     def lint : Array(Linter::Violation)
       Linter.lint(pending)
     end
 
-    # One session-level advisory lock covers the run. Pending migrations are
+    # One session-level advisory lock covers the run. A journaled migration this
+    # binary lacks is `Drift`: a newer schema is never migrated by an older
+    # binary, and migrations never roll back. Pending migrations are
     # linted before any statement executes. Each transactional migration runs in
     # a transaction of its own that also writes its journal row, so a failure
     # keeps the migrations before it. An online migration runs each statement in
@@ -139,7 +153,7 @@ module SugarORM
       @db.using_connection do |connection|
         connection.exec(LOCK_SQL, LOCK_ID)
         begin
-          pending = pending(connection)
+          pending = pending(connection, allow_ahead: false)
           Linter.enforce(Linter.lint(pending), dev_override, environment, @warnings)
           connection.exec(<<-SQL)
             CREATE TABLE IF NOT EXISTS caramel_migrations (
@@ -247,21 +261,28 @@ module SugarORM
       connection.exec(sql, migration.version, migration.name, migration.checksum)
     end
 
-    private def pending(connection : DB::Connection) : Array(Migration)
-      regclass = "SELECT to_regclass('caramel_migrations')::text"
-      return @migrations.dup unless connection.query_one(regclass, as: String?)
-      applied = {} of Int64 => String
-      connection.query("SELECT version, checksum FROM caramel_migrations") do |rows|
-        rows.each { applied[rows.read(Int64)] = rows.read(String) }
-      end
+    private def pending(connection : DB::Connection, allow_ahead : Bool) : Array(Migration)
+      applied = journaled(connection)
       applied.each do |version, checksum|
         subject = "Applied migration #{version}"
         migration = @migrations.find { |candidate| candidate.version == version }
+        next if allow_ahead && migration.nil?
         raise Drift.new("#{subject} is missing from this application") unless migration
         changed = migration.checksum != checksum
         raise Drift.new("#{subject} has changed; create a new migration") if changed
       end
       @migrations.reject { |migration| applied.has_key?(migration.version) }
+    end
+
+    # Version to checksum of every journaled migration; empty before the first run.
+    private def journaled(connection : DB::Connection) : Hash(Int64, String)
+      applied = {} of Int64 => String
+      regclass = "SELECT to_regclass('caramel_migrations')::text"
+      return applied unless connection.query_one(regclass, as: String?)
+      connection.query("SELECT version, checksum FROM caramel_migrations") do |rows|
+        rows.each { applied[rows.read(Int64)] = rows.read(String) }
+      end
+      applied
     end
   end
 end

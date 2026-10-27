@@ -146,5 +146,22 @@ module Caramel::ColdBrew
     SugarORM::Migration.new(20260927000006_i64, "add_caramel_jobs_releases", [
       "ALTER TABLE caramel_jobs ADD COLUMN releases int NOT NULL DEFAULT 0",
     ]),
+    # Maintenance's RELEASE walks `caramel_jobs_locked`; a claim's ORDER BY walks
+    # `caramel_jobs_claim`. `caramel_jobs` is a partitioned parent, which refuses
+    # CREATE INDEX CONCURRENTLY, so each build is plain and takes a SHARE lock on
+    # every partition for its duration; it blocks writes, not reads, and on a
+    # queue of due rows that is brief. The lines the linter reads allow it.
+    SugarORM::Migration.new(20260927000007_i64, "index_caramel_jobs_locked_and_claim", [
+      <<-SQL,
+        -- caramel:allow concurrent-index caramel_jobs
+        CREATE INDEX caramel_jobs_locked ON caramel_jobs (locked_at)
+        WHERE locked_at IS NOT NULL AND finished_at IS NULL AND failed_at IS NULL
+        SQL
+      <<-SQL,
+        -- caramel:allow concurrent-index caramel_jobs
+        CREATE INDEX caramel_jobs_claim ON caramel_jobs (queue, priority DESC, id)
+        WHERE locked_at IS NULL AND failed_at IS NULL AND finished_at IS NULL
+        SQL
+    ]),
   ]
 end

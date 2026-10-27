@@ -29,10 +29,17 @@ module Caramel::ColdBrew
   module Queue
     ERROR_LIMIT = 4000
 
+    # The channel idle workers LISTEN on; the payload is the queue name. The
+    # notify shares the insert's transaction, so it is delivered on commit.
+    CHANNEL = "caramel_jobs"
+
     PUSH = <<-SQL
-      INSERT INTO caramel_jobs (queue, class_name, payload, priority, run_at, context)
-      VALUES ($1, $2, $3::jsonb, $4, COALESCE($5::timestamptz, now()), $6::jsonb)
-      RETURNING id
+      WITH pushed AS (
+        INSERT INTO caramel_jobs (queue, class_name, payload, priority, run_at, context)
+        VALUES ($1, $2, $3::jsonb, $4, COALESCE($5::timestamptz, now()), $6::jsonb)
+        RETURNING id, queue
+      )
+      SELECT pushed.id FROM pushed CROSS JOIN LATERAL pg_notify('#{CHANNEL}', pushed.queue) AS sent
       SQL
 
     # The claim sets locked_at and locked_by and counts the
@@ -85,6 +92,12 @@ module Caramel::ColdBrew
       SET failed_at = now(), locked_at = NULL, locked_by = NULL, last_error = $3
       WHERE id = $1 AND enqueued_at = $2
       RETURNING queue, failed_at
+      SQL
+
+    # The last resort when a failure cannot be written: the row goes back to the queue.
+    UNLOCK = <<-SQL
+      UPDATE caramel_jobs SET locked_at = NULL, locked_by = NULL
+      WHERE id = $1 AND enqueued_at = $2
       SQL
 
     CLAIMED = {
@@ -151,27 +164,44 @@ module Caramel::ColdBrew
       nil
     rescue error
       Crema.report(error, handled: false)
-      if event = record_failure(job, error)
+      if event = record_failure_surely(job, error)
         ColdBrew.notify(event)
       end
       error
     end
 
-    # Reschedules or fails the job and returns the transition, which is
-    # durable once this returns outside a transaction. Nil when the row is gone.
-    def self.record_failure(job : Claim, error : Exception) : Transition?
-      rule = Retry.rule_for(Job.__cold_brew_lineage(job.class_name), error)
-      counted = job.counted_attempts
-      if error.is_a?(UnknownJob) || counted >= rule.attempts
-        give_up(job, error)
-      else
-        reschedule(job, error, after: rule.delay(counted))
+    # `record_failure`, with a second try describing only the class when the
+    # first write raises, and an unlock when that raises too, so a message the
+    # database rejects never leaves the row locked by a live backend.
+    private def self.record_failure_surely(job : Claim, error : Exception) : Transition?
+      record_failure(job, error)
+    rescue
+      begin
+        record_failure(job, error, described: "#{error.class}: (message unavailable)")
+      rescue exception
+        SugarORM.sql_exec(UNLOCK, job.id, job.enqueued_at)
+        Crema.report(exception, handled: true, source: "cold_brew.worker")
+        nil
       end
     end
 
-    private def self.reschedule(job : Claim, error : Exception,
+    # Reschedules or fails the job and returns the transition, which is
+    # durable once this returns outside a transaction. Nil when the row is gone.
+    # `described` replaces `describe(error)` as the stored `last_error`.
+    def self.record_failure(job : Claim, error : Exception,
+                            described : String = describe(error)) : Transition?
+      rule = Retry.rule_for(Job.__cold_brew_lineage(job.class_name), error)
+      counted = job.counted_attempts
+      if error.is_a?(UnknownJob) || counted >= rule.attempts
+        give_up(job, error, described)
+      else
+        reschedule(job, error, described, after: rule.delay(counted))
+      end
+    end
+
+    private def self.reschedule(job : Claim, error : Exception, described : String,
                                 after delay : Time::Span) : RetryScheduled?
-      values = {job.id, job.enqueued_at, delay.total_seconds, describe(error)}
+      values = {job.id, job.enqueued_at, delay.total_seconds, described}
       row = SugarORM.sql(RETRY, *values, as: RESCHEDULED).first? || return
       RetryScheduled.new(
         id: job.id, queue: row[:queue], class_name: job.class_name,
@@ -179,8 +209,8 @@ module Caramel::ColdBrew
       )
     end
 
-    private def self.give_up(job : Claim, error : Exception) : JobFailed?
-      values = {job.id, job.enqueued_at, describe(error)}
+    private def self.give_up(job : Claim, error : Exception, described : String) : JobFailed?
+      values = {job.id, job.enqueued_at, described}
       row = SugarORM.sql(FAIL, *values, as: FAILED).first? || return
       JobFailed.new(
         id: job.id, queue: row[:queue], class_name: job.class_name,
@@ -188,13 +218,15 @@ module Caramel::ColdBrew
       )
     end
 
-    # The class, message and the first backtrace lines, within ERROR_LIMIT.
+    # The class, message and the first backtrace lines, within ERROR_LIMIT,
+    # without the NUL bytes and invalid UTF-8 that PostgreSQL rejects in text.
     def self.describe(error : Exception) : String
       text = String.build do |io|
         io << error.class << ": " << error.message
         error.backtrace?.try(&.first(12).each { |line| io << "\n  " << line })
       end
-      text.size > ERROR_LIMIT ? text[0, ERROR_LIMIT] : text
+      text = text[0, ERROR_LIMIT] if text.size > ERROR_LIMIT
+      text.delete('\0').scrub
     end
 
     private def self.finish(job : Claim) : Nil

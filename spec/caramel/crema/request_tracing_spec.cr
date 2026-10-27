@@ -93,6 +93,25 @@ describe "Crema request tracing" do
     end
   end
 
+  it "ignores the inbound traceparent and request id when trace context is not trusted" do
+    header = HTTP::Headers{
+      "traceparent"  => "00-#{"a" * 32}-#{"b" * 16}-01",
+      "X-Request-ID" => "client-chosen-0001",
+    }
+    Caramel::Crema.trust_trace_context = false
+    begin
+      Caramel::Crema.request(HTTP::Request.new("GET", "/x", header)) do |trace|
+        trace.trace_id.should_not eq("a" * 32)
+        trace.parent_id.should be_nil
+        trace.parent_sampled.should be_nil
+        trace.request_id.should_not eq("client-chosen-0001")
+        Caramel::Response.new(body: "ok")
+      end
+    ensure
+      Caramel::Crema.trust_trace_context = true
+    end
+  end
+
   it "logs one canonical line with the route, action and status, and no path" do
     Log.capture("crema") do |logs|
       crema_app.handle(crema_request("/books/7"))

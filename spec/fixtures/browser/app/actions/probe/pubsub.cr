@@ -21,10 +21,7 @@ module App::Probe
       Caramel::ColdBrew.subscribe("board_#{contract.board_id}", channel)
 
       stream "text/event-stream" do |io|
-        loop do
-          io << "event: BoardUpdated\ndata: " << channel.receive << "\n\n"
-          io.flush
-        end
+        Caramel::SSE.relay(io, channel, event: "BoardUpdated")
       end
     end
   end

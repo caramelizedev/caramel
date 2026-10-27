@@ -1,6 +1,8 @@
 module App::@@COLLECTION@@
-  # The @@LABEL@@'s home page, at /SLUG.
+  # The @@LABEL@@'s home page, at /SLUG, for its members.
   struct Home < App::ApplicationAction
+    ingress authenticate: :member?
+
     contract do
     end
 

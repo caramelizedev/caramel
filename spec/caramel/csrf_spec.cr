@@ -50,6 +50,24 @@ describe Caramel::CSRF do
     secret_b.valid_token?(token).should be_false
   end
 
+  it "accepts a token issued under a previous APP_SECRET and refuses one from an unknown secret" do
+    origin = "https://bookshelf.caramel"
+    old = Caramel::CSRF.new("a" * 64, origin).issue
+    unknown = Caramel::CSRF.new("c" * 64, origin).issue
+    rotated = Caramel::CSRF.new("b" * 64, origin, ["a" * 64])
+    rotated.valid_token?(old).should be_true
+    rotated.valid_token?(unknown).should be_false
+    rotated.valid?(csrf_request("/books", old), old).should be_true
+    # New tokens are signed with the current secret only.
+    Caramel::CSRF.new("a" * 64, origin).valid_token?(rotated.issue).should be_false
+    Caramel::CSRF.new("b" * 64, origin).valid_token?(rotated.issue).should be_true
+    rotated.derive_keys("session").should eq([
+      Caramel::CSRF.new("b" * 64, origin).derive_key("session"),
+      Caramel::CSRF.new("a" * 64, origin).derive_key("session"),
+    ])
+    expect_raises(ArgumentError, "previous") { Caramel::CSRF.new("b" * 64, origin, ["short"]) }
+  end
+
   it "accepts a token from a clock a little ahead and rejects one far ahead" do
     csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
     slightly_ahead = csrf.issue(Time.utc + 30.seconds)

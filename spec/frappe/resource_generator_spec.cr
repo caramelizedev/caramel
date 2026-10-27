@@ -485,17 +485,29 @@ describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
     end
   end
 
-  it "signs the request spec into a tenant and proves another cannot see the record" do
+  it "signs the request spec into a tenant; another's member and a stranger see nothing" do
     tenant_project do |project, generator|
       generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
       spec = read(project, "spec/requests/notes_spec.cr")
       spec.should contain(%(    tenant_session("acme") do |client, db|\n))
       spec.should contain("client.post(\"/acme/notes\", params:")
       spec.should contain(<<-'CRYSTAL')
-              account(db, "globex")
-              client.get("/globex/notes/#{record.id}").should have_status(404)
+              tenant_session("globex") do |member|
+                member.get("/globex/notes/#{record.id}").should have_status(404)
+              end
+              client.get("/globex/notes/#{record.id}").should have_status(401)
         CRYSTAL
       spec.should_not contain("Corretto.session")
+    end
+  end
+
+  it "names the membership authenticator in each tenant action" do
+    tenant_project do |project, generator|
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      %w[index show new create edit update destroy].each do |action|
+        read(project, "app/actions/notes/#{action}.cr")
+          .should contain("    ingress authenticate: :member?\n\n    contract do\n")
+      end
     end
   end
 

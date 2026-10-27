@@ -6,17 +6,20 @@ require "./schema_diff"
 module Caramel::Frappe
   # Makes an application multi-tenant (ADR 0025): the tenant model with its
   # sign-up and home pages, `require "caramel/tenancy"`, the routes' tenant
-  # block, and the tenant named in each SweetTalk domain (ADR 0033).
+  # block, the membership check every tenant route needs, and the tenant
+  # named in each SweetTalk domain (ADR 0033).
   class TenancyGenerator
     CONFIG      = "config/application.cr"
     ROUTES      = "config/routes.cr"
     PATHS       = "config/paths.cr"
+    ACTION      = "app/actions/application_action.cr"
     SPEC_HELPER = "spec/spec_helper.cr"
 
     CARAMEL_REQUIRE = %(require "caramel")
     TENANCY_REQUIRE = %(require "caramel/tenancy")
     ROUTES_MARKER   = "    # Frappé resource routes"
     PATHS_MARKER    = "  # Frappé resource paths"
+    PATHS_INCLUDE   = "    include App::Paths"
     CORRETTO        = "Corretto.configure(App)"
     DOMAIN_ANCHOR   = "  include SweetTalk"
 
@@ -25,6 +28,7 @@ module Caramel::Frappe
       CONFIG      => CARAMEL_REQUIRE,
       ROUTES      => ROUTES_MARKER,
       PATHS       => PATHS_MARKER,
+      ACTION      => PATHS_INCLUDE,
       SPEC_HELPER => CORRETTO,
     }
 
@@ -47,7 +51,8 @@ module Caramel::Frappe
       files[CONFIG] = tenanted_config(originals[CONFIG])
       files[ROUTES] = tenanted_routes(originals[ROUTES], model, plural)
       files[PATHS] = originals[PATHS].sub(PATHS_MARKER, path_helpers(singular, plural))
-      files[SPEC_HELPER] = originals[SPEC_HELPER] + spec_helpers(model, singular)
+      files[ACTION] = originals[ACTION].sub(PATHS_INCLUDE, member_check(singular, plural))
+      files[SPEC_HELPER] = originals[SPEC_HELPER] + spec_helpers(model, singular, plural)
       tenanted_domains(project.root, model, files, originals)
       migration = create_migration(project.root, plural, version)
       migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
@@ -121,7 +126,25 @@ module Caramel::Frappe
       "  Caramel.resource_paths :#{plural}, :#{singular}\n#{PATHS_MARKER}"
     end
 
-    private def spec_helpers(model : String, singular : String) : String
+    # The authenticator the tenant's home and every tenant resource name:
+    # the session holds the slugs it signed up, until the application keeps
+    # memberships in a table of its own.
+    private def member_check(singular : String, plural : String) : String
+      label = singular.tr("_", " ")
+      <<-CRYSTAL
+        #{PATHS_INCLUDE}
+
+            # Whether the session may act in the request's #{label}: frappe make
+            # tenancy keeps the slugs a session signed up in session["#{plural}"].
+            # Replace it with a membership table of your own (the sessions recipe).
+            def member? : Bool
+              members = session["#{plural}"]? || return false
+              members.split(',').includes?(tenant.slug)
+            end
+        CRYSTAL
+    end
+
+    private def spec_helpers(model : String, singular : String, plural : String) : String
       <<-CRYSTAL
 
         # A new #{model} whose pages live under /SLUG.
@@ -129,11 +152,15 @@ module Caramel::Frappe
           App::#{model}.create!(db, name: slug.capitalize, slug: slug)
         end
 
-        # A request session in a new #{model} SLUG: the example's queries see
-        # only its rows.
+        # A request session that signed up a new #{model} SLUG, so it is a
+        # member (member?): the example's queries see only its rows.
         def tenant_session(slug : String, &)
           Corretto.session do |client, db|
-            Caramel::Tenancy.with(#{singular}(db, slug)) { yield client, db }
+            sign_up = {"name" => slug.capitalize, "slug" => slug}
+            signed_up = client.post("/#{plural}", params: sign_up)
+            raise "Sign-up of \#{slug} answered \#{signed_up.status}" unless signed_up.status == 303
+            tenant = App::#{model}.query.where(slug: slug).first!(db)
+            Caramel::Tenancy.with(tenant) { yield client, db }
           end
         end
 

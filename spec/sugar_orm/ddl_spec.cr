@@ -88,11 +88,15 @@ describe SugarORM::DDL do
     defaulted = Differ::AlterDefault.new("teams", "seats", "10")
     undefaulted = Differ::AlterDefault.new("teams", "seats", nil)
     widened = Differ::AlterType.new("teams", "seats", "bigint")
+    checked = Differ::AlterType.new("teams", "day", "date", checked: true)
     DDL.render(nullable).should eq("#{alter} DROP NOT NULL")
     DDL.render(required).should eq("#{alter} SET NOT NULL")
     DDL.render(defaulted).should eq("#{alter} SET DEFAULT 10")
     DDL.render(undefaulted).should eq("#{alter} DROP DEFAULT")
     DDL.render(widened).should eq(%(#{alter} TYPE bigint USING "seats"::bigint))
+    DDL.render(checked).should eq(
+      %(-- caramel:allow alter-column-type teams.day\n) +
+      %(ALTER TABLE "teams" ALTER COLUMN "day" TYPE date USING "day"::date))
   end
 
   it "renders a date column, required or nullable, with no default" do

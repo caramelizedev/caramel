@@ -4,6 +4,10 @@ module App::@@COLLECTION@@
     include Form
 
     # frappe:end
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
 @@CONTRACT_FIELDS@@
     end

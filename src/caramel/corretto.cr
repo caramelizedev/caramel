@@ -50,7 +50,8 @@ module Corretto
       config.database_url = Caramel::Database.url
       config.migration_url = Caramel::Database.url(migration: true)
       config.application = ->(db : DB::Database) do
-        Caramel.build(app, db, ENV["APP_SECRET"], ENV["APP_ORIGIN"], root)
+        Caramel.build(app, db, ENV["APP_SECRET"], ENV["APP_ORIGIN"], root,
+          Caramel.previous_secrets)
       end
     end
   end

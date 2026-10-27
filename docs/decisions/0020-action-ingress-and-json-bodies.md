@@ -13,13 +13,14 @@ Reading every request the same way before routing, and checking CSRF on every PO
 
 ## Decision
 
-1. **Declaration.** An action may declare `ingress body:, limit:, csrf:, authenticate:`, beside its contract. Each keyword is optional.
+1. **Declaration.** An action may declare `ingress body:, limit:, csrf:, authenticate:, open:`, beside its contract. Each keyword is optional.
    - `body: :form` is the default. `body: :raw` keeps the body exactly as sent, of any content type, as `raw_body : Bytes`.
    - `limit:` is an integer, `N.kilobytes` or `N.megabytes`, from 1 byte to 64 MiB. The default is 2 MiB.
    - `csrf: false` skips the browser CSRF check.
    - `authenticate: :method?` names an instance method returning `Bool`.
+   - `open: true` marks a route in the tenant block ([ADR 0025](0025-multi-tenancy.md) §3) as served to anyone in the tenant; it never combines with `authenticate:`.
 
-   Everything is checked at compile time: unknown or positional keywords, non-literal values, limits out of range, a second declaration in one type, `raw_body` on a form action, an authenticator that does not exist, does not return `Bool`, or is a keyword or a reserved name (the macro calls it as `self.name`), a form declaration under a raw parent, a redeclaration that drops the parent's authenticator, and `csrf: false` without `authenticate:`.
+   Everything is checked at compile time: unknown or positional keywords, non-literal values, limits out of range, a second declaration in one type, `raw_body` on a form action, an authenticator that does not exist, does not return `Bool`, or is a keyword or a reserved name (the macro calls it as `self.name`), a form declaration under a raw parent, a redeclaration that drops the parent's authenticator, `open: true` beside `authenticate:` or under an authenticating parent, and `csrf: false` without `authenticate:`.
 
    An action inherits its parent's ingress, so an API base declares it once. A subtype's own declaration replaces it, and must name an authenticator when its parent has one: redeclaring without `authenticate:` under an authenticating parent is a compile error, so changing a limit can never drop authentication. The macro sees the parent as compiled so far, so a base action declares its ingress where it is first defined, not in a reopening after its subtypes.
 2. **Routing before reading.** `Application#handle` asks the router for a `Router::Match` on the request's real method (HEAD as GET) and path before it reads the body.
@@ -42,9 +43,9 @@ Reading every request the same way before routing, and checking CSRF on every PO
    A body that is not an object answers 422 with `Expected a JSON object`. Malformed JSON, trailing data, NUL and invalid UTF-8 answer 400. `_csrf` and `_method` are ordinary members: JSON clients send `X-CSRF-Token` and use real methods. `+json` media types are not read as JSON, because their conventions for `null` and nesting mean something this binding would silently change; such routes use `body: :raw`.
 5. **CSRF.** Body methods are CSRF-checked unless the matched route declares `csrf: false`, which requires an authenticator. Same-origin `fetch` passes the token in `X-CSRF-Token`, as htmx does.
    - On a CSRF-off route the session reads empty and is never saved. Another site's form carries the browser's cookies, so only a credential a browser does not attach on its own, such as a signature or a bearer token, may stand in for the check.
-6. **Authentication.** The authenticator runs after the body is read and before the contract binds. False answers 401 with no detail, so an unauthenticated caller learns nothing from contract errors. It runs for every method of its route, reads included.
+6. **Authentication.** The authenticator runs after the body is read and before the contract binds. False answers 401 with no detail, so an unauthenticated caller learns nothing from contract errors. It runs for every method of its route, reads included. A route in the tenant block must have one, on its action or a parent, unless the action declares `open: true`; `Caramel::Router.draw` refuses it otherwise.
 7. **Method overrides.** A POST form's `_method` reaches a route only when that route reads its body like the POST's policy: form body, same limit, same CSRF setting. Otherwise the answer is 405. An override therefore never skips a check, and a raw route never parses `_method`.
-8. **Listing.** `routes` (and `frappe routes`) prints a route's non-default ingress, such as `[raw, 256 KiB, csrf off, authenticate signed?]`.
+8. **Listing.** `routes` (and `frappe routes`) prints a route's non-default ingress, such as `[raw, 256 KiB, csrf off, authenticate signed?]` or `[open]`.
 
 ## Reasons
 

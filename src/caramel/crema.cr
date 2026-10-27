@@ -30,6 +30,10 @@ module Caramel
     class_property slow_query : Time::Span = 100.milliseconds
     # Signs debug tokens; `Crema.start` sets it from the application's secret.
     class_property debug_key : Bytes? = nil
+    # When false, an inbound `traceparent` and `X-Request-ID` are ignored: every request
+    # gets fresh ids and no parent, so a client cannot pick its trace or force sampling.
+    # `CARAMEL_TRUST_TRACE_CONTEXT=0` turns it off at `Crema.start`.
+    class_property? trust_trace_context : Bool = true
 
     @@lock = Mutex.new
     @@metrics = MetricSink.new
@@ -217,13 +221,15 @@ module Caramel
 
     private def self.request_trace(request : HTTP::Request) : Trace
       trace_id, span_id = Ids.generate
-      parent = Ids.parse_traceparent(request.headers["traceparent"]?)
+      trusted = @@trust_trace_context
+      parent = Ids.parse_traceparent(request.headers["traceparent"]?) if trusted
       trace_id = parent[0] if parent
       method = METHODS.includes?(request.method) ? request.method : "OTHER"
       trace = Trace.new(Kind::Request, "#{method} (none)", trace_id, span_id)
       trace.parent_id = parent.try(&.[1])
       parent.try { |found| trace.parent_sampled = trace.sampled = found[2] }
-      trace.request_id = Ids.request_id(request.headers["X-Request-ID"]?)
+      inbound = request.headers["X-Request-ID"]? if trusted
+      trace.request_id = Ids.request_id(inbound)
       trace.method = method
       trace.path = request.path
       trace.debug = debug_token?(request)

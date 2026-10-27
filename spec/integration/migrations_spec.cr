@@ -336,6 +336,25 @@ describe SugarORM::Migrator do
     end
   end
 
+  it "starts a binary behind a journal that is ahead of it only when asked, " \
+     "names the versions it lacks and still refuses a changed checksum" do
+    with_scratch_database do |db|
+      create = migration(1, "Create books", BOOKS_WITH_TITLE)
+      pages = migration(2, "add_pages", %(ALTER TABLE "books" ADD COLUMN "pages" integer))
+      SugarORM::Migrator.new(db, [create, pages]).migrate.should eq(2)
+
+      older = SugarORM::Migrator.new(db, [create])
+      expect_raises(SugarORM::Migrator::Drift, "is missing") { older.pending }
+      older.pending(allow_ahead: true).should be_empty
+      older.ahead.should eq([2_i64])
+
+      changed = migration(1, "Create books", "CREATE TABLE changed (id int)")
+      expect_raises(SugarORM::Migrator::Drift, "has changed") do
+        SugarORM::Migrator.new(db, [changed]).pending(allow_ahead: true)
+      end
+    end
+  end
+
   it "accepts a journal written by the previous Caramel migrator" do
     with_scratch_database do |db|
       previous_journal = "CREATE TABLE caramel_migrations (version bigint PRIMARY KEY, " \

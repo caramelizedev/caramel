@@ -52,6 +52,7 @@ describe Caramel::Frappe::TenancyGenerator do
         app/actions/accounts/create.cr
         app/actions/accounts/home.cr
         app/actions/accounts/new.cr
+        app/actions/application_action.cr
         app/changesets/account.cr
         app/models/account.cr
         app/views/accounts/form.cr
@@ -111,10 +112,10 @@ describe Caramel::Frappe::TenancyGenerator do
     end
   end
 
-  it "gives specs a tenant and a session inside one" do
+  it "gives specs a tenant and a member's session inside one" do
     tenancy_project do |project, generator|
       generator.generate(project, "Account", version: VERSION)
-      read(project, "spec/spec_helper.cr").should end_with(<<-CRYSTAL)
+      read(project, "spec/spec_helper.cr").should end_with(<<-'CRYSTAL')
         Corretto.configure(App)
 
         # A new Account whose pages live under /SLUG.
@@ -122,14 +123,53 @@ describe Caramel::Frappe::TenancyGenerator do
           App::Account.create!(db, name: slug.capitalize, slug: slug)
         end
 
-        # A request session in a new Account SLUG: the example's queries see
-        # only its rows.
+        # A request session that signed up a new Account SLUG, so it is a
+        # member (member?): the example's queries see only its rows.
         def tenant_session(slug : String, &)
           Corretto.session do |client, db|
-            Caramel::Tenancy.with(account(db, slug)) { yield client, db }
+            sign_up = {"name" => slug.capitalize, "slug" => slug}
+            signed_up = client.post("/accounts", params: sign_up)
+            raise "Sign-up of #{slug} answered #{signed_up.status}" unless signed_up.status == 303
+            tenant = App::Account.query.where(slug: slug).first!(db)
+            Caramel::Tenancy.with(tenant) { yield client, db }
           end
         end
 
+        CRYSTAL
+    end
+  end
+
+  it "checks membership in the base action from the slugs the session signed up" do
+    tenancy_project do |project, generator|
+      generator.generate(project, "Account", version: VERSION)
+      read(project, "app/actions/application_action.cr").should contain(<<-CRYSTAL)
+            include App::Paths
+
+            # Whether the session may act in the request's account: frappe make
+            # tenancy keeps the slugs a session signed up in session["accounts"].
+            # Replace it with a membership table of your own (the sessions recipe).
+            def member? : Bool
+              members = session["accounts"]? || return false
+              members.split(',').includes?(tenant.slug)
+            end
+
+            def layout(page : Caramel::Page) : String
+        CRYSTAL
+    end
+  end
+
+  it "guards the tenant's home with member? and joins the session at sign-up" do
+    tenancy_project do |project, generator|
+      generator.generate(project, "Account", version: VERSION)
+      home = read(project, "app/actions/accounts/home.cr")
+      home.should contain("    ingress authenticate: :member?\n\n    contract do\n")
+      create = read(project, "app/actions/accounts/create.cr")
+      create.should contain("      join(changes.record)\n      self.status = 201\n")
+      create.should contain(<<-'CRYSTAL')
+            private def join(record : App::Account) : Nil
+              members = session["accounts"]?
+              session["accounts"] = members ? "#{members},#{record.slug}" : record.slug
+            end
         CRYSTAL
     end
   end
@@ -163,10 +203,11 @@ describe Caramel::Frappe::TenancyGenerator do
 
   it "refuses each missing anchor, writing nothing" do
     anchors = {
-      "config/application.cr" => %(require "caramel"\n),
-      "config/routes.cr"      => "    # Frappé resource routes\n",
-      "config/paths.cr"       => "  # Frappé resource paths\n",
-      "spec/spec_helper.cr"   => "Corretto.configure(App)\n",
+      "config/application.cr"             => %(require "caramel"\n),
+      "config/routes.cr"                  => "    # Frappé resource routes\n",
+      "config/paths.cr"                   => "  # Frappé resource paths\n",
+      "app/actions/application_action.cr" => "    include App::Paths\n",
+      "spec/spec_helper.cr"               => "Corretto.configure(App)\n",
     }
     anchors.each do |relative, anchor|
       tenancy_project do |project, generator|

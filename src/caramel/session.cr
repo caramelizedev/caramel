@@ -3,17 +3,26 @@ require "json"
 require "http/cookie"
 require "openssl/hmac"
 require "crypto/subtle"
+require "./csrf"
 
 module Caramel
   # The signed, client-held login session: `__Host-caramel_session` carries
-  # base64url JSON of a String => String hash and its HMAC-SHA256. It has no
-  # server-side expiry and lives until the browser session ends or the
-  # application clears it (`sign_out`). The hash an action gets is a `Data`:
-  # a write that would take the Set-Cookie past 4 KB raises `Overflow` at
-  # the write, before the action does anything else.
+  # base64url JSON of a String => String hash, the unix second it was signed
+  # and their HMAC-SHA256. The cookie is a browser-session cookie, and a value
+  # older than `max_age` (14 days by default) reads as empty. The window is
+  # absolute: an action re-signs the cookie only when it changes the session,
+  # so an unchanged session ends `max_age` after its last write. Nothing is
+  # stored server-side, so a copied cookie stays valid until then even after
+  # `sign_out`; an application that must end a session everywhere keeps a
+  # revocable row, as the website's Revocable sessions recipe shows. The hash
+  # an action gets is a `Data`: a write that would take the Set-Cookie past
+  # 4 KB raises `Overflow` at the write, before the action does anything else.
   class Session
     COOKIE_NAME      = "__Host-caramel_session"
     MAX_COOKIE_BYTES = 4096
+    MAX_AGE          = 14.days
+    # The unix second a cookie was signed: 10 digits until 2286.
+    ISSUED_BYTES = 10
     # An HMAC-SHA256 digest in unpadded base64url.
     SIGNATURE_BYTES  = 43
     OVERFLOW_MESSAGE = "The session exceeds #{MAX_COOKIE_BYTES} bytes. Store large " \
@@ -71,11 +80,11 @@ module Caramel
     end
 
     # The bytes the Set-Cookie name=value pair for `data` takes, without
-    # encoding it: the name, `=`, the unpadded base64 of the JSON, `.` and
-    # the signature.
+    # encoding it: the name, `=`, the unpadded base64 of the JSON, `.`, the
+    # issue time, `.` and the signature.
     def self.cookie_bytes(data : Hash(String, String)) : Int32
       payload = (4 * data.to_json.bytesize + 2) // 3
-      COOKIE_NAME.bytesize + 1 + payload + 1 + SIGNATURE_BYTES
+      COOKIE_NAME.bytesize + 1 + payload + 1 + ISSUED_BYTES + 1 + SIGNATURE_BYTES
     end
 
     # Whether the Set-Cookie for `data` stays within `MAX_COOKIE_BYTES`,
@@ -84,26 +93,36 @@ module Caramel
       cookie_bytes(data) <= MAX_COOKIE_BYTES
     end
 
-    def initialize(@key : Bytes)
+    # *keys* are `CSRF#derive_keys("session")`: the first signs, and every one
+    # verifies, so cookies signed under a previous secret still read.
+    def initialize(@keys : Array(Bytes), @max_age : Time::Span = MAX_AGE)
+      raise ArgumentError.new("Session needs at least one key") if @keys.empty?
     end
 
-    # The cookie value for `data`; raises `Overflow` when the Set-Cookie
-    # name=value pair would exceed 4 KB. `Data` refuses such a write already;
-    # this guards a hash built some other way.
-    def encode(data : Hash(String, String)) : String
+    # The cookie value for `data`, signed at *now* with the current key; raises
+    # `Overflow` when the Set-Cookie name=value pair would exceed 4 KB. `Data`
+    # refuses such a write already; this guards a hash built some other way.
+    def encode(data : Hash(String, String), now = Time.utc) : String
       raise Overflow.new(OVERFLOW_MESSAGE) unless Session.fits?(data)
 
       payload = Base64.urlsafe_encode(data.to_json, padding: false)
-      "#{payload}.#{sign(payload)}"
+      signed = "#{payload}.#{now.to_unix}"
+      "#{signed}.#{sign(signed, @keys.first)}"
     end
 
     # The session a cookie value carries, or nil when it is oversized,
-    # malformed or not signed with this application's secret.
-    def decode(value : String) : Hash(String, String)?
+    # malformed, signed with none of this application's keys, issued more
+    # than `CSRF::CLOCK_SKEW` after *now* or older than `max_age`.
+    def decode(value : String, now = Time.utc) : Hash(String, String)?
       return if COOKIE_NAME.bytesize + 1 + value.bytesize > MAX_COOKIE_BYTES
-      payload, dot, signature = value.rpartition('.')
+      signed, dot, signature = value.rpartition('.')
+      return if dot.empty?
+      payload, dot, issued = signed.rpartition('.')
       return if dot.empty? || payload.empty?
-      return unless Crypto::Subtle.constant_time_compare(sign(payload), signature)
+      issued_at = issued.to_i64? || return
+      return if issued_at > now.to_unix + CSRF::CLOCK_SKEW.total_seconds
+      return if now.to_unix - issued_at > @max_age.total_seconds
+      return unless signed?(signed, signature)
       Hash(String, String).from_json(Base64.decode_string(payload))
     rescue JSON::ParseException | TypeCastError
       nil
@@ -129,8 +148,13 @@ module Caramel
       )
     end
 
-    private def sign(payload : String) : String
-      Base64.urlsafe_encode(OpenSSL::HMAC.digest(:sha256, @key, payload), padding: false)
+    # Whether *signature* is *payload*'s HMAC under any key, the current one first.
+    private def signed?(payload : String, signature : String) : Bool
+      @keys.any? { |key| Crypto::Subtle.constant_time_compare(sign(payload, key), signature) }
+    end
+
+    private def sign(payload : String, key : Bytes) : String
+      Base64.urlsafe_encode(OpenSSL::HMAC.digest(:sha256, key, payload), padding: false)
     end
   end
 end

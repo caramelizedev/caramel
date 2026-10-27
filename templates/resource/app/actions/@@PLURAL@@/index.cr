@@ -1,5 +1,9 @@
 module App::@@COLLECTION@@
   struct Index < App::ApplicationAction
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
     end
 

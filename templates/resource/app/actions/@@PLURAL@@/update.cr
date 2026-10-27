@@ -4,6 +4,10 @@ module App::@@COLLECTION@@
     include Form
 
     # frappe:end
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
       field id : Int64, min: 1
 @@CONTRACT_FIELDS@@

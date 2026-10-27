@@ -76,6 +76,24 @@ describe Caramel::Crema::ErrorReport do
     redacted.should eq("password=visible [redacted]")
   end
 
+  it "redacts the userinfo of any URL and keeps its scheme and host" do
+    text = "fetch https://alice:pw-123@api.example.com/v1 failed"
+    redacted = Caramel::Crema::Redact.text(text, [] of String, 1000)
+    redacted.should eq("fetch https://[credential redacted]@api.example.com/v1 failed")
+  end
+
+  it "redacts a cookie header to its end of line" do
+    text = "headers Cookie: sid=abc123; theme=dark\nAccept: text/html"
+    redacted = Caramel::Crema::Redact.text(text, [] of String, 1000)
+    redacted.should eq("headers Cookie: [credential redacted]\nAccept: text/html")
+  end
+
+  it "redacts the values of a PostgreSQL key detail and keeps the columns" do
+    text = "Key (email)=(a@b.c) already exists"
+    redacted = Caramel::Crema::Redact.text(text, [] of String, 1000)
+    redacted.should eq("Key (email)=([redacted]) already exists")
+  end
+
   it "reduces a report to its class when it cannot be built" do
     report = Caramel::Crema::ErrorReport.minimal(KeyError.new("x"), false, "source")
     report.message.should eq("[unavailable]")

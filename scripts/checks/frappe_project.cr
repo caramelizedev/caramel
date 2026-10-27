@@ -278,7 +278,7 @@ module Caramel::Checks
       routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
       expected = [
         %w[POST /accounts App::Accounts::Create name:String slug:String],
-        %w[GET /:tenant/notes App::Notes::Index],
+        ["GET", "/:tenant/notes", "App::Notes::Index", "[authenticate", "member?]"],
         %w[GET /tags App::Tags::Index],
       ]
       expected.each do |route|

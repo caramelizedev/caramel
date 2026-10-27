@@ -2,7 +2,8 @@ require "./differ"
 
 module SugarORM
   # Renders differ operations as PostgreSQL statements, one per operation.
-  # Explicit rename and drop intents carry the annotation the linter accepts.
+  # Explicit rename and drop intents and the checked text to date retype carry
+  # the annotation the linter accepts.
   module DDL
     ON_DELETE = {"NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"}
 
@@ -86,11 +87,15 @@ module SugarORM
       "#{alter_column(operation.table, operation.column)} #{change}"
     end
 
+    # A checked retype carries the annotation the linter accepts; a `--dev-override`
+    # retype stays plain, so the linter still warns about it.
     def self.render(operation : Differ::AlterType) : String
       alter = alter_column(operation.table, operation.column)
       column = quote(operation.column)
       type = operation.sql_type
-      "#{alter} TYPE #{type} USING #{column}::#{type}"
+      sql = "#{alter} TYPE #{type} USING #{column}::#{type}"
+      return sql unless operation.checked
+      "-- caramel:allow alter-column-type #{operation.table}.#{operation.column}\n#{sql}"
     end
 
     # A DO block, because the check must read the rows. It locks the table first, so no row

@@ -2,6 +2,10 @@ module App::@@COLLECTION@@
   struct Edit < App::ApplicationAction
     include Form
 
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
       field id : Int64, min: 1
     end

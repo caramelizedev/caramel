@@ -1,5 +1,9 @@
 module App::@@COLLECTION@@
   struct Show < App::ApplicationAction
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
       field id : Int64, min: 1
     end

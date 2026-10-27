@@ -181,8 +181,11 @@ module Caramel::Crema
       headers
     end
 
+    LOOPBACK = {"127.0.0.1", "::1", "[::1]", "localhost"}
+
     # Starts the exporter for *runtime* when the environment asks for one; returns what
-    # stops it (after a last flush), or nil when export is off.
+    # stops it (after a last flush), or nil when export is off. Headers bound for an
+    # `http://` endpoint off the loopback interface are warned about once.
     def self.activate(runtime : Runtime, env = ENV) : Stopper?
       endpoint = endpoint(env) || return
       protocol = env["OTEL_EXPORTER_OTLP_PROTOCOL"]?
@@ -190,15 +193,25 @@ module Caramel::Crema
         LOG.warn { "OTLP export needs OTEL_EXPORTER_OTLP_PROTOCOL=http/json; export is off" }
         return
       end
+      headers = headers(env)
+      warn_plaintext(endpoint) unless headers.empty?
       service = env["OTEL_SERVICE_NAME"]?.presence || runtime.app
       environment = env["CARAMEL_ENV"]? || "production"
-      exporter = Exporter.new(endpoint, headers(env), service, environment, Sampler.from(env)).start
+      exporter = Exporter.new(endpoint, headers, service, environment, Sampler.from(env)).start
       Crema.subscribe(exporter)
       -> do
         Crema.unsubscribe(exporter)
         exporter.stop
         nil
       end
+    end
+
+    private def self.warn_plaintext(endpoint : URI) : Nil
+      return unless endpoint.scheme == "http"
+      host = endpoint.host || return
+      return if LOOPBACK.includes?(host)
+
+      LOG.warn { "OTLP headers are sent in clear to #{host}; use an https endpoint" }
     end
   end
 

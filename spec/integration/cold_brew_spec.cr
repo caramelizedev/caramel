@@ -83,6 +83,15 @@ module ColdBrewSpec
     end
   end
 
+  # Its message holds the NUL byte PostgreSQL rejects in text.
+  struct NulByte < Caramel::ColdBrew::Job
+    queue "fragile"
+
+    def perform
+      raise "nul\0byte"
+    end
+  end
+
   struct Chain < Caramel::ColdBrew::Job
     param depth : Int32
 
@@ -137,10 +146,7 @@ module ColdBrewSpec
         Caramel::ColdBrew.subscribe("board_#{contract.board_id}", channel)
 
         stream "text/event-stream" do |io|
-          loop do
-            io << "event: BoardUpdated\ndata: " << channel.receive << "\n\n"
-            io.flush
-          end
+          Caramel::SSE.relay(io, channel, event: "BoardUpdated")
         end
       end
     end
@@ -365,8 +371,9 @@ module ColdBrewSpec
     end
   end
 
-  def self.with_broker(&) : Nil
-    broker = Caramel::ColdBrew::Broker.new(runtime_url)
+  def self.with_broker(ping_interval : Time::Span = Caramel::ColdBrew::Broker::PING_INTERVAL,
+                       &) : Nil
+    broker = Caramel::ColdBrew::Broker.new(runtime_url, ping_interval)
     Caramel::ColdBrew.broker = broker
     begin
       yield broker
@@ -394,6 +401,14 @@ describe "Caramel::ColdBrew system tables" do
     unclaimed = "(queue, run_at, priority DESC) WHERE ((locked_at IS NULL) " \
                 "AND (failed_at IS NULL) AND (finished_at IS NULL))"
     ColdBrewSpec.scalar(definition, as: String).should end_with(unclaimed)
+    locked = "SELECT pg_get_indexdef('caramel_jobs_locked'::regclass) AS value"
+    ColdBrewSpec.scalar(locked, as: String).should end_with(
+      "(locked_at) WHERE ((locked_at IS NOT NULL) AND (finished_at IS NULL) " \
+      "AND (failed_at IS NULL))")
+    claim = "SELECT pg_get_indexdef('caramel_jobs_claim'::regclass) AS value"
+    ColdBrewSpec.scalar(claim, as: String).should end_with(
+      "(queue, priority DESC, id) WHERE ((locked_at IS NULL) AND (failed_at IS NULL) " \
+      "AND (finished_at IS NULL))")
     introspected = SugarORM::Introspection.read(ColdBrewSpec.owner)
     plan = SugarORM::Differ.diff([] of SugarORM::Catalog::Table, introspected)
     plan.clean?.should be_true
@@ -402,6 +417,25 @@ describe "Caramel::ColdBrew system tables" do
     end
     plan.notes.should contain("ignored table #{ColdBrewSpec.day(7)} (owned by Caramel)")
     plan.notes.select(&.includes?(" on caramel_")).should be_empty
+  end
+
+  it "claims through caramel_jobs_claim, so a backlog is never sorted" do
+    ColdBrewSpec.reset
+    backlog = "INSERT INTO caramel_jobs (queue, class_name, payload, priority) " \
+              "SELECT 'default', 'ColdBrewSpec::Record', '{}', n % 7 " \
+              "FROM generate_series(1, 2000) n"
+    ColdBrewSpec.owner.exec(backlog)
+    ColdBrewSpec.owner.exec("ANALYZE caramel_jobs")
+    # A partitioned index is scanned through its partitions' indexes.
+    partitioned = "SELECT c.relname::text AS name FROM pg_inherits i " \
+                  "JOIN pg_class c ON c.oid = i.inhrelid " \
+                  "WHERE i.inhparent = 'caramel_jobs_claim'::regclass"
+    children = SugarORM.sql(ColdBrewSpec.owner, partitioned, as: {name: String}).map(&.[:name])
+    children.should_not be_empty
+    explain = "EXPLAIN (COSTS OFF) " + Brew::Queue::CLAIM.sub("$1", "'default'")
+    plan = ColdBrewSpec.owner.query_all(explain, as: String).join('\n')
+    plan.should match(/Index (Only )?Scan/)
+    children.any? { |name| plan.includes?(name) }.should be_true
   end
 end
 
@@ -460,6 +494,23 @@ describe "Caramel::ColdBrew::Job.enqueue" do
 end
 
 describe Caramel::ColdBrew::Worker do
+  it "wakes an idle fiber on enqueue instead of waiting out its poll" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.with_broker do
+      worker = Brew::Worker.new("default", 1, ColdBrewSpec.runtime, idle: 1.second).start
+      begin
+        # Let the fiber find the queue empty and start its 1 s wait.
+        sleep 300.milliseconds
+        started = Time.instant
+        ColdBrewSpec::Record.enqueue(label: "woken")
+        ColdBrewSpec.eventually(2.seconds) { ColdBrewSpec.labels == ["woken"] }
+        (Time.instant - started).should be < 500.milliseconds
+      ensure
+        worker.stop
+      end
+    end
+  end
+
   it "runs each job once across two workers (SKIP LOCKED), on the connection claiming it" do
     ColdBrewSpec.reset
     60.times { |index| ColdBrewSpec::Busy.enqueue(label: "job #{index}") }
@@ -591,6 +642,17 @@ describe "Caramel::ColdBrew retries" do
     ColdBrewSpec.job(crash)[:last_error].not_nil!.should start_with("Exception: unexpected")
     ColdBrewSpec.job(throttle)[:attempts].should eq(4)
     ColdBrewSpec.job(throttle)[:failed_at].should_not be_nil
+  end
+
+  it "records a failure whose message holds a NUL byte, without leaving the row locked" do
+    ColdBrewSpec.reset
+    id = ColdBrewSpec::NulByte.enqueue
+    Brew.drain_queue(ColdBrewSpec.runtime, "fragile").should eq(1)
+    row = ColdBrewSpec.job(id)
+    row[:last_error].not_nil!.should start_with("Exception: nulbyte")
+    row[:locked_at].should be_nil
+    row[:locked_by].should be_nil
+    row[:delay].should be_close(1.0, 1.0)
   end
 
   it "fails a row whose job class is not compiled into the application" do
@@ -909,21 +971,39 @@ describe Caramel::ColdBrew::Maintenance do
     end
   end
 
-  it "releases a stale lock only when its backend is gone" do
+  it "releases a lock whose backend is gone or restarted, at any age, and keeps a live one" do
     ColdBrewSpec.reset
-    ColdBrewSpec.owner.using_connection do |live|
+    # The runtime role's own backend: maintenance sees its backend_start.
+    ColdBrewSpec.runtime.using_connection do |live|
       pid = live.scalar("SELECT pg_backend_pid()").as(Int32)
       insert = "INSERT INTO caramel_jobs " \
                "(class_name, payload, attempts, locked_at, locked_by) " \
                "VALUES ('ColdBrewSpec::Record', jsonb_build_object('label', $1::text), " \
                "1, now() - make_interval(mins => $2), $3) RETURNING id AS value"
       crashed = ColdBrewSpec.scalar(insert, "crashed", 20, "0", as: Int64)
-      ColdBrewSpec.scalar(insert, "still running", 20, pid.to_s, as: Int64)
-      ColdBrewSpec.scalar(insert, "recent", 1, "0", as: Int64)
-      Brew::Maintenance.new(ColdBrewSpec.runtime).run_once.released.should eq(1)
-      ColdBrewSpec.job(crashed)[:locked_at].should be_nil
-      Brew.drain_queue(ColdBrewSpec.runtime).should eq(1)
-      ColdBrewSpec.labels.should eq(["crashed"])
+      # Locked before the live backend started: its PID belongs to a dead process.
+      reused = ColdBrewSpec.scalar(insert, "reused", 20, pid.to_s, as: Int64)
+      recent = ColdBrewSpec.scalar(insert, "recent", 1, "0", as: Int64)
+      running = ColdBrewSpec.scalar(insert, "still running", 0, pid.to_s, as: Int64)
+      Brew::Maintenance.new(ColdBrewSpec.runtime).run_once.released.should eq(3)
+      [crashed, reused, recent].each { |id| ColdBrewSpec.job(id)[:locked_at].should be_nil }
+      ColdBrewSpec.job(running)[:locked_by].should eq(pid.to_s)
+      Brew.drain_queue(ColdBrewSpec.runtime).should eq(3)
+      ColdBrewSpec.labels.should eq(["crashed", "reused", "recent"])
+    end
+  end
+
+  it "runs every step of a pass when one raises" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.owner.exec("DROP TABLE #{ColdBrewSpec.day(7)}")
+    ColdBrewSpec.owner.exec("ALTER TABLE caramel_cache RENAME TO caramel_cache_x")
+    begin
+      report = Brew::Maintenance.new(ColdBrewSpec.runtime).run_once
+      report.created.should eq(1)
+      report.expired.should eq(0_i64)
+      ColdBrewSpec.partitions.should contain(ColdBrewSpec.day(7))
+    ensure
+      ColdBrewSpec.owner.exec("ALTER TABLE caramel_cache_x RENAME TO caramel_cache")
     end
   end
 
@@ -1284,6 +1364,25 @@ describe "Caramel::ColdBrew PubSub" do
       ColdBrewSpec.eventually { (current = broker.pid) && current != pid }
       Brew.publish("board_4", "after reconnect")
       ColdBrewSpec.receive?(updates, 5.seconds).should eq("after reconnect")
+    end
+  end
+
+  it "pings its LISTEN connection at the configured interval" do
+    ColdBrewSpec.reset
+    ColdBrewSpec.with_broker(100.milliseconds) do |broker|
+      updates = Channel(String).new(8)
+      Brew.subscribe("board_8", updates)
+      pid = broker.pid.not_nil!
+      admin = Caramel::Database.open(COLD_BREW_ADMIN_URL, 1)
+      begin
+        last_query = <<-SQL
+          SELECT query FROM pg_stat_activity WHERE pid = $1 AND state = 'idle'
+          SQL
+        ColdBrewSpec.eventually(2.seconds) { admin.scalar(last_query, pid) == "SELECT 1" }
+      ensure
+        admin.close
+      end
+      broker.pid.should eq(pid)
     end
   end
 

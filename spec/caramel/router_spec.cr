@@ -106,7 +106,7 @@ private def route(method : String, path : String, body : String? = nil) : Carame
   headers["Content-Type"] = "application/x-www-form-urlencoded" if body
   request = HTTP::Request.new(method, path, headers, body)
   csrf = Caramel::CSRF.new("s" * 64, "https://bookshelf.caramel")
-  session = Caramel::Session.new(csrf.derive_key("session"))
+  session = Caramel::Session.new(csrf.derive_keys("session"))
   input = Caramel::RequestInput.read(request)
   context = Caramel::RequestContext.new(request, csrf, session, input)
   RouterSpecApp::AppRouter.new.dispatch(context)

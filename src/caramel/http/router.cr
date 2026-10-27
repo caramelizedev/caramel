@@ -523,6 +523,29 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
                "Remediation: declare it as `struct #{action} < Caramel::Action` " +
                "(or your application's base action).\n" %}
     {% end %}
+    # A tenant route fails closed (ADR 0025): its action, or a parent,
+    # authenticates, or the action declares `ingress open: true`.
+    {% if tenants[i] %}
+      {% guard = nil %}
+      {% opened = nil %}
+      {% for ancestor in [type] + type.ancestors %}
+        {% unless guard %}
+          {% guard = ancestor.methods.find(&.name.==("__caramel_authenticated?")) %}
+        {% end %}
+        {% unless opened %}
+          {% opened = ancestor.methods.find(&.name.==("__caramel_open?")) %}
+        {% end %}
+      {% end %}
+      {% authenticated = guard && !guard.body.is_a?(BoolLiteral) %}
+      {% unless authenticated || (opened && opened.body.is_a?(BoolLiteral) && opened.body) %}
+        {% raise "Compile Error: Tenant route #{method.id} #{path.id} runs #{type} " +
+                 "with no authenticator.\n" +
+                 where +
+                 "Remediation: declare `ingress authenticate: :member?` on the action " +
+                 "or its parent, or `ingress open: true` to serve it to anyone " +
+                 "in the tenant.\n" %}
+      {% end %}
+    {% end %}
     {% contract = type.constant("Contract") %}
     {% unless contract %}
       {% raise "Compile Error: '#{action}' must define an explicit " +

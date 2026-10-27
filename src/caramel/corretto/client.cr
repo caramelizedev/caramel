@@ -99,7 +99,7 @@ module Corretto
     end
 
     # Signs `user` in the way the application does: `user_id` in the signed
-    # session cookie.
+    # session cookie, signed now with the current key.
     def sign_in(user) : Nil
       sessions = @application.sessions
       cookie = @cookies[Caramel::Session::COOKIE_NAME]?

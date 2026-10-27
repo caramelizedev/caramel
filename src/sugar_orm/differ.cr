@@ -14,7 +14,8 @@ module SugarORM
     record DropColumn, table : String, column : String, explicit : Bool
     record AlterNull, table : String, column : String, nullable : Bool
     record AlterDefault, table : String, column : String, default : String?
-    record AlterType, table : String, column : String, sql_type : String
+    # `checked`: an AssertDateText ran first, so the retype is deliberate (ADR 0042).
+    record AlterType, table : String, column : String, sql_type : String, checked : Bool = false
     # Raises, naming the rows it found, unless every value of the text column is a
     # calendar day written YYYY-MM-DD; it runs before the column becomes a date.
     record AssertDateText, table : String, column : String
@@ -449,7 +450,7 @@ module SugarORM
                                          changes : Array(Operation)) : Nil
       changes << AssertDateText.new(table, column.name)
       changes << AlterDefault.new(table, column.name, nil) if actual.default
-      changes << AlterType.new(table, column.name, DATE)
+      changes << AlterType.new(table, column.name, DATE, checked: true)
       plan.notes << "retyping #{table}.#{column.name} from text to date rewrites #{table} " \
                     "under an exclusive lock; its migration first checks every value"
     end

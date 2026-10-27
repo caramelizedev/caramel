@@ -41,6 +41,8 @@ describe SugarORM::Linter do
     rules(online).should be_empty
     rules(%(CREATE TABLE "books" (id bigint)), index_on_id).should be_empty
     rules(%(CREATE TABLE shelves (id bigint)), index_on_id).should eq(blocking)
+    rules(%(-- caramel:allow concurrent-index books\n#{index_on_id})).should be_empty
+    rules(%(-- caramel:allow concurrent-index shelves\n#{index_on_id})).should eq(blocking)
     lint(qualified).first.message.should contain("existing table books")
   end
 
@@ -69,6 +71,7 @@ describe SugarORM::Linter do
     rules(drop).should eq(destructive)
     rules(%(ALTER TABLE books DROP legacy CASCADE)).should eq(destructive)
     rules(%(-- caramel:allow-drop books.legacy\n#{drop})).should be_empty
+    rules(%(-- caramel:allow destructive-column books.legacy\n#{drop})).should be_empty
     rules(%(-- caramel:allow-drop books.other\n#{drop})).should eq(destructive)
     rules(%(-- caramel:allow-drop books.legacy), quoted_drop).should be_empty
     rules(%(ALTER TABLE books DROP CONSTRAINT fk_books_shelf_id)).should be_empty
@@ -76,8 +79,129 @@ describe SugarORM::Linter do
     rules(rename).should eq(destructive)
     rules(%(ALTER TABLE teams RENAME email TO billing_email)).should eq(destructive)
     rules(%(-- caramel:allow-rename teams.email\n#{rename})).should be_empty
-    rules(%(ALTER TABLE teams RENAME TO crews)).should be_empty
+    rules(%(ALTER TABLE teams RENAME TO crews)).should eq(["rename-table"])
     rules(%(ALTER TABLE teams RENAME CONSTRAINT a TO b)).should be_empty
+  end
+
+  it "rejects DROP TABLE and TRUNCATE of a table the migration did not create" do
+    drop = %(DROP TABLE IF EXISTS books CASCADE)
+    truncate = %(TRUNCATE TABLE ONLY public.books RESTART IDENTITY)
+    create = %(CREATE TABLE books (id bigint))
+    rules(drop).should eq(["drop-table"])
+    rules(%(truncate books, shelves)).should eq(["truncate"])
+    rules(truncate).should eq(["truncate"])
+    rules(create, drop).should be_empty
+    rules(create, truncate).should be_empty
+    rules(%(-- caramel:allow drop-table books\n#{drop})).should be_empty
+    rules(%(-- caramel:allow truncate books), truncate).should be_empty
+    rules(%(-- caramel:allow truncate shelves), truncate).should eq(["truncate"])
+    lint(drop).first.message.should eq("DROP TABLE books destroys the table and every row in it.")
+  end
+
+  it "rejects RENAME TO of an existing table" do
+    rename = %(ALTER TABLE IF EXISTS teams RENAME TO crews)
+    rules(rename).should eq(["rename-table"])
+    rules(%(CREATE TABLE teams (id bigint)), rename).should be_empty
+    rules(%(-- caramel:allow rename-table teams\n#{rename})).should be_empty
+    lint(rename).first.message.should contain("RENAME TO crews breaks the binary still serving")
+  end
+
+  it "rejects ALTER COLUMN TYPE on an existing table" do
+    retype = %(ALTER TABLE books ALTER COLUMN pages TYPE bigint USING pages::bigint)
+    rules(retype).should eq(["alter-column-type"])
+    rules(%(ALTER TABLE books ALTER pages SET DATA TYPE bigint)).should eq(["alter-column-type"])
+    rules(%(CREATE TABLE books (pages int)), retype).should be_empty
+    rules(%(-- caramel:allow alter-column-type books.pages\n#{retype})).should be_empty
+    other = %(-- caramel:allow alter-column-type books.other\n#{retype})
+    rules(other).should eq(["alter-column-type"])
+    lint(retype).first.remediation.should contain("-- caramel:allow alter-column-type books.pages")
+  end
+
+  it "rejects SET NOT NULL on an existing table" do
+    tighten = %(ALTER TABLE books ALTER COLUMN isbn SET NOT NULL)
+    rules(tighten).should eq(["set-not-null"])
+    rules(%(ALTER TABLE books ALTER isbn SET NOT NULL)).should eq(["set-not-null"])
+    rules(%(ALTER TABLE books ALTER COLUMN isbn DROP NOT NULL)).should be_empty
+    rules(%(CREATE TABLE books (isbn text)), tighten).should be_empty
+    rules(%(-- caramel:allow set-not-null books.isbn\n#{tighten})).should be_empty
+    lint(tighten).first.remediation.should contain("CHECK (isbn IS NOT NULL) NOT VALID")
+  end
+
+  it "rejects constraints that scan or build an index while the table is locked" do
+    scanning = ["constraint-not-valid"]
+    check = %(ALTER TABLE books ADD CONSTRAINT check_books_copies CHECK (copies >= 0))
+    key = %(ALTER TABLE books ADD FOREIGN KEY (shelf_id) REFERENCES shelves (id))
+    unique = %(ALTER TABLE books ADD CONSTRAINT books_isbn_key UNIQUE (isbn))
+    primary = %(ALTER TABLE books ADD PRIMARY KEY (id))
+    rules(check).should eq(scanning)
+    rules("#{check} NOT VALID").should be_empty
+    rules(key).should eq(scanning)
+    rules("#{key} ON DELETE CASCADE NOT VALID").should be_empty
+    rules(unique).should eq(scanning)
+    adopted = %(ALTER TABLE books ADD CONSTRAINT books_isbn_key UNIQUE USING INDEX isbn)
+    rules(adopted).should be_empty
+    rules(primary).should eq(scanning)
+    rules(%(ALTER TABLE books ADD PRIMARY KEY USING INDEX books_pkey)).should be_empty
+    rules(%(CREATE TABLE books (id bigint)), check, unique).should be_empty
+    rules(%(-- caramel:allow constraint-not-valid books\n#{check}), key).should be_empty
+    lint(check).first.message.should start_with("ADD CONSTRAINT check_books_copies CHECK scans")
+    lint(unique).first.remediation.should contain("ADD CONSTRAINT … UNIQUE USING INDEX")
+  end
+
+  it "rejects DROP INDEX without CONCURRENTLY unless the migration built the index" do
+    drop = %(DROP INDEX IF EXISTS public.index_books_on_title)
+    rules(drop).should eq(["concurrent-drop-index"])
+    rules(%(DROP INDEX CONCURRENTLY index_books_on_title)).should be_empty
+    built = %(CREATE INDEX index_books_on_title ON books (title))
+    rules(built, drop).should eq(["concurrent-index"])
+    rules(%(-- caramel:allow concurrent-drop-index index_books_on_title\n#{drop})).should be_empty
+    lint(drop).first.remediation.should contain("use DROP INDEX CONCURRENTLY")
+  end
+
+  it "rejects bulk UPDATE and DELETE on an existing table" do
+    update = %(UPDATE books AS b SET isbn = '' WHERE b.isbn IS NULL)
+    delete = %(DELETE FROM ONLY books WHERE isbn = '')
+    rules(update).should eq(["bulk-write"])
+    rules(%(UPDATE books SET isbn = '')).should eq(["bulk-write"])
+    rules(delete).should eq(["bulk-write"])
+    rules(%(INSERT INTO books (isbn) VALUES (''))).should be_empty
+    rules(%(CREATE TABLE books (isbn text)), update, delete).should be_empty
+    rules(%(-- caramel:allow bulk-write books\n#{update})).should be_empty
+    lint(delete).first.message.should start_with("DELETE FROM books rewrites its matching rows")
+  end
+
+  it "reads the statements of a DO block but not the body of a CREATE FUNCTION" do
+    hidden = <<-SQL
+      DO $$
+      BEGIN
+        IF true THEN
+          ALTER TABLE books DROP COLUMN legacy;
+        END IF;
+      END
+      $$
+      SQL
+    tagged = %(DO LANGUAGE plpgsql $do$ BEGIN DELETE FROM books; END $do$)
+    function = %(CREATE FUNCTION purge() RETURNS void LANGUAGE sql AS $$ DELETE FROM books $$)
+    rules(hidden).should eq(["hidden-ddl"])
+    rules(tagged).should eq(["hidden-ddl"])
+    rules(function).should be_empty
+    rules(%(CREATE TABLE books (id bigint)), tagged).should be_empty
+    rules(%(-- caramel:allow destructive-column books.legacy\n#{hidden})).should be_empty
+    violation = lint(hidden).first
+    violation.message.should eq(
+      "DO block hides destructive-column: DROP COLUMN legacy destroys the data in books.legacy.")
+    violation.remediation.should start_with("write the statement outside the DO block; declare")
+  end
+
+  it "keeps quoted text as written and reads no statement out of it" do
+    escaped = %(DO $$ BEGIN INSERT INTO books (title) VALUES (E'a\\'; DROP TABLE books;'); END $$)
+    doubled = %(DO $$ BEGIN INSERT INTO books (title) VALUES ('a''; DROP TABLE books;'); END $$)
+    validated = %(ALTER TABLE "a  b" /* comment */ VALIDATE\n\tCONSTRAINT "c")
+    rules(escaped).should be_empty
+    rules(doubled).should be_empty
+    rules(%(DO $$ BEGIN INSERT INTO books (title) VALUES ('a'); DROP TABLE books; END $$))
+      .should eq(["hidden-ddl"])
+    SugarORM::Linter.validated_constraint(validated).should eq({"a  b", "c"})
   end
 
   it "rejects mixing CONCURRENTLY with statements that need a transaction" do
@@ -87,7 +211,7 @@ describe SugarORM::Linter do
     drop = %(DROP INDEX CONCURRENTLY IF EXISTS index_books_on_isbn)
     rules(%(ALTER TABLE books ADD COLUMN isbn text), build).should eq(mixed)
     rules(build, validate).should be_empty
-    rules(drop, %(DROP INDEX index_books_on_title)).should eq(mixed)
+    rules(drop, %(DROP INDEX index_books_on_title)).should eq(["concurrent-drop-index"] + mixed)
   end
 
   it "prints the rule, the offending statement and a remediation" do
