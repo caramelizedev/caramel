@@ -106,6 +106,7 @@ describe Caramel::Outbound do
     spawn { server.listen }
     previous = Caramel::Outbound.proxy
     Caramel::Outbound.proxy = nil
+    Caramel::Outbound.allow_private = true
     begin
       hooks = "http://127.0.0.1:#{address.port}/hooks?a=1"
       Caramel::Outbound.post(hooks, body: "ping").body.should eq("direct")
@@ -115,6 +116,7 @@ describe Caramel::Outbound do
       end
     ensure
       Caramel::Outbound.proxy = previous
+      Caramel::Outbound.allow_private = false
       server.close
     end
   end
