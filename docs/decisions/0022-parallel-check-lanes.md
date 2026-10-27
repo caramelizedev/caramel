@@ -8,7 +8,7 @@ Status: accepted.
 
 - Running checks one after another is slow: a full run is 23 mostly single-threaded runs, 417 s on a 12-core machine.
 - They ran serially because they share one compiler cache: Crystal's keep-10 cleanup ends every build, `crystal spec` names its program after `<cwd>/spec`, and the suite's temporary projects churn the cache.
-- A private toolchain prefix isolates that: its `data/installs` and `bin` link to the toolchain's, it has compiler and shards caches of its own, and Frappé, Latte and the checks follow `CARAMEL_TOOLCHAIN_ROOT` to it (`src/latte/toolchain.cr`). Runs on different prefixes then compete only for CPU, memory, free ports (fixtures bind port 0) and Latte's fixed ports (only latte-daemon uses them).
+- A private toolchain prefix isolates that: its `data/installs` and `bin` link to the toolchain's, it has compiler and shards caches of its own, and Frappé, Latte and the checks follow `CARAMEL_TOOLCHAIN_ROOT` to it (`src/latte/toolchain.cr`). Runs on different prefixes then compete only for CPU, memory and free ports (fixtures bind port 0; latte-daemon passes the ports it picked to its daemon through `CARAMEL_LATTE_DNS_PORT`, `CARAMEL_LATTE_HTTP_PORT`, `CARAMEL_LATTE_HTTPS_PORT` and `CARAMEL_LATTE_OTLP_PORT`).
 - A prefix's compiler sees the standard library through the prefix's path, so objects cached under the toolchain's own paths do not match there. A throwaway prefix compiles cold every time.
 
 ## Decision
@@ -22,7 +22,7 @@ Status: accepted.
    - `frappe-project`, `frappe-project-dev` and `frappe-project-build` each create their own application, so the longest flow no longer bounds one lane.
    - A check that generates an application (`LatteFixture`) keeps its root at `/private/tmp/caramel-checks/<checkout hash>/<check>`, emptied at the start of each run and locked while it runs, so a second run of the same check from the same checkout fails at once instead of disturbing the first, and `scripts/crystal` gives the programs under it cache roots of their own, as it gives the checkout's programs, so a generated application's dev build, Corretto worker and dependency postinstall compile warm from the second run on. A failed run's root is renamed `<check>.failed-<time>` and kept. The roots fall under the 30-day prune.
    - browser runs first in its lane.
-   - latte-daemon keeps Latte's fixed ports, which no other check uses, so a full run still needs the user's own Latte stopped.
+   - No check uses Latte's default ports, so a full run runs beside the user's own Latte.
 4. When the build step fails, the checks run in one lane: without its binaries each check builds its own into `bin/`, and lanes would race to write them.
 5. Outside `check all` the checks share the checkout's toolchain, so two `scripts/check NAME` never run at once.
 6. A release runs every check ([ADR 0016](0016-versioning-and-releases.md) §6).

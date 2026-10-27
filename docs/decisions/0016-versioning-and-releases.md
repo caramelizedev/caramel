@@ -9,7 +9,7 @@ Status: accepted. Amends ADR 0015 on on-demand start and the launchers.
 Caramel needs releases that applications can pin, upgrade and install side by side:
 
 - One version number must serve the framework, Latte and the shard, and compatibility between Frappé, Latte and its state must be explicit.
-- Latte is one per user (one daemon, one PostgreSQL cluster, one CA, fixed ports, one relay), while several Caramel versions can be installed at once.
+- Latte is one per user on the default ports (one daemon, one PostgreSQL cluster, one CA, one resolver, one relay), while several Caramel versions can be installed at once. Another state root (a check's, or a second user's) runs on ports of its own, set by `CARAMEL_LATTE_DNS_PORT`, `CARAMEL_LATTE_HTTP_PORT` and `CARAMEL_LATTE_HTTPS_PORT`, and gets no resolver or relay: its HTTP listener redirects to its own HTTPS port. A Latte whose port is held, by another Latte or anything else, refuses to start that service and names the port's owner (`port_in_use`) before starting anything.
 - A copied framework and a thick generated entry point would drift from the release an application pins.
 - `bin/frappe` and `bin/latte` find OpenSSL through an absolute rpath into the builder's toolchain, so they cannot run on another machine ([ADR 0001](0001-managed-toolchain-provider.md)).
 

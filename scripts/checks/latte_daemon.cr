@@ -72,7 +72,7 @@ module Caramel::Checks::LatteDaemon
     end
   end
 
-  private def dns_ready!(domain : String) : Nil
+  private def dns_ready!(domain : String, port : Int32) : Nil
     query = IO::Memory.new
     query.write(Bytes[0x43, 0x41, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0])
     domain.split('.').each do |label|
@@ -82,7 +82,7 @@ module Caramel::Checks::LatteDaemon
     query.write(Bytes[0, 0, 1, 0, 1])
     dns = UDPSocket.new
     dns.read_timeout = 1.second
-    dns.connect("127.0.0.1", 15353)
+    dns.connect("127.0.0.1", port)
     dns.send(query.to_slice)
     answer = Bytes.new(512)
     count, _ = dns.receive(answer)
@@ -158,12 +158,19 @@ module Caramel::Checks::LatteDaemon
     Dir.mkdir_p(root, 0o700)
     runtime = Checks.runtime_root(root)
     socket = File.join(runtime, "latte.sock")
+    # Free ports, so the check runs beside the user's own Latte on the defaults.
+    dns_port = Checks.free_udp_port
+    http_port = Checks.free_tcp_port
+    https_port = Checks.free_tcp_port
     otlp = Checks.free_tcp_port
-    environment = {
-      "CARAMEL_HOME"            => root,
-      "CARAMEL_LATTE_OTLP_PORT" => otlp.to_s,
+    ports = {
+      "CARAMEL_LATTE_DNS_PORT"   => dns_port.to_s,
+      "CARAMEL_LATTE_HTTP_PORT"  => http_port.to_s,
+      "CARAMEL_LATTE_HTTPS_PORT" => https_port.to_s,
+      "CARAMEL_LATTE_OTLP_PORT"  => otlp.to_s,
     } of String => String?
-    user = {"HOME" => home, "CARAMEL_HOME" => nil} of String => String?
+    environment = ports.merge({"CARAMEL_HOME" => root} of String => String?)
+    user = ports.merge({"HOME" => home, "CARAMEL_HOME" => nil} of String => String?)
     log = File.open(File.join(root, "daemon.log"), "a", 0o600)
     process : Process? = nil
     begin
@@ -185,7 +192,7 @@ module Caramel::Checks::LatteDaemon
       raise "Two daemons acquired the same instance" if duplicate.success?
       registration = JSON.parse({name: "bookshelf", directory: root}.to_json)
       site = request(socket, "POST", "/v1/sites", registration)["site"]
-      dns_ready!(site["domain"].as_s)
+      dns_ready!(site["domain"].as_s, dns_port)
       before = caddy_pid(root) || raise "Caddy has no process record after startup"
       database = Caramel::Latte::Postgres.database_names(site["id"].as_s).development
       strand_guard(root, runtime, database)
@@ -295,7 +302,8 @@ module Caramel::Checks::LatteDaemon
            "guard release on SIGTERM and on restart after SIGKILL, proxy recovery, " \
            "CA/registry persistence, native menu, explicit stop, " \
            "on-demand detached start from Frappé and latte stop, " \
-           "the OTLP collector's write and read-back on a free port"
+           "the OTLP collector's write and read-back, all on free ports " \
+           "(DNS #{dns_port}, HTTP #{http_port}, HTTPS #{https_port}, OTLP #{otlp})"
       0
     rescue ex
       STDERR.puts ex.message

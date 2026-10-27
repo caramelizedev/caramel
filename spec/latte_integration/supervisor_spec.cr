@@ -86,7 +86,7 @@ describe Caramel::Latte::Supervisor do
     end
   end
 
-  it "preserves an occupied listener and cleans up services from a failed startup" do
+  it "refuses an occupied listener before starting anything and leaves it alone" do
     root = File.join("/private/tmp", "latte-start-failure-#{Random::Secure.hex(6)}")
     registry = Caramel::Latte::Registry.new(root)
     dns_port, _, https_port = supervisor_ports
@@ -102,15 +102,61 @@ describe Caramel::Latte::Supervisor do
       supervisor.await_idle(30.seconds)
       status = JSON.parse(supervisor.status_json)
       status["services"]["proxy"]["state"].as_s.should eq("failed")
+      port = occupied.local_address.port
+      pattern = /\AHTTP port #{port} is in use by \S+ \(pid #{Process.pid}\)\z/
+      status["error"].as_s.should match(pattern)
       supervisor.postgres.running?.should be_false
       occupied.closed?.should be_false
-      File.exists?(cluster_version_file(registry)).should be_true
+      File.exists?(cluster_version_file(registry)).should be_false
     ensure
       supervisor.stop_services
       supervisor.await_idle(60.seconds)
       occupied.close
       FileUtils.rm_rf(registry.paths.run_dir)
       FileUtils.rm_rf(root)
+    end
+  end
+
+  it "refuses ports another Latte holds, naming the owner, and starts beside it on its own" do
+    registries = Array.new(3) do |index|
+      Caramel::Latte::Registry.new(
+        File.join("/private/tmp", "latte-ports-#{index}-#{Random::Secure.hex(6)}"))
+    end
+    dns_port, http_port, https_port = supervisor_ports
+    first = Caramel::Latte::Supervisor.new(
+      registries[0], dns_port: dns_port, http_port: http_port, https_port: https_port)
+    # Another state root on the first Latte's ports.
+    contender = Caramel::Latte::Supervisor.new(
+      registries[1], dns_port: dns_port, http_port: http_port, https_port: https_port)
+    other_dns, other_http, other_https = supervisor_ports
+    other = Caramel::Latte::Supervisor.new(
+      registries[2], dns_port: other_dns, http_port: other_http, https_port: other_https)
+    begin
+      first.start_services
+      first.await_idle(90.seconds)
+      JSON.parse(first.status_json)["services"]["dns"]["state"].as_s.should eq("running")
+      contender.start_services
+      contender.await_idle(30.seconds)
+      status = JSON.parse(contender.status_json)
+      status["services"]["dns"]["state"].as_s.should eq("failed")
+      status["error"].as_s.should match(/\ADNS port #{dns_port} is in use by coredns \(pid \d+\)\z/)
+      # The contender never started a cluster of its own.
+      File.exists?(cluster_version_file(registries[1])).should be_false
+      other.start_services
+      other.await_idle(90.seconds)
+      %w[postgres dns proxy].each do |name|
+        JSON.parse(other.status_json)["services"][name]["state"].as_s.should eq("running")
+        JSON.parse(first.status_json)["services"][name]["state"].as_s.should eq("running")
+      end
+    ensure
+      {first, contender, other}.each do |supervisor|
+        supervisor.stop_services
+        supervisor.await_idle(60.seconds)
+      end
+      registries.each do |registry|
+        FileUtils.rm_rf(registry.paths.run_dir)
+        FileUtils.rm_rf(registry.paths.root)
+      end
     end
   end
 
