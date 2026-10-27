@@ -17,7 +17,9 @@ module Caramel
   class Forbidden < Exception; end
 
   # The HTTP server is a private upstream behind the trusted local proxy. Host
-  # validation uses the configured origin; forwarded headers grant no trust.
+  # validation uses the normalised configured origin: a `Host` that names its
+  # authority in any case, with or without `:443`, is accepted; forwarded headers
+  # grant no trust.
   class Application
     include HTTP::Handler
 
@@ -35,6 +37,7 @@ module Caramel
     getter csrf : CSRF
     getter sessions : Session
     @authority : String
+    @authority_with_port : String
     @public_root : String?
     @policy : ContentSecurityPolicy
     @policy_header : String
@@ -50,20 +53,29 @@ module Caramel
       @policy_header = @policy.to_s
       @authority = URI.parse(@csrf.origin).authority ||
                    raise ArgumentError.new("Application origin #{@csrf.origin} has no host")
+      @authority_with_port = "#{@authority}:443"
       @public_root = public_root.try { |root| File.realpath(root) }
       @sessions = Session.new(@csrf.derive_key("session"))
     end
 
     def handle(request : HTTP::Request) : Response
       return secure(Response.new(400, "Malformed path")) unless request.path.starts_with?("/")
-      host = request.headers["Host"]?
-      return secure(Response.new(421, "Unknown project host")) if host != @authority
+      return secure(Response.new(421, "Unknown project host")) unless own_host?(request)
       if static = static_response(request)
         return secure(static)
       end
       Crema.request(request) do
         secure(tenanted(request) { |found| localized(found) { |routed| route(routed) } })
       end
+    end
+
+    # Whether the request's `Host` is the configured authority, compared without
+    # allocating: case-insensitively, with or without an explicit `:443`.
+    private def own_host?(request : HTTP::Request) : Bool
+      host = request.headers["Host"]? || return false
+
+      host.compare(@authority, case_insensitive: true) == 0 ||
+        host.compare(@authority_with_port, case_insensitive: true) == 0
     end
 
     def call(context : HTTP::Server::Context) : Nil

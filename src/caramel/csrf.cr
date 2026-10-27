@@ -6,20 +6,27 @@ require "random/secure"
 
 module Caramel
   # Signed double-submit tokens are independent of optional login sessions.
-  # Exact Origin checking also prevents sibling local sites from submitting.
+  # Exact Origin checking also prevents sibling local sites from submitting. The
+  # configured origin is normalised once (lowercase scheme and host, no `:443`), and
+  # a request's `Origin` matches it case-insensitively, with or without `:443`.
   class CSRF
     COOKIE_NAME = "__Host-caramel_csrf"
     LIFETIME    = 24.hours
     # How far ahead of this host's clock another host's issue time may be.
     CLOCK_SKEW = 1.minute
 
+    # The normalised origin: `https://Example.com:443` becomes `https://example.com`.
     getter origin : String
+    @origin_with_port : String
 
-    def initialize(@secret : String, @origin : String)
+    def initialize(@secret : String, origin : String)
       raise ArgumentError.new("CSRF secret must be at least 32 bytes") if @secret.bytesize < 32
-      unless https_origin?(URI.parse(@origin))
+      uri = URI.parse(origin)
+      unless https_origin?(uri)
         raise ArgumentError.new("CSRF origin must be an HTTPS origin without a path")
       end
+      @origin = normalise(uri)
+      @origin_with_port = "#{@origin}:443"
     end
 
     def issue(now = Time.utc) : String
@@ -40,7 +47,7 @@ module Caramel
     end
 
     def valid?(request : HTTP::Request, submitted : String?, now = Time.utc) : Bool
-      return false unless request.headers["Origin"]? == @origin
+      return false unless origin?(request.headers["Origin"]?)
       return false unless submitted && submitted.bytesize <= 256
       stored = request.cookies[COOKIE_NAME]?.try(&.value)
       return false unless stored && Crypto::Subtle.constant_time_compare(stored, submitted)
@@ -65,6 +72,22 @@ module Caramel
 
     private def sign(payload : String) : String
       OpenSSL::HMAC.hexdigest(:sha256, @secret, payload)
+    end
+
+    # Whether *header* names the configured origin, in any case and with or without `:443`.
+    private def origin?(header : String?) : Bool
+      return false unless header
+
+      header.compare(@origin, case_insensitive: true) == 0 ||
+        header.compare(@origin_with_port, case_insensitive: true) == 0
+    end
+
+    # Lowercase scheme and host, an explicit `:443` dropped. `https_origin?` has already
+    # refused a path, so no trailing slash remains.
+    private def normalise(uri : URI) : String
+      host = (uri.host || raise ArgumentError.new("CSRF origin has no host")).downcase
+      port = uri.port
+      port.nil? || port == 443 ? "https://#{host}" : "https://#{host}:#{port}"
     end
 
     # A scheme and a host, with no credentials, path, query or fragment.

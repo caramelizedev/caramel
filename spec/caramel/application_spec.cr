@@ -126,6 +126,14 @@ describe Caramel::Application do
     app.handle(hosted_request("GET", "/", host: "evil.example")).status.should eq(421)
   end
 
+  it "accepts the configured host in any case, with or without :443, and no other port" do
+    csrf = Caramel::CSRF.new("s" * 64, "https://Example.com:443")
+    app = Caramel::Application.new(ApplicationSpecApp::AppRouter.new, csrf)
+    app.handle(hosted_request("GET", "/", host: "example.com")).body.should eq("hello")
+    app.handle(hosted_request("GET", "/", host: "Example.com:443")).body.should eq("hello")
+    app.handle(hosted_request("GET", "/", host: "example.com:8443")).status.should eq(421)
+  end
+
   it "carries the default policy and no Strict-Transport-Security unless asked" do
     response = application_spec_app.handle(hosted_request("GET", "/"))
     default = Caramel::ContentSecurityPolicy.default.to_s
