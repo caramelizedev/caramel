@@ -248,7 +248,9 @@ module Caramel
       @context.csp_nonce
     end
 
-    # The signed session; changes are saved in the response's cookie.
+    # The signed session; changes are saved in the response's cookie. A write
+    # that would take the cookie past 4 KB raises `Session::Overflow` at the
+    # write and leaves the session as it was.
     def session : Hash(String, String)
       @context.session
     end
