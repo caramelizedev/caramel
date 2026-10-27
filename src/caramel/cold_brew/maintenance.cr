@@ -6,11 +6,12 @@ require "../cache"
 require "./queue"
 
 module Caramel::ColdBrew
-  # The background housekeeping fiber: every `interval` it releases stale
-  # job locks whose backend is gone, failing a job on its third release,
-  # deletes expired cache rows, creates the daily job partitions
-  # for today through today + 7 (UTC) and drops partitions that ended more
-  # than `retention` ago and hold only finished or failed jobs.
+  # The background housekeeping fiber: every `interval` it creates the daily
+  # job partitions for today through today + 7 (UTC), releases job locks whose
+  # backend is gone, failing a job on its third release, deletes expired cache
+  # rows and drops partitions that ended more than `retention` ago and hold
+  # only finished or failed jobs. Each step is reported on its own, so one
+  # that raises never skips the others.
   class Maintenance
     Log = ::Log.for("cold_brew.maintenance")
 
@@ -23,6 +24,8 @@ module Caramel::ColdBrew
     record Report, released : Int64, failed : Int64, expired : Int64, created : Int32,
       dropped : Int32
 
+    # A backend that started after the lock was taken reuses a dead one's PID.
+    # pg_stat_activity hides another role's backend_start; such a lock counts as live.
     RELEASE = <<-SQL
       UPDATE caramel_jobs
       SET locked_at = NULL, locked_by = NULL, releases = releases + 1,
@@ -31,7 +34,9 @@ module Caramel::ColdBrew
       WHERE locked_at < now() - make_interval(secs => $1)
         AND finished_at IS NULL AND failed_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM pg_stat_activity activity \
-          WHERE activity.pid::text = caramel_jobs.locked_by)
+          WHERE activity.pid::text = caramel_jobs.locked_by \
+            AND (activity.backend_start IS NULL \
+              OR activity.backend_start <= caramel_jobs.locked_at))
       RETURNING id, queue, class_name, attempts, failed_at
       SQL
     RELEASED = {id: Int64, queue: String, class_name: String, attempts: Int32, failed_at: Time?}
@@ -42,7 +47,8 @@ module Caramel::ColdBrew
                       "make_interval(secs => $1)) AS dropped"
 
     def initialize(@db : DB::Database = SugarORM::Repo.database, @retention : Time::Span = 7.days,
-                   @stale_after : Time::Span = 15.minutes, @interval : Time::Span = 60.seconds)
+                   @stale_after : Time::Span = Time::Span.zero,
+                   @interval : Time::Span = 60.seconds)
       # The partition function refuses shorter windows; fail at construction.
       raise ArgumentError.new("retention must be at least one day") if @retention < 1.day
       @stopping = Channel(Nil).new
@@ -82,19 +88,32 @@ module Caramel::ColdBrew
     # One pass. A job whose lock is older than `stale_after` and whose
     # locking backend no longer exists is released and counted; the release
     # that reaches RELEASE_LIMIT fails it with AbandonedJob instead and calls
-    # the `on_failed` hooks, after that statement has committed.
+    # the `on_failed` hooks, after that statement has committed. A step that
+    # raises is reported as handled and counts as zero.
     def run_once : Report
       SugarORM::Repo.using(@db) do
-        rows = SugarORM.sql(RELEASE, @stale_after.total_seconds, RELEASE_LIMIT, ABANDONED,
-          as: RELEASED)
-        abandoned = rows.compact_map { |row| failure_of(row) }
-        abandoned.each { |event| fail_abandoned(event) }
-        expired = Cache.vacuum
-        created = create_partitions
-        dropped = drop_partitions
-        released = (rows.size - abandoned.size).to_i64
-        Report.new(released, abandoned.size.to_i64, expired, created, dropped)
+        created = step(0) { create_partitions }
+        released, failed = step({0_i64, 0_i64}) { release }
+        expired = step(0_i64) { Cache.vacuum }
+        dropped = step(0) { drop_partitions }
+        Report.new(released, failed, expired, created, dropped)
       end
+    end
+
+    private def step(zero : T, & : -> T) : T forall T
+      yield
+    rescue error
+      Crema.report(error, handled: true, source: "cold_brew.maintenance")
+      zero
+    end
+
+    # Releases, then fails the abandoned ones; {released, failed}.
+    private def release : {Int64, Int64}
+      rows = SugarORM.sql(RELEASE, @stale_after.total_seconds, RELEASE_LIMIT, ABANDONED,
+        as: RELEASED)
+      abandoned = rows.compact_map { |row| failure_of(row) }
+      abandoned.each { |event| fail_abandoned(event) }
+      {(rows.size - abandoned.size).to_i64, abandoned.size.to_i64}
     end
 
     private def failure_of(row) : JobFailed?

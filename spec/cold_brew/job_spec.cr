@@ -143,4 +143,13 @@ describe Caramel::ColdBrew::Queue do
     long = Caramel::ColdBrew::Queue.describe(ColdBrewUnit::Bounce.new("x" * 10_000))
     long.size.should eq(Caramel::ColdBrew::Queue::ERROR_LIMIT)
   end
+
+  it "describes a failure without the NUL bytes and invalid UTF-8 that text rejects" do
+    nul = Caramel::ColdBrew::Queue.describe(ColdBrewUnit::Bounce.new("bad\0byte"))
+    nul.should start_with("ColdBrewUnit::Bounce: badbyte")
+    broken = String.new(Bytes[0x61, 0xff, 0x62])
+    mended = Caramel::ColdBrew::Queue.describe(ColdBrewUnit::Bounce.new(broken))
+    mended.valid_encoding?.should be_true
+    mended.should start_with("ColdBrewUnit::Bounce: a\uFFFDb")
+  end
 end

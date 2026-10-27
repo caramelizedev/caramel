@@ -20,7 +20,7 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
    - The states are:
      - `Finished`;
      - `Failed`;
-     - `Running` (locked; a dead process's lock shows until maintenance releases it);
+     - `Running` (locked; a dead process's lock shows until the next maintenance pass, within a minute, releases it);
      - `Retrying` (ran before and waits);
      - `Queued` (due);
      - `Scheduled` (not yet due).
@@ -42,7 +42,7 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
 4. **Names.** `enqueue` always stores the job's current fully qualified class name, and a worker runs a row whose stored name is that name or one the job declares with `renamed_from "Old::Name", …`.
    - A declared name that is the job's own, or another job's name or alias, fails to compile; one job takes over an old name. A name declared in a `macro finished`, as SweetTalk's jobs declare theirs, is checked when the job registry or an `enqueue` compiles. `renamed_from` belongs to a concrete job; on an abstract parent it fails to compile.
    - A job found through an old name keeps the retry rules of the current class. A row whose name no compiled job claims still fails on its first run with `UnknownJob`, without a retry.
-   - `Caramel::ColdBrew.unknown_queued_class_names(db)` returns the sorted class names of rows that are not locked, finished or failed and that no compiled job claims, empty when every queued job can run. A running job's row is not listed; a crashed worker's lock is released by maintenance, and the row is listed then. The query uses the partial index of `caramel_jobs_fetch`.
+   - `Caramel::ColdBrew.unknown_queued_class_names(db)` returns the sorted class names of rows that are not locked, finished or failed and that no compiled job claims, empty when every queued job can run. A running job's row is not listed; a crashed worker's lock is released by the next maintenance pass, and the row is listed then. The query uses the partial index of `caramel_jobs_fetch`.
    - `work` and `migrate` log a warning naming them when they start, and stop nothing, not even when the query fails, which is logged by class: a stranded row is already recoverable by deploying the old name back or declaring it.
 5. **Delivery.** Jobs run at least once: a job's own writes commit once with its completion, but a call to another service repeats when the process dies or the commit fails after the call. Receivers deduplicate on a stable identifier. PubSub notifications are at most once.
 
@@ -54,4 +54,4 @@ A signed webhook relay built on Caramel 0.4.0 ([#6](https://github.com/carameliz
 - A row stores a name, not a reference, so the name must outlive the class that wrote it. Declaring the old name on the class that replaced it keeps the queue valid across a deploy without a data migration, and a compile error stops two jobs from silently sharing one.
 - Reporting rather than refusing keeps `work` and `migrate` from blocking a deploy over rows that a rollback or a later alias fixes; the report is an API, so a deploy script can fail on it.
 - The worker-only process reuses `serve`'s startup and shutdown instead of a second entry point, so a deployment runs one binary in two roles.
-- **Released runs are counted apart from attempts.** A process can die for reasons outside the job, such as a deploy's SIGKILL or another job exhausting memory, so a released run does not spend the retry rule's attempts. A job that ends its process on every run must still stop: its third release fails it, at least 45 minutes after its first run at the 15-minute release floor.
+- **Released runs are counted apart from attempts.** A process can die for reasons outside the job, such as a deploy's SIGKILL or another job exhausting memory, so a released run does not spend the retry rule's attempts. A job that ends its process on every run must still stop: its third release fails it. A lock is released as soon as a pass finds its backend gone, or finds a backend under that PID that started after the lock was taken, so the row waits a minute, not a 15-minute floor; `pg_stat_activity` is the ground truth a waiting period only approximated.
