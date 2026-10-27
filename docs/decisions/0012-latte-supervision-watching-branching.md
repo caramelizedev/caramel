@@ -19,6 +19,7 @@ Latte has to supervise the application and shared services, watch sources, give 
 2. **Unix sockets.**
    - PostgreSQL listens only on a private, owner-only socket directory inside Latte's state (`listen_addresses = ''`) with SCRAM authentication. It does not use the shared `/tmp/.s.PGSQL.5432`, because `/tmp` is shared by every user on the machine.
    - Application sockets live in the site's owner-only run directory under the same runtime root, not at `/tmp/caramel_app.sock`, for the same reason.
+   - The runtime root is `~/Library/Caches/Caramel/<8 hex of the state root's SHA-256>`, with the home from the passwd database: short enough for macOS's 104-byte socket paths, and under the owner's home, where another user cannot create the directory first, as they could in `/private/tmp`. Latte refuses a home that would push a socket path past 103 bytes.
 3. **Kernel watching.**
    - `Caramel::Latte::Watcher` registers `EVFILT_VNODE` kqueue filters on every watched directory and file (opened `O_EVTONLY`) and rescans a directory when it changes.
    - `frappe dev` hashes the tree only after a kernel event, then waits out a 50 ms debounce before the type check. A multi-file save that outlasts a shorter window only cancels a check and costs CPU, since a newer change stops an obsolete check or build.

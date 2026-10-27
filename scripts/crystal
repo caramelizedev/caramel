@@ -40,11 +40,20 @@ GMP=$BASE/data/installs/conda-gmp/6.3.0
 # Crystal 1.21 pastes pkg-config output into a shell command without quoting.
 # Keep the metadata in a short private alias; link the durable path into binaries.
 # GMP, which Crystal links by name, is found through one link to its library in
-# the same directory.
+# the same directory. The alias lives in the per-user temporary directory
+# (TMPDIR, else DARWIN_USER_TEMP_DIR), which no other user can pre-create,
+# unlike /private/tmp.
 KEY=$(printf '%s' "$BASE" | /usr/bin/openssl dgst -sha256 -r)
 REST=${KEY#????????????????}
 KEY=${KEY%"$REST"}
-RUNTIME=/private/tmp/caramel-compiler-$USER_ID-$KEY
+USER_TEMP=${TMPDIR:-}
+[ -n "$USER_TEMP" ] || USER_TEMP=$(/usr/bin/getconf DARWIN_USER_TEMP_DIR)
+USER_TEMP=${USER_TEMP%/}
+case $USER_TEMP in
+    /*) ;;
+    *) echo 'No per-user temporary directory: set TMPDIR' >&2; exit 1 ;;
+esac
+RUNTIME=$USER_TEMP/caramel-compiler-$USER_ID-$KEY
 ALIAS=$RUNTIME/openssl
 GMPLINK=$RUNTIME/libgmp.dylib
 STAMP=$RUNTIME/.stamp

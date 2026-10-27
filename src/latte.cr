@@ -20,8 +20,9 @@ begin
     # Detach first, so every later failure reaches logs/latte.log.
     Caramel::Latte::Daemon.detach(paths) if ARGV[1]? == "--detach"
     registry = Caramel::Latte::Registry.new(paths)
+    ports = Caramel::Latte::Supervisor.ports_from_environment
     supervisor = Caramel::Latte::Supervisor.new(
-      registry, otlp_port: Caramel::Latte::Collector.port)
+      registry, **ports, otlp_port: Caramel::Latte::Collector.port)
     Caramel::Latte::Daemon.new(registry, supervisor).run
   when ["stop"]
     stopped = Caramel::Latte::Daemon.stop(Caramel::Latte::Paths.new)

@@ -230,7 +230,12 @@ module Caramel::Checks
             git: #{url.to_json}
             version: #{Caramel::VERSION}\n
         YAML
-      assert!(File.read(File.join(tagged, "shard.lock")).includes?(locked))
+      lock = File.read(File.join(tagged, "shard.lock"))
+      assert!(lock.includes?(locked))
+      # The dependencies come from the framework's lock, each pinned to the
+      # commit its tag pointed at; CARAMEL_REPOSITORY itself is not pinned.
+      pinned = /^  pg:\n    git: .+\n    version: 0\.31\.0\+git\.commit\.[0-9a-f]{40}$/m
+      assert!(lock.matches?(pinned), lock)
       library = File.join(tagged, "lib/caramel")
       checkout = File.info(library, follow_symlinks: false).directory? &&
                  File.file?(File.join(library, "src/caramel/command_line.cr"))

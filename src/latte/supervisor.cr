@@ -11,11 +11,23 @@ require "openssl"
 module Caramel::Latte
   # One owner for shared services. Slow lifecycle operations run behind the IPC
   # response; status always remains available to the menu application.
+  #
+  # The listeners default to DNS 15353 and HTTP/HTTPS 18080/18443, the ports the
+  # resolver and the relay of `scripts/install-local-integration` point at. The
+  # port variables move a Latte to ports of its own (ADR 0016): such a Latte
+  # gets no resolver or relay, and its HTTP listener redirects to the HTTPS
+  # port it listens on rather than 443.
   class Supervisor < ServiceControl
-    BUSY            = "A service operation is already in progress"
-    NOT_READY       = "Start Latte services and wait for them to be ready"
-    NOT_PROVISIONED = "Project has no provisioned database; run frappe setup"
-    WORKER_FAILED   = "Test worker database operation failed"
+    DNS_PORT            = 15353
+    HTTP_PORT           = 18080
+    HTTPS_PORT          = 18443
+    DNS_PORT_VARIABLE   = "CARAMEL_LATTE_DNS_PORT"
+    HTTP_PORT_VARIABLE  = "CARAMEL_LATTE_HTTP_PORT"
+    HTTPS_PORT_VARIABLE = "CARAMEL_LATTE_HTTPS_PORT"
+    BUSY                = "A service operation is already in progress"
+    NOT_READY           = "Start Latte services and wait for them to be ready"
+    NOT_PROVISIONED     = "Project has no provisioned database; run frappe setup"
+    WORKER_FAILED       = "Test worker database operation failed"
 
     getter postgres : Postgres
     getter dns : DNS
@@ -32,16 +44,26 @@ module Caramel::Latte
     @dns_child : ManagedChild
     @proxy_child : ManagedChild
 
+    # The listener ports the port variables name; the defaults where they are unset.
+    def self.ports_from_environment : {dns_port: Int32, http_port: Int32, https_port: Int32}
+      {
+        dns_port:   Latte.port_from(DNS_PORT_VARIABLE, DNS_PORT),
+        http_port:  Latte.port_from(HTTP_PORT_VARIABLE, HTTP_PORT),
+        https_port: Latte.port_from(HTTPS_PORT_VARIABLE, HTTPS_PORT),
+      }
+    end
+
     def initialize(@registry : Registry,
                    @toolchain : Toolchain = Toolchain.for_checkout,
-                   dns_port : Int32 = 15353,
-                   http_port : Int32 = 18080,
-                   https_port : Int32 = 18443,
+                   dns_port : Int32 = DNS_PORT,
+                   http_port : Int32 = HTTP_PORT,
+                   https_port : Int32 = HTTPS_PORT,
                    otlp_port : Int32 = Collector::DEFAULT_PORT)
       paths = @registry.paths
       @postgres = Postgres.new(paths, @toolchain)
       @dns = DNS.new(paths, dns_port)
-      @proxy = Proxy.new(@registry, https_port, http_port, public_https_port: 443)
+      public_https_port = https_port == HTTPS_PORT ? 443 : https_port
+      @proxy = Proxy.new(@registry, https_port, http_port, public_https_port: public_https_port)
       @collector = Collector.new(otlp_port)
       @dns_child = ManagedChild.new(
         name: "dns",
@@ -106,6 +128,7 @@ module Caramel::Latte
           "proxy"    => @proxy_child.running?,
         }
         begin
+          preflight_ports(previous)
           @dns.write(@registry.list)
           @proxy.write
           @postgres.start
@@ -141,6 +164,53 @@ module Caramel::Latte
           raise ex
         end
       end
+    end
+
+    # Fails fast, naming the owner, when a listener a service about to start
+    # needs is taken. CoreDNS and Caddy listen with SO_REUSEPORT; on macOS a
+    # plain bind (no SO_REUSEPORT) still fails against such a listener with
+    # "Address already in use", so a bind that succeeds proves the port free.
+    private def preflight_ports(previous : Hash(String, Bool)) : Nil
+      preflight("DNS", @dns.port, udp: true) unless previous["dns"]
+      return if previous["proxy"]
+
+      preflight("HTTP", @proxy.http_port, udp: false)
+      preflight("HTTPS", @proxy.https_port, udp: false)
+    end
+
+    private def preflight(service : String, port : Int32, udp : Bool) : Nil
+      if udp
+        socket = UDPSocket.new
+        socket.bind("127.0.0.1", port)
+      else
+        socket = TCPServer.new("127.0.0.1", port)
+      end
+    rescue Socket::BindError
+      owner = port_owner(port, udp)
+      raise PublicError.new("port_in_use", "#{service} port #{port} is in use by #{owner}")
+    ensure
+      socket.try(&.close)
+    end
+
+    # The listener on *port* as lsof reports it: command name and pid, or
+    # "another process" when lsof lists none (the owner exited, or lsof failed).
+    private def port_owner(port : Int32, udp : Bool) : String
+      command = ["/usr/sbin/lsof", "-nP", "-Fpcn", udp ? "-iUDP:#{port}" : "-iTCP:#{port}"]
+      command << "-sTCP:LISTEN" unless udp
+      result = ProcessRunner.run(command, timeout: 5.seconds)
+      # One p (pid) and c (command) line per process, then an n (name) line per
+      # socket; a socket connected to the port, not listening on it, names its peer.
+      pid = name = nil
+      result.stdout.each_line do |line|
+        case line[0]?
+        when 'p' then pid = line[1..]
+        when 'c' then name = line[1..]
+        when 'n' then return "#{name} (pid #{pid})" if pid && name && !line.includes?("->")
+        end
+      end
+      "another process"
+    rescue IO::Error
+      "another process"
     end
 
     def stop_services : Nil

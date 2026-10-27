@@ -62,6 +62,7 @@ module Caramel::Checks
       assert!(packed, listing.join('\n'))
       only_both = listing.all? { |entry| %w[bin/ public/].any? { |top| entry.starts_with?(top) } }
       assert!(only_both, listing.join('\n'))
+      sidecars(artifact)
       unpacked = File.join(@root, "release")
       Dir.mkdir(unpacked, 0o755)
       command(["/usr/bin/tar", "-xzf", artifact, "-C", unpacked], echo: false)
@@ -75,6 +76,26 @@ module Caramel::Checks
       puts "PASS: frappe build writes a static linux/amd64 artifact, GMP linked in, " \
            "that runs on Ubuntu"
       ProductionArtifact.new(self, docker, unpacked).check
+    end
+
+    # The checksum verifies the tarball and the SBOM names what it links.
+    private def sidecars(artifact : String) : Nil
+      checksum = artifact + ".sha256"
+      sbom = artifact + ".sbom.json"
+      assert!(File.file?(checksum) && File.file?(sbom), "missing #{checksum} or #{sbom}")
+      verify = ["/usr/bin/shasum", "-a", "256", "-c", File.basename(checksum)]
+      verified = attempt(verify, chdir: File.dirname(artifact), timeout: 60.seconds)
+      expected = "#{File.basename(artifact)}: OK\n"
+      assert!(verified.success? && verified.stdout == expected, verified.stdout + verified.stderr)
+      document = JSON.parse(File.read(sbom))
+      assert!(document["bomFormat"] == "CycloneDX" && document["specVersion"] == "1.5", sbom)
+      components = document["components"].as_a
+      versions = components.to_h { |entry| {entry["name"].as_s, entry["version"].as_s} }
+      caramel = versions["caramel"]? || ""
+      openssl = versions["openssl"]? || ""
+      assert!(caramel.matches?(/\A\d/) && openssl.matches?(/\A\d/), File.read(sbom))
+      puts "PASS: frappe build writes a checksum and an SBOM that names " \
+           "caramel #{caramel} and openssl #{openssl}"
     end
 
     # Runs the binary as a server would: on a socket of its own, serving public

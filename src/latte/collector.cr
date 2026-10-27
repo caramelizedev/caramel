@@ -5,23 +5,44 @@ require "../caramel/crema/event"
 require "./server"
 
 module Caramel::Latte
+  # The port an environment *variable* names, or *default* when it is unset. A value
+  # outside *minimum*..65535 is a `PublicError` naming the variable.
+  def self.port_from(variable : String,
+                     default : Int32,
+                     minimum : Int32 = 1024,
+                     value : String? = ENV[variable]?) : Int32
+    return default unless value
+    port = value.to_i?
+    return port if port && port.in?(minimum..65535)
+    raise PublicError.new("invalid_port",
+      "#{variable} must be a port from #{minimum} to 65535, not #{value.inspect}")
+  end
+end
+
+module Caramel::Latte
   # A local OTLP/HTTP collector (ADR 0029). Any local process may write traces to
   # `127.0.0.1:4318`, as with any OpenTelemetry collector, and nothing here serves
-  # reads: they go through the control API on the owner-only socket. Only JSON is
-  # accepted, and only the fields a trace view needs are kept.
+  # reads: they go through the control API on the owner-only socket. A request whose
+  # `Host` is not the loopback address and port it listens on, as a page using DNS
+  # rebinding sends, gets 421. Only JSON is accepted, and only the fields a trace view
+  # needs are kept, within a ceiling of MAX_BYTES over every stored trace.
   class Collector
     DEFAULT_PORT   = 4318
     PORT_VARIABLE  = "CARAMEL_LATTE_OTLP_PORT"
     MAX_BODY       = 4 * 1024 * 1024
+    MAX_BYTES      = 64_i64 * 1024 * 1024
     MAX_TRACES     = 2000
     MAX_SPANS      =  200
     MAX_ATTRIBUTES =   32
     MAX_VALUE      =  256
-    TRACE_ID       = /\A[0-9a-f]{32}\z/
-    SPAN_ID        = /\A[0-9a-f]{16}\z/
-    DEADLINE       = 10.seconds
-    JSON_ONLY      = "{\"error\":\"Latte accepts OTLP/HTTP JSON; " \
-                     "set OTEL_EXPORTER_OTLP_PROTOCOL=http/json\"}"
+    # What a stored span costs beyond its strings: the object, its ids and numbers.
+    SPAN_OVERHEAD = 128
+    TRACE_ID      = /\A[0-9a-f]{32}\z/
+    SPAN_ID       = /\A[0-9a-f]{16}\z/
+    DEADLINE      = 10.seconds
+    JSON_ONLY     = "{\"error\":\"Latte accepts OTLP/HTTP JSON; " \
+                    "set OTEL_EXPORTER_OTLP_PROTOCOL=http/json\"}"
+    UNKNOWN_HOST = %({"error":"unknown host"})
 
     # One trace as the listing shows it.
     record Summary,
@@ -63,6 +84,8 @@ module Caramel::Latte
 
     private class Trace
       getter spans = [] of Crema::CollectedSpan
+      # What its spans cost against MAX_BYTES.
+      property bytes = 0_i64
       property dropped = 0
     end
 
@@ -75,16 +98,15 @@ module Caramel::Latte
     # The OTLP port: 4318, or CARAMEL_LATTE_OTLP_PORT, which the latte-daemon check sets to a
     # free port.
     def self.port(value : String? = ENV[PORT_VARIABLE]?) : Int32
-      return DEFAULT_PORT unless value
-      port = value.to_i?
-      return port if port && port.in?(1..65535)
-      raise PublicError.new("collector_port",
-        "#{PORT_VARIABLE} must be a port from 1 to 65535, not #{value.inspect}")
+      Latte.port_from(PORT_VARIABLE, DEFAULT_PORT, 1, value)
     end
 
-    def initialize(@port : Int32 = DEFAULT_PORT)
+    # *max_bytes* is the ceiling over stored traces; a spec lowers it.
+    def initialize(@port : Int32 = DEFAULT_PORT, @max_bytes : Int64 = MAX_BYTES)
       @lock = Mutex.new
       @traces = {} of String => Trace
+      @bytes = 0_i64
+      @bound_port = @port
     end
 
     # Binds the port on loopback. A port in use leaves the collector `unavailable`
@@ -93,7 +115,7 @@ module Caramel::Latte
       server = BoundedServer.new { |context| handle(context) }
       server.max_request_line_size = 2048
       server.max_headers_size = 16 * 1024
-      server.bind_tcp("127.0.0.1", @port)
+      @bound_port = server.bind_tcp("127.0.0.1", @port).port
       @server = server
       @state = "running"
       spawn(name: "latte:collector") { server.listen }
@@ -125,6 +147,11 @@ module Caramel::Latte
       @lock.synchronize { @traces.sum(0) { |_, trace| trace.dropped } }
     end
 
+    # The bytes charged against the ceiling by every stored span.
+    def bytes : Int64
+      @lock.synchronize { @bytes }
+    end
+
     # Stores every span in an OTLP JSON *body*. The whole document is read before any
     # span is stored, so a malformed one stores nothing.
     # A body that is valid JSON but not an object is as malformed as one that does not parse.
@@ -140,6 +167,7 @@ module Caramel::Latte
     private def handle(context : HTTP::Server::Context) : Nil
       request = context.request
       response = context.response
+      return answer(response, 421, UNKNOWN_HOST) unless local_host?(request.headers["Host"]?)
       unless request.method == "POST" && request.path == "/v1/traces"
         return answer(response, 404, %({"error":"not found"}))
       end
@@ -221,15 +249,44 @@ module Caramel::Latte
     end
 
     private def store(trace_id : String, collected : Crema::CollectedSpan) : Nil
+      cost = cost_of(collected)
       @lock.synchronize do
         trace = (@traces[trace_id] ||= Trace.new)
         if trace.spans.size >= MAX_SPANS
           trace.dropped += 1
         else
           trace.spans << collected
+          trace.bytes += cost
+          @bytes += cost
         end
-        @traces.shift if @traces.size > MAX_TRACES
+        evict if @traces.size > MAX_TRACES
+        # The oldest traces go until the ceiling holds; the one just stored stays.
+        while @bytes > @max_bytes && @traces.size > 1
+          evict
+        end
       end
+    end
+
+    # Removes the oldest trace. Called under the lock.
+    private def evict : Nil
+      _, trace = @traces.shift
+      @bytes -= trace.bytes
+    end
+
+    # A span's charge: its strings plus a fixed overhead.
+    private def cost_of(span : Crema::CollectedSpan) : Int64
+      bytes = SPAN_OVERHEAD + span.service.bytesize + span.name.bytesize
+      span.attributes.each { |key, value| bytes += key.bytesize + value.bytesize }
+      bytes.to_i64
+    end
+
+    # Whether *host* names this collector: 127.0.0.1, localhost or [::1] with the port
+    # it listens on. A browser reaching it through another name sends that name.
+    private def local_host?(host : String?) : Bool
+      return false unless host
+      name, _, port = host.rpartition(':')
+      return false unless port.to_i? == @bound_port
+      name.downcase.in?("127.0.0.1", "localhost", "[::1]")
     end
 
     private def parse(service : String, span : Hash(String, JSON::Any)) : Crema::CollectedSpan?

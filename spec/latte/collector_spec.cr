@@ -80,6 +80,22 @@ describe Caramel::Latte::Collector do
     collector.dropped.should eq(3)
   end
 
+  it "caps total bytes over traces, evicting the oldest" do
+    collector = Caramel::Latte::Collector.new(0, 1_000_i64)
+    one = collector.tap(&.ingest(export({"bookshelf", "0" * 32, "aaaaaaaaaaaaaaaa", nil}))).bytes
+    # 128 overhead + "bookshelf" + "GET /bookshelf" + "http.status_code" + "500"
+    one.should eq(128 + 9 + 14 + 16 + 3)
+    count = (1_000 // one) + 2
+    (1..count).each do |index|
+      trace = index.to_s(16).rjust(32, '0')
+      collector.ingest(export({"bookshelf", trace, "aaaaaaaaaaaaaaaa", nil}))
+    end
+    collector.bytes.should be <= 1_000
+    collector.spans("0" * 32).should be_nil
+    collector.spans(count.to_s(16).rjust(32, '0')).should_not be_nil
+    collector.traces(10_000).size.should eq(1_000 // one)
+  end
+
   it "ignores spans with a malformed trace id" do
     collector = Caramel::Latte::Collector.new(0)
     collector.ingest(export({"bookshelf", "short", "aaaaaaaaaaaaaaaa", nil}))
@@ -142,6 +158,17 @@ describe Caramel::Latte::Collector do
       HTTP::Client.get(url).status_code.should eq(404)
       metrics = "http://127.0.0.1:#{port}/v1/metrics"
       HTTP::Client.post(metrics, json, "{}").status_code.should eq(404)
+
+      post = ->(host : String) do
+        headers = HTTP::Headers{"Content-Type" => "application/json", "Host" => host}
+        HTTP::Client.post(url, headers, "{}")
+      end
+      misdirected = post.call("collector.example:#{port}")
+      {misdirected.status_code, misdirected.body}.should eq({421, %({"error":"unknown host"})})
+      post.call("127.0.0.1:#{port + 1}").status_code.should eq(421)
+      ["localhost:#{port}", "[::1]:#{port}", "LOCALHOST:#{port}"].each do |host|
+        post.call(host).status_code.should eq(200)
+      end
     ensure
       collector.stop
     end

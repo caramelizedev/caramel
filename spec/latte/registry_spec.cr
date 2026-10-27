@@ -25,8 +25,10 @@ describe Caramel::Latte::Paths do
       paths = Caramel::Latte::Paths.new(root)
 
       paths.root.should eq(File.realpath(root))
-      paths.run_dir.should match(%r{\A/private/tmp/caramel-\d+-[0-9a-f]{12}\z})
-      paths.run_dir.size.should be < 80
+      caches = File.join(Caramel::Latte::StateSecurity.user_home, "Library/Caches/Caramel")
+      paths.run_dir.should match(%r{\A#{Regex.escape(caches)}/[0-9a-f]{8}\z})
+      longest = paths.run_dir.bytesize + Caramel::Latte::Paths::LONGEST_SOCKET.bytesize
+      longest.should be <= Caramel::Latte::Paths::SOCKET_PATH_LIMIT
       paths.control_socket.size.should be < 104
       paths.site_run_dir("0123456789abcdef").size.should be < 104
       paths.postgres_socket_dir.size.should be < 104
@@ -46,6 +48,21 @@ describe Caramel::Latte::Paths do
       end
     ensure
       remove_latte_root(root)
+    end
+  end
+
+  it "refuses a home whose runtime directory would make a socket path over 103 bytes" do
+    root = latte_temp_root
+    home = File.join(root, "h" * 60)
+    Dir.mkdir(home, 0o700)
+    begin
+      error = expect_raises(Caramel::Latte::PublicError, "macOS allows 103") do
+        Caramel::Latte::Paths.new(root, home)
+      end
+      error.code.should eq("runtime_path_too_long")
+      File.exists?(File.join(home, "Library")).should be_false
+    ensure
+      FileUtils.rm_rf(root)
     end
   end
 

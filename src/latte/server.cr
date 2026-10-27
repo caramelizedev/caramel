@@ -62,15 +62,6 @@ module Caramel::Latte
     end
   end
 
-  class PublicError < Exception
-    getter code : String
-    getter status : Int32
-
-    def initialize(@code : String, message : String, @status : Int32 = 503)
-      super(message)
-    end
-  end
-
   # Restricts accepted connections to the installing Unix user. A total
   # connection deadline also bounds trickled headers/bodies, independently of
   # the socket's inactivity timeout. IPC responses close the connection.

@@ -1,4 +1,5 @@
 require "json"
+require "yaml"
 require "digest/sha256"
 require "file_utils"
 require "random/secure"
@@ -15,7 +16,7 @@ module Caramel::Frappe
   # explicitly, so an editor never reaches a different Crystal.
   class EditorTools
     SERVERS                 = %w[crystalline ameba-ls]
-    BUILD_RECIPE            = 3 # bump whenever the crystalline build flags or steps change
+    BUILD_RECIPE            = 4 # bump whenever the crystalline build flags or steps change
     LLVM_VERSION            = "15.0.7"
     MAX_BINARY              = 128 * 1024 * 1024
     DYLD_LINE               = /^dyld\[\d+\]: <[0-9A-Fa-f-]+> (\/.+)$/
@@ -49,6 +50,9 @@ module Caramel::Frappe
       getter commit : String
       getter reported_version : String
       getter crystal : String
+      # Each dependency crystalline's shard.lock names, by the commit its
+      # tag pointed at when the pin was recorded.
+      getter shards : Hash(String, String)
     end
 
     struct LlvmPin
@@ -89,12 +93,14 @@ module Caramel::Frappe
       end
     end
 
-    # First 12 hex characters of SHA-256 over every crystalline build input.
-    # The source commit covers crystalline's own shard.lock.
+    # First 12 hex characters of SHA-256 over every crystalline build input:
+    # the source commit, its dependencies' commits, the compiler, LLVM and
+    # the recipe.
     def crystalline_fingerprint : String
       pins = manifest
+      shards = pins.crystalline.shards.to_a.sort!.map { |name, commit| "#{name} #{commit}" }
       inputs = "#{pins.crystalline.commit}\n#{pins.crystalline.crystal}\n" \
-               "#{pins.llvmdev.sha256}\n#{BUILD_RECIPE}"
+               "#{pins.llvmdev.sha256}\n#{BUILD_RECIPE}\n#{shards.join('\n')}"
       Digest::SHA256.hexdigest(inputs)[0, 12]
     end
 
@@ -262,8 +268,10 @@ module Caramel::Frappe
         rebuild_llvm_ext(build, compiler_source)
         source = File.join(build, "crystalline")
         fetch_crystalline(source, pin)
+        pin_crystalline_dependencies(source, pin)
         shards = File.join(@framework_root, "scripts/shards")
         tools.run(shards, ["install", "--production"], source)
+        verify_crystalline_dependencies(source, pin)
         enable_save_notifications(source)
         Dir.mkdir(File.join(source, "bin"), 0o700)
         extras = {
@@ -409,6 +417,52 @@ module Caramel::Frappe
       head = run!(rev_parse, "git rev-parse failed", limit).stdout.strip
       return if head == pin.commit
       raise Error.new("frappe lsp: fetched crystalline #{head}, expected #{pin.commit}")
+    end
+
+    # Rewrites crystalline's shard.lock so each dependency the manifest pins
+    # carries its commit in Shards' own form `X+git.commit.SHA` (ADR 0016):
+    # the install checks that commit out whatever its tag points at now.
+    # The manifest pins what `--production` installs; a development
+    # dependency it leaves out is never fetched.
+    private def pin_crystalline_dependencies(source : String, pin : CrystallinePin) : Nil
+      lock = File.join(source, "shard.lock")
+      names = [] of String
+      name = nil
+      lines = File.read_lines(lock).map do |line|
+        if entry = line.match(/\A  (\S+):\z/)
+          name = entry[1]
+          names << entry[1]
+          line
+        elsif (current = name) && (version = line.match(/\A    version: ([^+\s]+)/))
+          commit = pin.shards[current]? || next line
+          "    version: #{version[1]}+git.commit.#{commit}"
+        else
+          line
+        end
+      end
+      missing = pin.shards.keys - names
+      unless missing.empty?
+        raise Error.new("frappe lsp: tools/editor-darwin-arm64.json pins #{missing.join(", ")}, " \
+                        "which the pinned crystalline shard.lock does not name")
+      end
+      File.write(lock, lines.join('\n') + '\n')
+    end
+
+    # Every dependency Shards installed for crystalline is at the commit the
+    # manifest records, by Shards' own record of the install.
+    private def verify_crystalline_dependencies(source : String, pin : CrystallinePin) : Nil
+      info = File.join(source, "lib/.shards.info")
+      installed = YAML.parse(File.read(info))["shards"]?.try(&.as_h?) ||
+                  raise Error.new("frappe lsp: #{info} records no shards")
+      installed.each do |name, entry|
+        version = entry["version"]?.try(&.as_s?) || ""
+        expected = pin.shards[name.as_s]?
+        next if expected && version.ends_with?("+git.commit.#{expected}")
+        raise Error.new("frappe lsp: crystalline dependency #{name} was installed at " \
+                        "#{version}, expected commit #{expected || "(not pinned)"}")
+      end
+    rescue ex : File::Error | YAML::ParseException
+      raise Error.new("frappe lsp: could not read #{source}/lib/.shards.info: #{ex.message}")
     end
 
     private def publish_crystalline(root : String, built : String, target : String) : Nil

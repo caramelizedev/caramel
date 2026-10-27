@@ -19,8 +19,11 @@ module Caramel::Latte
       fingerprint_of(File.read(certificate_path))
     end
 
+    # Refuses while a key of the authority is readable by anyone else: trusting
+    # it would let every reader mint certificates browsers accept.
     def install : Nil
       certificate = File.read(certificate_path)
+      check_private_keys!
       digest = fingerprint_of(certificate)
       saved = receipt
       if saved && saved["sha256"].as_s != digest
@@ -74,6 +77,16 @@ module Caramel::Latte
         raise PublicError.new("ca_unavailable", message)
       end
       path
+    end
+
+    # Every `*.key` beside the root certificate must be an owned file of mode 0600.
+    private def check_private_keys! : Nil
+      Dir.glob(File.join(File.dirname(@proxy.root_certificate), "*.key")).sort!.each do |key|
+        info = File.info?(key, follow_symlinks: false)
+        next if info && StateSecurity.private_file?(info)
+        message = "#{key} must be a file you own with mode 0600 before its authority is trusted"
+        raise PublicError.new("ca_key_exposed", message)
+      end
     end
 
     private def fingerprint_of(certificate : String) : String

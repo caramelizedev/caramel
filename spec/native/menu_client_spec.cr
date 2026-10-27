@@ -74,7 +74,7 @@ private class MenuFixture
     Dir.mkdir(@home, 0o700)
     Dir.mkdir(File.join(@home, "logs"), 0o700)
     @runtime = Caramel::Latte::StateSecurity.runtime_root(File.realpath(@home))
-    Dir.mkdir(@runtime, 0o700)
+    Caramel::Latte::StateSecurity.ensure_owned_directory(@runtime)
     @socket = File.join(@runtime, "latte.sock")
     @daemon = nil
   end
