@@ -459,6 +459,26 @@ describe SugarORM::Migrator do
     end
   end
 
+  it "raises the migration's own error, not the advisory unlock's, " \
+     "when the connection breaks" do
+    with_scratch_database do |db|
+      suicide = migration(1, "kill_self", "SELECT pg_terminate_backend(pg_backend_pid())")
+      warnings = IO::Memory.new
+      # crystal-pg reports the killed backend as a DB::ConnectionLost without a
+      # message; before the fix the unlock's own failure replaced it.
+      error = expect_raises(DB::ConnectionLost) do
+        SugarORM::Migrator.new(db, [suicide], warnings).migrate
+      end
+      error.message.should be_nil
+      warnings.to_s.should contain("pg_advisory_unlock failed (")
+      warnings.to_s.should contain("the lock is released with the session")
+
+      books = "CREATE TABLE books (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY)"
+      SugarORM::Migrator.new(db, [migration(1, "create_books", books)]).migrate.should eq(1)
+      journal(db).should eq([1_i64])
+    end
+  end
+
   it "runs each transactional migration in its own transaction, " \
      "so a failure keeps the ones before it" do
     with_scratch_database do |db|
