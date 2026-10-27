@@ -62,11 +62,12 @@ describe Caramel::Frappe::NewProject do
       locked = <<-YAML + "\n"
           caramel:
             #{source.lock}
-            version: #{Caramel::VERSION}
+            version: #{source.version}
         YAML
       File.read(File.join(target, "shard.lock")).should contain(locked)
       lock = YAML.parse(File.read(File.join(target, "shard.lock")))["shards"]
-      lock["pg"]["version"].as_s.should eq("0.31.0")
+      lock["pg"]["version"].as_s
+        .should eq("0.31.0+git.commit.8b63363430edb5c09d5612f9776e6398efe48bce")
       lock["ameba"]?.should be_nil
       Caramel::Frappe::Project.pin(target).should eq(Caramel::VERSION)
       File.read(File.join(target, ".gitignore")).should contain(".env\n")
@@ -87,7 +88,8 @@ describe Caramel::Frappe::NewProject do
 
     locked = YAML.parse(files["shard.lock"])["shards"]
     locked["lexbor"]["git"].as_s.should eq("https://github.com/kostya/lexbor.git")
-    locked["lexbor"]["version"].as_s.should eq("3.6.4")
+    locked["lexbor"]["version"].as_s
+      .should eq("3.6.4+git.commit.e7028553e39cba5b7031c53668b9e38035ecac18")
     locked["ameba"]?.should be_nil
   end
 
@@ -133,9 +135,13 @@ describe Caramel::Frappe::NewProject do
       ].each { |arguments| git.call(arguments) }
       generator.dependency.shard.should start_with("path: ")
       git.call(["tag", "v#{Caramel::VERSION}"])
+      head = ["/usr/bin/git", "-C", repository, "rev-parse", "HEAD"]
+      commit = Caramel::Latte::ProcessRunner.run(head, timeout: 30.seconds).stdout.strip
+      commit.should match(/\A[0-9a-f]{40}\z/)
       github = Caramel::Frappe::NewProject::Dependency.new(
         shard: %(github: caramelizedev/caramel\n    version: "~> #{Caramel::VERSION}"),
         lock: %(git: "https://github.com/caramelizedev/caramel.git"),
+        version: "#{Caramel::VERSION}+git.commit.#{commit}",
       )
       generator.dependency.should eq(github)
       File.write(File.join(repository, "demo.txt"), "an application generated inside the clone")

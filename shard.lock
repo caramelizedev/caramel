@@ -2,21 +2,20 @@ version: 2.0
 shards:
   ameba:
     git: https://github.com/crystal-ameba/ameba.git
-    version: 1.7.0
+    version: 1.7.0+git.commit.9a19f5f98abdf792a5a0ef6ca5c5d89459740e2f
 
   blueprint:
     git: https://github.com/stephannv/blueprint.git
-    version: 1.1.0
+    version: 1.1.0+git.commit.8d05048ae40562e8fd486abc5f845233b9116e22
 
   db:
     git: https://github.com/crystal-lang/crystal-db.git
-    version: 0.15.0
+    version: 0.15.0+git.commit.ec7b045b3e2cf5962c029bf676f238f812f40872
 
   lexbor:
     git: https://github.com/kostya/lexbor.git
-    version: 3.6.4
+    version: 3.6.4+git.commit.e7028553e39cba5b7031c53668b9e38035ecac18
 
   pg:
     git: https://github.com/will/crystal-pg.git
-    version: 0.31.0
-
+    version: 0.31.0+git.commit.8b63363430edb5c09d5612f9776e6398efe48bce

@@ -45,4 +45,49 @@ if [ ! -f "$BINARY" ]; then
     echo "Managed Shards is missing from $BASE. Run scripts/install-toolchain." >&2
     exit 1
 fi
+
+# Each git shard in a lock or in Shards' record of what it installed, as
+# "NAME VERSION" lines. A version written X+git.commit.SHA pins the commit:
+# Shards checks it out whatever the tag v<X> points at now (ADR 0016).
+git_shards() {
+    awk '
+        function flush() { if (name != "" && git) print name, version; name = ""; git = 0; version = "" }
+        /^  [^ ]/ { flush(); name = $1; sub(/:$/, "", name); next }
+        /^    git: / { git = 1; next }
+        /^    version: / { version = $2; next }
+        END { flush() }
+    ' "$1"
+}
+
+# The 40-hex commit a version pins, or nothing.
+commit_of() {
+    case $1 in *+git.commit.*) ;; *) return 0 ;; esac
+    commit=${1##*+git.commit.}
+    case $commit in *[!0-9a-f]*) return 0 ;; esac
+    [ ${#commit} -eq 40 ] && printf '%s\n' "$commit"
+}
+
+# After an install, every shard the lock pins to a commit must have been
+# installed at that commit, so a moved tag fails here on every path that
+# installs: frappe new and setup, the release build, the linter build and
+# the crystalline build. scripts/check shard-pins also refuses an unpinned
+# entry in the framework's own lock.
+verify_pins() {
+    [ -f shard.lock ] && [ -f lib/.shards.info ] || return 0
+    git_shards shard.lock > "$SHARD_HOOKS/locked"
+    git_shards lib/.shards.info > "$SHARD_HOOKS/installed"
+    failed=0
+    while read -r name version; do
+        [ -n "$(commit_of "$version")" ] || continue
+        installed=$(awk -v name="$name" '$1 == name { print $2 }' "$SHARD_HOOKS/installed")
+        [ -n "$installed" ] || continue
+        if [ "$installed" != "$version" ]; then
+            echo "shard $name: shard.lock pins $version but $installed was installed" >&2
+            failed=1
+        fi
+    done < "$SHARD_HOOKS/locked"
+    return $failed
+}
+
 "$BINARY" "$@"
+case ${1-} in install) verify_pins ;; esac

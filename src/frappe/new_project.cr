@@ -7,8 +7,9 @@ require "../latte/process"
 module Caramel::Frappe
   class NewProject
     # How a generated application depends on the framework (ADR 0016): its
-    # shard.yml source lines and its shard.lock source line.
-    record Dependency, shard : String, lock : String
+    # shard.yml source lines, its shard.lock source line and the version the
+    # lock records, which from a release tag pins the tag's commit.
+    record Dependency, shard : String, lock : String, version : String
 
     def initialize(framework_root : String)
       @framework_root = File.realpath(framework_root)
@@ -78,30 +79,35 @@ module Caramel::Frappe
       result
     end
 
-    # The tagged release on GitHub; CARAMEL_REPOSITORY, a git URL, for tests
-    # and forks; or, from a checkout that is not exactly its clean release
-    # tag, the checkout itself.
+    # The tagged release on GitHub, locked to the commit the tag points at;
+    # CARAMEL_REPOSITORY, a git URL, for tests and forks; or, from a checkout
+    # that is not exactly its clean release tag, the checkout itself.
     def dependency : Dependency
       pin = "\n    version: \"~> #{Caramel::VERSION}\""
       if repository = ENV["CARAMEL_REPOSITORY"]?
         source = "git: #{repository.to_json}"
-        Dependency.new(shard: source + pin, lock: source)
-      elsif released?
+        Dependency.new(shard: source + pin, lock: source, version: Caramel::VERSION)
+      elsif commit = release_commit
         release = "git: #{"#{Caramel::REPOSITORY}.git".to_json}"
-        Dependency.new(shard: "github: caramelizedev/caramel" + pin, lock: release)
+        Dependency.new(shard: "github: caramelizedev/caramel" + pin, lock: release,
+          version: "#{Caramel::VERSION}+git.commit.#{commit}")
       else
         source = "path: #{@framework_root.to_json}"
-        Dependency.new(shard: source, lock: source)
+        Dependency.new(shard: source, lock: source, version: Caramel::VERSION)
       end
     end
 
-    private def released? : Bool
-      return false unless File.exists?(File.join(@framework_root, ".git"))
+    # The commit at HEAD when the checkout is exactly its clean release tag.
+    private def release_commit : String?
+      return unless File.exists?(File.join(@framework_root, ".git"))
       tag = git("describe", "--exact-match", "--tags", "HEAD")
-      return false unless tag.success? && tag.stdout.strip == "v#{Caramel::VERSION}"
+      return unless tag.success? && tag.stdout.strip == "v#{Caramel::VERSION}"
       # Untracked files, such as an app generated inside the clone, change nothing.
       status = git("status", "--porcelain", "--untracked-files=no")
-      status.success? && status.stdout.empty?
+      return unless status.success? && status.stdout.empty?
+      head = git("rev-parse", "HEAD")
+      commit = head.stdout.strip
+      commit if head.success? && commit.matches?(/\A[0-9a-f]{40}\z/)
     end
 
     private def git(*arguments : String) : Latte::ProcessResult
@@ -110,7 +116,8 @@ module Caramel::Frappe
     end
 
     # The framework at this release, then its runtime dependencies and the
-    # application's explicit development dependencies as the framework locks them.
+    # application's explicit development dependencies as the framework locks
+    # them, each at the commit the framework's lock pins.
     private def shard_lock(source : Dependency, manifest : String) : String
       framework = YAML.parse(File.read(File.join(@framework_root, "shard.yml")))
       development = dependency_names(framework, "development_dependencies")
@@ -120,7 +127,7 @@ module Caramel::Frappe
       locked = YAML.parse(File.read(File.join(@framework_root, "shard.lock")))["shards"].as_h
       String.build do |io|
         io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock
-        io << "\n    version: " << Caramel::VERSION << '\n'
+        io << "\n    version: " << source.version << '\n'
         locked.each do |name, entry|
           next if development.includes?(name.as_s) && !required.includes?(name.as_s)
           io << "\n  " << name.as_s << ":\n"
