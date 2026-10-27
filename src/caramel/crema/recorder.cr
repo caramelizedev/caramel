@@ -149,10 +149,12 @@ module Caramel::Crema
       self.class.sql_key(sql)
     end
 
+    # Rows go in `{kind, key}` order: two processes (web and worker) upserting the same
+    # window's rows in different orders lock them in opposite orders and deadlock.
     private def write(window : Tally, bucket : Time) : Nil
       SugarORM::Repo.using(@database) do
         SugarORM::Repo.transaction do
-          window.each do |kind, key, entry|
+          window.sorted.each do |kind, key, entry|
             values = [bucket, kind, key, entry.count, entry.errors, entry.total_ms, entry.max_ms,
                       entry.histogram.to_a] of SugarORM::Value
             SugarORM::Repo.exec(UPSERT, values)
