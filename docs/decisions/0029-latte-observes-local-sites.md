@@ -56,7 +56,10 @@ belong.
    prints the file. Caddy redacts `Cookie` and `Authorization`.
 7. **Latte collects local traces.** The daemon listens on `127.0.0.1:4318`, the OTLP/HTTP
    port, for `POST /v1/traces` with a JSON body of at most 4 MiB. It keeps the newest 2000
-   traces with at most 200 spans each, in memory, and refuses protobuf with 415. A busy
+   traces with at most 200 spans each, in memory and within 64 MiB over all traces (each
+   span charged its strings plus 128 bytes; the oldest traces go first), and refuses
+   protobuf with 415 and a request whose `Host` is not `127.0.0.1`, `localhost` or `[::1]`
+   with its port with 421. A busy
    port leaves the collector `unavailable` and the daemon running. `CARAMEL_LATTE_OTLP_PORT`
    moves the collector's port; the latte-daemon check uses that to pick a free port. The
    collector serves no reads: control API 2 lists traces (`GET /v2/traces?limit=N`),
@@ -76,7 +79,9 @@ belong.
   literal, and a role sees only its own statements' text.
 - The statement tags Crema adds (ADR 0027) make those statistics attributable.
 - Local OTLP SDKs speak HTTP over TCP, so the collector is an exception to the Unix-socket
-  rule. Any local process may write, as with any OpenTelemetry collector; only the owner
+  rule. Any local process may write, as with any OpenTelemetry collector, but a browser
+  page cannot through DNS rebinding, because its `Host` is not the collector's, and no
+  writer can grow the daemon past the byte ceiling; only the owner
   can read, over the control socket. Traces hold span names and attributes the exporter
   chose, never a Caramel secret (ADR 0028).
 - Research: [observability](https://github.com/caramelizedev/caramel-notes/blob/main/research/observability.md).

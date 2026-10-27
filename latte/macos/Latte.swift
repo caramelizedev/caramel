@@ -226,12 +226,21 @@ private struct LatteRuntime {
 
         let canonicalPath = Self.canonicalPath(expandedHome)
         let canonicalHome = URL(fileURLWithPath: canonicalPath, isDirectory: true)
+        // Mirrors Caramel::Latte::StateSecurity.runtime_root: the passwd home
+        // (not $HOME) /Library/Caches/Caramel/<8 hex of the canonical root>.
         let hash = SHA256.hash(data: Data(canonicalHome.path.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
-            .prefix(12)
+            .prefix(8)
         let currentUID = getuid()
-        let runtime = URL(fileURLWithPath: "/private/tmp/caramel-\(currentUID)-\(hash)", isDirectory: true)
+        guard let passwd = getpwuid(currentUID), let directory = passwd.pointee.pw_dir else {
+            throw LatteError.invalidConfiguration("the current user has no home directory")
+        }
+        let runtime = URL(fileURLWithPath: String(cString: directory), isDirectory: true)
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Caches", isDirectory: true)
+            .appendingPathComponent("Caramel", isDirectory: true)
+            .appendingPathComponent(String(hash), isDirectory: true)
 
         self.home = canonicalHome
         self.runtimeDirectory = runtime

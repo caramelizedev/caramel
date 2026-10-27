@@ -1,8 +1,21 @@
 require "digest/sha256"
 require "c/unistd"
+require "system/user"
 
 module Caramel
   module Latte
+    # An error whose message is safe to show the user: Latte's CLI and control
+    # API answer with it (*status* over HTTP). Raised anywhere in Latte, so it
+    # lives in its lowest-level file.
+    class PublicError < Exception
+      getter code : String
+      getter status : Int32
+
+      def initialize(@code : String, message : String, @status : Int32 = 503)
+        super(message)
+      end
+    end
+
     # Filesystem policy shared by the Latte state primitives. Managed state is
     # private to the current Unix user and is never reached through a symlink.
     module StateSecurity
@@ -142,9 +155,18 @@ module Caramel
         info
       end
 
-      def self.runtime_root(canonical_root : String) : String
-        digest = Digest::SHA256.hexdigest(canonical_root)[0, 12]
-        "/private/tmp/caramel-#{current_uid}-#{digest}"
+      # The home directory of the current Unix user from the passwd database,
+      # not $HOME, which fixtures and launchers fake.
+      def self.user_home : String
+        System::User.find_by(id: LibC.getuid.to_s).home_directory
+      end
+
+      # The ephemeral runtime directory for the state root *canonical_root*:
+      # `<home>/Library/Caches/Caramel/<8 hex of its SHA-256>`. Under the user's
+      # home, another user cannot pre-create it, which /private/tmp allowed.
+      def self.runtime_root(canonical_root : String, home : String = user_home) : String
+        digest = Digest::SHA256.hexdigest(canonical_root)[0, 8]
+        File.join(home, "Library", "Caches", "Caramel", digest)
       end
 
       def self.valid_site_id?(id : String) : Bool
@@ -153,18 +175,25 @@ module Caramel
     end
 
     # Durable Latte state lives under the user's Application Support folder.
-    # Unix-domain socket paths are shorter than macOS's 104-byte limit by using
-    # a stable per-user runtime directory in /private/tmp. The durable root is
-    # still the source of truth; run_dir is intentionally ephemeral runtime
-    # state and may be recreated after a reboot.
+    # Unix-domain socket paths stay under macOS's 104-byte sun_path by using a
+    # short per-user runtime directory in ~/Library/Caches/Caramel, named by a
+    # digest of the durable root. The durable root is still the source of
+    # truth; run_dir is intentionally ephemeral runtime state and may be
+    # recreated after a reboot or a cache purge.
     class Paths
       DEFAULT_ROOT = "~/Library/Application Support/Caramel"
       # The detached daemon's output, in logs_dir.
       DAEMON_LOG = "latte.log"
+      # macOS sun_path holds 104 bytes including the terminator.
+      SOCKET_PATH_LIMIT = 103
+      # The longest socket under run_dir: a site's `app-xxxxxxxx.ops.sock`.
+      LONGEST_SOCKET = "/sites/0123456789abcdef/app-xxxxxxxx.ops.sock"
 
       getter root : String
 
-      def initialize(root : String? = nil)
+      # *home* names the runtime directory's parent, by default the current
+      # user's passwd home.
+      def initialize(root : String? = nil, home : String = StateSecurity.user_home)
         selected = root || ENV["CARAMEL_HOME"]? || DEFAULT_ROOT
         if selected.strip.empty?
           raise ArgumentError.new("state root must not be empty")
@@ -174,7 +203,13 @@ module Caramel
         canonical = StateSecurity.canonical_creation_path(expanded)
         @root = StateSecurity.ensure_owned_directory(canonical)
         @root = File.realpath(@root)
-        runtime = StateSecurity.canonical_creation_path(StateSecurity.runtime_root(@root))
+        runtime = StateSecurity.canonical_creation_path(StateSecurity.runtime_root(@root, home))
+        longest = runtime.bytesize + LONGEST_SOCKET.bytesize
+        if longest > SOCKET_PATH_LIMIT
+          raise PublicError.new("runtime_path_too_long",
+            "Latte's runtime directory #{runtime} makes a socket path of #{longest} bytes; " \
+            "macOS allows #{SOCKET_PATH_LIMIT}")
+        end
         @run_dir = StateSecurity.ensure_owned_directory(runtime)
       end
 
