@@ -194,6 +194,7 @@ describe "SweetTalk's calendar days" do
     statements.size.should eq(2)
     statements[0].should start_with("DO $caramel$\n")
     statements[1].should eq(
+      %(-- caramel:allow alter-column-type lending_loans.borrowed_on\n) +
       %(ALTER TABLE "lending_loans" ALTER COLUMN "borrowed_on" TYPE date USING "borrowed_on"::date))
   end
 end

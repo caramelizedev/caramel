@@ -98,6 +98,7 @@ describe SugarORM::Differ do
     deferred = %(ALTER TABLE "lefts" ADD CONSTRAINT "fk_lefts_right_id" ) \
                %(FOREIGN KEY ("right_id") REFERENCES "rights" ("id"))
     statements[2].should eq(deferred)
+    SugarORM::Linter.lint(SugarORM::Migration.new(1_i64, "cycle", statements)).should be_empty
   end
 
   it "adds a composite key on a new table's own rows after the table's indexes" do
@@ -112,6 +113,7 @@ describe SugarORM::Differ do
                %(FOREIGN KEY ("sequel_id", "account_id") ) \
                %(REFERENCES "books" ("id", "account_id"))
     statements[1..].should eq([indexed, deferred])
+    SugarORM::Linter.lint(SugarORM::Migration.new(1_i64, "sequel", statements)).should be_empty
   end
 
   it "drops foreign keys before the columns of every table they depend on" do
@@ -313,6 +315,8 @@ describe SugarORM::Differ do
     retyped = %(ALTER TABLE "books" ALTER COLUMN "pages" TYPE bigint USING "pages"::bigint)
     statements.should contain(retyped)
     statements.should contain(%(ALTER TABLE "books" ALTER COLUMN "pages" SET NOT NULL))
+    migration = SugarORM::Migration.new(1_i64, "override", statements)
+    SugarORM::Linter.lint(migration).map(&.rule).should eq(["alter-column-type", "set-not-null"])
   end
 
   it "derives a text to date retype: a check of every value, then the type, with no halt" do
@@ -327,9 +331,11 @@ describe SugarORM::Differ do
       statements.size.should eq(2)
       statements[0].should start_with("DO $caramel$\n")
       statements[0].should contain(%(WHERE "published_on" IS NOT NULL))
-      alter = %(ALTER TABLE "books" ALTER COLUMN "published_on" ) +
+      alter = %(-- caramel:allow alter-column-type books.published_on\n) +
+              %(ALTER TABLE "books" ALTER COLUMN "published_on" ) +
               %(TYPE date USING "published_on"::date)
       statements[1].should eq(alter)
+      SugarORM::Linter.lint(SugarORM::Migration.new(1_i64, "retype", statements)).should be_empty
       plan.notes.should eq([
         "retyping books.published_on from text to date rewrites books under an exclusive " \
         "lock; its migration first checks every value",

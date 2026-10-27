@@ -26,17 +26,23 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
 
    `frappe make resource` derives its `CREATE TABLE` migration through the same DDL renderer, offline, because the table is new.
 3. **Online migrations.** A migration made only of `CREATE/DROP INDEX CONCURRENTLY`, `ALTER INDEX … RENAME TO` and `VALIDATE CONSTRAINT` statements runs outside a transaction under a session advisory lock. The migrator refuses to journal an index that PostgreSQL left `INVALID`, so an interrupted online migration can be retried safely. A changed index is built under the name `<name>_swap` (`<name>_swap2` and so on when that name is taken), then the old one is dropped and the new one renamed. Foreign keys and checks on existing tables are added `NOT VALID` and validated in the online migration; a validation that existing rows fail stops the migration, names the constraint and leaves it `NOT VALID`. Every other migration runs in a transaction of its own, which also writes its journal row, so a failure keeps the migrations before it. A statement that hits `lock_timeout` rolls its migration back, and the migrator runs it again after 1, 2 and 4 s. A fourth timeout stops `migrate` and names the migration. Online migrations run with no `lock_timeout`. The wait for the advisory lock that serializes migrators keeps the connection's `lock_timeout` and is not retried: a second `migrate` that waits longer fails with PostgreSQL's lock error.
-4. **Lints.** The linter runs over every pending migration before any statement executes:
-   - **Rule 1:** a blocking `CREATE INDEX` on an existing table.
-   - **Rule 2:** `ADD COLUMN … NOT NULL` without `DEFAULT`.
-   - **Rule 3:** a `DROP COLUMN` or `RENAME COLUMN` without an explicit origin.
-   - **Mixing:** online and transactional statements in one migration.
+4. **Lints.** The linter runs over every pending migration before any statement executes. It reads dollar-quoted bodies, so a `DO` block hides nothing from it; a `CREATE FUNCTION` body is not read, because it runs only when called. The rules, each named as `frappe migrate` reports it:
+   - `concurrent-index`: a blocking `CREATE INDEX` on an existing table.
+   - `concurrent-drop-index`: a `DROP INDEX` without `CONCURRENTLY` of an index the migration did not build.
+   - `not-null-default`: `ADD COLUMN … NOT NULL` without `DEFAULT` on an existing table.
+   - `destructive-column`: a `DROP COLUMN` or `RENAME COLUMN` without an explicit origin.
+   - `drop-table`, `truncate`, `rename-table`: `DROP TABLE`, `TRUNCATE` and `ALTER TABLE … RENAME TO` of an existing table.
+   - `alter-column-type`, `set-not-null`: `ALTER COLUMN … TYPE` and `ALTER COLUMN … SET NOT NULL` on an existing table.
+   - `constraint-not-valid`: `ADD … CHECK` or `FOREIGN KEY` without `NOT VALID`, and `ADD … UNIQUE` or `PRIMARY KEY` without `USING INDEX`, on an existing table.
+   - `bulk-write`: `UPDATE … SET` or `DELETE FROM` an existing table.
+   - `hidden-ddl`: a `DO` block whose body breaks any rule above.
+   - `mixed-concurrency`: online and transactional statements in one migration.
 
-   Tables created in the same migration are exempt from Rules 1 and 2, because they have no rows and no readers.
+   A table the migration creates is exempt from every rule but `destructive-column` and `mixed-concurrency`, because it has no rows and no readers; so is an index the migration builds. Every rule but `mixed-concurrency` accepts the line `-- caramel:allow <rule> <subject>` above the statement, where the subject is the table, `table.column`, or the index for `concurrent-drop-index`. `--dev-override` turns violations into warnings in development only (decision 6).
 5. **Explicit intent.**
    - A rename comes from `field new_name : T, renamed_from: :old_name`.
    - A drop comes from the schema directive `drop_column :name`.
-   - Derived SQL carries the annotations `-- caramel:allow-rename table.column` and `-- caramel:allow-drop table.column`, which the linter accepts. Hand-written SQL must state them to pass.
+   - Derived SQL carries the annotations `-- caramel:allow-rename table.column`, `-- caramel:allow-drop table.column` and, for the checked text to date retype of [ADR 0042](0042-sugar-orm-date-codec.md), `-- caramel:allow alter-column-type table.column`, which the linter accepts. Hand-written SQL must state them to pass. A type change or `SET NOT NULL` that `--dev-override` derived stays plain, so the linter still warns about it.
    - Otherwise the differ halts, with a `Remediation:` line instead of emitting destructive DDL.
    - SugarORM owns CHECK constraints named `check_…`: an undeclared one is dropped, and any other CHECK is left in place with a note.
    - SugarORM owns the indexes it names `index_<table>_on_…` and the keys it names `fk_<table>_…`: an undeclared one is dropped, and any other undeclared index or key is left in place with a note.
@@ -48,6 +54,7 @@ Migrations are derived by diffing the declared schema against a catalog snapshot
 - Branch isolation keeps the verification away from development data.
 - Separate online migrations are the only way PostgreSQL permits `CONCURRENTLY`. Refusing to journal an invalid index keeps the journal truthful.
 - Explicit rename and drop intent turns the most common source of data loss into a compile-visible, reviewable declaration.
+- The lint rules cover every statement that locks an existing table against its writes for longer than a lock wait, destroys its rows, or hides such a statement in a `DO` block, because `migrate` runs while the previous binary still serves ([ADR 0032](0032-application-production-contract.md)). Each is a judgment the author can overrule with an annotation that names the rule and the subject, so the review sees it; a blanket override would not.
 - Native PostgreSQL features are used directly, not abstracted.
 - One transaction per migration releases each migration's locks when it commits, so an early migration's `ACCESS EXCLUSIVE` lock is not held while later ones run. Retrying a short lock wait, instead of waiting long, stalls the queries queued behind a migration's lock for seconds at a time. An online statement's `SHARE UPDATE EXCLUSIVE` lock queues no reads or writes, so a timeout would only abandon a `CONCURRENTLY` build.
 - Ownership by name keeps a DBA's index or a hand-added key through the next diff, while removing a declaration still removes what it built. Building a changed index before dropping the old one keeps a unique index's guarantee through the change.
