@@ -20,16 +20,31 @@ module Caramel
 
   # The application's HTTP handler on a database pool: its router behind
   # CSRF protection, serving *root*/public. It sends Strict-Transport-Security
-  # when CARAMEL_ENV is production or unset (ADR 0037).
+  # when CARAMEL_ENV is production or unset (ADR 0037). *previous* holds the
+  # secrets being rotated out (`APP_SECRET_PREVIOUS`), and *session_max_age*
+  # is how long a session cookie reads after its last write.
   def self.build(app : T.class,
                  db : DB::Database,
                  secret : String,
                  origin : String,
-                 root : String) : Application forall T
+                 root : String,
+                 previous : Array(String) = [] of String,
+                 session_max_age : Time::Span = Session::MAX_AGE) : Application forall T
     SugarORM::Repo.database = db
     production = (ENV["CARAMEL_ENV"]? || "production") == "production"
-    Application.new(T::AppRouter.new, CSRF.new(secret, origin), File.join(root, "public"),
-      hsts: production)
+    Application.new(T::AppRouter.new, CSRF.new(secret, origin, previous), File.join(root, "public"),
+      hsts: production, session_max_age: session_max_age)
+  end
+
+  # APP_SECRET_PREVIOUS: the secrets `APP_SECRET` replaced, comma-separated,
+  # each at least 32 bytes, that still verify sessions and CSRF tokens while
+  # they rotate out; empty when unset. Raises ArgumentError for a short one,
+  # as `CSRF.new` does for a short `APP_SECRET`.
+  def self.previous_secrets(env = ENV) : Array(String)
+    value = env["APP_SECRET_PREVIOUS"]? || return [] of String
+    secrets = value.split(',').map(&.strip).reject(&.empty?)
+    return secrets if secrets.all? { |secret| secret.bytesize >= 32 }
+    raise ArgumentError.new("Each APP_SECRET_PREVIOUS secret must be at least 32 bytes")
   end
 
   module CommandLine
@@ -339,9 +354,17 @@ module Caramel
       ColdBrew.warn_unknown_queued(db)
     end
 
+    # A journal ahead of this binary (a newer one has migrated) warns and starts;
+    # a migration this binary has not applied still refuses.
     private def self.refuse_pending(db : DB::Database,
                                     migrations : Array(SugarORM::Migration)) : Nil
-      return if SugarORM::Migrator.new(db, migrations).pending.empty?
+      migrator = SugarORM::Migrator.new(db, migrations)
+      ahead = migrator.ahead
+      unless ahead.empty?
+        STDERR.puts "WARNING: the database holds migrations this binary lacks " \
+                    "(#{ahead.map { |version| "v#{version}" }.join(", ")}); starting anyway"
+      end
+      return if migrator.pending(allow_ahead: true).empty?
 
       abort("Pending migrations. Run frappe migrate first.")
     end
@@ -387,7 +410,7 @@ module Caramel
       origin = ENV["APP_ORIGIN"]? || abort("APP_ORIGIN is required")
       secret = ENV["APP_SECRET"]? || abort("APP_SECRET is required")
       socket_path, group = application_socket
-      application = Caramel.build(app, db, secret, origin, root)
+      application = Caramel.build(app, db, secret, origin, root, Caramel.previous_secrets)
       server = HTTP::Server.new([application])
       # ameba:disable Lint/UselessAssign -- read by the ensure below when binding fails
       bound = false
