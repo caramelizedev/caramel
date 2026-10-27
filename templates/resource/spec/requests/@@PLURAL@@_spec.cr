@@ -35,8 +35,10 @@ describe "@@COLLECTION_LABEL@@" do
       # frappe:end
       persisted = App::@@MODEL@@.query.find!(db, record.id)
       # frappe:only tenant
-      @@TENANT@@(db, "globex")
-      client.get("/globex/@@PLURAL@@/#{record.id}").should have_status(404)
+      tenant_session("globex") do |member|
+        member.get("/globex/@@PLURAL@@/#{record.id}").should have_status(404)
+      end
+      client.get("/globex/@@PLURAL@@/#{record.id}").should have_status(401)
       # frappe:end
       # frappe:only update
 @@ASSERT_FIELDS@@

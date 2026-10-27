@@ -2,8 +2,9 @@ require "../units"
 
 module Caramel
   # How a route reads its request (ADR 0020): the body it accepts, the most
-  # bytes of it that are read, and whether the browser CSRF check or the
-  # action's own authenticator guards it. Actions declare one with `ingress`;
+  # bytes of it that are read, whether the browser CSRF check or the
+  # action's own authenticator guards it, and whether a tenant route is open
+  # to anyone in the tenant (ADR 0025). Actions declare one with `ingress`;
   # every other route uses DEFAULT.
   struct Ingress
     enum Body
@@ -20,7 +21,7 @@ module Caramel
     MAX_LIMIT = 67_108_864_i64
 
     # The vocabulary the `ingress` macro checks at compile time.
-    KEYWORDS = ["body", "limit", "csrf", "authenticate"]
+    KEYWORDS = ["body", "limit", "csrf", "authenticate", "open"]
     UNITS    = {
       "kilobyte" => 1_024, "kilobytes" => 1_024,
       "megabyte" => 1_048_576, "megabytes" => 1_048_576,
@@ -35,10 +36,15 @@ module Caramel
     # The action method that authenticates the request, when it declares one.
     getter authenticate : String?
 
+    # Whether a tenant route serves anyone in the tenant; the router refuses a
+    # tenant route that neither authenticates nor declares this.
+    getter? open : Bool
+
     def initialize(@body : Body = Body::Form,
                    @limit : Int64 = DEFAULT_LIMIT,
                    @csrf : Bool = true,
-                   @authenticate : String? = nil)
+                   @authenticate : String? = nil,
+                   @open : Bool = false)
       return if 1 <= @limit <= MAX_LIMIT
 
       raise ArgumentError.new("An ingress limit is 1 byte to 64 MiB, got #{@limit}")
@@ -47,19 +53,21 @@ module Caramel
     DEFAULT = new
 
     # A `_method` override may reach a route only when that route reads the
-    # POST's body the same way, so an override never skips a check.
+    # POST's body the same way, so an override never skips a check. `open`
+    # changes nothing about reading, and the target's own ingress dispatches.
     def reads_like?(other : Ingress) : Bool
       {body, limit, csrf?} == {other.body, other.limit, other.csrf?}
     end
 
     # What `routes` prints after a route: empty for DEFAULT, otherwise such
-    # as `raw, 256 KiB, csrf off, authenticate signed?`.
+    # as `raw, 256 KiB, csrf off, authenticate signed?` or `open`.
     def summary : String
       parts = [] of String
       parts << "raw" if @body.raw?
       parts << Ingress.size(@limit) if @body.raw? || @limit != DEFAULT_LIMIT
       parts << "csrf off" unless @csrf
       @authenticate.try { |name| parts << "authenticate #{name}" }
+      parts << "open" if @open
       parts.join(", ")
     end
 

@@ -15,6 +15,13 @@ describe "@@MODEL@@ sign-up" do
     end
   end
 
+  it "answers 401 at the home of a @@LABEL@@ the session did not sign up" do
+    Corretto.session do |client, db|
+      @@SINGULAR@@(db, "acme")
+      client.get("/acme").should have_status(401)
+    end
+  end
+
   it "answers 404 for a slug no @@LABEL@@ has" do
     Corretto.session do |client|
       client.get("/globex").should have_status(404)

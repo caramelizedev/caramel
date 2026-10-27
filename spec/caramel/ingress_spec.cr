@@ -268,4 +268,10 @@ describe "Caramel::Action ingress" do
     ingress_of("IngressSpecShowNote").summary.should eq("csrf off, authenticate token?")
     ingress_of("IngressSpecCreateBook").should eq(Caramel::Ingress::DEFAULT)
   end
+
+  it "lists an open route, which a method override reaches as a default one" do
+    open = Caramel::Ingress.new(open: true)
+    open.summary.should eq("open")
+    open.reads_like?(Caramel::Ingress::DEFAULT).should be_true
+  end
 end

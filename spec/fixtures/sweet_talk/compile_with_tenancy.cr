@@ -11,6 +11,8 @@ module Fixture
   end
 
   struct Home < Caramel::Action
+    ingress open: true
+
     contract do
     end
 

@@ -68,6 +68,13 @@ module Caramel
       true
     end
 
+    # :nodoc:
+    # Whether the action declares `ingress open: true`; the router reads it
+    # at compile time for a tenant route. Every `ingress` replaces it.
+    def __caramel_open? : Bool
+      false
+    end
+
     # Declares how the route reads this action's request (ADR 0020):
     #
     # ```
@@ -90,12 +97,16 @@ module Caramel
     #   authenticator, and the session reads empty and is never saved: only a
     #   credential a browser does not attach on its own, such as a signature
     #   or a bearer token, can stand in for the check.
+    # * `open: true` serves a tenant route to anyone in the tenant (ADR
+    #   0025): a tenant route must name an authenticator or declare it. It
+    #   cannot combine with `authenticate:`.
     #
     # A subtype inherits its parent's ingress. Its own declaration replaces
-    # it, but must name the parent's authenticator again (or its own) and
-    # cannot turn a raw parent's body back into a form. The macro checks
-    # the parent as compiled so far, so declare a base action's ingress
-    # where the base is first defined, before its subtypes.
+    # it, but must name the parent's authenticator again (or its own), cannot
+    # open a route its parent authenticates and cannot turn a raw parent's
+    # body back into a form. The macro checks the parent as compiled so far,
+    # so declare a base action's ingress where the base is first defined,
+    # before its subtypes.
     macro ingress(*arguments, **options)
       {% site = @caller ? @caller.first : nil %}
       {% where = "" %}
@@ -111,8 +122,8 @@ module Caramel
 
       # Keywords only, once per action.
       {% if !arguments.empty? || options.empty? %}
-        {% raise "ingress takes keywords: body:, limit:, csrf: and authenticate:" + where +
-                 "\nRemediation: write, for example, `#{example.id}`.\n" %}
+        {% raise "ingress takes keywords: body:, limit:, csrf:, authenticate: and open:" +
+                 where + "\nRemediation: write, for example, `#{example.id}`.\n" %}
       {% end %}
       {% if @type.constants.map(&.stringify).includes?("CARAMEL_INGRESS") %}
         {% raise "#{@type} declares ingress twice#{where.id}" +
@@ -121,7 +132,7 @@ module Caramel
       {% for key, value in options %}
         {% unless keywords.includes?(key.id.stringify) %}
           {% value.raise "unknown ingress keyword '#{key}'; " +
-                         "use body:, limit:, csrf: or authenticate:#{where.id}" %}
+                         "use body:, limit:, csrf:, authenticate: or open:#{where.id}" %}
         {% end %}
       {% end %}
 
@@ -173,6 +184,19 @@ module Caramel
                                 "as in :signed?, got #{authenticate}#{where.id}" %}
         {% end %}
       {% end %}
+
+      # open: true, for a tenant route that serves anyone in the tenant
+      {% open = options[:open] %}
+      {% if given.includes?("open") && !(open.is_a?(BoolLiteral) && open) %}
+        {% open.raise "ingress open: must be true, got #{open}#{where.id}" %}
+      {% end %}
+      {% open = given.includes?("open") %}
+      {% if open && given.includes?("authenticate") %}
+        {% raise "ingress open: true cannot combine with authenticate:" + where +
+                 "\nRemediation: keep `authenticate: :#{authenticate.id}` to guard the route, " +
+                 "or `open: true` to serve it to anyone in the tenant.\n" %}
+      {% end %}
+
       # A subtype may not drop its parent's authenticator by redeclaring.
       {% guard = nil %}
       {% for ancestor in @type.ancestors %}
@@ -180,7 +204,15 @@ module Caramel
           {% guard = ancestor.methods.find(&.name.==("__caramel_authenticated?")) %}
         {% end %}
       {% end %}
-      {% if guard && !guard.body.is_a?(BoolLiteral) && !given.includes?("authenticate") %}
+      {% guarded = guard && !guard.body.is_a?(BoolLiteral) %}
+      {% if guarded && open %}
+        {% raise "#{@type} declares ingress open: true, " +
+                 "but its parent authenticates with :#{guard.body.name}" + where +
+                 "\nRemediation: replace `open: true` with " +
+                 "`authenticate: :#{guard.body.name}`, " +
+                 "or inherit from an action without an authenticator.\n" %}
+      {% end %}
+      {% if guarded && !given.includes?("authenticate") %}
         {% raise "#{@type} redeclares ingress without authenticate:, " +
                  "but its parent authenticates with :#{guard.body.name}" + where +
                  "\nRemediation: add `authenticate: :#{guard.body.name}` to its ingress, " +
@@ -199,12 +231,18 @@ module Caramel
         limit: ({{ limit || "::Caramel::Ingress::DEFAULT_LIMIT".id }}).to_i64,
         csrf: {{ csrf }},
         authenticate: {{ authenticate ? authenticate.id.stringify : nil }},
+        open: {{ open }},
       )
 
       # :nodoc:
       # `self.` keeps a keyword such as `:true` from standing in for a method.
       def __caramel_authenticated? : Bool
         {{ authenticate ? "self.#{authenticate.id}".id : true }}
+      end
+
+      # :nodoc:
+      def __caramel_open? : Bool
+        {{ open }}
       end
 
       {% if raw %}

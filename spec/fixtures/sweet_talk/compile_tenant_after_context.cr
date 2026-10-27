@@ -21,6 +21,8 @@ module Shop
   tenant Account
 
   struct Home < Caramel::Action
+    ingress open: true
+
     contract do
     end
 

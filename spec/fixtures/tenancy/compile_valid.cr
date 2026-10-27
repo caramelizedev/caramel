@@ -48,8 +48,15 @@ module Fixture
     end
   end
 
+  # Every page, central and tenant, is for members; the tenant routes inherit
+  # the authenticator.
   abstract struct Base < Caramel::Action
     Caramel.resource_paths :books, :book
+    ingress authenticate: :member?
+
+    private def member? : Bool
+      true
+    end
   end
 
   struct Home < Base

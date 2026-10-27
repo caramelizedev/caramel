@@ -21,6 +21,8 @@ module Shop
   end
 
   struct Home < Caramel::Action
+    ingress open: true
+
     contract do
     end
 

@@ -32,16 +32,26 @@ PROBLEMS = [
                            "'books', as a central route does"},
   {"set_null_tenanted", "cannot use on_delete: :set_null: it references the tenanted " \
                         "Fixture::Author"},
+  {"tenant_route_without_authenticator", "Tenant route GET /books/:id runs Fixture::Shown " \
+                                         "with no authenticator."},
+  {"open_with_authenticate", "ingress open: true cannot combine with authenticate:"},
+  {"open_under_authenticated", "Fixture::Home declares ingress open: true, " \
+                               "but its parent authenticates with :member?"},
 ]
 # The guard runs once the program is complete, so it names no fixture line.
-UNLOCATED    = %w[compile_missing_tenant_block]
+UNLOCATED = %w[compile_missing_tenant_block]
+GUARD     = "Remediation: declare `ingress authenticate: :member?` on the action or its " \
+            "parent, or `ingress open: true` to serve it to anyone in the tenant."
 REMEDIATIONS = {
-  "compile_tenant_without_require"       => "add it after require \"caramel\"",
-  "compile_tenant_block_without_require" => "add it after require \"caramel\"",
-  "compile_tenant_mismatch"              => "Remediation: name Fixture::Account here.",
-  "compile_central_parameter_route"      => "Remediation: give it a static first segment",
-  "compile_shared_first_segment"         => "Remediation: rename one of them.",
-  "compile_set_null_tenanted"            => "Remediation: use on_delete: :cascade or :restrict.",
+  "compile_tenant_without_require"             => "add it after require \"caramel\"",
+  "compile_tenant_block_without_require"       => "add it after require \"caramel\"",
+  "compile_tenant_mismatch"                    => "Remediation: name Fixture::Account here.",
+  "compile_central_parameter_route"            => "Remediation: give it a static first segment",
+  "compile_shared_first_segment"               => "Remediation: rename one of them.",
+  "compile_set_null_tenanted"                  => "Remediation: use on_delete: :cascade",
+  "compile_tenant_route_without_authenticator" => GUARD,
+  "compile_open_with_authenticate"             => "Remediation: keep `authenticate: :member?`",
+  "compile_open_under_authenticated"           => "Remediation: replace `open: true` with",
 }
 
 cases = {"compile_valid" => nil} of String => String?

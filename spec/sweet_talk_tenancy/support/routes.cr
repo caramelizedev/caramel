@@ -3,6 +3,8 @@
 module TenantShop
   # The bound tenant's slug.
   struct Dashboard < Caramel::Action
+    ingress open: true
+
     contract do
     end
 

@@ -337,7 +337,10 @@ module Caramel::Frappe
       plural = ResourceGenerator.pluralize(model.underscore)
       next_step = "\nNext: run frappe migrate and open /#{plural}/new. " \
                   "frappe make resource now writes tenant resources; " \
-                  "pass --central for one every tenant shares."
+                  "pass --central for one every tenant shares. " \
+                  "Tenant pages answer 401 unless member? in " \
+                  "app/actions/application_action.cr holds: it reads the slugs the session " \
+                  "signed up, until you replace it with a membership table of your own."
       if files.any?(&.starts_with?("app/domain/"))
         next_step += " Each SweetTalk domain in app/domain/ now names App::#{model}, " \
                      "and its contexts belong to the tenant unless they say central: true; " \

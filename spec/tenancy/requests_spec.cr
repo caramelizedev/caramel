@@ -57,6 +57,14 @@ describe "A tenant route" do
     wrong.status.should eq(405)
     wrong.headers["Allow"].should eq("GET, HEAD")
   end
+
+  it "answers 401 to a caller outside the tenant and 200 to a member" do
+    acme_with_a_book
+    TenancySpec.get("/acme/settings").status.should eq(401)
+    TenancySpec.get("/acme/settings", member: "globex").status.should eq(401)
+    member = TenancySpec.get("/acme/settings", member: "acme")
+    {member.status, member.body}.should eq({200, "settings of acme"})
+  end
 end
 
 describe "A locale switch" do
@@ -119,8 +127,9 @@ describe "The routes listing" do
       Caramel::CommandLine.run(TenancySpec, ["routes"], Dir.current)
     end
     lines = listing.lines.map(&.split)
-    lines.should contain(["GET", "/:tenant/books", "Books"])
-    lines.should contain(["GET", "/:tenant", "Dashboard"])
+    lines.should contain(["GET", "/:tenant/books", "Books", "[open]"])
+    lines.should contain(["GET", "/:tenant", "Dashboard", "[open]"])
+    lines.should contain(["GET", "/:tenant/settings", "Settings", "[authenticate", "member?]"])
     lines.should contain(["GET", "/health", "Health"])
   end
 end

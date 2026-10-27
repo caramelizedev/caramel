@@ -28,6 +28,8 @@ module TenancyZeroCost
   end
 
   struct Books < Caramel::Action
+    ingress open: true
+
     contract do
     end
 

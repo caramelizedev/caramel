@@ -34,6 +34,10 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
      tenant comes first: `/acme/fr/books`.
    - Actions and views have `tenant` and `tenant_path(path)`.
      `cs.validate_tenant_slug(:slug)` accepts only a slug the router would read.
+   - A tenant route fails closed: `Caramel::Router.draw` refuses a route in the tenant
+     block whose action, or a parent of it, neither names an authenticator with
+     `ingress authenticate:` nor declares `ingress open: true` ([ADR 0020](0020-action-ingress-and-json-bodies.md)
+     §1), with "Tenant route GET /books/:id runs App::Books::Show with no authenticator."
 4. **SugarORM's `tenant account : Account`** is a `belongs_to` that also scopes.
    - Its column is system-managed: never a changeset param, never NOT NULL-checked. It
      stays preloadable.
@@ -63,12 +67,18 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
    `without` it deletes every key.
 7. **Frappé.** `frappe make tenancy MODEL` writes the tenant's schema, changeset,
    migration, sign-up page at `/PLURAL/new` and home at `/SLUG`, and adds the require,
-   the tenant block, the path helpers and the `tenant_session` spec helper. In a
-   multi-tenant application `frappe make resource` writes resources that belong to the
-   tenant, and `--central` writes one every tenant shares, the same as a plain
-   application's.
+   the tenant block, the path helpers, `member?` to `app/actions/application_action.cr`
+   and the `account` and `tenant_session` spec helpers. The generated `member?` reads
+   `session["PLURAL"]`, a comma-separated list of the slugs the session signed up, which
+   the sign-up action extends; the home and every tenant resource action declare
+   `ingress authenticate: :member?`, and `tenant_session(slug)` signs up `slug` through
+   the sign-up route so its client is a member. In a multi-tenant application `frappe
+   make resource` writes resources that belong to the tenant, and `--central` writes one
+   every tenant shares, the same as a plain application's.
 8. **Membership is the application's.** Whether a user may act in `acme` is its ingress
-   check, such as `ingress authenticate: :member?`.
+   check, `ingress authenticate: :member?`; an action for anyone in the tenant declares
+   `ingress open: true`. The generated session-held membership is a starting point the
+   application replaces with a table of its own, as the sessions recipe does.
 
 ### Plugging in on existing data
 
@@ -97,6 +107,12 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
 - Scoping fails closed. Crystal applications today scope with an explicit `where`, and
   one forgotten call leaks another tenant's rows; Ecto's `prepare_query`, Ash and
   activerecord-tenanted raise instead.
+- Tenant routes fail closed for the same reason. The slug alone selects the tenant and
+  the session cookie spans every tenant, so a user signed in under `acme` reached
+  `/globex/books/1` until each action checked membership by hand
+  ([#99](https://github.com/caramelizedev/caramel/issues/99)); the compile check makes the
+  omission a build error, `open: true` keeps a public tenant page honest, and the generated
+  session-held membership gives a new application a working default to replace.
 - Composite keys let PostgreSQL refuse a reference to another tenant's row, even from raw
   SQL, and the `(tenant, id)` index serves scoped reads.
 - The tenant is bound per fiber and restored, as `Log.with_context` is, because

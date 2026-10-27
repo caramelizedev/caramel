@@ -102,6 +102,22 @@ module TenancySpec
     Caramel.resource_paths :books, :book
   end
 
+  # A tenant page every caller in the tenant sees; the scoping examples need
+  # no membership.
+  abstract struct Open < Action
+    ingress open: true
+  end
+
+  # A tenant page for its members: the X-Member header names the slug the
+  # caller belongs to, standing in for an application's membership table.
+  abstract struct Member < Action
+    ingress authenticate: :member?
+
+    private def member? : Bool
+      request.headers["X-Member"]? == tenant.slug
+    end
+  end
+
   # Which tenant, if any, a central request sees.
   struct Home < Action
     contract do
@@ -122,7 +138,7 @@ module TenancySpec
     end
   end
 
-  struct Dashboard < Action
+  struct Dashboard < Open
     contract do
     end
 
@@ -131,7 +147,16 @@ module TenancySpec
     end
   end
 
-  struct Books < Action
+  struct Settings < Member
+    contract do
+    end
+
+    def handle(contract : Contract)
+      Caramel::Response.new(200, "settings of #{tenant.slug}")
+    end
+  end
+
+  struct Books < Open
     contract do
     end
 
@@ -141,7 +166,7 @@ module TenancySpec
     end
   end
 
-  struct Shown < Action
+  struct Shown < Open
     contract do
       field id : Int64
     end
@@ -152,7 +177,7 @@ module TenancySpec
     end
   end
 
-  struct Streamed < Action
+  struct Streamed < Open
     contract do
     end
 
@@ -163,7 +188,7 @@ module TenancySpec
     end
   end
 
-  struct Renamed < Action
+  struct Renamed < Open
     contract do
       field id : Int64
       field title : String
@@ -175,8 +200,9 @@ module TenancySpec
     end
   end
 
-  # The language switcher's links to French and English.
-  struct Language < Action
+  # The language switcher's links to French and English, central and in a
+  # tenant alike.
+  struct Language < Open
     contract do
     end
 
@@ -192,6 +218,7 @@ module TenancySpec
     get "/switcher", Language
     tenant TenancySpec::Account, by: :slug do
       get "/", Dashboard
+      get "/settings", Settings
       get "/books", Books
       get "/books/:id", Shown
       patch "/books/:id", Renamed
@@ -278,8 +305,11 @@ module TenancySpec
     end
   end
 
-  def self.get(path : String) : Caramel::Response
-    APP.handle(HTTP::Request.new("GET", path, HTTP::Headers{"Host" => HOST}))
+  # A GET of *path*; *member* names the tenant slug the caller belongs to.
+  def self.get(path : String, member : String? = nil) : Caramel::Response
+    headers = HTTP::Headers{"Host" => HOST}
+    headers["X-Member"] = member if member
+    APP.handle(HTTP::Request.new("GET", path, headers))
   end
 
   # A CSRF-protected form post of *body* to *path*.

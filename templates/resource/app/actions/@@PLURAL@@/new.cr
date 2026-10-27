@@ -2,6 +2,10 @@ module App::@@COLLECTION@@
   struct New < App::ApplicationAction
     include Form
 
+    # frappe:only tenant
+    ingress authenticate: :member?
+
+    # frappe:end
     contract do
     end
 
