@@ -98,60 +98,93 @@ module Caramel::Frappe
     def initialize(@framework_root : String, @project : Project, @output : IO, @error : IO)
     end
 
+    # A line of worker output that has not ended after this long is forwarded
+    # as far as it goes, so a spec's progress dots stay visible.
+    QUIET        = 5.seconds
+    RELAY_BUFFER = 4096
+
     def run(paths : Array(String), concurrency : Int32) : Nil
+      started = Time.instant
       files = self.class.spec_files(@project.root, paths)
       settings = self.class.test_environment(@project.root)
       refuse_mocks
       client = LatteClient.new
       client.ready!
       id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
-      template = verified_template(client, id)
+      template = phase("template checked") { verified_template(client, id) }
       tools = Tools.new(@framework_root, @output, @error)
       spec_url = template["SPEC_DATABASE_URL"]
       spec_database = Caramel::Database::Config.parse(spec_url).database
       migration_url = template["SPEC_MIGRATION_DATABASE_URL"]
       groups = self.class.split(files, concurrency)
+      file_count = pluralize(files.size, "spec file")
+      worker_count = pluralize(groups.size, "worker")
+      @output.puts("Corretto: #{file_count} across #{worker_count}")
       # Spec binaries need no database, so they build while the application
       # builds and migrates the template and Latte clones the workers.
       builds = start_builds(tools, groups)
       secret = Random::Secure.hex(32)
       created = [] of Int32
       results = begin
-        tools.app_command(@project, ["migrate"], settings.merge({
-          "CARAMEL_ENV"                   => "test",
-          "CARAMEL_SPEC_DATABASE"         => spec_database,
-          "SPEC_DATABASE_URL"             => spec_url,
-          "SPEC_MIGRATION_DATABASE_URL"   => migration_url,
-          "CARAMEL_EXPECTED_DATABASE_URL" => migration_url,
-        }))
-        environments = groups.map_with_index do |_, offset|
-          index = offset + 1
-          worker = client.test_worker(id, index)
-          created << index
-          settings.merge(worker_environment(client, id, index, worker, secret))
+        phase("template migrated") do
+          tools.app_command(@project, ["migrate"], settings.merge({
+            "CARAMEL_ENV"                   => "test",
+            "CARAMEL_SPEC_DATABASE"         => spec_database,
+            "SPEC_DATABASE_URL"             => spec_url,
+            "SPEC_MIGRATION_DATABASE_URL"   => migration_url,
+            "CARAMEL_EXPECTED_DATABASE_URL" => migration_url,
+          }))
         end
-        file_count = pluralize(files.size, "spec file")
-        worker_count = pluralize(groups.size, "worker")
-        @output.puts("Corretto: #{file_count} across #{worker_count}")
-        run_workers(tools, builds, environments)
+        environments = phase("worker databases cloned") do
+          groups.map_with_index do |_, offset|
+            index = offset + 1
+            worker = client.test_worker(id, index)
+            created << index
+            settings.merge(worker_environment(client, id, index, worker, secret))
+          end
+        end
+        phase("workers finished") { run_workers(tools, builds, environments) }
       ensure
         # A failed migration or clone still waits for the builds it started.
         builds.each(&.receive?)
-        created.each do |index|
-          client.drop_test_worker(id, index)
-        rescue ex : Error
-          @error.puts("Could not drop test worker #{index}: #{ex.message}")
+        unless created.empty?
+          phase("workers dropped") do
+            created.each do |index|
+              client.drop_test_worker(id, index)
+            rescue ex : Error
+              @error.puts("Could not drop test worker #{index}: #{ex.message}")
+            end
+          end
         end
       end
       failed = results.each_with_index
         .reject { |passed, _| passed }
         .map { |_, offset| "w#{offset + 1}" }
         .to_a
-      @output.puts("Corretto: #{results.size - failed.size} of #{results.size} workers passed")
+      total = self.class.format_duration(Time.instant - started)
+      @output.puts("Corretto: #{results.size - failed.size} of #{results.size} workers passed " \
+                   "in #{total}")
       return if failed.empty?
 
       raise Error.new("Specs failed in #{failed.join(", ")}; " \
                       "see the prefixed output above")
+    end
+
+    # Runs the block, then reports `Corretto: <label> in <duration>`.
+    private def phase(label : String, & : -> T) : T forall T
+      started = Time.instant
+      result = yield
+      elapsed = self.class.format_duration(Time.instant - started)
+      @output.puts("Corretto: #{label} in #{elapsed}")
+      result
+    end
+
+    # `4.2s` under a minute, else `m:ss`, as in `3:20`.
+    def self.format_duration(span : Time::Span) : String
+      seconds = span.total_seconds
+      return "%.1fs" % seconds if seconds < 59.95
+      whole = seconds.round.to_i
+      "#{whole // 60}:#{(whole % 60).to_s.rjust(2, '0')}"
     end
 
     # *number* of *noun*, as in `1 worker` or `3 workers`.
@@ -317,12 +350,18 @@ module Caramel::Frappe
       record = File.join(entries, "#{name}.json")
       slot = BuildSlot.new(File.join(entries, name), record, tools.toolchain.root, "corretto")
       fingerprint = signature.try { |value| Digest::SHA256.hexdigest("#{value}\n#{requires}") }
-      return slot.binary if fingerprint && slot.holds?(fingerprint)
+      if fingerprint && slot.holds?(fingerprint)
+        @output.puts("#{prefix}spec binary reused")
+        return slot.binary
+      end
       temporary = File.join(entries, "building-#{name}-#{Random::Secure.hex(4)}")
       begin
         compiler = File.join(@framework_root, "scripts/crystal")
         arguments = ["build", entry, "-o", temporary]
+        started = Time.instant
         return unless relayed(compiler, arguments, tools.environment, prefix)
+        elapsed = self.class.format_duration(Time.instant - started)
+        @output.puts("#{prefix}spec binary built in #{elapsed}")
         slot.install(temporary, fingerprint)
         slot.binary
       ensure
@@ -356,18 +395,57 @@ module Caramel::Frappe
         output: Process::Redirect::Pipe,
         error: Process::Redirect::Pipe)
       done = Channel(Nil).new(2)
-      spawn { relay(process.output, @output, prefix); done.send(nil) }
-      spawn { relay(process.error, @error, prefix); done.send(nil) }
+      spawn { self.class.relay(process.output, @output, prefix); done.send(nil) }
+      spawn { self.class.relay(process.error, @error, prefix); done.send(nil) }
       2.times { done.receive }
       process.wait.success?
     end
 
-    private def relay(source : IO, destination : IO, prefix : String) : Nil
-      source.each_line(chomp: false) do |line|
-        destination << prefix << line
-        destination << '\n' unless line.ends_with?('\n')
-        destination.flush
+    # Forwards *source* to *destination* with *prefix* before each line. A
+    # line still unfinished *quiet* after it began is forwarded as far as it
+    # goes, as its own prefixed line, so progress a spec prints without
+    # newlines shows within *quiet* and a log holds at most one such line
+    # per interval. The rest of the line follows when it ends, or at end of
+    # file.
+    def self.relay(source : IO::FileDescriptor,
+                   destination : IO,
+                   prefix : String,
+                   quiet : Time::Span = QUIET) : Nil
+      buffer = Bytes.new(RELAY_BUFFER)
+      pending = IO::Memory.new
+      since = Time.instant
+      loop do
+        remaining = pending.empty? ? quiet : quiet - (Time.instant - since)
+        source.read_timeout = remaining.clamp(1.millisecond, quiet)
+        count = begin
+          source.read(buffer)
+        rescue IO::TimeoutError
+          forward(destination, prefix, pending) unless pending.empty?
+          next
+        end
+        break if count.zero?
+        chunk = buffer[0, count]
+        while newline = chunk.index('\n'.ord.to_u8)
+          pending.write(chunk[0, newline + 1])
+          forward(destination, prefix, pending)
+          chunk = chunk[newline + 1..]
+        end
+        next if chunk.empty?
+        since = Time.instant if pending.empty?
+        pending.write(chunk)
+        forward(destination, prefix, pending) if Time.instant - since >= quiet
       end
+      forward(destination, prefix, pending) unless pending.empty?
+    end
+
+    # Writes *pending* as one prefixed line and empties it.
+    private def self.forward(destination : IO, prefix : String, pending : IO::Memory) : Nil
+      line = pending.to_slice
+      destination << prefix
+      destination.write(line)
+      destination << '\n' unless line.last == '\n'.ord
+      destination.flush
+      pending.clear
     end
   end
 end

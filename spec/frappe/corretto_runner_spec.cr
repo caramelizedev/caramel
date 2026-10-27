@@ -105,4 +105,62 @@ describe Caramel::Frappe::CorrettoRunner do
       end
     end
   end
+
+  it "formats durations as tenths of a second under a minute, else m:ss" do
+    format = ->(span : Time::Span) { Caramel::Frappe::CorrettoRunner.format_duration(span) }
+    format.call(Time::Span.zero).should eq("0.0s")
+    format.call(4.2.seconds).should eq("4.2s")
+    format.call(59.94.seconds).should eq("59.9s")
+    format.call(59.95.seconds).should eq("1:00")
+    format.call(61.4.seconds).should eq("1:01")
+    format.call(200.seconds).should eq("3:20")
+    format.call(3661.seconds).should eq("61:01")
+  end
+
+  it "relays complete lines at once and an unfinished line after it stays quiet" do
+    reader, writer = IO.pipe
+    log = IO::Memory.new
+    quiet = 50.milliseconds
+    done = Channel(Nil).new
+    spawn do
+      Caramel::Frappe::CorrettoRunner.relay(reader, log, "[w1] ", quiet)
+      done.send(nil)
+    end
+    writer << "1 examples\n.."
+    writer.flush
+    sleep 10.milliseconds
+    log.to_s.should eq("[w1] 1 examples\n")
+    sleep quiet * 4
+    log.to_s.should eq("[w1] 1 examples\n[w1] ..\n")
+    writer << ". done\n"
+    writer.flush
+    sleep 10.milliseconds
+    log.to_s.should eq("[w1] 1 examples\n[w1] ..\n[w1] . done\n")
+    writer << "tail"
+    writer.close
+    done.receive
+    log.to_s.should eq("[w1] 1 examples\n[w1] ..\n[w1] . done\n[w1] tail\n")
+  end
+
+  it "forwards a steady trickle without newlines once per quiet interval" do
+    reader, writer = IO.pipe
+    log = IO::Memory.new
+    done = Channel(Nil).new
+    spawn do
+      Caramel::Frappe::CorrettoRunner.relay(reader, log, "[w2] ", 50.milliseconds)
+      done.send(nil)
+    end
+    40.times do
+      writer << '.'
+      writer.flush
+      sleep 5.milliseconds
+    end
+    writer.close
+    done.receive
+    lines = log.to_s.lines
+    lines.size.should be >= 3
+    lines.size.should be <= 6
+    lines.all?(&.starts_with?("[w2] .")).should be_true
+    lines.join.count('.').should eq(40)
+  end
 end
