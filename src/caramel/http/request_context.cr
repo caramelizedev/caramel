@@ -15,7 +15,7 @@ module Caramel
     getter ingress : Ingress
     @json_q = 0.0
     @html_q = 0.0
-    @session : Hash(String, String)? = nil
+    @session : Session::Data? = nil
     @loaded_session : Hash(String, String)? = nil
     @response_policy : ContentSecurityPolicy? = nil
     @csp_nonce : String? = nil
@@ -55,14 +55,16 @@ module Caramel
     end
 
     # The signed session, verified on first use; an invalid cookie reads as
-    # empty. A route whose ingress turns CSRF off reads an empty session and
-    # never saves it: another site's form carries the browser's cookie, so
-    # the cookie cannot authenticate a request that skipped the CSRF check.
-    def session : Hash(String, String)
+    # empty. A write that would take the cookie past 4 KB raises
+    # `Session::Overflow` and leaves the session as it was. A route whose
+    # ingress turns CSRF off reads an empty session and never saves it:
+    # another site's form carries the browser's cookie, so the cookie cannot
+    # authenticate a request that skipped the CSRF check.
+    def session : Session::Data
       @session ||= begin
         loaded = saved_session || {} of String => String
         @loaded_session = loaded.dup
-        loaded
+        Session::Data.new(loaded)
       end
     end
 

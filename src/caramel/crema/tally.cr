@@ -109,6 +109,13 @@ module Caramel::Crema
       @lock.synchronize { @entries.each { |(kind, key), entry| yield kind, key, entry } }
     end
 
+    # Every row ordered by `{kind, key}`, taken under the Mutex; the entries are shared, not
+    # copied, so use it on a swapped tally that nothing records into any more.
+    def sorted : Array({String, String, Entry})
+      rows = @lock.synchronize { @entries.map { |(kind, key), entry| {kind, key, entry} } }
+      rows.sort_by! { |(kind, key, _)| {kind, key} }
+    end
+
     # Copies of every row, taken under the Mutex and safe to read at leisure.
     def snapshot : Array({String, String, Entry})
       @lock.synchronize { @entries.map { |(kind, key), entry| {kind, key, entry.copy} } }

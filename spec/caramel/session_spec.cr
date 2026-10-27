@@ -37,11 +37,39 @@ struct SessionSpecSignOut < SessionSpecAction
   end
 end
 
+struct SessionSpecNote < SessionSpecAction
+  contract do
+    field note : String
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    session["note"] = contract.note
+    Caramel::Response.new(body: "kept #{session["note"].bytesize}")
+  end
+end
+
+# Rescues the write to show the raise comes from it, not from encoding the
+# response's cookie.
+struct SessionSpecNoteRescued < SessionSpecAction
+  contract do
+    field note : String
+  end
+
+  def handle(contract : Contract) : Caramel::Response
+    session["note"] = contract.note
+    Caramel::Response.new(body: "kept")
+  rescue Caramel::Session::Overflow
+    Caramel::Response.new(body: "refused; session holds #{session.keys.join(",")}")
+  end
+end
+
 module SessionSpecApp
   Caramel::Router.draw do
     get "/whoami", SessionSpecWhoami
     post "/sign-in", SessionSpecSignIn
     post "/sign-out", SessionSpecSignOut
+    post "/note", SessionSpecNote
+    post "/note-rescued", SessionSpecNoteRescued
   end
 end
 
@@ -102,15 +130,67 @@ describe Caramel::Session do
     Caramel::Session.new(secret_b.derive_key("session")).decode(cookie).should be_nil
   end
 
-  it "refuses to write a session over 4 KB and ignores oversized cookies" do
+  # The cookie for {"note" => "x" * k} is 22 + 1 + base64(11 + k) + 1 + 43 bytes.
+  # Unpadded base64 skips some lengths, so no k gives exactly 4096: k = 3010
+  # takes 4095 bytes and k = 3011 takes 4097.
+  it "computes the cookie's size without encoding it, to the byte at the limit" do
+    session = Caramel::Session.new(SESSION_SPEC_CSRF.derive_key("session"))
+    (3000..3010).each do |length|
+      data = {"note" => "x" * length}
+      actual = Caramel::Session::COOKIE_NAME.bytesize + 1 + session.encode(data).bytesize
+      Caramel::Session.cookie_bytes(data).should eq(actual)
+      Caramel::Session.fits?(data).should be_true
+    end
+    Caramel::Session.cookie_bytes({"note" => "x" * 3010}).should eq(4095)
+    Caramel::Session.cookie_bytes({"note" => "x" * 3011}).should eq(4097)
+    Caramel::Session.fits?({"note" => "x" * 3011}).should be_false
+    expect_raises(Caramel::Session::Overflow, "exceeds 4096 bytes") do
+      session.encode({"note" => "x" * 3011})
+    end
+  end
+
+  it "refuses a write past 4 KB at the write and keeps the session as it was" do
+    data = Caramel::Session::Data.new({"user_id" => "42", "note" => "short"})
+    expect_raises(Caramel::Session::Overflow, "exceeds 4096 bytes") do
+      data["note"] = "x" * 3100
+    end
+    data["note"].should eq("short")
+    expect_raises(Caramel::Session::Overflow) { data["draft"] = "x" * 3100 }
+    data.has_key?("draft").should be_false
+    expect_raises(Caramel::Session::Overflow) { data.update("note") { "x" * 3100 } }
+    data["note"].should eq("short")
+    expect_raises(Caramel::Session::Overflow) { data.merge!({"draft" => "x" * 3100}) }
+    data.has_key?("draft").should be_false
+    expect_raises(Caramel::Session::Overflow) { data.put("draft", "x" * 3100) { } }
+    data.has_key?("draft").should be_false
+    expect_raises(Caramel::Session::Overflow) { data.put_if_absent("draft") { "x" * 3100 } }
+    data.has_key?("draft").should be_false
+    expect_raises(Caramel::Session::Overflow) { data.transform_values! { |_| "x" * 3100 } }
+    data.should eq({"user_id" => "42", "note" => "short"})
+    data["note"] = "x" * 2990
+    data["note"].bytesize.should eq(2990)
+  end
+
+  it "ignores an oversized cookie" do
     session = Caramel::Session.new(SESSION_SPEC_CSRF.derive_key("session"))
     fits = session.encode({"note" => "x" * 2900})
-    (Caramel::Session::COOKIE_NAME.bytesize + 1 + fits.bytesize).should be <= 4096
-    session.decode(fits).should eq({"note" => "x" * 2900})
-    expect_raises(Caramel::Session::Overflow, "exceeds 4096 bytes") do
-      session.encode({"note" => "x" * 3100})
-    end
     session.decode("#{fits}#{"x" * 4096}").should be_nil
+  end
+
+  it "answers 500 with no cookie when an action's session write overflows" do
+    kept = session_spec_request("POST", "/note", body: "note=#{"x" * 3010}")
+    kept.status.should eq(200)
+    kept.body.should eq("kept 3010")
+    session_set_cookie(kept).should_not be_nil
+
+    refused = session_spec_request("POST", "/note", body: "note=#{"x" * 3011}")
+    refused.status.should eq(500)
+    session_set_cookie(refused).should be_nil
+
+    rescued = session_spec_request("POST", "/note-rescued", body: "note=#{"x" * 3011}")
+    rescued.status.should eq(200)
+    rescued.body.should eq("refused; session holds ")
+    session_set_cookie(rescued).should be_nil
   end
 
   it "issues an expiry-free host-only cookie only when an action changes the session" do

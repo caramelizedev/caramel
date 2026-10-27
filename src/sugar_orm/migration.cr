@@ -103,6 +103,8 @@ module SugarORM
     alias Failure = Drift | ConcurrentIndexFailed | ValidationFailed | LockTimedOut
 
     LOCK_ID            = 0x434152414D454C_i64
+    LOCK_SQL           = "SELECT pg_advisory_lock($1)"
+    UNLOCK_SQL         = "SELECT pg_advisory_unlock($1)"
     LOCK_NOT_AVAILABLE = "55P03"
     LOCK_RETRY_DELAYS  = [1.second, 2.seconds, 4.seconds]
     @migrations : Array(Migration)
@@ -130,11 +132,12 @@ module SugarORM
     # linted before any statement executes. Each transactional migration runs in
     # a transaction of its own that also writes its journal row, so a failure
     # keeps the migrations before it. An online migration runs each statement in
-    # autocommit and is journaled last.
+    # autocommit and is journaled last. A failing unlock only warns, so the
+    # migration's own error reaches the operator when the connection broke.
     def migrate(dev_override : Bool = false,
                 environment : String = Linter.environment) : Int32
       @db.using_connection do |connection|
-        connection.exec("SELECT pg_advisory_lock($1)", LOCK_ID)
+        connection.exec(LOCK_SQL, LOCK_ID)
         begin
           pending = pending(connection)
           Linter.enforce(Linter.lint(pending), dev_override, environment, @warnings)
@@ -155,9 +158,19 @@ module SugarORM
           end
           pending.size
         ensure
-          connection.exec("SELECT pg_advisory_unlock($1)", LOCK_ID)
+          release_lock(connection)
         end
       end
+    end
+
+    # A session-level advisory lock dies with its session, so when the unlock
+    # itself fails (the connection is already gone) nothing is lost: warn and
+    # let the exception in flight propagate instead of replacing it.
+    private def release_lock(connection : DB::Connection) : Nil
+      connection.exec(UNLOCK_SQL, LOCK_ID)
+    rescue error
+      @warnings.puts "pg_advisory_unlock failed (#{error.class}); " \
+                     "the lock is released with the session"
     end
 
     # A lock timeout rolls the migration back; it runs again after each of

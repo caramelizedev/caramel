@@ -8,28 +8,93 @@ module Caramel
   # The signed, client-held login session: `__Host-caramel_session` carries
   # base64url JSON of a String => String hash and its HMAC-SHA256. It has no
   # server-side expiry and lives until the browser session ends or the
-  # application clears it (`sign_out`).
+  # application clears it (`sign_out`). The hash an action gets is a `Data`:
+  # a write that would take the Set-Cookie past 4 KB raises `Overflow` at
+  # the write, before the action does anything else.
   class Session
     COOKIE_NAME      = "__Host-caramel_session"
     MAX_COOKIE_BYTES = 4096
+    # An HMAC-SHA256 digest in unpadded base64url.
+    SIGNATURE_BYTES  = 43
     OVERFLOW_MESSAGE = "The session exceeds #{MAX_COOKIE_BYTES} bytes. Store large " \
                        "values in the database and keep only their ids in the session."
 
     class Overflow < Exception
     end
 
+    # The session an action reads and writes. Every writer that can grow it
+    # (`[]=`, `merge!`, `update`, `put`, `put_if_absent`, `transform_values!`)
+    # checks that the cookie still fits, and one that would not leaves the
+    # session as it was and raises `Overflow`.
+    class Data < Hash(String, String)
+      def initialize(loaded : Hash(String, String))
+        super()
+        merge!(loaded)
+      end
+
+      def []=(key : String, value : String) : String
+        previous = self[key]?
+        super
+        return value if Session.fits?(self)
+
+        previous ? super(key, previous) : delete(key)
+        raise Overflow.new(OVERFLOW_MESSAGE)
+      end
+
+      def update(key : String, & : String -> String) : String
+        previous = self[key]
+        self[key] = yield previous
+        previous
+      end
+
+      def put(key : String, value : String, &)
+        return put_present(key, value) if has_key?(key)
+
+        self[key] = value
+        yield key
+      end
+
+      def put_if_absent(key : String, & : String -> String) : String
+        fetch(key) { self[key] = yield key }
+      end
+
+      def transform_values!(& : String, String -> String) : self
+        keys.each { |key| self[key] = yield self[key], key }
+        self
+      end
+
+      private def put_present(key : String, value : String) : String
+        previous = self[key]
+        self[key] = value
+        previous
+      end
+    end
+
+    # The bytes the Set-Cookie name=value pair for `data` takes, without
+    # encoding it: the name, `=`, the unpadded base64 of the JSON, `.` and
+    # the signature.
+    def self.cookie_bytes(data : Hash(String, String)) : Int32
+      payload = (4 * data.to_json.bytesize + 2) // 3
+      COOKIE_NAME.bytesize + 1 + payload + 1 + SIGNATURE_BYTES
+    end
+
+    # Whether the Set-Cookie for `data` stays within `MAX_COOKIE_BYTES`,
+    # past which browsers silently drop it.
+    def self.fits?(data : Hash(String, String)) : Bool
+      cookie_bytes(data) <= MAX_COOKIE_BYTES
+    end
+
     def initialize(@key : Bytes)
     end
 
     # The cookie value for `data`; raises `Overflow` when the Set-Cookie
-    # name=value pair would exceed 4 KB, which browsers silently drop.
+    # name=value pair would exceed 4 KB. `Data` refuses such a write already;
+    # this guards a hash built some other way.
     def encode(data : Hash(String, String)) : String
+      raise Overflow.new(OVERFLOW_MESSAGE) unless Session.fits?(data)
+
       payload = Base64.urlsafe_encode(data.to_json, padding: false)
-      value = "#{payload}.#{sign(payload)}"
-      if COOKIE_NAME.bytesize + 1 + value.bytesize > MAX_COOKIE_BYTES
-        raise Overflow.new(OVERFLOW_MESSAGE)
-      end
-      value
+      "#{payload}.#{sign(payload)}"
     end
 
     # The session a cookie value carries, or nil when it is oversized,

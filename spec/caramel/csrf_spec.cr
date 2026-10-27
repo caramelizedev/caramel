@@ -26,6 +26,21 @@ describe Caramel::CSRF do
     csrf.valid?(request, token).should be_false
   end
 
+  it "normalises a capitalised origin with :443 and matches Origin without case or port" do
+    csrf = Caramel::CSRF.new("s" * 64, "https://Example.com:443")
+    csrf.origin.should eq("https://example.com")
+    token = csrf.issue
+    cookie = "__Host-caramel_csrf=#{token}"
+    {"https://example.com", "https://example.com:443"}.each do |origin|
+      headers = HTTP::Headers{"Origin" => origin, "Cookie" => cookie}
+      csrf.valid?(HTTP::Request.new("POST", "/", headers), token).should be_true
+    end
+    {"https://example.com.evil", "https://other.example.com"}.each do |origin|
+      headers = HTTP::Headers{"Origin" => origin, "Cookie" => cookie}
+      csrf.valid?(HTTP::Request.new("POST", "/", headers), token).should be_false
+    end
+  end
+
   it "fails a token issued under one APP_SECRET when another secret is configured" do
     origin = "https://bookshelf.caramel"
     secret_a = Caramel::CSRF.new("a" * 64, origin)

@@ -51,4 +51,14 @@ describe Caramel::Crema::Tally do
     other.count.should eq(2)
     copy.find! { |row| row[1] == "a" }[2].count.should eq(1)
   end
+
+  it "orders sorted rows by kind then key whatever order they were recorded in" do
+    tally = Caramel::Crema::Tally.new
+    tally.record("sql", "z", 1.0, false)
+    tally.record("sql", "a", 1.0, false)
+    tally.record("request", "z", 1.0, false)
+    tally.record("request", "a", 1.0, false)
+    rows = tally.sorted.map { |(kind, key, _)| {kind, key} }
+    rows.should eq([{"request", "a"}, {"request", "z"}, {"sql", "a"}, {"sql", "z"}])
+  end
 end

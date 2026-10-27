@@ -865,6 +865,44 @@ describe "SugarORM with PostgreSQL" do
     end
   end
 
+  it "reads the row on an update with no changes, and reports a deleted one as gone" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      team = SugarSpec::Team.create!(name: "Acme")
+      owner.exec("UPDATE sugar_teams SET updated_at = '2000-01-01' WHERE id = $1", team.id)
+      unchanged = SugarSpec::Team::UpdateChangeset.new(team, seats: team.seats)
+      delta = SugarSpec.statements { SugarORM::Repo.update(unchanged) }
+      delta.should eq(1)
+      unchanged.saved?.should be_true
+      unchanged.record.seats.should eq(team.seats)
+      unchanged.record.updated_at.should be < Time.utc(2001, 1, 1)
+
+      owner.exec("DELETE FROM sugar_teams WHERE id = $1", team.id)
+      gone = SugarORM::Repo.update(SugarSpec::Team::UpdateChangeset.new(team))
+      gone.saved?.should be_false
+      gone.stale?.should be_false
+      gone.errors.should eq({"_base" => ["Record no longer exists"]})
+    end
+  end
+
+  it "leaves the version alone on an update with no changes, and rejects a stale copy" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      stored = SugarSpec::Sale.create!(tea_id: 1_i64, sold: 1)
+      owner.exec("UPDATE sugar_sales SET updated_at = '2000-01-01' WHERE id = $1", stored.id)
+      unchanged = SugarORM::Repo.update(SugarSpec::Sale::Count.new(stored, sold: 1))
+      unchanged.saved?.should be_true
+      unchanged.record.lock_version.should eq(0)
+      unchanged.record.updated_at.should be < Time.utc(2001, 1, 1)
+      SugarSpec::Sale.query.find!(stored.id).lock_version.should eq(0)
+
+      SugarORM::Repo.update(SugarSpec::Sale::Count.new(stored, sold: 2)).saved?.should be_true
+      stale = SugarORM::Repo.update(SugarSpec::Sale::Count.new(stored, sold: 1))
+      stale.saved?.should be_false
+      stale.stale?.should be_true
+      stale.errors.should eq({"_base" => ["Record changed since you loaded it"]})
+      SugarSpec::Sale.query.find!(stored.id).sold.should eq(2)
+    end
+  end
+
   it "upserts one row per key: the second call updates what update: names" do
     SugarSpec.with_tables(owner_url, runtime_url) do
       first = SugarORM::Repo.insert(SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 1))

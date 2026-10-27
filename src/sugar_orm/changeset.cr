@@ -440,8 +440,7 @@ module SugarORM
         return
       end
       if @changes.empty?
-        @record = original
-        @saved = true
+        write { stored_row(original, version) }
         return
       end
       assignments = @changes.keys.map_with_index do |column, index|
@@ -549,6 +548,22 @@ module SugarORM
       {column, value.to_i64}
     end
 
+    # The row a no-change update reads instead of writing: by primary key, the tenant's and, on
+    # a versioned schema, at the loaded version, so a row gone or changed meanwhile answers as
+    # it would to a changed update. `version` is `loaded_version`'s result, untyped because an
+    # unversioned schema narrows it to `{NoReturn, Int64}?`.
+    private def stored_row(original : T, version) : T?
+      args = [original.__sugar_primary_value] of Value
+      predicate = %("#{T.__sugar_primary_key}" = $1)
+      if version
+        args << version[1]
+        predicate += %( AND "#{version[0]}" = $2)
+      end
+      sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
+            "WHERE #{predicate}#{SugarORM.tenant_filter(T, args)}"
+      Repo.query_one?(sql, args) { |rows| T.from_row(rows) }
+    end
+
     private def mark_stale : Nil
       @stale = true
       add_error("_base", Wording.record_stale)
@@ -573,8 +588,8 @@ module SugarORM
       !Repo.query_one?(sql, args, &.read(Int32)).nil?
     end
 
-    # Runs the write; inside a transaction a changeset with unique or check
-    # constraints writes under a savepoint so a mapped violation leaves the
+    # Runs the write (or a no-change update's read); inside a transaction a changeset with
+    # unique or check constraints writes under a savepoint so a mapped violation leaves the
     # transaction usable.
     # The block is captured so its query is compiled once, not once per path.
     private def write(&query : -> T?) : Nil

@@ -4,6 +4,13 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- `APP_ORIGIN` is normalised once: the host is lowercased and an explicit `:443` dropped, so `https://Example.com:443` works, and a request whose `Host` or `Origin` header differs from the origin only in case or by `:443` is accepted instead of answering 421 or 403. `Caramel::CSRF#origin` returns the normalised form (`https://example.com`).
+- A session write that would take the `__Host-caramel_session` cookie past 4096 bytes (`session["key"] = value`, `merge!`, `update`, `put`, `put_if_absent` or `transform_values!`) raises `Caramel::Session::Overflow` at the write and leaves the session as it was, so an action fails there instead of answering 500 after the records it wrote committed. `session` is now a `Caramel::Session::Data`, a `Hash(String, String)` subclass; `Caramel::Session.fits?(data)` and `.cookie_bytes(data)` say whether and how big a hash would encode, and `Session#encode` still raises `Overflow` for a hash built some other way.
+- An `update` whose changeset changes nothing no longer reports success without a query: it writes nothing (no `updated_at` bump, no version increment) but reads the row by key, tenant and loaded version, so a row deleted meanwhile adds `Record no longer exists` under `_base` and, on a versioned schema, a stale copy adds `Record changed since you loaded it` with `stale?` true. Code that relied on a no-change update of a missing row being `saved?` must handle the error.
+- `SugarORM::Migrator#migrate` no longer lets a failing `pg_advisory_unlock` replace the migration's own error: when the connection broke mid-run the statement's exception (typically `DB::ConnectionLost`) propagates, and the unlock failure is one line on the migrator's warnings IO; the session-level lock dies with its session anyway.
+- Cold Brew's schedule lease takes its advisory lock in Caramel's two-key namespace (`Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE`, `hashtext(name)`), so it no longer meets an application's own `pg_advisory_lock(n)`. A schedule block that raises now counts its period as run, so the next attempt comes after its span instead of within a minute; a block that must retry sooner should enqueue a job.
+- Crema's metrics recorder upserts each window's `caramel_metrics` rows in `(kind, key)` order, so a web process and a worker flushing the same minute no longer deadlock and drop a window.
+
 ## 0.19.0 - 2026-10-25
 
 ### Upgrade notes
