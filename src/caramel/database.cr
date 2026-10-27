@@ -351,8 +351,9 @@ module Caramel
 
     # One connection outside any pool under the same transport policy, for a
     # session that waits by design, such as LISTEN: its handshake keeps
-    # IO_TIMEOUT, later reads wait indefinitely. The protocol connection is
-    # for the caller's own frame loop.
+    # IO_TIMEOUT, later reads wait indefinitely, bounded by TCP keepalive and
+    # the caller's own ping. The protocol connection is for the caller's own
+    # frame loop.
     def self.listener(url : String) : {PG::Connection, PQ::Connection}
       config = Config.parse(url, 1, "caramel-listen")
       if config.unix_socket?

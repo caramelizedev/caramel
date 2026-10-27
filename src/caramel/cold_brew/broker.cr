@@ -7,11 +7,13 @@ module Caramel::ColdBrew
   # over one dedicated connection per process. It LISTENs when a channel
   # gains its first subscriber and UNLISTENs when it loses its last, and
   # after a lost connection it reconnects with backoff and LISTENs again;
-  # notifications sent while it is disconnected are lost. Each subscriber
-  # receives payloads in publish order from a mailbox its own fiber drains;
-  # a payload it does not receive within 1 s is dropped, so no subscriber
-  # holds up the broker or the others. A subscription ends with
-  # `unsubscribe`, a closed channel, or the end of the fiber that
+  # notifications sent while it is disconnected are lost. A `SELECT 1`
+  # every PING_INTERVAL finds a connection that stopped answering, which
+  # TCP keepalive alone would report only once its probes ran out. Each
+  # subscriber receives payloads in publish order from a mailbox its own
+  # fiber drains; a payload it does not receive within 1 s is dropped, so
+  # no subscriber holds up the broker or the others. A subscription ends
+  # with `unsubscribe`, a closed channel, or the end of the fiber that
   # subscribed, so an SSE action's subscription ends with its stream.
   class Broker
     Log = ::Log.for("cold_brew.pubsub")
@@ -20,6 +22,7 @@ module Caramel::ColdBrew
     DELIVERY_TIMEOUT    = 1.second
     MAILBOX_LIMIT       = 10_000
     MAX_RECONNECT_DELAY = 5.seconds
+    PING_INTERVAL       = 30.seconds
 
     # One subscription and its ordered mailbox. A fiber delivers while
     # payloads wait and gives each DELIVERY_TIMEOUT to be received.
@@ -69,16 +72,19 @@ module Caramel::ColdBrew
     end
 
     # One LISTEN session. Only its reader fiber reads the socket; commands
-    # are written by the caller and acknowledged by the reader in order.
+    # are written by the caller and acknowledged by the reader in order. A
+    # ping fiber sends `SELECT 1` every *ping_interval* while the session
+    # is open, so a session that stopped answering fails within ACK_TIMEOUT.
     class Link
       getter pid : Int32
 
-      def self.open(url : String, broker : Broker) : Link
+      def self.open(url : String, broker : Broker, ping_interval : Time::Span) : Link
         connection, pq = Caramel::Database.listener(url)
         begin
           pid = connection.scalar("SELECT pg_backend_pid()").as(Int32)
           link = new(connection, pq, pid, broker)
           spawn(name: "cold_brew:listen") { link.read }
+          spawn(name: "cold_brew:ping") { link.ping(ping_interval) }
           link
         rescue error
           connection.close rescue nil
@@ -145,6 +151,22 @@ module Caramel::ColdBrew
         @broker.lost(self) if lost
       end
 
+      # :nodoc:
+      # Runs until the link closes. A ping the server does not acknowledge
+      # within ACK_TIMEOUT drops the connection, and the reader then reports
+      # the loss; any other failure drops it too, logged by the reader.
+      def ping(interval : Time::Span) : Nil
+        loop do
+          sleep interval
+          return if @closed
+          command("SELECT 1")
+        end
+      rescue error : IO::TimeoutError
+        Log.warn { "LISTEN ping timed out error_type=#{error.class}; reconnecting" }
+      rescue
+        drop_connection
+      end
+
       private def acknowledge(error : Exception?) : Nil
         @acks.shift?.try(&.send(error))
       end
@@ -177,7 +199,8 @@ module Caramel::ColdBrew
       end
     end
 
-    def initialize(@url : String)
+    # *ping_interval* is how often the LISTEN connection runs `SELECT 1`.
+    def initialize(@url : String, @ping_interval : Time::Span = PING_INTERVAL)
       Caramel::Database::Config.parse(@url, 1)
       @subscribers = {} of String => Array(Subscriber)
       @lock = Mutex.new
@@ -293,7 +316,7 @@ module Caramel::ColdBrew
       if (link = @link) && link.open?
         return link
       end
-      link = Link.open(@url, self)
+      link = Link.open(@url, self, @ping_interval)
       begin
         @subscribers.keys.each { |name| link.listen(name) }
       rescue error
