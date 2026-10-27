@@ -29,18 +29,31 @@ module Caramel::ColdBrew
   end
 
   # One fiber per schedule. Each tick takes the lease: a
-  # `pg_try_advisory_xact_lock(hashtext(name))` and the schedule's
-  # `caramel_schedules` row, updated only once the period has elapsed. A tick holds
-  # one of SCHEDULE_SLOTS while it does, so the blocks never take more of the pool.
+  # `pg_try_advisory_xact_lock(LOCK_NAMESPACE, hashtext(name))` and the schedule's
+  # `caramel_schedules` row, updated only once the period has elapsed. A block that
+  # raises rolls the lease back, but its attempt is recorded, so its period counts as
+  # run and the next attempt comes after the span. A tick holds one of SCHEDULE_SLOTS
+  # while it does, so the blocks never take more of the pool.
   class Scheduler
     Log = ::Log.for("cold_brew.scheduler")
 
-    LOCK = "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS held"
+    # Caramel's advisory-lock namespace ("cara" in ASCII): the first key of every
+    # two-key lock Caramel takes, so a lease never meets an application's own
+    # `pg_advisory_lock(n)` in the one-key space.
+    LOCK_NAMESPACE = 0x6361_7261
+
+    LOCK = "SELECT pg_try_advisory_xact_lock($1, hashtext($2)) AS held"
 
     LEASE = <<-SQL
       INSERT INTO caramel_schedules AS schedules (name, last_run_at) VALUES ($1, now())
       ON CONFLICT (name) DO UPDATE SET last_run_at = now()
       WHERE schedules.last_run_at <= now() - make_interval(secs => $2)
+      RETURNING name
+      SQL
+
+    FAILED = <<-SQL
+      INSERT INTO caramel_schedules (name, last_run_at) VALUES ($1, now())
+      ON CONFLICT (name) DO UPDATE SET last_run_at = now()
       RETURNING name
       SQL
 
@@ -106,17 +119,35 @@ module Caramel::ColdBrew
 
     private def run_leased(schedule : Schedule) : Bool
       ran = false
+      started = false
       SugarORM::Repo.using(@db) do
         SugarORM::Repo.transaction do
-          held = SugarORM.sql(LOCK, schedule.name, as: {held: Bool}).first[:held]
+          held = SugarORM.sql(LOCK, LOCK_NAMESPACE, schedule.name, as: {held: Bool}).first[:held]
           next unless held
           period = schedule.span.total_seconds
           next if SugarORM.sql(LEASE, schedule.name, period, as: {name: String}).empty?
+          started = true
           Crema.schedule(schedule.name) { schedule.block.call }
           ran = true
         end
+      rescue error
+        record_failure(schedule) if started
+        raise error
       end
       ran
+    end
+
+    # The lease rolled back with the block; this autocommit upsert still counts the
+    # period as run. When recording itself fails, the block's error is the one to
+    # propagate, so this one is only logged.
+    private def record_failure(schedule : Schedule) : Nil
+      SugarORM::Repo.using(@db) do
+        SugarORM.sql(FAILED, schedule.name, as: {name: String})
+      end
+    rescue error
+      Log.warn do
+        "schedule=#{schedule.name} could not record a failed run error_type=#{error.class}"
+      end
     end
 
     private def tick(schedule : Schedule) : Nil
@@ -130,13 +161,21 @@ module Caramel::ColdBrew
           unless Crema.reported?(error)
             Crema.report(error, handled: false, source: "cold_brew.scheduler")
           end
-          {schedule.span, @retry}.min
+          after_error(schedule, floor)
         end
         select
         when @stopping.receive?
         when timeout(wait)
         end
       end
+    end
+
+    # A failed block's period counts as run, so the next attempt waits like a
+    # successful one; `@retry` only covers a database that cannot say how long.
+    private def after_error(schedule : Schedule, floor : Time::Span) : Time::Span
+      remaining(schedule).clamp(floor, schedule.span)
+    rescue
+      {schedule.span, @retry}.min
     end
 
     private def remaining(schedule : Schedule) : Time::Span

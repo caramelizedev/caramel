@@ -1054,7 +1054,7 @@ describe Caramel::ColdBrew::Scheduler do
     end
   end
 
-  it "rolls the lease back with a block that raises" do
+  it "counts a block that raises as run, so the next attempt waits for its span" do
     ColdBrewSpec.reset
     attempts = 0
     schedule = Brew::Schedule.new(1.hour, "flaky", -> do
@@ -1065,11 +1065,54 @@ describe Caramel::ColdBrew::Scheduler do
     end)
     scheduler = Brew::Scheduler.new([schedule], ColdBrewSpec.runtime)
     expect_raises(Exception, "broken") { scheduler.run_due(schedule) }
-    ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_schedules", as: Int64).should eq(0)
+    fresh = "SELECT last_run_at > now() - interval '1 minute' AS value " \
+            "FROM caramel_schedules WHERE name = 'flaky'"
+    ColdBrewSpec.scalar(fresh, as: Bool).should be_true
+    scheduler.run_due(schedule).should be_false
+    attempts.should eq(1)
+    ColdBrewSpec.scalar("SELECT count(*) AS value FROM caramel_jobs", as: Int64).should eq(0)
+    lapse = "UPDATE caramel_schedules " \
+            "SET last_run_at = last_run_at - interval '61 minutes'"
+    ColdBrewSpec.owner.exec(lapse)
     scheduler.run_due(schedule).should be_true
+    attempts.should eq(2)
     labels = "SELECT payload->>'label' AS label FROM caramel_jobs"
     rows = SugarORM.sql(ColdBrewSpec.owner, labels, as: {label: String})
     rows.map(&.[:label]).should eq(["attempt 2"])
+  end
+
+  it "takes the lease in Caramel's advisory-lock namespace, apart from one-key locks" do
+    ColdBrewSpec.reset
+    runs = 0
+    schedule = Brew::Schedule.new(1.hour, "namespaced", -> { runs += 1; nil })
+    scheduler = Brew::Scheduler.new([schedule], ColdBrewSpec.runtime)
+    holder = Caramel::Database.open(ColdBrewSpec.runtime_url, 1)
+    begin
+      holder.using_connection do |session|
+        session.exec("SELECT pg_advisory_lock(hashtext($1))", schedule.name)
+        begin
+          scheduler.run_due(schedule).should be_true
+          runs.should eq(1)
+        ensure
+          session.exec("SELECT pg_advisory_unlock_all()")
+        end
+      end
+      ColdBrewSpec.owner.exec("TRUNCATE caramel_schedules")
+      holder.using_connection do |session|
+        namespaced = "SELECT pg_advisory_lock($1, hashtext($2))"
+        session.exec(namespaced, Brew::Scheduler::LOCK_NAMESPACE, schedule.name)
+        begin
+          scheduler.run_due(schedule).should be_false
+          runs.should eq(1)
+        ensure
+          session.exec("SELECT pg_advisory_unlock_all()")
+        end
+      end
+      scheduler.run_due(schedule).should be_true
+      runs.should eq(2)
+    ensure
+      holder.close
+    end
   end
 
   it "runs at most its slots of blocks at once and lets the others wait" do
