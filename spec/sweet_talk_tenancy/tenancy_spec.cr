@@ -9,8 +9,8 @@ alias Fulfilment = TenantShop::Fulfilment
 alias Reporting = TenantShop::Reporting
 
 module TenancySpecs
-  TENANTED = %w[fulfilment_parcels ordering_holds ordering_order_lines ordering_orders
-    ordering_sales stock_crates]
+  TENANTED = %w[fulfilment_labels fulfilment_parcels ordering_holds ordering_order_lines
+    ordering_orders ordering_sales stock_crates]
   LAPSE     = "TenantShop::Ordering::Hold::LapseDeadline"
   TOTALS    = "TenantShop::Reporting::Totals::WhenOrderingOrderPlaced"
   PLACED    = "sweettalk.ordering.order.placed"
@@ -251,7 +251,7 @@ describe "SweetTalk with tenancy" do
       slot = Ordering::Slot.new(order: 424242, tea: sencha.id.raw)
       {acme, globex}.each do |tenant|
         Caramel::Tenancy.with(tenant) do
-          SugarORM::Repo.transaction { SweetTalk.__sweettalk_unit { Ordering::Hold[slot] } }
+          SugarORM::Repo.transaction { SweetTalk.__sweettalk_work { Ordering::Hold[slot] } }
         end
       end
 
@@ -309,6 +309,24 @@ describe "SweetTalk with tenancy" do
       {"fk_ordering_order_lines_order_id", ["order_id", "account_id"], ["id", "account_id"]},
       {"fk_ordering_order_lines_tea_id", ["tea_id"], ["id"]},
     ])
+  end
+
+  it "keeps a unique value unique within each tenant, so two tenants may share it" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      [acme, globex].each do |account|
+        Caramel::Tenancy.with(account) { Fulfilment::Label.create(code: "FRAGILE") }
+      end
+      Caramel::Tenancy.with(acme) do
+        expect_raises(SweetTalk::Refusal, "Label code must be unique") do
+          Fulfilment::Label.create(code: "FRAGILE")
+        end
+        Fulfilment::Label.all.size.should eq(1)
+      end
+      table = SugarORM::Catalog.declared.find! { |declared| declared.name == "fulfilment_labels" }
+      table.indexes.find! { |index| index.name == "index_fulfilment_labels_on_code" }.columns
+        .should eq(["code", "account_id"])
+    end
   end
 
   it "migrates to a clean diff" do

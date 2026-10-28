@@ -47,12 +47,12 @@ module SweetTalk
     def self.__sweettalk_on_{{ suffix }}({{ parameters.id }}) : Nil
       ::SweetTalk.__sweettalk_handling("a whenever handler", "use each: or a second whenever") do
         {% if kind == "process" %}
-          ::SweetTalk.__sweettalk_unit do
+          ::SweetTalk.__sweettalk_work do
             row = self[__sweettalk_key_{{ suffix }}({{ names.id }})]
             row.__sweettalk_step_{{ suffix }}({{ names.id }})
           end
         {% elsif kind == "projection" %}
-          ::SweetTalk.__sweettalk_unit do
+          ::SweetTalk.__sweettalk_work do
             {{ block.body }}
           end
         {% else %}
@@ -167,7 +167,7 @@ module SweetTalk
     def self.__sweettalk_compensate_{{ suffix }}({{ parameters.id }}) : Nil
       ::SweetTalk.__sweettalk_handling("a compensation", ::SweetTalk::INSTEAD) do
         {% if kind == "process" %}
-          ::SweetTalk.__sweettalk_unit do
+          ::SweetTalk.__sweettalk_work do
             row = self[__sweettalk_key_{{ suffix }}({{ names.id }})]
             row.__sweettalk_undo_{{ suffix }}({{ names.id }}, {{ refusal }})
           end

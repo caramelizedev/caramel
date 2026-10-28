@@ -29,9 +29,22 @@ module SweetTalk
     end
   end
 
-  # An aggregate's typed id, `Name::Id`, or a record's, `RecordId(Account)`.
+  # An aggregate's typed id, `Name::Id`, an entity's, or a record's, `RecordId(Account)`.
+  # `SweetTalk.lock` locks an aggregate's rows through its id; an entity's or a record's
+  # id names no row it may lock.
   abstract struct Identity
     abstract def raw : Int64
+
+    # The table whose row this id names, for `SweetTalk.lock`.
+    def __sweettalk_table : String
+      raise ArgumentError.new("SweetTalk.lock locks aggregates by their ids, and " \
+                              "#{self.class.name} is not an aggregate's id")
+    end
+
+    # Locks the live rows of *raws* in this id's table, by id, in one statement.
+    def __sweettalk_lock(raws : Array(Int64)) : Nil
+      __sweettalk_table
+    end
   end
 
   # The id of a record of an application's own SugarORM schema, such as `Account`, that

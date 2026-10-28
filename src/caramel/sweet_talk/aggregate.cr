@@ -208,7 +208,7 @@ module SweetTalk
           \{% named = attributes.select { |attribute| {{ given }}.includes?(attribute[0]) }
                .map { |attribute| "#{attribute[0].id}: #{attribute[0].id}" } %}
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
-            ::SweetTalk.__sweettalk_enter(nil)
+            ::SweetTalk.__sweettalk_enter(self)
             aggregate = __sweettalk_assemble(\{{ named.join(", ").id }})
             aggregate.__sweettalk_make_{{ verb }}({{ call.args.map(&.var).splat }})
             aggregate
@@ -374,6 +374,29 @@ module SweetTalk
         def to_s(io : IO) : Nil
           io << raw
         end
+
+        # The table whose row this id names, and the lock of a batch of such rows, for
+        # `SweetTalk.lock` (ADR 0046).
+        def __sweettalk_table : String
+          {{ table }}
+        end
+
+        def __sweettalk_lock(raws : Array(Int64)) : Nil
+          {{ @type }}.__sweettalk_lock(raws)
+        end
+      end
+
+      def self.__sweettalk_table : String
+        {{ table }}
+      end
+
+      # Locks the live rows of *raws* `FOR UPDATE`, by id, in one statement; an id with no
+      # live row raises `Missing`.
+      def self.__sweettalk_lock(raws : Array(Int64)) : Nil
+        held = {{ row }}.query.where(removed_at: nil).where(id: raws).order_by(:id, :asc).lock
+        absent = raws - held.to_a.map(&.id)
+        return if absent.empty?
+        raise ::SweetTalk::Missing.new("{{ missing.id }}#{absent.first}.")
       end
 
       def initialize({{ positional.join(", ").id }})
@@ -430,7 +453,7 @@ module SweetTalk
         # timed as a domain span named `Catalogue::Tea.create`.
         def self.create({{ named.id }}) : self
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
-            ::SweetTalk.__sweettalk_enter(nil)
+            ::SweetTalk.__sweettalk_enter(self)
             aggregate = new({{ attributes.map(&.[0].id).splat }})
             ::SugarORM::Repo.transaction do
               aggregate.__sweettalk_check
@@ -497,17 +520,42 @@ module SweetTalk
         {% end %}
       end
 
-      # Writes the root through its changeset, then each entity, each only when a column
-      # changes; deletes, in one statement per list, the entity rows this aggregate loaded
-      # and no longer holds, and none when it dropped none.
+      {% constraints = @type.constants.select(&.starts_with?("SWEETTALK_CONSTRAINT_"))
+           .map { |constant| @type.constant(constant) }.sort_by { |constraint| constraint[1] } %}
+      # The sentence each unique index and check this aggregate declared refuses with, by
+      # the constraint's name (ADR 0045); a violation of any other constraint stays raw.
+      SWEETTALK_REFUSALS = {
+        {% for constraint in constraints %}
+          {% if constraint[4] %}
+            {{ constraint[3].id }} => {{ constraint[4] }},
+          {% end %}
+        {% end %}
+      } of String => String
+
+      # Deletes, in one statement per list, the entity rows this aggregate loaded and no
+      # longer holds, and none when it dropped none; then writes the root through its
+      # changeset and each entity, each only when a column changes. The deletes come first
+      # so an entity replaced by one with the same unique value saves.
       def __sweettalk_save : Nil
+        {% for collection in collections %}
+          held = @{{ collection[0].id }}.compact_map { |entity| entity.@__sweettalk_id }
+          dropped = @__sweettalk_loaded_{{ collection[0].id }} - held
+          unless dropped.empty?
+            {{ row }}::{{ collection[3][6..-2].id }}.query.where({{ foreign }}: __sweettalk_raw_id)
+              .where(id: dropped).delete_all
+          end
+        {% end %}
         changeset = if row = @__sweettalk_row
                       {{ row }}::Changeset.new(row, {{ columns.join(", ").id }})
                     else
                       {{ row }}::Changeset.new({{ columns.join(", ").id }})
                     end
         unless row && changeset.changes.empty? && changeset.valid?
-          row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
+          begin
+            row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
+          rescue error : ::SugarORM::UniqueViolation | ::SugarORM::CheckViolation
+            ::SweetTalk.__sweettalk_refuse(error, SWEETTALK_REFUSALS)
+          end
           unless changeset.saved?
             raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; "))
           end
@@ -515,13 +563,8 @@ module SweetTalk
           @__sweettalk_id = changeset.record.id
         end
         {% for collection in collections %}
-          kept = @{{ collection[0].id }}.map(&.__sweettalk_save({{ foreign }}: __sweettalk_raw_id))
-          dropped = @__sweettalk_loaded_{{ collection[0].id }} - kept
-          unless dropped.empty?
-            {{ row }}::{{ collection[3][6..-2].id }}.query.where({{ foreign }}: __sweettalk_raw_id)
-              .where(id: dropped).delete_all
-          end
-          @__sweettalk_loaded_{{ collection[0].id }} = kept
+          @__sweettalk_loaded_{{ collection[0].id }} =
+            @{{ collection[0].id }}.map(&.__sweettalk_save({{ foreign }}: __sweettalk_raw_id))
         {% end %}
       end
 
@@ -538,6 +581,15 @@ module SweetTalk
         {% if moves %}
           @state = fresh.@state
         {% end %}
+      end
+
+      # Takes what is stored again, after a rolled-back change, and drops the events the
+      # change queued; an aggregate whose row is gone keeps what it has.
+      def __sweettalk_reload : Nil
+        @__sweettalk_events.clear
+        if fresh = self.class.__sweettalk_find?(__sweettalk_raw_id)
+          __sweettalk_copy(fresh)
+        end
       end
 
       # A command: load the aggregate with its row locked, run the body, check the
@@ -564,10 +616,7 @@ module SweetTalk
             end
           end
         rescue error : ::SweetTalk::Refusal | ::SweetTalk::Boundary
-          @__sweettalk_events.clear
-          if fresh = self.class.__sweettalk_find?(__sweettalk_raw_id)
-            __sweettalk_copy(fresh)
-          end
+          __sweettalk_reload
           raise error
         ensure
           fiber.__sweettalk_command = nil
@@ -583,6 +632,17 @@ module SweetTalk
     def __sweettalk_raw_id : Int64
       short = self.class.name.split("::").last
       @__sweettalk_id || raise NilAssertionError.new("#{short} has no id until it is created")
+    end
+
+    # The table this aggregate's rows live in, and what is stored read again; each
+    # aggregate's `__sweettalk_storage` defines both, so a call through `Aggregate` or
+    # `Aggregate.class` reaches the subclass's.
+    def self.__sweettalk_table : String
+      raise NotImplementedError.new("#{name}.__sweettalk_table")
+    end
+
+    def __sweettalk_reload : Nil
+      raise NotImplementedError.new("#{self.class.name}#__sweettalk_reload")
     end
 
     def __sweettalk_same?(other : ::SweetTalk::Aggregate) : Bool

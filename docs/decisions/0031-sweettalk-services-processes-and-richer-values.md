@@ -6,8 +6,9 @@ Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions
 Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md) and
 [ADR 0043](0043-sweettalk-calendar-days.md), decision 2 by
 [ADR 0039](0039-sweettalk-optional-attributes.md), decision 11 by
-[ADR 0033](0033-sweettalk-multi-tenancy.md), and decisions 3 and 11 by
-[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md).
+[ADR 0033](0033-sweettalk-multi-tenancy.md), decisions 3 and 11 by
+[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), and decisions 5, 7,
+8 and 10 by [ADR 0046](0046-sweettalk-units.md).
 
 ## Context
 
@@ -67,11 +68,12 @@ aggregates over days and undo their work when a step is refused.
    default covers, or a factory named like a repository method, does not compile.
 5. **Services.** `service verb(args), returns: T, means: "…" do … end` in a context is a
    domain service and a glossary entry. It runs in one transaction and changes at most one
-   aggregate, by as many commands as it likes, a `create` or a factory counting as the
-   first; a command on a second aggregate raises `SweetTalk::Boundary`. Anywhere but a
-   context it does not compile. A context's own `event Name, field : Type, means: "…"`,
-   without `carries:`, is for a change no aggregate holds; only a service body may `emit`
-   it, on `sweettalk.<context>.<event>` with the bound tenant's id, or nil, as subject.
+   aggregate by any number of commands, a `create` or a factory counting as the first, or
+   runs one `unit` (ADR 0046); a command on a second aggregate raises
+   `SweetTalk::Boundary`. Anywhere but a context it does not compile. A context's own
+   `event Name, field : Type, means: "…"`, without `carries:`, is for a change no aggregate
+   holds; only a service body may `emit` it, on `sweettalk.<context>.<event>` with the
+   bound tenant's id, or nil, as subject.
 6. **Event metadata** (amends decision 6). Every event records `event_id`, `occurred_at`,
    `actor`, `cause_id` and `flow_id`, and its jobs carry them. `SweetTalk.acting(by) { … }`
    names the actor of the events emitted inside it, and each policy, compensation and step
@@ -88,25 +90,25 @@ aggregates over days and undo their work when a step is refused.
 7. **Compensation** (amends decision 6). `compensate Event do |event, …, refusal| … end`,
    after a `whenever` for the same event in the same context, border or process, runs when
    that handler is refused. The handler's work has rolled back; the compensation gets its
-   arguments and the refusal, and runs in its own transaction, changing at most one
-   aggregate as a service does. A refusal there fails the job.
+   arguments and the refusal, and runs in its own transaction, changing one aggregate or
+   running one unit, as a service does. A refusal there fails the job.
 8. **Processes.** `process Name, means: "…" do … end` in a context keeps one row per
    `key`, with attributes, a lifecycle (`moves`) and deadlines. `whenever Event, key:
    expression` is a step: its job inserts the row when absent, locks it and runs the block
-   on it. A step changes at most one aggregate as a service does; its own row does not
-   count. A process may follow another context's events outside a border, which draws an
-   event edge, and takes `renamed_from:` as a projection does.
+   on it. A step changes at most one aggregate, or runs one unit, as a service does; its
+   own row does not count. A process may follow another context's events outside a
+   border, drawing an event edge, and takes `renamed_from:` like a projection.
 9. **Deadlines.** `deadline name, after: span do … end` in a process: `arm name` sets
    `<name>_due` and enqueues a job for that time, `arm name, after: other` uses another
    span, and `disarm name` clears it. The job runs the block only when no arming or
    disarming came after its own, acting as `deadline <Process>.<name>`.
-10. **Units of work and checks.** A handler's projection and process rows live in a unit
-    of work on its fiber and are saved when it returns. The whole-program checks run at the
-    first `find?`, dispatch or job as well as at `SweetTalk.boot`. Each `to`, `factory` and
-    `service` also emits `self.__sweettalk_touch_<name>`, a never-run proc literal that
-    calls it; the checks call every one, so `--no-codegen` types each body whether or
-    not anything calls it, and `frappe make domain` writes `SweetTalk.boot` after
-    `require "../app/domain/*"` so `frappe check` reaches them.
+10. **Units of work and checks.** A handler's projection and process rows live in a
+    `SweetTalk::Work` on its fiber, saved when it returns. The whole-program checks run at
+    the first `find?`, dispatch or job, and at `SweetTalk.boot`. Each `to`, `factory`,
+    `service` and `unit` also emits `self.__sweettalk_touch_<name>`, a never-run proc
+    literal that calls it, which the checks call, so `--no-codegen` types each body
+    whether or not anything calls it, and `frappe make domain` writes `SweetTalk.boot`
+    after `require "../app/domain/*"` so `frappe check` reaches them.
 11. **Database checks** (amends decision 2). An integer value's bounds and a string
     value's `length:` are also SugarORM `check` constraints on every column that stores
     the value, a composite's part columns included: `check_<table>_<column>` for bounds,

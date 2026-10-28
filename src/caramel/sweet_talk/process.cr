@@ -103,7 +103,7 @@ module SweetTalk
           by = {{ "deadline #{process.id}.#{name.id}" }}
           ::SweetTalk.__sweettalk_following(by, cause, flow) do
             ::SweetTalk.__sweettalk_handling("a deadline", ::SweetTalk::INSTEAD) do
-              ::SweetTalk.__sweettalk_unit do
+              ::SweetTalk.__sweettalk_work do
                 row = ::{{ @type }}[::{{ @type }}.__sweettalk_key_from(key)]
                 row.__sweettalk_fire_{{ name.id }} if row.{{ name.id }}_arming == arming
               end

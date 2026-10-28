@@ -623,6 +623,109 @@ module SweetTalk
       end
     end
 
+    # `unit post(journal : Journal::Id, segments : Array(Segment::Id)), changes: [Journal,
+    # Position, Segment], locks: [journal, segments], returns: Nil, means: "…" do … end`
+    # is a unit (ADR 0046): one transaction whose commands change the aggregates named in
+    # `changes:`, each existing row locked first through `SweetTalk.lock` on the arguments
+    # `locks:` names, in table then id order. A `never` or `always` line in its body is a
+    # rule over the set, checked after the body. It is a glossary entry, timed as a domain
+    # span named `Ledger.post`.
+    macro unit(call, changes = nil, locks = nil, returns = nil, means = nil, &block)
+      {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
+                 call.args.all?(&.is_a?(TypeDeclaration)) %}
+      {% unless typed %}
+        {% call.raise "unit takes a verb and typed arguments, " +
+                      "as in unit post(journal : Journal::Id) do … end" %}
+      {% end %}
+      {% short = @type.name.split("::").last %}
+      {% call.raise "#{@type.name.id}.#{call.name} needs a meaning: add means: \"…\", " +
+                    "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
+      {% named = changes.is_a?(ArrayLiteral) ? changes : [changes] %}
+      {% unless named.size > 0 && named.all?(&.is_a?(Path)) %}
+        {% call.raise "unit #{call.name} takes changes: [Journal, Position], the aggregates " +
+                      "its commands change, declared before it, not changes: #{changes}" %}
+      {% end %}
+      {% allowed = [] of Nil %}
+      {% for path in named %}
+        {% found = path.resolve? %}
+        {% unless found && found.is_a?(TypeNode) && found < ::SweetTalk::Aggregate %}
+          {% path.raise "unit #{call.name} changes #{path}, which is no aggregate declared " +
+                        "before it: declare aggregate #{path} above the unit, or take it " +
+                        "out of changes:" %}
+        {% end %}
+        {% if @type.constant("SWEETTALK_CENTRAL") %}
+          {% home = ::SweetTalk::BoundedContext.includers
+               .find { |context| found.name.starts_with?("#{context.name}::") } %}
+          {% if home && home.constant("SWEETTALK_TENANT") %}
+            {% path.raise "unit #{call.name} in #{short.id}, a central context, changes " +
+                          "#{path}, whose rows belong to a tenant: a central context's unit " +
+                          "changes the aggregates of central contexts alone" %}
+          {% end %}
+        {% end %}
+        {% allowed << found.name %}
+      {% end %}
+      {% held = [] of Nil %}
+      {% held = [locks] unless locks.is_a?(NilLiteral) %}
+      {% held = locks if locks.is_a?(ArrayLiteral) %}
+      {% arguments = call.args.map(&.var.stringify) %}
+      {% for name in held %}
+        {% known = (name.is_a?(Var) || (name.is_a?(Call) && name.args.empty?)) &&
+                   arguments.includes?(name.stringify) %}
+        {% unless known %}
+          {% name.raise "unit #{call.name} locks #{name}, which is not one of its arguments: " +
+                        "locks: names the arguments whose rows it changes, as in locks: " +
+                        "[#{arguments.join(", ").id}]" %}
+        {% end %}
+      {% end %}
+      {% body = block.body %}
+      {% steps = body.is_a?(Expressions) ? body.expressions : [body] %}
+      {% rules = steps.select do |step|
+           step.is_a?(Call) && %w[never always].includes?(step.name.stringify) &&
+             step.args.size == 1 && step.args[0].is_a?(StringLiteral) && !step.block.is_a?(Nop)
+         end %}
+      {% work = steps.reject { |step| rules.includes?(step) } %}
+      {% what = "unit #{short.id}.#{call.name}" %}
+      {% span = "#{short.id}.#{call.name}" %}
+      {% unit = {call.name.stringify, means, call.line_number} %}
+      {% kinds = allowed.map { |name| "::#{name.id}" }.join(", ") %}
+      SWEETTALK_UNIT_{{ call.name.upcase }} = {{ unit }}
+
+      {% result = returns.is_a?(NilLiteral) ? Nil : returns %}
+      def self.{{ call.name }}({{ call.args.splat }}) : {{ result }}
+        ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
+          %allowed = [{{ kinds.id }}] of ::SweetTalk::Aggregate.class
+          %result = nil
+          ::SweetTalk.__sweettalk_unit({{ what }}, %allowed) do
+            {% unless held.empty? %}
+              ::SweetTalk.lock({{ held.splat }})
+            {% end %}
+            %result = begin
+              {% for step in work %}
+                {{ step }}
+              {% end %}
+            end
+            {% for rule in rules %}
+              {% if rule.name == "never" %}
+                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) if ({{ rule.block.body }})
+              {% else %}
+                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) unless ({{ rule.block.body }})
+              {% end %}
+            {% end %}
+          end
+          {% unless returns.is_a?(NilLiteral) %}
+            %result.as({{ returns }})
+          {% end %}
+        end
+      end
+
+      # Typed by `SweetTalk.boot`, so the body compiles whether or not anything calls it.
+      def self.__sweettalk_touch_{{ call.name }} : Nil
+        {% params = call.args.map { |arg| "#{arg.var} : #{arg.type}" } %}
+        ->({{ params.join(", ").id }}) { {{ call.name }}({{ call.args.map(&.var).splat }}) }
+        nil
+      end
+    end
+
     # `event Renamed, name : String, means: "…"` is one of this context's events: what a
     # service records when it changes what no aggregate holds, such as the tenant's own
     # settings. A context holds no attributes, so it takes no `carries:`. Its channel is
@@ -1003,9 +1106,9 @@ module SweetTalk
     end
 
     # `publishes Cents, Tea::Id, price_of` is this context's published language: the
-    # types and services another context may name. Once a context publishes, every other
-    # context names only those, and the events it reacts to. `context` reads the list;
-    # this checks that each name is declared before it.
+    # types, services and units another context may name. Once a context publishes, every
+    # other context names only those, and the events it reacts to. `context` reads the
+    # list; this checks that each name is declared before it.
     macro publishes(*names)
       {% short = @type.name.split("::").last %}
       {% for name in names %}
@@ -1013,14 +1116,15 @@ module SweetTalk
           {% found = name.resolve? %}
           {% declared = found && found.name.starts_with?("#{@type.name}::") %}
         {% elsif name.is_a?(Call) && name.receiver.is_a?(Nop) && name.args.empty? %}
-          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") %}
+          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") ||
+                        @type.has_constant?("SWEETTALK_UNIT_#{name.name.upcase}") %}
         {% else %}
-          {% name.raise "publishes takes the context's types and services, as in " +
+          {% name.raise "publishes takes the context's types, services and units, as in " +
                         "publishes Cents, Tea::Id, price_of, not #{name}" %}
         {% end %}
         {% unless declared %}
           {% name.raise "#{short.id} publishes #{name}, which it does not declare: declare " +
-                        "a type or a service of that name before publishes" %}
+                        "a type, a service or a unit of that name before publishes" %}
         {% end %}
       {% end %}
     end

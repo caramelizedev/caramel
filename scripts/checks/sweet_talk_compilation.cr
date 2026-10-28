@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041, 0043 and 0044). Each
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0045). Each
 # declaration mistake fails to compile with a fixed problem text, naming its file where the
 # mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
 # application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
@@ -301,10 +301,10 @@ PROBLEMS = [
   {"published_after_use",
    "Shop::Reporting names Catalogue::Tea, which Catalogue does not publish"},
   {"publishes_unknown",
-   "Catalogue publishes Teas, which it does not declare: declare a type or a service of that " \
-   "name before publishes"},
+   "Catalogue publishes Teas, which it does not declare: declare a type, a service or a unit " \
+   "of that name before publishes"},
   {"publishes_expression",
-   "publishes takes the context's types and services, as in publishes Cents, Tea::Id, " \
+   "publishes takes the context's types, services and units, as in publishes Cents, Tea::Id, " \
    "price_of, not price_of(1)"},
   {"call_outside_border",
    "Shop::Reporting calls Catalogue.teas_on_shelf outside a border: move that call into " \
@@ -394,6 +394,42 @@ PROBLEMS = [
    "event Renamed in Catalogue takes no carries:: a context holds no attributes to carry; " \
    "declare the fields it records, as in event Renamed, name : String"},
   {"uncalled_command_body", "undefined local variable or method 'dispatched!'"},
+  {"unit_in_aggregate", "unit belongs in a context, not in aggregate Order"},
+  {"kernel_holds_unit",
+   "kernel Money holds values and aggregates only, not unit: move it into a context that " \
+   "shares Money"},
+  {"unit_changes_foreign", "Shop::Ordering names Catalogue:: outside a border"},
+  {"unit_without_meaning",
+   "Shop::Ordering.restock needs a meaning: add means: \"…\", the line its glossary entry shows"},
+  {"central_unit_tenanted",
+   "unit audit in Reporting, a central context, changes Ordering::Order, whose rows belong " \
+   "to a tenant: a central context's unit changes the aggregates of central contexts alone"},
+  {"unique_in_projection",
+   "unique belongs in an aggregate or an entity, not in projection Sales: its key is its " \
+   "identity"},
+  {"index_in_process",
+   "index belongs in an aggregate or an entity, not in process Tally: its key is its identity"},
+  {"has_check_in_projection",
+   "check belongs in an aggregate or an entity, not in projection Sales: its key is its " \
+   "identity"},
+  {"unique_unknown_attribute",
+   "unique :code names code, which Crate does not have above it; it has label: declare code " \
+   "before the unique"},
+  {"index_unknown_attribute",
+   "index :label, :state names state, which Crate does not have above it; it has label: " \
+   "declare moves, whose state it names, before the index"},
+  {"check_without_sentence",
+   "check :not_negative needs otherwise:, the sentence a row that breaks it is refused with, " \
+   "as in check :not_negative, \"quantity >= 0\", otherwise: \"A pending line carries no " \
+   "amounts.\""},
+  {"has_check_without_sentence",
+   "has quantity : Int32 takes check: {\"sql\", \"sentence\"}, the SQL every row keeps and " \
+   "the sentence a row that breaks it is refused with, as in check: {\"quantity >= 0\", " \
+   "\"A crate cannot hold less than nothing.\"}"},
+  {"unique_entities",
+   "has lines : Array(Line) takes no unique:, index: or check:: what makes Line unique, or " \
+   "what it keeps, is declared inside entity Line"},
+  {"unique_twice", "Crate declares unique :label twice"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
@@ -404,7 +440,7 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_call_outside_border compile_outside_is_a_context compile_kernel_unknown_sharer
   compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
   compile_follows_kernel compile_border_kernel compile_kernel_word_alone
-  compile_kernel_word_unused]
+  compile_kernel_word_unused compile_unit_changes_foreign]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }
