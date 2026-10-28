@@ -52,10 +52,12 @@ module SweetTalk
     glossary
   end
 
-  # The context map as {from, to, kind} edges, kind "dependency", "event" or "outside".
-  # Refuses unknown contexts, foreign names and calls outside a border, names a context
-  # does not publish, `Rows` named in a context, outside borders named like a context,
-  # and cycles of dependency edges.
+  # The context map as {from, to, kind} edges, kind "dependency", "event", "outside" or
+  # "kernel". Refuses unknown contexts, foreign names and calls outside a border, names a
+  # context does not publish, `Rows` named in a context, outside borders named like a
+  # context, a kernel named, followed or bordered by one that does not share it, a kernel
+  # that names a context, shared by an unknown or silent context or kernel, or holding a
+  # word fewer than two of its sharers name, and cycles of dependency edges.
   def self.context_map : Array({String, String, String})
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
@@ -63,6 +65,9 @@ module SweetTalk
     {% follows = {} of Nil => Nil %}
     {% borders = {} of Nil => Nil %}
     {% edges = [] of Nil %}
+    {% kernels = contexts.select(&.constant("SWEETTALK_SHARED_BY"))
+         .map(&.name.split("::").last) %}
+    {% bounded = names.reject { |name| kernels.includes?(name) } %}
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
       {% follows[short] = context.constant("SWEETTALK_FOLLOWS") %}
@@ -71,7 +76,11 @@ module SweetTalk
       {% for other in follows[short] %}
         {% unless names.includes?(other) %}
           {% raise "#{context.name} follows #{other.id}, but there is no context #{other.id}; " +
-                   "contexts: #{names.join(", ").id}" %}
+                   "contexts: #{bounded.join(", ").id}" %}
+        {% end %}
+        {% if kernels.includes?(other) %}
+          {% raise "#{context.name} follows #{other.id}, a kernel: say shares: #{other.id} " +
+                   "and list #{short.id} in its shared_by:" %}
         {% end %}
         {% edge = {short, other, "dependency"} %}
         {% edges << edge unless edges.includes?(edge) %}
@@ -79,7 +88,11 @@ module SweetTalk
       {% for border in borders[short] %}
         {% unless names.includes?(border[0]) %}
           {% raise "#{context.name} has a border with #{border[0].id}, but there is no context " +
-                   "#{border[0].id}; contexts: #{names.join(", ").id}" %}
+                   "#{border[0].id}; contexts: #{bounded.join(", ").id}" %}
+        {% end %}
+        {% if kernels.includes?(border[0]) %}
+          {% raise "#{context.name} has a border with #{border[0].id}, a kernel: say shares: " +
+                   "#{border[0].id} and list #{short.id} in its shared_by:" %}
         {% end %}
         {% calls = border[2].split(border[0] + ".")[1..-1].any? { |piece| piece =~ /\A[a-z_]/ } %}
         {% if border[2].includes?(border[0] + "::") || calls %}
@@ -108,6 +121,26 @@ module SweetTalk
         {% edges << edge unless edges.includes?(edge) %}
       {% end %}
     {% end %}
+    # Each sharer of a kernel is a context or kernel that says it shares it.
+    {% for context in contexts %}
+      {% if context.constant("SWEETTALK_SHARED_BY") %}
+        {% short = context.name.split("::").last %}
+        {% for sharer in context.constant("SWEETTALK_SHARED_BY") %}
+          {% unless names.includes?(sharer) %}
+            {% raise "#{context.name} is shared by #{sharer.id}, but there is no context or " +
+                     "kernel #{sharer.id}" %}
+          {% end %}
+          {% home = contexts.find { |candidate| candidate.name.split("::").last == sharer } %}
+          {% unless home.constant("SWEETTALK_SHARES").includes?(short) %}
+            {% raise "#{context.name} is shared by #{sharer.id}, but #{sharer.id} does not say " +
+                     "shares: #{short.id}: add shares: #{short.id} to #{sharer.id}, or take " +
+                     "#{sharer.id} out of shared_by:" %}
+          {% end %}
+          {% edge = {sharer, short, "kernel"} %}
+          {% edges << edge unless edges.includes?(edge) %}
+        {% end %}
+      {% end %}
+    {% end %}
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
       {% text = context.constant("SWEETTALK_TEXT") %}
@@ -117,8 +150,24 @@ module SweetTalk
         {% raise "#{context.name} names Rows, SweetTalk's storage: change an aggregate through " +
                  "its commands, and read it with find" %}
       {% end %}
+      {% own_sharers = context.constant("SWEETTALK_SHARED_BY") %}
+      {% shares = context.constant("SWEETTALK_SHARES") %}
       {% for other in names %}
-        {% if other != short && !follows[short].includes?(other) %}
+        {% if other == short %}
+        {% elsif kernels.includes?(other) %}
+          {% texts = [text] + borders[short].map(&.[1]) %}
+          {% if !shares.includes?(other) && texts.any?(&.includes?(other + "::")) %}
+            {% raise "#{context.name} names #{other.id}::, a kernel it does not share: say " +
+                     "shares: #{other.id} and list #{short.id} in its shared_by:, or leave " +
+                     "#{other.id} to the ones that share it" %}
+          {% end %}
+        {% elsif own_sharers %}
+          {% calls = text.split(other + ".")[1..-1].any? { |piece| piece =~ /\A[a-z_]/ } %}
+          {% if text.includes?(other + "::") || calls %}
+            {% raise "#{context.name} is a kernel and names #{other.id}: a kernel names no " +
+                     "context; move that code into a context that shares #{short.id}" %}
+          {% end %}
+        {% elsif !follows[short].includes?(other) %}
           {% foreign = text.includes?(other + "::") %}
           {% for border in borders[short] %}
             {% foreign = true if border[0] != other && border[1].includes?(other + "::") %}
@@ -186,6 +235,35 @@ module SweetTalk
                  "reacting to another context's events in a border is allowed" %}
       {% end %}
     {% end %}
+    # A kernel's words that fewer than two of its sharers name, by the text they write.
+    {% for context in contexts %}
+      {% if context.constant("SWEETTALK_SHARED_BY") %}
+        {% short = context.name.split("::").last %}
+        {% for word in context.constant("SWEETTALK_WORDS") %}
+          {% users = [] of Nil %}
+          {% for sharer in context.constant("SWEETTALK_SHARED_BY") %}
+            {% home = contexts.find { |candidate| candidate.name.split("::").last == sharer } %}
+            {% texts = [home.constant("SWEETTALK_TEXT")] + borders[sharer].map(&.[1]) %}
+            {% named = false %}
+            {% for text in texts %}
+              {% for piece in text.split(short + "::")[1..-1] %}
+                {% named = true if piece.gsub(/\A([A-Z]\w*)[\s\S]*\z/, "\\1") == word %}
+              {% end %}
+            {% end %}
+            {% users << sharer if named %}
+          {% end %}
+          {% if users.size == 1 %}
+            {% raise "#{context.name}::#{word.id} is named only by #{users[0].id}: a kernel " +
+                     "holds what two or more of its sharers name; move #{word.id} into " +
+                     "#{users[0].id}" %}
+          {% elsif users.empty? %}
+            {% raise "#{context.name}::#{word.id} is named by none of its sharers: a kernel " +
+                     "holds what two or more of its sharers name; remove #{word.id} from " +
+                     "#{short.id}" %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
     edges = [] of {String, String, String}
     {% for edge in edges %}
       edges << { {{ edge[0] }}, {{ edge[1] }}, {{ edge[2] }} }
@@ -194,9 +272,9 @@ module SweetTalk
     {% end %}
   end
 
-  # The ubiquitous language: every context, service, outside system, value, aggregate,
-  # entity, event, projection, specification and process with its meaning, and its
-  # context's subdomain.
+  # The ubiquitous language: every context, kernel, service, outside system, value,
+  # aggregate, entity, event, projection, specification and process with its meaning, and
+  # its context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
     terms = [] of ::SweetTalk::Term
     {% begin %}
@@ -204,7 +282,8 @@ module SweetTalk
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
       {% part = context.constant("SWEETTALK_SUBDOMAIN") %}
-      terms << ::SweetTalk::Term.new("context", {{ short }}, {{ short }},
+      {% kind = context.constant("SWEETTALK_SHARED_BY") ? "kernel" : "context" %}
+      terms << ::SweetTalk::Term.new({{ kind }}, {{ short }}, {{ short }},
         {{ context.constant("SWEETTALK_MEANS") }}, {{ part }})
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_SERVICE_")) %}
         {% service = context.constant(constant) %}

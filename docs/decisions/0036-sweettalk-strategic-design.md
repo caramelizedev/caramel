@@ -2,7 +2,9 @@
 
 Date: 2026-10-13
 
-Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2 and 3.
+Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2 and 3. Its
+rejection of a shared kernel word is reversed by
+[ADR 0044](0044-sweettalk-shared-kernels.md).
 
 ## Context
 
@@ -72,6 +74,7 @@ Rejected:
   what it claims.
 - **A shared kernel word.** A small context that several contexts follow already shares
   a model, with a dependency edge each; joint ownership is a team practice, not a type.
+  [ADR 0044](0044-sweettalk-shared-kernels.md) reverses this.
 - **A partnership word.** Two contexts that depend on each other form the cycle ADR 0030
   refuses; partners react to each other's events, which the map already allows.
 - **RPC or HTTP export of a context.** Contexts are modules in one binary.

@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043). Each
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041, 0043 and 0044). Each
 # declaration mistake fails to compile with a fixed problem text, naming its file where the
 # mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
 # application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
@@ -334,6 +334,36 @@ PROBLEMS = [
   {"whenever_outside",
    "whenever belongs in a border with a context: Cards is outside the program and emits no " \
    "events"},
+  {"kernel_without_meaning", "Shop::Money needs a meaning: add means:"},
+  {"kernel_shared_by_one",
+   "kernel Money takes shared_by: [Pricing, Billing], the two or more contexts or kernels " \
+   "that share it, not shared_by: [Catalogue]"},
+  {"kernel_holds_service",
+   "kernel Money holds values and aggregates only, not service: move it into a context that " \
+   "shares Money"},
+  {"kernel_outbound",
+   "kernel Money reaches Caramel::Outbound, which only a border with an outside system may"},
+  {"shares_not_kernel",
+   "context Ordering shares Catalogue, which is no kernel declared before it"},
+  {"shares_unlisted",
+   "context Fulfilment shares Money, but kernel Money is shared by Catalogue, Ordering: add " \
+   "Fulfilment to its shared_by:"},
+  {"kernel_shares_unlisted",
+   "kernel Money shares Calendar, but kernel Calendar is shared by Catalogue, Ordering: add " \
+   "Money to its shared_by:"},
+  {"kernel_unknown_sharer",
+   "Shop::Money is shared by Ordring, but there is no context or kernel Ordring"},
+  {"kernel_sharer_silent",
+   "Shop::Money is shared by Ordering, but Ordering does not say shares: Money"},
+  {"kernel_not_shared", "Shop::Fulfilment names Money::, a kernel it does not share"},
+  {"kernel_names_context",
+   "Shop::Money is a kernel and names Catalogue: a kernel names no context"},
+  {"follows_kernel", "Shop::Fulfilment follows Money, a kernel: say shares: Money"},
+  {"border_kernel", "Shop::Fulfilment has a border with Money, a kernel: say shares: Money"},
+  {"kernel_word_alone",
+   "Shop::Money::Millionths is named only by Catalogue: a kernel holds what two or more of " \
+   "its sharers name; move Millionths into Catalogue"},
+  {"kernel_word_unused", "Shop::Money::Millionths is named by none of its sharers"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
@@ -341,7 +371,10 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
   compile_job_alias_taken compile_all_satisfying_other compile_finds_value_type
   compile_day_query_text compile_loader_outside compile_published_after_use
-  compile_call_outside_border compile_outside_is_a_context]
+  compile_call_outside_border compile_outside_is_a_context compile_kernel_unknown_sharer
+  compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
+  compile_follows_kernel compile_border_kernel compile_kernel_word_alone
+  compile_kernel_word_unused]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

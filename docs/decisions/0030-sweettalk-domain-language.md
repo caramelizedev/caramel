@@ -6,8 +6,9 @@ Status: accepted. Decisions 2, 4 and 6 are amended by
 [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), decisions 1 and 6 by
 [ADR 0033](0033-sweettalk-multi-tenancy.md), decision 2 by
 [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), decisions 2 and 3
-by [ADR 0036](0036-sweettalk-strategic-design.md), and decision 6 by
-[ADR 0041](0041-sweettalk-events-that-carry-attributes.md).
+by [ADR 0036](0036-sweettalk-strategic-design.md), decision 6 by
+[ADR 0041](0041-sweettalk-events-that-carry-attributes.md), and decision 3 by
+[ADR 0044](0044-sweettalk-shared-kernels.md).
 
 ## Context
 

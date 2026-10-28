@@ -1,27 +1,55 @@
-# The tea house's strategic design (ADR 0036): subdomains, a published language that a
-# follower and a border read, and a border with an outside card gateway, which the specs
-# fake at the wire with Corretto.stub_wire.
+# The tea house's strategic design (ADRs 0036 and 0044): subdomains, a calendar and a money
+# kernel that Pricing and Billing share, a published language that a follower and a border
+# read, and a border with an outside card gateway, which the specs fake at the wire with
+# Corretto.stub_wire.
 require "../../../src/caramel/sweet_talk"
 
 module TeaHouse
   include SweetTalk
 
-  context Pricing, subdomain: :supporting, means: "what each tea costs" do
+  kernel Calendar, shared_by: [Money, Pricing, Billing],
+    means: "the days the tea house counts in" do
+    value Day, Date, means: "a calendar day"
+  end
+
+  kernel Money, shared_by: [Pricing, Billing], shares: Calendar,
+    means: "the money pricing and billing agree on" do
     value Cents, Int64, at_least: 0, means: "an amount of money"
 
+    aggregate Voucher, means: "an amount off one tea's bill, spent once" do
+      has amount : Cents
+      has expires_on : Calendar::Day?
+      moves unspent >> spent
+
+      event Spent, tea : Int64, on : Calendar::Day, carries: [amount, expires_on],
+        means: "a member spent a voucher on a tea"
+
+      finds expiring(from : Calendar::Day, to : Calendar::Day), where: {expires_on: from..to}
+
+      to spend(tea : Int64, on : Calendar::Day) do
+        expiry = expires_on
+        refuse "A voucher cannot be spent after it expires." if expiry && on > expiry
+        spent!
+        emit Spent, tea: tea, on: on
+      end
+    end
+  end
+
+  context Pricing, shares: [Money, Calendar], subdomain: :supporting,
+    means: "what each tea costs" do
     aggregate Tea, means: "one tea and its price" do
       has name : String
-      has price : Cents
+      has price : Money::Cents
 
-      event Repriced, price : Cents, means: "a tea's price changed"
+      event Repriced, price : Money::Cents, means: "a tea's price changed"
 
-      to reprice(price : Cents) do
+      to reprice(price : Money::Cents) do
         @price = price
         emit Repriced, price: price
       end
     end
 
-    service price_of(tea : Tea::Id), returns: Cents, means: "what one tea costs today" do
+    service price_of(tea : Tea::Id), returns: Money::Cents, means: "what one tea costs today" do
       Tea.find(tea).price
     end
 
@@ -29,21 +57,26 @@ module TeaHouse
       Tea.all.size
     end
 
-    publishes Cents, Tea::Id, price_of
+    service give(amount : Money::Cents, expires_on : Calendar::Day?), returns: Money::Voucher::Id,
+      means: "give a member an amount off one tea" do
+      Money::Voucher.create(amount: amount, expires_on: expires_on).id
+    end
+
+    publishes Tea::Id, price_of
   end
 
-  context Billing, follows: Pricing, subdomain: :core,
+  context Billing, follows: Pricing, shares: [Money, Calendar], subdomain: :core,
     means: "charging members for their teas" do
     value Reference, String, length: 1..64, means: "the card gateway's name for one charge"
 
     aggregate Bill, means: "what a member owes for one tea" do
-      has amount : Pricing::Cents
+      has amount : Money::Cents
       has reference : String = ""
       moves open >> charged, open >> declined
 
-      event Opened, amount : Pricing::Cents, means: "a member owes for a tea"
+      event Opened, amount : Money::Cents, means: "a member owes for a tea"
 
-      factory open(amount : Pricing::Cents) do
+      factory open(amount : Money::Cents) do
         emit Opened, amount: amount
       end
 
@@ -62,6 +95,15 @@ module TeaHouse
       Bill.open(Pricing.price_of(tea)).id
     end
 
+    service spend(voucher : Money::Voucher::Id, tea : Pricing::Tea::Id, on : Calendar::Day),
+      means: "spend a voucher on one tea" do
+      Money::Voucher.find(voucher).spend(tea.raw, on)
+    end
+
+    whenever Money::Voucher::Spent do |spent|
+      Bill.open(Pricing.price_of(Pricing::Tea::Id.new(spent.tea)) - spent.amount)
+    end
+
     whenever Bill::Opened do |opened|
       reference = Cards.charge(opened.bill_id.raw, opened.amount)
       Bill.find(opened.bill_id).settle reference
@@ -74,7 +116,7 @@ module TeaHouse
     border Cards, outside: "the card gateway we charge through" do
       CHARGES = "https://cards.example/v1/charges"
 
-      def self.charge(bill : Int64, amount : Pricing::Cents) : Reference
+      def self.charge(bill : Int64, amount : Money::Cents) : Reference
         headers = HTTP::Headers{"Content-Type" => "application/json"}
         body = {bill: bill, amount: amount.raw}.to_json
         response = Caramel::Outbound.post(CHARGES, headers, body)
