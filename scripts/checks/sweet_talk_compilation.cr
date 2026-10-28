@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0045). Each
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0048). Each
 # declaration mistake fails to compile with a fixed problem text, naming its file where the
 # mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
 # application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
@@ -22,7 +22,8 @@ PROBLEMS = [
   {"unknown_state", "undefined local variable or method 'shipped!'"},
   {"the_without_type", "the total needs a type"},
   {"value_type",
-   "value Grams wraps Int32, Int64, String or Date, or takes parts, not Float64"},
+   "value Grams wraps Int32, Int64, String, Date, Decimal(P, S) or Json(T), or takes parts, " \
+   "not Float64"},
   {"whenever_in_aggregate", "whenever belongs in a context, a border or a projection"},
   {"hash_attribute", "has teas : Hash(Int64, Int32) cannot be stored: use an entity"},
   {"unsupported_type", "has weight : Float32 cannot be stored"},
@@ -430,6 +431,43 @@ PROBLEMS = [
    "has lines : Array(Line) takes no unique:, index: or check:: what makes Line unique, or " \
    "what it keeps, is declared inside entity Line"},
   {"unique_twice", "Crate declares unique :label twice"},
+  {"decimal_without_require",
+   "value Rate wraps Decimal, which needs require \"caramel/sweet_talk/decimal\" before this " \
+   "domain: a program that declares no decimal value never links GMP"},
+  {"decimal_bound_scale",
+   "value Rate takes at_least: \"0.123456789\", which has more than 8 decimals: Decimal(20, 8) " \
+   "keeps 8, so a bound written past them would never hold"},
+  {"decimal_bound_not_text",
+   "value Rate checks its bounds in the database too, so each is a decimal written as text, " \
+   "as in at_least: \"0\" or at_most: \"1.5\", not 0: write it in quotes, or add " \
+   "database_check: false"},
+  {"json_option",
+   "value Evidence wraps Json, a document PostgreSQL keeps whole, so it takes no at_least:"},
+  {"json_order",
+   "finds by_evidence orders by evidence, a JSON value, which Price cannot sort by: a " \
+   "document has no order; order by id, or by an attribute stored in one column"},
+  {"json_range",
+   "no overload matches 'Shop::Pricing::Rows::Price::QueryOf(NamedTuple())#where', " \
+   "evidence: Range(JSON::Any, JSON::Any)"},
+  {"projection_decimal_default",
+   "has rate : Rate = Rate.new(\"0\") in projection Rates cannot have a default: a decimal or " \
+   "a JSON value is stored through its codec, which takes no SQL default, and its row starts " \
+   "from its key alone; make it optional, as in has rate : Rate?"},
+  {"after_not_following",
+   "whenever Order::Placed, after: Sales in Ordering: Sales does not follow Order::Placed; " \
+   "after: names a projection, a process or a context with a whenever Order::Placed of its own"},
+  {"after_cycle",
+   "whenever Order::Placed, after: Sales in Ordering: after: runs in a circle, Ordering → " \
+   "Sales → Ordering; one of them follows Order::Placed without after:"},
+  {"after_each",
+   "whenever Order::Placed, after: Sales in Ordering: Sales handles Order::Placed with each: " \
+   "lines, one job per element, which releases no follower; follow the event without after:"},
+  {"rebuild_without_log",
+   "SweetTalk.rebuild(Shop::Ordering::Sales): Ordering keeps no event log to replay; say " \
+   "context Ordering, event_log: true, and rebuild from the events logged since"},
+  {"event_log_table_taken",
+   "context Ordering keeps its event log in ordering_events, the table aggregate Event stores " \
+   "its rows in: rename one of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
@@ -440,7 +478,7 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_call_outside_border compile_outside_is_a_context compile_kernel_unknown_sharer
   compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
   compile_follows_kernel compile_border_kernel compile_kernel_word_alone
-  compile_kernel_word_unused compile_unit_changes_foreign]
+  compile_kernel_word_unused compile_unit_changes_foreign compile_json_range]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

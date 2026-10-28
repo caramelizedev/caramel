@@ -3,7 +3,8 @@
 Date: 2026-10-25
 
 Status: accepted. Amends [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md)
-decision 1 and builds on [ADR 0042](0042-sugar-orm-date-codec.md).
+decision 1 and builds on [ADR 0042](0042-sugar-orm-date-codec.md). Decision 2 is amended by
+[ADR 0047](0047-sweettalk-decimal-and-json-values.md).
 
 ## Context
 
@@ -27,8 +28,9 @@ permanent API, and a `date` column cannot be reached from it without a migration
    writes `field settled_on : ::SugarORM::Date, codec: ::SugarORM::DateCodec` for a value with
    a codec, with `?` after the type for an optional one, and `param` takes the raw type. The
    bridge is general: any value that names a codec is stored through it, and a later `numeric`
-   or `jsonb` value adds its base to `value` without another change to `has`. Only `Date` is
-   a base now.
+   or `jsonb` value adds its base to `value` without another change to `has`. `Decimal(P, S)`
+   over `SugarORM::DecimalCodec(P, S)` and `Json(T)` over `SugarORM::JSONB(T)` did so in
+   [ADR 0047](0047-sweettalk-decimal-and-json-values.md), with no change to this bridge.
 3. **The column is `date`.** The table derivation gives a `date` column, and for a table that
    holds the day as `text` the differ derives ADR 0042's checked retype. There is no `CHECK`:
    the type makes PostgreSQL refuse a day that does not exist, and `SWEETTALK_CHECK` is `nil`.

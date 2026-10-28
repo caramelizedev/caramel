@@ -37,15 +37,20 @@ module SweetTalk
     # quantity too. `value Email, String, matches: /…/, length: 3..254, means: "…"`
     # wraps a string, `value Kind, String, one_of: %w[payment receipt], means: "…"` a string
     # that is one of a closed list, `value Day, Date, means: "…"` a real calendar day (a
-    # `SugarORM::Date`, stored in a `date` column through `SugarORM::DateCodec`), and `value
-    # Address, means: "…" do part street : String; … end` is a value of several parts.
-    # Bounds, lengths and lists are also CHECK constraints
-    # on every column that stores the value, and so are integer literals; `database_check:
-    # false` keeps them in Crystal only. A pattern is checked in Crystal only, because
-    # PostgreSQL reads regular expressions differently. `SWEETTALK_CHECK` records {"range",
-    # "lo..hi"}, {"length", name suffix, SQL condition} or {"column", name suffix, SQL
-    # condition}, or nil. `SWEETTALK_WRAPS` is the raw type's name and `SWEETTALK_CODEC` the
-    # codec that stores it, or nil for a type a column holds as it is.
+    # `SugarORM::Date`, stored in a `date` column through `SugarORM::DateCodec`), `value
+    # Rate, Decimal(20, 8), at_least: "0", means: "…"` a `BigDecimal` kept in a
+    # `numeric(20,8)` column through `SugarORM::DecimalCodec` (with `caramel/sweet_talk/
+    # decimal` required), `value Evidence, Json(Snapshot), means: "…"` a JSON document, a
+    # `JSON::Serializable` type or `JSON::Any` for `Json` alone, kept in a `jsonb` column
+    # through `SugarORM::JSONB`, and `value Address, means: "…" do part street : String; …
+    # end` is a value of several parts. Bounds, lengths and lists are also CHECK constraints
+    # on every column that stores the value, and so are literals, integers or, for a
+    # decimal, decimal text; `database_check: false` keeps them in Crystal only. A pattern
+    # is checked in Crystal only, because PostgreSQL reads regular expressions differently.
+    # `SWEETTALK_CHECK` records {"range", "lo..hi"}, {"length", name suffix, SQL condition}
+    # or {"column", name suffix, SQL condition}, or nil. `SWEETTALK_WRAPS` is the raw type's
+    # name and `SWEETTALK_CODEC` the codec that stores it, or nil for a type a column holds
+    # as it is.
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
                 matches = nil, length = nil, one_of = nil, database_check = nil, means = nil,
                 &block)
@@ -53,9 +58,11 @@ module SweetTalk
         {% name.raise "value #{name} takes parts or a type to wrap, not both" %}
       {% elsif !block && wraps.is_a?(NilLiteral) %}
         {% name.raise "value #{name} needs parts, as in part street : String" %}
-      {% elsif !block && !["Int32", "Int64", "String", "Date"].includes?(wraps.stringify) %}
-        {% wraps.raise "value #{name} wraps Int32, Int64, String or Date, or takes parts, " +
-                       "not #{wraps}" %}
+      {% elsif !block && !["Int32", "Int64", "String", "Date"].includes?(wraps.stringify) &&
+                 !(wraps.is_a?(Generic) && %w[Decimal Json].includes?(wraps.name.stringify)) &&
+                 wraps.stringify != "Json" %}
+        {% wraps.raise "value #{name} wraps Int32, Int64, String, Date, Decimal(P, S) or " +
+                       "Json(T), or takes parts, not #{wraps}" %}
       {% end %}
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -360,6 +367,238 @@ module SweetTalk
 
           def to_json(json : JSON::Builder) : Nil
             json.string(to_s)
+          end
+        end
+      {% elsif wraps.is_a?(Generic) && wraps.name.stringify == "Decimal" %}
+        {% unless ::SugarORM.has_constant?("DecimalCodec") %}
+          {% wraps.raise "value #{name} wraps Decimal, which needs require " +
+                         "\"caramel/sweet_talk/decimal\" before this domain: a program that " +
+                         "declares no decimal value never links GMP" %}
+        {% end %}
+        {% digits = wraps.type_vars %}
+        {% whole = digits.size == 2 && digits.all? do |digit|
+             digit.is_a?(NumberLiteral) && digit.kind.stringify =~ /\A:[iu]/
+           end %}
+        {% shape = "value #{name} takes Decimal(P, S), the digits in all and the digits " +
+                   "after the point, as in Decimal(20, 8), with S at most P and P at most " +
+                   "1000, not #{wraps}" %}
+        {% wraps.raise shape unless whole %}
+        {% precision = digits[0] %}
+        {% scale = digits[1] %}
+        {% wraps.raise shape unless scale >= 0 && scale <= precision && precision <= 1000 &&
+                                    precision >= 1 %}
+        {% options = [{"within", within}, {"times", times}, {"matches", matches},
+                      {"length", length}, {"one_of", one_of}] %}
+        {% for option in options %}
+          {% unless option[1].is_a?(NilLiteral) %}
+            {% name.raise "value #{name} wraps Decimal, so it takes at_least: and at_most:, " +
+                          "each a decimal written as text, not #{option[0].id}:" %}
+          {% end %}
+        {% end %}
+        {% texts = [] of Nil %}
+        {% for option in [{"at_least", at_least}, {"at_most", at_most}] %}
+          {% bound = option[1] %}
+          {% if bound.is_a?(NilLiteral) %}
+            {% texts << nil %}
+          {% elsif !bound.is_a?(StringLiteral) && checked %}
+            {% bound.raise "value #{name} checks its bounds in the database too, so each is " +
+                           "a decimal written as text, as in at_least: \"0\" or at_most: " +
+                           "\"1.5\", not #{bound}: write it in quotes, or add " +
+                           "database_check: false" %}
+          {% elsif !bound.is_a?(StringLiteral) %}
+            {% texts << nil %}
+          {% elsif !(bound =~ /\A-?\d+(\.\d+)?\z/) %}
+            {% bound.raise "value #{name} takes #{option[0].id}: a decimal written with " +
+                           "digits and a point, as in #{option[0].id}: \"0.25\", not #{bound}" %}
+          {% elsif bound.split(".").size == 2 && bound.split(".")[1].size > scale %}
+            {% bound.raise "value #{name} takes #{option[0].id}: #{bound}, which has more " +
+                           "than #{scale} decimals: Decimal(#{precision}, #{scale}) keeps " +
+                           "#{scale}, so a bound written past them would never hold" %}
+          {% elsif bound.split(".")[0].gsub(/\A-?0*/, "").size > precision - scale %}
+            {% bound.raise "value #{name} takes #{option[0].id}: #{bound}, which has more " +
+                           "than #{precision - scale} digits before the point, all that " +
+                           "Decimal(#{precision}, #{scale}) holds" %}
+          {% else %}
+            {% texts << bound %}
+          {% end %}
+        {% end %}
+        {% check = nil %}
+        {% if checked && (texts[0] || texts[1]) %}
+          # The bounds join the constraint's name, as a length's do, so a changed bound is a
+          # new constraint; `.` becomes `_` and a leading `-` `minus`.
+          {% lo = texts[0] && texts[0].gsub(/\./, "_").gsub(/\A-/, "minus") %}
+          {% hi = texts[1] && texts[1].gsub(/\./, "_").gsub(/\A-/, "minus") %}
+          {% if texts[0] && texts[1] %}
+            {% check = {"column", "between_#{lo.id}_and_#{hi.id}",
+                        "BETWEEN #{texts[0].id} AND #{texts[1].id}"} %}
+          {% elsif texts[0] %}
+            {% check = {"column", "from_#{lo.id}", ">= #{texts[0].id}"} %}
+          {% else %}
+            {% check = {"column", "to_#{hi.id}", "<= #{texts[1].id}"} %}
+          {% end %}
+        {% end %}
+        struct {{ name }} < ::SweetTalk::Value
+          include Comparable({{ name }})
+          include ::Caramel::FieldValue(String)
+
+          SWEETTALK_MEANS     = {{ means }}
+          SWEETTALK_WRAPS     = "::BigDecimal"
+          SWEETTALK_CODEC     = {{ "::SugarORM::DecimalCodec(#{precision}, #{scale})" }}
+          SWEETTALK_CHECK     = {{ check }}
+          SWEETTALK_PRECISION = {{ precision }}
+          SWEETTALK_SCALE     = {{ scale }}
+          SWEETTALK_REFUSAL   = ::SweetTalk::Decimal.refusal({{ name.stringify }})
+          {% unless at_least.is_a?(NilLiteral) %}
+            SWEETTALK_LEAST = ::BigDecimal.new({{ at_least }})
+          {% end %}
+          {% unless at_most.is_a?(NilLiteral) %}
+            SWEETTALK_MOST = ::BigDecimal.new({{ at_most }})
+          {% end %}
+
+          getter raw : ::BigDecimal
+
+          # Refuses a decimal the column would round or overflow, then one outside the
+          # bounds.
+          def initialize(@raw : ::BigDecimal)
+            text = ::SugarORM::Decimal.plain(@raw)
+            unless ::SugarORM::Decimal.fits(text, SWEETTALK_PRECISION, SWEETTALK_SCALE)
+              raise ::SweetTalk::Refusal.new(
+                "{{ name }} keeps #{SWEETTALK_SCALE} decimals and " \
+                "#{SWEETTALK_PRECISION - SWEETTALK_SCALE} digits before the point, " \
+                "not #{text}")
+            end
+            {% unless at_least.is_a?(NilLiteral) %}
+              if @raw < SWEETTALK_LEAST
+                raise ::SweetTalk::Refusal.new("{{ name }} must be at least #{ {{ at_least }} }")
+              end
+            {% end %}
+            {% unless at_most.is_a?(NilLiteral) %}
+              if @raw > SWEETTALK_MOST
+                raise ::SweetTalk::Refusal.new("{{ name }} must be at most #{ {{ at_most }} }")
+              end
+            {% end %}
+          end
+
+          # Reads digits with at most one point, `12.50`, and refuses any other text.
+          def self.new(text : String) : self
+            new(::SweetTalk::Decimal.parse({{ name.stringify }}, text))
+          end
+
+          def self.new(raw : Int) : self
+            new(::BigDecimal.new(raw))
+          end
+
+          def self.__sweettalk_from_json(any : JSON::Any) : self
+            new(any.as_s)
+          end
+
+          def self.new(pull : JSON::PullParser) : self
+            text = pull.read_string
+            pull.raise(SWEETTALK_REFUSAL) unless text.matches?(::SugarORM::Decimal::TEXT)
+            new(text)
+          end
+
+          # Builds the value a contract field binds, or yields the refusal's message.
+          def self.from_field(raw : String, & : String ->) : self?
+            new(raw)
+          rescue error : ::SweetTalk::Refusal
+            yield error.message || ""
+            nil
+          end
+
+          def self.zero : self
+            new(0)
+          end
+
+          def +(other : self) : {{ name }}
+            {{ name }}.new(raw + other.raw)
+          end
+
+          def -(other : self) : {{ name }}
+            {{ name }}.new(raw - other.raw)
+          end
+
+          def *(other : Int::Primitive) : {{ name }}
+            {{ name }}.new(raw * other)
+          end
+
+          def <=>(other : self)
+            raw <=> other.raw
+          end
+
+          # Plain digits, `-12.5`, with no exponent and no trailing zeros after the point.
+          def to_s(io : IO) : Nil
+            io << ::SugarORM::Decimal.plain(raw)
+          end
+
+          def to_json(json : JSON::Builder) : Nil
+            json.string(to_s)
+          end
+
+          def __sweettalk_pack(json : JSON::Builder) : Nil
+            json.string(to_s)
+          end
+        end
+      {% elsif wraps.stringify == "Json" ||
+                 (wraps.is_a?(Generic) && wraps.name.stringify == "Json") %}
+        {% options = [{"at_least", at_least}, {"at_most", at_most}, {"within", within},
+                      {"times", times}, {"matches", matches}, {"length", length},
+                      {"one_of", one_of}, {"database_check", database_check}] %}
+        {% for option in options %}
+          {% unless option[1].is_a?(NilLiteral) %}
+            {% name.raise "value #{name} wraps Json, a document PostgreSQL keeps whole, so it " +
+                          "takes no #{option[0].id}:" %}
+          {% end %}
+        {% end %}
+        {% if wraps.is_a?(Generic) %}
+          {% unless wraps.type_vars.size == 1 && wraps.type_vars[0].is_a?(Path) &&
+                      wraps.type_vars[0].resolve? %}
+            {% wraps.raise "value #{name} takes Json(T), T a JSON::Serializable type declared " +
+                           "before it, or Json alone for any document, not #{wraps}" %}
+          {% end %}
+          {% document = wraps.type_vars[0].resolve %}
+          {% unless document <= ::JSON::Serializable || document == ::JSON::Any %}
+            {% wraps.raise "value #{name} takes Json(T), T a JSON::Serializable type or " +
+                           "JSON::Any, not #{document}, which includes neither" %}
+          {% end %}
+          {% document = "::#{document}" %}
+        {% else %}
+          {% document = "::JSON::Any" %}
+        {% end %}
+        struct {{ name }} < ::SweetTalk::Value
+          SWEETTALK_MEANS = {{ means }}
+          SWEETTALK_WRAPS = {{ document }}
+          SWEETTALK_CODEC = {{ "::SugarORM::JSONB(#{document.id})" }}
+          SWEETTALK_CHECK = nil
+
+          getter raw : {{ document.id }}
+
+          def initialize(@raw : {{ document.id }})
+          end
+
+          # Reads the document from its JSON text.
+          def self.parse(text : String) : self
+            new({{ document.id }}.from_json(text))
+          end
+
+          def self.__sweettalk_from_json(any : JSON::Any) : self
+            {% if document == "::JSON::Any" %}
+              new(any)
+            {% else %}
+              new({{ document.id }}.from_json(any.to_json))
+            {% end %}
+          end
+
+          def self.new(pull : JSON::PullParser) : self
+            new({{ document.id }}.new(pull))
+          end
+
+          def to_json(json : JSON::Builder) : Nil
+            raw.to_json(json)
+          end
+
+          def to_s(io : IO) : Nil
+            raw.to_json(io)
           end
         end
       {% else %}
@@ -1011,7 +1250,13 @@ module SweetTalk
             {% attribute = attributes.find { |attribute| attribute[0] == key } %}
             {% sortable = key == "id" ||
                           (attribute && !%w[entities composite].includes?(attribute[2])) %}
-            {% unless sortable %}
+            {% document = attribute && attribute[11] &&
+                          attribute[11].starts_with?("::SugarORM::JSONB") %}
+            {% if document %}
+              {% raise "#{word.id} orders by #{key.id}, a JSON value, which #{short.id} cannot " +
+                       "sort by: a document has no order; order by id, or by an attribute " +
+                       "stored in one column" + at %}
+            {% elsif !sortable %}
               {% raise "#{word.id} orders by #{key.id}, which #{short.id} cannot sort by: " +
                        "order by id, or by an attribute stored in one column" + at %}
             {% end %}
@@ -1058,14 +1303,16 @@ module SweetTalk
           {% attempts = nil %}
           {% backoff = nil %}
           {% base = nil %}
+          {% after = nil %}
           {% for argument in (expression.named_args || [] of Nil) %}
             {% each = argument.value if argument.name.stringify == "each" %}
             {% attempts = argument.value if argument.name.stringify == "attempts" %}
             {% backoff = argument.value if argument.name.stringify == "backoff" %}
             {% base = argument.value if argument.name.stringify == "base" %}
+            {% after = argument.value if argument.name.stringify == "after" %}
           {% end %}
           ::SweetTalk.__sweettalk_policy({{ @type }}, {{ expression.args[0] }}, {{ each }},
-            {{ other }}, "context", nil, {{ attempts }}, {{ backoff }}, {{ base }},
+            {{ other }}, "context", nil, {{ attempts }}, {{ backoff }}, {{ base }}, {{ after }},
             {{ expression.block.args.splat }}) do
             {{ expression.block.body }}
           end
@@ -1082,11 +1329,12 @@ module SweetTalk
 
     # `whenever Event do |event| … end` is a policy, run as a Cold Brew job after the
     # command that emitted the event commits. `attempts:`, `backoff:` and `base:` set its
-    # retry rule for errors other than a refusal.
+    # retry rule for errors other than a refusal. `after: Sales` runs it once the named
+    # projection's, process's or context's handler of the same event has committed.
     macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
-                   &block)
+                   after = nil, &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, {{ border }}, "context",
-        nil, {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
+        nil, {{ attempts }}, {{ backoff }}, {{ base }}, {{ after }}, {{ block.args.splat }}) do
         {{ block.body }}
       end
     end
@@ -1163,9 +1411,10 @@ module SweetTalk
   # `subdomain: :core`, `:supporting` or `:generic` says what part of the domain it is.
   # `publishes` lists the names other contexts may use, and `border X, outside: "…"`
   # faces a system outside the program.
-  # `shares: Money` names the kernels it shares, declared before it.
+  # `shares: Money` names the kernels it shares, declared before it. `event_log: true`
+  # keeps every event of the context, and of the kernels it shares, in `<context>_events`.
   macro context(name, follows = nil, shares = nil, means = nil, renamed_from = nil,
-                central = nil, subdomain = nil, &block)
+                central = nil, subdomain = nil, event_log = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -1176,6 +1425,10 @@ module SweetTalk
     {% if central && !::Caramel.has_constant?("Tenancy") %}
       {% central.raise "context #{name} takes central: true only in a program that requires " +
                        "caramel/tenancy" %}
+    {% end %}
+    {% unless event_log.is_a?(NilLiteral) || (event_log.is_a?(BoolLiteral) && event_log) %}
+      {% event_log.raise "context #{name} takes event_log: true, which keeps its events in " +
+                         "#{name.stringify.underscore.id}_events, not event_log: #{event_log}" %}
     {% end %}
     {% subdomains = %w[core supporting generic] %}
     {% unless subdomain.is_a?(NilLiteral) ||
@@ -1336,6 +1589,8 @@ module SweetTalk
       # {tenant model, attribute} when this context's rows belong to one tenant
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
+      # Whether `<context>_events` keeps every event of this context (ADR 0048)
+      SWEETTALK_EVENT_LOG = {{ event_log ? true : false }}
       SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
       SWEETTALK_SHARES  = [{{ shared.map(&.names.last.stringify).splat }}] of String
@@ -1373,6 +1628,7 @@ module SweetTalk
 
       {{ body }}
 
+      ::SweetTalk.__sweettalk_event_log(::{{ prefix.id }}{{ name }})
       __sweettalk_check_queries
     end
   end

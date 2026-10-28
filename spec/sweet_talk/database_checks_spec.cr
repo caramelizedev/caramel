@@ -79,7 +79,10 @@ describe "SweetTalk's database checks" do
         check_counter_transfers_opened_by_length_2_20 check_counter_transfers_reason_length_3_40
         check_counter_transfers_settled_by_length_2_20 check_counter_transfers_state_2d0246c7
         check_counter_vouchers_issuer_length_2_20 check_counter_vouchers_kind_one_of_897bbc40
+        check_credit_loans_rate_between_0_and_1 check_credit_loans_spread_from_minus0_5
+        check_credit_pricings_rate_between_0_and_1
         check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
+        check_invoicing_invoices_state_048b3f84 check_invoicing_invoices_total
         check_lending_loans_term_all_or_none_5e0012d4
         check_money_vouchers_amount check_money_vouchers_state_b3ad369e
         check_ordering_holds_state_a8664243 check_ordering_order_lines_price

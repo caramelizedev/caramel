@@ -2,14 +2,14 @@
 
 Date: 2026-10-08
 
-Status: accepted. Decisions 2, 4 and 6 are amended by
-[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), decisions 1 and 6 by
-[ADR 0033](0033-sweettalk-multi-tenancy.md), decision 2 by
-[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), decisions 2 and 3
-by [ADR 0036](0036-sweettalk-strategic-design.md), decision 6 by
-[ADR 0041](0041-sweettalk-events-that-carry-attributes.md), decision 3 by
-[ADR 0044](0044-sweettalk-shared-kernels.md), decision 4 by
-[ADR 0045](0045-sweettalk-database-constraints.md) and 5 by
+Status: accepted. Amended: decisions 2, 4 and 6 by
+[ADR 0031](0031-sweettalk-services-processes-and-richer-values.md), 1 and 6 by
+[ADR 0033](0033-sweettalk-multi-tenancy.md), 2 by
+[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), 2 and 3 by
+[ADR 0036](0036-sweettalk-strategic-design.md), 6 by
+[ADR 0041](0041-sweettalk-events-that-carry-attributes.md) and
+[ADR 0048](0048-sweettalk-event-log.md), 3 by [ADR 0044](0044-sweettalk-shared-kernels.md),
+4 by [ADR 0045](0045-sweettalk-database-constraints.md) and 5 by
 [ADR 0046](0046-sweettalk-units.md).
 
 ## Context
@@ -94,14 +94,14 @@ or a policy, and nothing stops one context from reaching into another's types.
      getter on an event loads an aggregate.
    - **Jobs.** The command enqueues one job per `whenever` that follows the event, carrying
      the event as JSON; `enqueue` joins the transaction
-     ([ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decision 2). `whenever Event, each:
-     :lines do |event, line|` enqueues one job per element instead. Jobs are enqueued in
-     declaration order: the contexts' and borders' policies, then the projections'
-     handlers, then the processes' steps; Cold Brew starts them in that order and finishes
-     them in any, so no handler assumes another's work is saved. For specs,
-     `SweetTalk.emitted { … }` returns the events `dispatch` saw on the fiber while the
-     block ran, in that order, and `SweetTalk.emitted(Order::Placed) { … }` those of one
-     class, typed; the jobs are enqueued all the same.
+     ([ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decision 2); `each: :lines` enqueues
+     one job per element. Jobs go in declaration order: the contexts' and borders'
+     policies, then the projections' handlers, then the processes' steps; Cold Brew starts
+     them in that order and finishes them in any, so no handler assumes another's work
+     saved unless it says `after: Owner`, which the owner's job enqueues in its
+     transaction (ADR 0048). For specs, `SweetTalk.emitted { … }` returns the events
+     `dispatch` saw on the fiber, in order; `SweetTalk.emitted(Order::Placed) { … }` one
+     class, typed.
    - **Job names.** A job is named after its owner (a context and its border, or a
      projection) and the event's path as written; when a rename changes that name, the job
      declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. An old
@@ -111,7 +111,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      `whenever Event, attempts: 5, backoff: :linear, base: 2.seconds` and the same keywords
      on `deadline` set the job's rule, as `retry_on ::Exception` after the two refusal
      rules, so a literal Cold Brew refuses does not compile; without them the job follows
-     ADR 0009 decision 2.
+     ADR 0009 decision 2. A failed job releases no `after:` follower.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
      63 characters, or 42 in a program that requires `caramel/tenancy`, does not compile.

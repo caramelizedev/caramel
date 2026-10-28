@@ -9,9 +9,13 @@ module SweetTalk
   # on. `attempts:`, `backoff:` and `base:` are the job's retry rule for any error but a
   # refusal or a boundary, which fail it at once; Cold Brew checks the literals. The job
   # is named after its owner (the context and its border, the projection or the process)
-  # and the event's path, because `caramel_jobs` stores the name.
+  # and the event's path, because `caramel_jobs` stores the name. With `after: Owner` the
+  # filter is `__sweettalk_follow_*`, which `dispatch` leaves alone and the owner's job
+  # calls through `SweetTalk.__sweettalk_release` once its handler has run (ADR 0048);
+  # `SWEETTALK_HANDLER_*` records each handler for that and for a rebuild, and the
+  # whole-program check reads it once every name is known.
   macro __sweettalk_policy(scope, event, each, border, kind, key, attempts, backoff, base,
-                           *arguments, &block)
+                           after, *arguments, &block)
     {% type = scope.resolve %}
     {% owner = border ? "#{border.names.last}Border".id : nil %}
     {% job = "When#{event.names.join("").id}".id %}
@@ -24,6 +28,10 @@ module SweetTalk
       {% event.raise "#{type.name.split("::").last.id} already handles #{event}" +
                      "#{place.id}; write one whenever per event" %}
     {% end %}
+    {% unless after.is_a?(NilLiteral) || after.is_a?(Path) %}
+      {% after.raise "whenever #{event}, after: #{after}: after: names a projection, a process " +
+                     "or a context that follows #{event}, as in after: Sales" %}
+    {% end %}
     {% if each && arguments.size != 2 %}
       {% event.raise "whenever #{event}, each: #{each} takes two block arguments, the event and " +
                      "one element, as in do |#{event.names.last.underscore.id}, item|" %}
@@ -33,6 +41,14 @@ module SweetTalk
     {% names = each ? "#{named[0]}, #{named[1]}" : "#{named[0]}" %}
     {% compensation = "__sweettalk_compensate_#{suffix}" %}
     {% handler = border ? "border #{border}" : type.name.split("::").last %}
+    {% at = "#{event.filename.id}:#{event.line_number}:#{event.column_number}" %}
+    {% entry = {event.stringify, suffix.stringify, each ? each.id.stringify : nil,
+                after ? after.stringify : nil, "#{type.name.id}::#{path}", at, handler} %}
+    {% filter = after ? "__sweettalk_follow_#{suffix}" : "__sweettalk_enqueue_#{suffix}" %}
+    {% releasing = "::SweetTalk.__sweettalk_release(#{"#{type.name.id}/#{suffix}".stringify.id}, " +
+                   "#{named[0]}) if release" %}
+    # {event as written, suffix, each: field, after: as written, job, where, handler}
+    SWEETTALK_HANDLER_{{ suffix.upcase }} = {{ entry }}
     {% if kind == "process" %}
       # The row this step runs on.
       def self.__sweettalk_key_{{ suffix }}({{ parameters.id }})
@@ -44,26 +60,31 @@ module SweetTalk
       end
     {% end %}
 
-    def self.__sweettalk_on_{{ suffix }}({{ parameters.id }}) : Nil
+    # Runs the handler; with *release*, as a job does, the followers that say
+    # `after:` this owner are enqueued in the same transaction once the body has run.
+    def self.__sweettalk_on_{{ suffix }}({{ parameters.id }}, *, release : Bool = true) : Nil
       ::SweetTalk.__sweettalk_handling("a whenever handler", "use each: or a second whenever") do
         {% if kind == "process" %}
           ::SweetTalk.__sweettalk_work do
             row = self[__sweettalk_key_{{ suffix }}({{ names.id }})]
             row.__sweettalk_step_{{ suffix }}({{ names.id }})
+            {{ releasing.id }}
           end
         {% elsif kind == "projection" %}
           ::SweetTalk.__sweettalk_work do
             {{ block.body }}
+            {{ releasing.id }}
           end
         {% else %}
           ::SugarORM::Repo.transaction do
             {{ block.body }}
+            {{ releasing.id }}
           end
         {% end %}
       end
     end
 
-    def self.__sweettalk_enqueue_{{ suffix }}(event : ::SweetTalk::Event) : Nil
+    def self.{{ filter.id }}(event : ::SweetTalk::Event) : Nil
       return unless event.is_a?({{ event }})
       subject, fields, meta = event.__sweettalk_subject_id, event.__sweettalk_fields,
         event.__sweettalk_meta

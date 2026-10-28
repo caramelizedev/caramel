@@ -137,9 +137,10 @@ module SweetTalk
   # The parent of aggregates, entities and projections.
   abstract class Model
     # `has stock : Tins` is an attribute, and `has held : Tins = Tins.zero` one with a
-    # default. What it is stored as depends on its type: a column, a value's raw column,
-    # one column per part of a composite value, a reference to another aggregate or to an
-    # application's schema, or a child table of entities, which only an aggregate holds. A
+    # default. What it is stored as depends on its type: a column, a value's raw column
+    # (through the value's codec for a day, a decimal or a JSON document), one column per
+    # part of a composite value, a reference to another aggregate or to an application's
+    # schema, or a child table of entities, which only an aggregate holds. A
     # value's bounds and length are also `check` lines on its column, or on each part's
     # column. A type followed by `?`, as in `has owner : Setup::Owner?`, `has reason :
     # Reason?` and `has leg : Leg?`, is optional: its column, or every column of a composite
@@ -264,7 +265,8 @@ module SweetTalk
         {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
         # A value default whose expression names one literal, `Cents.new(0)`, `Tins.zero` or a
         # closed-set member such as `Kind.payment`, gives the column that literal as its SQL
-        # default; a part or a calendar day has no SQL literal, so it takes none.
+        # default; a part, a calendar day, a decimal or a JSON document has no SQL literal
+        # (a codec field takes no default), so it takes none.
         {% built = kind == "value" && !codec && value.is_a?(Call) && value.receiver.is_a?(Path) &&
                    value.receiver.resolve? == members[0] && value.named_args.is_a?(Nop) %}
         {% wraps = built && members[0].constant("SWEETTALK_WRAPS") %}
@@ -282,10 +284,16 @@ module SweetTalk
           {% given = member if member %}
         {% end %}
         {% if given.is_a?(NilLiteral) %}
-          {% if kind == "composite" || codec %}
+          {% stored = kind == "composite" || codec == "::SugarORM::DateCodec" %}
+          {% if stored %}
             {% decl.raise "has #{decl} in #{owner.id} cannot have a default: a value with " +
                           "parts or a calendar day has no SQL default, and its row starts " +
                           "from its key alone; make it optional, as in has #{name} : #{type}?" %}
+          {% elsif codec %}
+            {% decl.raise "has #{decl} in #{owner.id} cannot have a default: a decimal or a " +
+                          "JSON value is stored through its codec, which takes no SQL " +
+                          "default, and its row starts from its key alone; make it optional, " +
+                          "as in has #{name} : #{type}?" %}
           {% else %}
             {% decl.raise "has #{decl} in #{owner.id} needs a literal default, as in has tins : " +
                           "Int32 = 0, or a value built from one, as in has total : Cents = " +

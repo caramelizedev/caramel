@@ -22,6 +22,13 @@ module TenantShop
     means: "the stock ordering and packing agree on" do
     aggregate Crate, means: "a crate of tins one tenant keeps" do
       has tins : Int32
+
+      event Filled, carries: [tins], means: "a crate was topped up"
+
+      to fill(more : Int32) do
+        @tins += more
+        emit Filled
+      end
     end
   end
 
@@ -31,7 +38,8 @@ module TenantShop
     end
   end
 
-  context Ordering, follows: Catalogue, shares: Stock, means: "choosing teas and checking out" do
+  context Ordering, follows: Catalogue, shares: Stock, event_log: true,
+    means: "choosing teas and checking out" do
     value Slot, means: "one tea in one order" do
       part order : Int64
       part tea : Int64
@@ -109,6 +117,10 @@ module TenantShop
     service stock(tins : Int32), returns: Stock::Crate::Id,
       means: "a crate of tins kept for orders" do
       Stock::Crate.create(tins: tins).id
+    end
+
+    service fill(crate : Stock::Crate::Id, more : Int32), means: "tops a crate up" do
+      Stock::Crate.find(crate).fill(more)
     end
   end
 

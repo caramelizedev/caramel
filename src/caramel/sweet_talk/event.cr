@@ -31,6 +31,11 @@ module SweetTalk
 
     abstract def __sweettalk_channel : String
 
+    # The stored name of the context or kernel this event belongs to, and the aggregate
+    # and name an event log of *context* stores it under (ADR 0048).
+    abstract def __sweettalk_home : String
+    abstract def __sweettalk_logged_as(context : String) : {String, String}
+
     def __sweettalk_subject_id : Int64?
       @__sweettalk_subject_id || @__sweettalk_subject.try(&.__sweettalk_raw_id)
     end

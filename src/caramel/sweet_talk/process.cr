@@ -20,9 +20,10 @@ module SweetTalk
     # `whenever Order::Placed, each: :lines, key: Slot.new(…) do |placed, line| … end` is
     # a step: the job finds the row that `key:` picks, inserting it in its first state
     # when absent, and runs the block on it. `attempts:`, `backoff:` and `base:` set the
-    # job's retry rule.
+    # job's retry rule, and `after: Owner` runs the job once the named owner's handler of
+    # the same event has committed.
     macro whenever(event, key = nil, each = nil, attempts = nil, backoff = nil, base = nil,
-                   &block)
+                   after = nil, &block)
       {% process = @type.name.split("::").last %}
       {% if key.is_a?(NilLiteral) %}
         {% event.raise "whenever #{event} in process #{process.id} needs key:, " +
@@ -30,7 +31,8 @@ module SweetTalk
       {% end %}
       __sweettalk_no_stray_writes({{ "whenever #{event}" }}, {{ block.body.stringify }})
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "process",
-        {{ key }}, {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
+        {{ key }}, {{ attempts }}, {{ backoff }}, {{ base }}, {{ after }},
+        {{ block.args.splat }}) do
         {{ block.body }}
       end
     end

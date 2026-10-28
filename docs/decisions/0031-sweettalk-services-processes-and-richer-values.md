@@ -3,9 +3,9 @@
 Date: 2026-10-09
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2, 4 and 6.
-Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md) and
-[ADR 0043](0043-sweettalk-calendar-days.md), decision 2 by
-[ADR 0039](0039-sweettalk-optional-attributes.md), decision 11 by
+Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md),
+[ADR 0043](0043-sweettalk-calendar-days.md) and [ADR 0047](0047-sweettalk-decimal-and-json-values.md),
+decision 2 by [ADR 0039](0039-sweettalk-optional-attributes.md), decision 11 by
 [ADR 0033](0033-sweettalk-multi-tenancy.md), decisions 3 and 11 by
 [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), and decisions 5, 7,
 8 and 10 by [ADR 0046](0046-sweettalk-units.md).
@@ -21,15 +21,16 @@ aggregates over days and undo their work when a step is refused.
 ## Decision
 
 1. **Values** (amends decision 2).
-   - `value Name, String, matches: /…/, length: 3..254` is a string value. A string value
-     takes only `matches:` and `length:`, an integer value only `at_least:`, `at_most:`,
-     `within:` and `times:`, and only integer values have arithmetic.
-   - `value Name, means: "…" do part street : String; … end` is a composite value. A part
-     is a column type or a value that wraps one. It is built with one keyword per part,
-     checks its `never` and `always` when built, and equals another with the same parts.
-   - `value Name, Date, means: "…"` is a calendar day over `SugarORM::Date`, stored in a
-     `date` column ([ADR 0043](0043-sweettalk-calendar-days.md)).
-   - Any other value does not compile.
+   - `value Name, String, matches: /…/, length: 3..254` takes only `matches:` and
+     `length:`; an integer takes `at_least:`, `at_most:`, `within:` and `times:`,
+     and alone has arithmetic.
+   - `value Name, means: "…" do part street : String; … end` is a composite built by
+     keyword from parts, each a column type or a value over one; it checks `never` and
+     `always` and equals one of equal parts.
+   - `value Name, Date` is a day in a `date` column ([ADR 0043](0043-sweettalk-calendar-days.md)),
+     `Decimal(P, S)` and `Json(T)` a decimal and a document
+     ([ADR 0047](0047-sweettalk-decimal-and-json-values.md)).
+   - No other value compiles.
 2. **Attributes and tables** (amends decision 4).
    - `has name : Type = expression` gives an aggregate's or an entity's attribute a default;
      its column has a SQL default when the expression is a literal. A projection's or a

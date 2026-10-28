@@ -112,6 +112,24 @@ module TeaShopWeb
     end
   end
 
+  # Binds a decimal value, required and optional, from its text, and answers it as JSON.
+  struct Price < PageAction
+    ingress csrf: false, authenticate: :allowed?
+
+    contract do
+      field rate : Treasury::Credit::Rate
+      field spread : Treasury::Credit::Spread?
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      json({rate: contract.rate, spread: contract.spread})
+    end
+
+    private def allowed? : Bool
+      true
+    end
+  end
+
   Caramel::Router.draw do
     get "/teas/:tea/hold", Hold
     get "/teas/:tea/form", HoldForm
@@ -119,5 +137,6 @@ module TeaShopWeb
     get "/boxes/:box/fill", FillWith
     post "/orders/:order/lines", AddLine
     post "/loans/lend", Lend
+    post "/loans/price", Price
   end
 end

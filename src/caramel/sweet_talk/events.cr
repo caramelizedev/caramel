@@ -38,6 +38,7 @@ module SweetTalk
       {% name.raise "event #{name}'s channel #{channel.id} is longer than PostgreSQL's 63 " +
                     "characters: shorten the #{parts.id} name" %}
     {% end %}
+    {% parts = channel.split(".") %}
     {% given = names.map_with_index { |field, index| "@#{field.id} : #{types[index].id}" } %}
     {% given = given.join(", ") %}
     {% after_subject = names.empty? ? "" : ", *, #{given.id}" %}
@@ -53,6 +54,11 @@ module SweetTalk
       SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
       SWEETTALK_CHANNEL = {{ channel }}
       SWEETTALK_CARRIES = [{{ carried.map(&.[0]).splat }}] of String
+      # The stored names an event log keeps: the context or kernel, the aggregate (nil for
+      # a context's event) and the event, as the channel says them.
+      SWEETTALK_HOME      = {{ parts[1] }}
+      SWEETTALK_AGGREGATE = {{ subject ? parts[2] : nil }}
+      SWEETTALK_NAME      = {{ parts.last }}
 
       {% for field, index in names %}
         getter {{ field.id }} : {{ types[index].id }}
@@ -87,6 +93,29 @@ module SweetTalk
 
       def __sweettalk_channel : String
         SWEETTALK_CHANNEL
+      end
+
+      # The log row's aggregate and name: the aggregate's stored name, led by its kernel's
+      # when it is a kernel's (`money_voucher`), or the context's own for its event.
+      def self.__sweettalk_logged_as(context : String) : {String, String}
+        {% if subject %}
+          own = SWEETTALK_HOME == context
+          {own ? SWEETTALK_AGGREGATE : "#{SWEETTALK_HOME}_#{SWEETTALK_AGGREGATE}", SWEETTALK_NAME}
+        {% else %}
+          {SWEETTALK_HOME, SWEETTALK_NAME}
+        {% end %}
+      end
+
+      def __sweettalk_logged_as(context : String) : {String, String}
+        self.class.__sweettalk_logged_as(context)
+      end
+
+      def self.__sweettalk_home : String
+        SWEETTALK_HOME
+      end
+
+      def __sweettalk_home : String
+        SWEETTALK_HOME
       end
 
       private def __sweettalk_record : String

@@ -14,11 +14,12 @@ module SweetTalk
 
     # `whenever Order::Placed, each: :lines do |placed, line| … end` updates rows from an
     # event, as a job, or one job per element of the event's list; `attempts:`,
-    # `backoff:` and `base:` set the job's retry rule.
+    # `backoff:` and `base:` set the job's retry rule, and `after: Owner` runs the job
+    # once the named owner's handler of the same event has committed.
     macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
-                   &block)
+                   after = nil, &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "projection", nil,
-        {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
+        {{ attempts }}, {{ backoff }}, {{ base }}, {{ after }}, {{ block.args.splat }}) do
         {{ block.body }}
       end
     end

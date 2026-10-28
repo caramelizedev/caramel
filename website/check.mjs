@@ -327,7 +327,7 @@ const compileRows = {
   'A mover the lifecycle does not declare': ['unknown_state'],
   'A lifecycle whose check name would pass PostgreSQL’s 63 bytes': ['state_check_long'],
   'the without a type': ['the_without_type'],
-  'A value that wraps anything but Int32, Int64, String or Date, or has no parts': ['value_type', 'composite_without_parts'],
+  'A value that wraps anything but Int32, Int64, String, Date, Decimal(P, S) or Json(T), or has no parts': ['value_type', 'composite_without_parts'],
   'A value that takes an option its raw type does not, such as matches: on an integer or at_least: on a string, database_check: true, or database_check: false on a value with parts': ['value_string_bounds', 'value_int_matches', 'value_int_one_of', 'database_check_true', 'composite_database_check'],
   'A one_of: that is not a literal list of words, lists a word twice or one that is not a word, takes matches: or length:, or lists a word that names a method the value or every object already has, or a Crystal keyword': ['one_of_not_list', 'one_of_with_matches', 'one_of_word', 'one_of_duplicate', 'one_of_reserved', 'one_of_class_method', 'one_of_object_method', 'one_of_keyword'],
   'A Date value that takes a bound, a pattern, a length, a list or database_check:': ['date_option', 'date_database_check'],
@@ -376,6 +376,15 @@ const compileRows = {
   'A unit in an aggregate, an entity, a projection, a process or a kernel': ['unit_in_aggregate', 'kernel_holds_unit'],
   'A unit without means:, or whose changes: names another context’s aggregate without follows:': ['unit_without_meaning', 'unit_changes_foreign'],
   'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
+  'A Decimal(P, S) value without require "caramel/sweet_talk/decimal"': ['decimal_without_require'],
+  'A decimal bound that is not decimal text, such as at_least: 0, or one written past S decimals': ['decimal_bound_not_text', 'decimal_bound_scale'],
+  'A Json value with at_least: or any other option': ['json_option'],
+  'order: on a Json value': ['json_order'],
+  'A range in where: on a Json value': ['json_range'],
+  'A projection or process attribute whose default is a decimal or JSON value, which take no SQL default': ['projection_decimal_default'],
+  'An after: naming a projection, a process or a context that does not follow the event, or whose handler takes each:, or a chain of after: that runs in a circle': ['after_not_following', 'after_each', 'after_cycle'],
+  'SweetTalk.rebuild of a projection whose context keeps no event log, or that follows an event the log does not keep': ['rebuild_without_log'],
+  'An event_log: true context declaring an aggregate, projection or process whose table would be CONTEXT_events': ['event_log_table_taken'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));
