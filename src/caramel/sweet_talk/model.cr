@@ -22,6 +22,18 @@ module SweetTalk
     {{ constant.id }} = { {{ items.splat }} }
   end
 
+  # Raises the refusal *refusals* gives the constraint *error* names (ADR 0045), or
+  # *error* itself when SweetTalk did not declare that constraint. The parameter is the
+  # parent class: a rescue of two sibling violations types its variable so.
+  def self.__sweettalk_refuse(error : ::SugarORM::Error,
+                              refusals : Hash(String, String)) : NoReturn
+    name = case error
+           when ::SugarORM::UniqueViolation, ::SugarORM::CheckViolation then error.constraint
+           end
+    sentence = name.try { |named| refusals[named]? }
+    raise sentence ? ::SweetTalk::Refusal.new(sentence) : error
+  end
+
   # `moves`, the lifecycle of an aggregate or a process.
   module Lifecycle
     # `moves open >> placed >> shipped, placed >> cancelled` is the lifecycle, stored in a
@@ -143,8 +155,10 @@ module SweetTalk
     # composite is optional. An attribute named like the tenant's or the parent aggregate's
     # column or association is refused, and under caramel/tenancy a central context's
     # reference to rows that belong to one tenant (ADR 0033); an index name over
-    # PostgreSQL's 63 bytes is SugarORM's to shorten.
-    macro has(decl)
+    # PostgreSQL's 63 bytes is SugarORM's to shorten. `unique: true` or `unique: "…"`,
+    # `index: true` and `check: {"sql", "…"}` are database constraints on the attribute's
+    # columns (ADR 0045), recorded by `__sweettalk_constraint`.
+    macro has(decl, unique = nil, index = nil, check = nil)
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
       {% end %}
@@ -291,15 +305,15 @@ module SweetTalk
         {% end %}
       {% end %}
       {% for entry in checks %}
-        {% check = entry[1] %}
-        {% if check[0] == "range" %}
+        {% bound = entry[1] %}
+        {% if bound[0] == "range" %}
           {% suffix = entry[0] %}
-          {% line = "check #{entry[0].id}: #{check[1].id}" %}
+          {% line = "check #{entry[0].id}: #{bound[1].id}" %}
         {% else %}
-          {% suffix = "#{entry[0].id}_#{check[1].id}" %}
+          {% suffix = "#{entry[0].id}_#{bound[1].id}" %}
           {% subject = "\"#{entry[0].id}\"" %}
-          {% subject = "char_length(#{subject.id})" if check[0] == "length" %}
-          {% sql = "#{subject.id} #{check[2].id}" %}
+          {% subject = "char_length(#{subject.id})" if bound[0] == "length" %}
+          {% sql = "#{subject.id} #{bound[2].id}" %}
           {% line = "check :#{suffix.id}, #{sql.stringify.id}" %}
         {% end %}
         {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{suffix.id}" %}
@@ -367,6 +381,45 @@ module SweetTalk
                       parts, nilable && !default ? "nil" : default, nilable, base, codec} %}
       SWEETTALK_HAS_{{ name.upcase }} = {{ attribute }}
 
+      {% unless unique.is_a?(NilLiteral) && index.is_a?(NilLiteral) && check.is_a?(NilLiteral) %}
+        {% if kind == "entities" %}
+          {% decl.raise "has #{decl} takes no unique:, index: or check:: what makes " +
+                        "#{type.type_vars[0]} unique, or what it keeps, is declared inside " +
+                        "entity #{type.type_vars[0]}" %}
+        {% end %}
+      {% end %}
+      {% unless unique.is_a?(NilLiteral) %}
+        {% unless unique.is_a?(BoolLiteral) && unique || unique.is_a?(StringLiteral) %}
+          {% decl.raise "has #{decl} takes unique: true or the sentence a duplicate is " +
+                        "refused with, as in unique: \"A " +
+                        "#{@type.name.split("::").last.underscore.id} with this #{name} " +
+                        "already exists.\"" %}
+        {% end %}
+        {% sentence = unique.is_a?(StringLiteral) ? unique : nil %}
+        __sweettalk_constraint("unique", [{{ name.stringify }}], {{ stored }},
+          {{ name.stringify }}, {{ sentence }}, nil)
+      {% end %}
+      {% unless index.is_a?(NilLiteral) %}
+        {% unless index.is_a?(BoolLiteral) && index %}
+          {% decl.raise "has #{decl} takes index: true" %}
+        {% end %}
+        __sweettalk_constraint("index", [{{ name.stringify }}], {{ stored }},
+          {{ name.stringify }}, nil, nil)
+      {% end %}
+      {% unless check.is_a?(NilLiteral) %}
+        {% shaped = check.is_a?(TupleLiteral) && check.size == 2 &&
+                    check[0].is_a?(StringLiteral) && check[1].is_a?(StringLiteral) %}
+        {% unless shaped %}
+          {% decl.raise "has #{decl} takes check: {\"sql\", \"sentence\"}, the SQL every row " +
+                        "keeps and the sentence a row that breaks it is refused with, as in " +
+                        "check: {\"#{name} >= 0\", \"A " +
+                        "#{@type.name.split("::").last.underscore.id} cannot hold less than " +
+                        "nothing.\"}" %}
+        {% end %}
+        __sweettalk_constraint("check", [{{ name.stringify }}], nil,
+          {{ name.stringify }}, {{ check[1] }}, {{ check[0] }})
+      {% end %}
+
       {% if kind == "reference" || kind == "record" %}
         {% target = kind == "record" ? "::SweetTalk::RecordId(#{base.id})" : "#{base.id}::Id" %}
         {% accepted = "#{base.id} | #{target.id}" %}
@@ -428,6 +481,128 @@ module SweetTalk
       {% end %}
     end
 
+    # `unique :source_key, :bundle, otherwise: "…"` is a unique index over the columns of
+    # those attributes (ADR 0045); in an entity it is unique within the aggregate, so the
+    # parent's column leads it. `otherwise:` is the sentence a duplicate is refused with;
+    # without it, `Adjustment source_key and bundle must be unique`.
+    macro unique(*names, otherwise = nil)
+      {% unless otherwise.is_a?(NilLiteral) || otherwise.is_a?(StringLiteral) %}
+        {% otherwise.raise "unique takes otherwise: the sentence a duplicate is refused " +
+                           "with, as in otherwise: \"That bundle already has an adjustment.\"" %}
+      {% end %}
+      {% if names.empty? %}
+        {% raise "unique takes the attributes that are unique together, as in " +
+                 "unique :source_key, :bundle" %}
+      {% end %}
+      __sweettalk_constraint("unique", {{ names.map(&.id.stringify) }}, nil,
+        {{ names.map(&.id.stringify).join("_and_") }}, {{ otherwise }}, nil)
+    end
+
+    # `index :owner, :state` is a plain index over the columns of those attributes, for
+    # the reads that look rows up by them (ADR 0045).
+    macro index(*names)
+      {% if names.empty? %}
+        {% raise "index takes the attributes to index together, as in index :owner, :state" %}
+      {% end %}
+      __sweettalk_constraint("index", {{ names.map(&.id.stringify) }}, nil,
+        {{ names.map(&.id.stringify).join("_and_") }}, nil, nil)
+    end
+
+    # `check :pending_is_zero, "state <> 'pending' OR debit = 0", otherwise: "…"` is a
+    # CHECK every row keeps, written against the stored columns, named by its name and the
+    # hash of its SQL (ADR 0045); `otherwise:` is the sentence a row that breaks it is
+    # refused with.
+    macro check(name, sql, otherwise = nil)
+      {% unless name.is_a?(SymbolLiteral) && sql.is_a?(StringLiteral) %}
+        {% raise "check takes a name and the SQL every row keeps, as in check " +
+                 ":pending_is_zero, \"state <> 'pending' OR (debit = 0 AND credit = 0)\", " +
+                 "otherwise: \"A pending line carries no amounts.\"" %}
+      {% end %}
+      {% unless otherwise.is_a?(StringLiteral) %}
+        {% raise "check #{name} needs otherwise:, the sentence a row that breaks it is " +
+                 "refused with, as in check #{name}, #{sql}, otherwise: \"A pending line " +
+                 "carries no amounts.\"" %}
+      {% end %}
+      __sweettalk_constraint("check", [{{ name.id.stringify }}], nil,
+        {{ name.id.stringify }}, {{ otherwise }}, {{ sql }})
+    end
+
+    # Records one database constraint of this aggregate or entity as
+    # `SWEETTALK_CONSTRAINT_<KIND>_<SUFFIX>`: {kind, declaration order, schema line, the
+    # expression that names the constraint at run time, sentence}. *names* are the
+    # attributes it covers and *columns* their columns, resolved from the names when nil: a
+    # reference's `<name>_id`, a composite's part columns, and `state` once `moves` is
+    # declared. A unique index is named by SugarORM, which shortens it past 63 bytes and
+    # appends the tenant column in a tenanted context; a check is
+    # `check_<table>_<suffix>_<hash of the SQL>`, so a changed SQL is a new constraint, and
+    # one over 63 bytes is refused here. A refusal is raised bare: a symbol has no
+    # location, and the compiler reports the macro call's.
+    macro __sweettalk_constraint(kind, names, columns, suffix, sentence, sql)
+      {% owner = @type.name.split("::").last %}
+      {% listed = names.map { |name| ":#{name.id}" }.join(", ") %}
+      {% shown = kind == "check" ? "check :#{suffix.id}" : "#{kind.id} #{listed.id}" %}
+      {% if @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+        {% raise "#{kind.id} belongs in an aggregate or an entity, not in " +
+                 "#{@type.constant("SWEETTALK_KIND").id} #{owner.id}: its key is its identity" %}
+      {% end %}
+      {% table = @type.constant("SWEETTALK_TABLE") %}
+      {% constant = "SWEETTALK_CONSTRAINT_#{kind.upcase.id}_#{suffix.upcase.id}" %}
+      {% if @type.has_constant?(constant) %}
+        {% raise "#{owner.id} declares #{shown.id} twice" %}
+      {% end %}
+      {% order = @type.constants.size %}
+      {% resolved = columns %}
+      {% unless resolved || kind == "check" %}
+        {% resolved = [] of Nil %}
+        {% attributes = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |found| @type.constant(found) }.sort_by { |attribute| attribute[1] } %}
+        {% for name in names %}
+          {% attribute = attributes.find { |candidate| candidate[0] == name } %}
+          {% if name == "state" && @type.has_constant?("SWEETTALK_MOVES") %}
+            {% resolved << "state" %}
+          {% elsif attribute && attribute[2] == "entities" %}
+            {% raise "#{shown.id} names #{name.id}, a list of entities: what makes " +
+                     "#{attribute[3][6..-2].id} unique is declared inside entity " +
+                     "#{attribute[3][6..-2].id}" %}
+          {% elsif attribute && attribute[2] == "composite" %}
+            {% for part in attribute[7] %}
+              {% resolved << part[1] %}
+            {% end %}
+          {% elsif attribute %}
+            {% resolved << attribute[4] %}
+          {% else %}
+            {% have = attributes.reject { |candidate| candidate[2] == "entities" }.map(&.[0]) %}
+            {% have << "state" if @type.has_constant?("SWEETTALK_MOVES") %}
+            {% wanted = name == "state" ? "moves, whose state it names," : name %}
+            {% raise "#{shown.id} names #{name.id}, which #{owner.id} does not have above " +
+                     "it; it has #{have.join(", ").id}: declare #{wanted.id} before the " +
+                     "#{kind.id}" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% if kind == "check" %}
+        {% constraint = "check_#{table.id}_#{suffix.id}_@digest" %}
+        {% too_long = "#{shown.id} would be named @name, longer than PostgreSQL's 63 bytes: " +
+                      "shorten its name or the #{owner.id} name" %}
+        {% line = "check :#{suffix.id}_@digest, #{sql.stringify.id}" %}
+        ::SweetTalk.__sweettalk_hashed({{ constant.id }},
+          {"check", {{ order }}, {{ line }}, {{ "\"#{constraint.id}\"" }}, {{ sentence }}},
+          {{ sql }}, {{ constraint }}, {{ too_long }})
+      {% else %}
+        {% if kind == "unique" && @type < ::SweetTalk::Entity %}
+          {% resolved = ["#{@type.constant("SWEETTALK_PARENT")[0].id}_id"] + resolved %}
+        {% end %}
+        {% listed = resolved.map { |column| ":#{column.id}" }.join(", ") %}
+        {% line = "index #{listed.id}" + (kind == "unique" ? ", unique: true" : "") %}
+        {% quoted = resolved.map { |column| "\"#{column.id}\"" }.join(", ") %}
+        {% named = "::SugarORM::Catalog.index_name(#{table.stringify.id}, [#{quoted.id}])" %}
+        {% if kind == "unique" && sentence.is_a?(NilLiteral) %}
+          {% sentence = "#{owner.id} #{names.join(" and ").id} must be unique" %}
+        {% end %}
+        {{ constant.id }} = { {{ kind }}, {{ order }}, {{ line }}, {{ named }}, {{ sentence }} }
+      {% end %}
+    end
+
     # `the total : Cents = expression` is a derived value, never stored.
     macro the(decl)
       {% if decl.is_a?(TypeDeclaration) && !decl.value.is_a?(Nop) %}
@@ -478,6 +653,11 @@ module SweetTalk
     macro service(call, returns = nil, means = nil, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% call.raise "service belongs in a context, not in #{owner.id}" %}
+    end
+
+    macro unit(call, changes = nil, locks = nil, returns = nil, means = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% call.raise "unit belongs in a context, not in #{owner.id}" %}
     end
 
     macro specification(name, on = nil, where = nil, means = nil, &block)

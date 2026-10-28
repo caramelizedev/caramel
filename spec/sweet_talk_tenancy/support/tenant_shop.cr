@@ -120,6 +120,10 @@ module TenantShop
       end
     end
 
+    aggregate Label, means: "a label one tenant prints once per code" do
+      has code : String, unique: true
+    end
+
     border Ordering do
       whenever Ordering::Order::Placed do |placed|
         TenantShop::SEEN << Caramel::Tenancy.current.slug

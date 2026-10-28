@@ -316,7 +316,7 @@ module SweetTalk
     {% end %}
   end
 
-  # The ubiquitous language: every context, kernel, service, outside system, value,
+  # The ubiquitous language: every context, kernel, service, unit, outside system, value,
   # aggregate, entity, event, projection, specification and process with its meaning, and
   # its context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
@@ -332,6 +332,11 @@ module SweetTalk
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_SERVICE_")) %}
         {% service = context.constant(constant) %}
         terms << ::SweetTalk::Term.new("service", {{ service[0] }}, {{ short }}, {{ service[1] }},
+          {{ part }})
+      {% end %}
+      {% for constant in context.constants.select(&.starts_with?("SWEETTALK_UNIT_")) %}
+        {% unit = context.constant(constant) %}
+        terms << ::SweetTalk::Term.new("unit", {{ unit[0] }}, {{ short }}, {{ unit[1] }},
           {{ part }})
       {% end %}
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}

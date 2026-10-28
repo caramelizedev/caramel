@@ -2,10 +2,10 @@
 # string length is a CHECK constraint on each column that stores it, a closed list of
 # words too, and every lifecycle one on its state column, so a write that goes around the
 # domain is refused too; an optional value with parts has one that keeps its columns all
-# set or all nil, named by its parts so that a part added is a new constraint; a pattern,
-# and a value with database_check: false, are checked in Crystal only. And the tables as
-# PostgreSQL holds them match the declared ones, so `frappe db diff` derives no further
-# migration.
+# set or all nil, named by its parts so that a part added is a new constraint; a declared
+# `check` is one named by the hash of its SQL (ADR 0045); a pattern, and a value with
+# database_check: false, are checked in Crystal only. And the tables as PostgreSQL holds
+# them match the declared ones, so `frappe db diff` derives no further migration.
 require "./support/app"
 
 # Two values with parts that differ by one part, to see how their checks are named.
@@ -86,7 +86,9 @@ describe "SweetTalk's database checks" do
         check_ordering_order_lines_quantity check_ordering_orders_courier_length_2_30
         check_ordering_orders_gift_to_all_or_none_333c6ad0
         check_ordering_orders_receipt_to_length_3_254
-        check_ordering_orders_state_ef9524ce check_ordering_sales_takings check_pricing_teas_price
+        check_ordering_orders_state_ef9524ce check_ordering_sales_takings
+        check_pantry_adjustments_pending_is_zero_0f316047 check_pantry_adjustments_state_ec1638eb
+        check_pantry_crates_quantity_69784f25 check_pricing_teas_price
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
         check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8

@@ -4,8 +4,9 @@
 # PostgreSQL checks too, except one that opts out, a process whose steps may overlap,
 # whose deadline a step arms for its own span and which declares queries, a policy whose
 # first delivery fails, a policy with its own retry rule, an entity a second aggregate
-# stores again as its own, a two-word state, a jar that specifications sort, and a
-# service that emits the shelf's own event, which a second context follows.
+# stores again as its own, a two-word state, a jar that specifications sort, a service
+# that emits the shelf's own event, which a second context follows, and units that change
+# two boxes, or a box and a crate, in one transaction under ordered locks.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
@@ -48,6 +49,10 @@ module Rules
       to fill_with(other : Box) do
         @count += Count.new(1)
         other.fill Count.new(1)
+      end
+
+      to fill_both_with(other : Box) do
+        Shelf.fill_both(self, other, 1)
       end
 
       to tag(label : String) do
@@ -297,6 +302,61 @@ module Rules
 
     service rename(name : String), means: "gives the shelf a new name" do
       emit Renamed, name: name
+    end
+
+    # Fills two boxes by one count, the two rows locked first in id order whichever way
+    # the arguments come; a count of 13 raises after the second fill, and a box left with
+    # more than nine things is refused by the set's rule.
+    unit fill_both(first : Box, second : Box, by : Int32, pause : Int32 = 0),
+      changes: [Box], locks: [first, second],
+      means: "fills two boxes by one count in one transaction" do
+      first.fill Count.new(by)
+      sleep pause.milliseconds unless pause.zero?
+      second.fill Count.new(by)
+      raise "the shelf fell over" if by == 13
+      never "A box holds at most nine things." { first.count.raw > 9 || second.count.raw > 9 }
+    end
+
+    unit tag_and_sign(box : Box::Id, crate : Crate::Id, word : String),
+      changes: [Box, Crate], locks: [box, crate],
+      means: "tags a box and signs a crate with one word in one transaction" do
+      Box.find(box).tag word
+      Crate.find(crate).sign word
+    end
+
+    unit tag_and_relabel(box : Box::Id, tab : Tab::Id, word : String), changes: [Box],
+      locks: [box], means: "tags a box, then reaches a tab the unit does not change" do
+      Box.find(box).tag word
+      Tab.find(tab).relabel word
+    end
+
+    unit fill_unlocked(box : Box::Id, other : Box::Id), changes: [Box], locks: [box],
+      means: "fills a box it locked, then one it did not" do
+      Box.find(box).fill Count.new(1)
+      Box.find(other).fill Count.new(1)
+    end
+
+    unit make_filled_pair(label : String), changes: [Box], returns: Box::Id,
+      means: "creates a box and fills it, with nothing to lock" do
+      box = Box.create(label: label, count: Count.new(0))
+      box.fill Count.new(1)
+      box.id
+    end
+
+    unit fill_both_twice(first : Box, second : Box), changes: [Box], locks: [first, second],
+      means: "runs the fill_both unit inside a unit, which a unit refuses" do
+      fill_both(first, second, 1)
+    end
+
+    service fill_both_served(first : Box::Id, second : Box::Id),
+      means: "runs the fill_both unit as its one change" do
+      fill_both(Box.find(first), Box.find(second), 1)
+    end
+
+    service fill_both_then_one(first : Box::Id, second : Box::Id),
+      means: "runs the fill_both unit, then a command, which is one change too many" do
+      fill_both(Box.find(first), Box.find(second), 1)
+      Box.find(first).fill Count.new(1)
     end
   end
 

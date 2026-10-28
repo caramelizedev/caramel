@@ -7,8 +7,10 @@ Status: accepted. Decisions 2, 4 and 6 are amended by
 [ADR 0033](0033-sweettalk-multi-tenancy.md), decision 2 by
 [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), decisions 2 and 3
 by [ADR 0036](0036-sweettalk-strategic-design.md), decision 6 by
-[ADR 0041](0041-sweettalk-events-that-carry-attributes.md), and decision 3 by
-[ADR 0044](0044-sweettalk-shared-kernels.md).
+[ADR 0041](0041-sweettalk-events-that-carry-attributes.md), decision 3 by
+[ADR 0044](0044-sweettalk-shared-kernels.md), decision 4 by
+[ADR 0045](0045-sweettalk-database-constraints.md) and 5 by
+[ADR 0046](0046-sweettalk-units.md).
 
 ## Context
 
@@ -62,30 +64,30 @@ or a policy, and nothing stops one context from reaching into another's types.
 4. **Aggregates, entities and projections are SugarORM schemas.** Each is a schema in
    `<Context>::Rows` over the table `<context>_<name>` pluralised (entities:
    `<context>_<aggregate>_<entity>`), written only through its changeset
-   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)); naming `Rows` in a context
-   does not compile. `has` stores:
+   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)); a context may not name
+   `Rows`. `has` stores:
    - `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` as a column; a non-optional
-     `Bool` reads as `name?` too, and no state or specification shares that name;
-   - a value as its raw column, rebuilt and so validated on load;
-   - an aggregate as a foreign key; its getter returns the aggregate's `Id`;
-   - an `Array` of the aggregate's own entity as a child table, loaded with `preload`; an
-     entity holds none, nor is an `Array` of scalars stored.
+     `Bool` reads as `name?` too, a name no state or specification shares;
+   - a value as its raw column, rebuilt on load;
+   - an aggregate as a foreign key, whose getter returns its `Id`;
+   - an `Array` of the aggregate's own entity as a child table; an entity holds none, nor
+     is an `Array` of scalars stored.
 
-   Any other type, or a name the tenant's or the parent's column or association takes,
-   does not compile. An entity updates only its saving aggregate's row; one held elsewhere,
-   or left by a failed `create` or factory, is inserted anew. Stored types are declared
-   first. A projection's key column is uniquely indexed. `frappe db diff` derives the
-   migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
+   `has` options and the words `unique`, `index` and `check` declare database constraints
+   ([ADR 0045](0045-sweettalk-database-constraints.md)). Any other type, or a name the
+   tenant's or the parent's column takes, does not compile. An entity another aggregate
+   holds is inserted anew. Stored types come first. A projection's key is uniquely
+   indexed. `frappe db diff` derives the migrations
+   ([ADR 0008](0008-branch-and-diff-migrations.md)).
 5. **A command is one transaction on one aggregate.** `to` runs in
-   `SugarORM::Repo.transaction`: it loads the aggregate with its root's row locked, runs
-   the body, checks every `never` and `always`, saves the root and then its entities, and
-   dispatches the events. A `SweetTalk::Refusal` rolls the transaction back, and the
-   aggregate reloads what is stored. A command or `create` on another aggregate while a
-   command runs raises `SweetTalk::Boundary`, and so does a command on a second aggregate
-   in a `whenever` handler. Two commands called in turn inside one
-   `SugarORM::Repo.transaction`, each a savepoint, commit and roll back together: the
-   supported atomic seam across aggregates. `to finalize` does not compile: it would
-   replace the garbage collector's.
+   `SugarORM::Repo.transaction`: it locks the root's row and loads the aggregate, runs
+   the body, checks every `never` and `always`, saves the root, then its entities, and
+   dispatches the events. A `SweetTalk::Refusal` rolls it back, and the aggregate reloads
+   what is stored. A command or `create` on another aggregate while a command runs raises
+   `SweetTalk::Boundary`, as does a command on a second aggregate in a `whenever`
+   handler, or a `unit` (ADR 0046). Two commands run in turn in one
+   `SugarORM::Repo.transaction`, each a savepoint, commit and roll back together; a unit
+   names that seam and locks first. `to finalize` does not compile.
 6. **Events carry their facts and leave through Cold Brew, in the command's transaction.**
    - **Facts.** An event holds its subject's id (`order_id`) and its fields as they were
      when emitted: column types, values, ids and an `Array` of the aggregate's entity. No

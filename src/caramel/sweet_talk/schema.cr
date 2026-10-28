@@ -14,6 +14,8 @@ module SweetTalk
     {% named = type.has_constant?("SWEETTALK_KEY") ? type.constant("SWEETTALK_KEY") : nil %}
     {% key = named ? attributes.find { |attribute| attribute[0] == named } : nil %}
     {% indexed = key && (key[2] == "composite" ? key[7].map { |part| part[1] } : [key[4]]) %}
+    {% constraints = type.constants.select(&.starts_with?("SWEETTALK_CONSTRAINT_"))
+         .map { |constant| type.constant(constant) }.sort_by { |constraint| constraint[1] } %}
     {% aggregate = type < ::SweetTalk::Aggregate %}
     {% home = ::SweetTalk::BoundedContext.includers
          .find { |context| type.name.starts_with?("#{context.name}::") } %}
@@ -40,6 +42,9 @@ module SweetTalk
         {% end %}
         {% if key %}
           index {{ indexed.map { |column| ":#{column.id}" }.join(", ").id }}, unique: true
+        {% end %}
+        {% for constraint in constraints %}
+          {{ constraint[2].id }}
         {% end %}
         timestamps
       end

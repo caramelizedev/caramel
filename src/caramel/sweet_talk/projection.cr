@@ -111,12 +111,12 @@ module SweetTalk
     # inserted with its defaults through `Start`, an upsert that leaves one row when two
     # handlers insert one key. Only a handler may ask for one.
     def self.[]({{ key[0].id }} : {{ key_type }}) : self
-      unit = ::Fiber.current.__sweettalk_unit || raise ArgumentError.new({{ outside }})
+      work = ::Fiber.current.__sweettalk_work || raise ArgumentError.new({{ outside }})
       {% for value, index in key_values %}
         key_{{ index }} = {{ value.id }}
       {% end %}
       text = "{{ type }}:" + [{{ locals.id }}].join(":")
-      (unit.rows[text] ||= begin
+      (work.rows[text] ||= begin
         query = {{ row }}.query.where({{ wheres.join(", ").id }}).lock
         stored = query.first || begin
           start = {{ row }}::Start.new({{ wheres.join(", ").id }})

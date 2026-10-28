@@ -392,7 +392,7 @@ describe "The tea shop on PostgreSQL" do
       tea = TeaShopSpec.tea("Sencha")
       done = Channel(Exception?).new
       spawn do
-        SweetTalk.__sweettalk_unit do
+        SweetTalk.__sweettalk_work do
           Ordering::Sales[tea.id].sold += 1
           sleep 200.milliseconds
         end
@@ -401,7 +401,7 @@ describe "The tea shop on PostgreSQL" do
         done.send(ex)
       end
       sleep 50.milliseconds
-      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 2 }
+      SweetTalk.__sweettalk_work { Ordering::Sales[tea.id].sold += 2 }
       done.receive.should be_nil
       Ordering::Sales.all.map { |row| {row.tea.raw, row.sold} }.should eq([{tea.id.raw, 3}])
     end
@@ -410,10 +410,10 @@ describe "The tea shop on PostgreSQL" do
   it "keeps both changes when two handlers update one projection row at once" do
     SweetTalkSpec.committed do
       tea = TeaShopSpec.tea("Sencha")
-      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 1 }
+      SweetTalk.__sweettalk_work { Ordering::Sales[tea.id].sold += 1 }
       done = Channel(Exception?).new
       spawn do
-        SweetTalk.__sweettalk_unit do
+        SweetTalk.__sweettalk_work do
           Ordering::Sales[tea.id].sold += 2
           sleep 200.milliseconds
         end
@@ -422,7 +422,7 @@ describe "The tea shop on PostgreSQL" do
         done.send(ex)
       end
       sleep 50.milliseconds
-      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 4 }
+      SweetTalk.__sweettalk_work { Ordering::Sales[tea.id].sold += 4 }
       done.receive.should be_nil
       Ordering::Sales.all.map { |row| {row.tea.raw, row.sold} }.should eq([{tea.id.raw, 7}])
     end
@@ -771,7 +771,7 @@ describe "The tea shop on PostgreSQL" do
     SweetTalkSpec.rolled_back do |connection|
       Ordering::Rows::Sales.__sugar_required_columns.should eq(["tea_id"])
       tea = TeaShopSpec.tea("Sencha")
-      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 1 }
+      SweetTalk.__sweettalk_work { Ordering::Sales[tea.id].sold += 1 }
       Ordering::Sales.all.map(&.takings).should eq([Catalogue::Cents.zero])
 
       TeaShopSpec.order({tea, 2}).place

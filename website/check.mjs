@@ -369,6 +369,13 @@ const compileRows = {
   'A projection or process attribute whose default is a value with parts or a calendar day': ['projection_composite_default'],
   'A command, factory or service whose body does not compile, called or not': ['uncalled_command_body'],
   'An emit in a context outside a service body, or a context event with carries:': ['emit_outside_service', 'context_event_carries'],
+  'A unique, index or check, or a has with those options, in a projection or a process': ['unique_in_projection', 'index_in_process', 'has_check_in_projection'],
+  'A unique or index naming an attribute the aggregate does not have above it': ['unique_unknown_attribute', 'index_unknown_attribute'],
+  'A check without otherwise:, a has whose check: is not a SQL and a sentence, a unique: that is neither true nor a sentence, or those options on a list of entities': ['check_without_sentence', 'has_check_without_sentence', 'unique_entities'],
+  'A constraint declared twice over the same attributes': ['unique_twice'],
+  'A unit in an aggregate, an entity, a projection, a process or a kernel': ['unit_in_aggregate', 'kernel_holds_unit'],
+  'A unit without means:, or whose changes: names another context’s aggregate without follows:': ['unit_without_meaning', 'unit_changes_foreign'],
+  'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

@@ -160,6 +160,18 @@ module SweetTalk
         end
       end
 
+      {% constraints = @type.constants.select(&.starts_with?("SWEETTALK_CONSTRAINT_"))
+           .map { |constant| @type.constant(constant) }.sort_by { |constraint| constraint[1] } %}
+      # The sentence each unique index and check this entity declared refuses with, by the
+      # constraint's name (ADR 0045); a violation of any other constraint stays raw.
+      SWEETTALK_REFUSALS = {
+        {% for constraint in constraints %}
+          {% if constraint[4] %}
+            {{ constraint[3].id }} => {{ constraint[4] }},
+          {% end %}
+        {% end %}
+      } of String => String
+
       # Inserts or updates this entity's row under its aggregate; returns its id. A row
       # another aggregate holds, or one a rolled-back create or factory left behind, is not
       # this aggregate's, so the entity is inserted again as a new row of its own. A row
@@ -173,7 +185,11 @@ module SweetTalk
                       {{ row }}::Changeset.new({{ arguments.id }})
                     end
         return row.id if row && changeset.changes.empty? && changeset.valid?
-        row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
+        begin
+          row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
+        rescue error : ::SugarORM::UniqueViolation | ::SugarORM::CheckViolation
+          ::SweetTalk.__sweettalk_refuse(error, SWEETTALK_REFUSALS)
+        end
         raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; ")) unless changeset.saved?
         @__sweettalk_row = changeset.record
         @__sweettalk_id = changeset.record.id
