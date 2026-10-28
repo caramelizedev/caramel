@@ -181,7 +181,7 @@ module SweetTalk
       {% parts = @type.name.split("::") %}
       {% short = parts.last %}
       {% span = "#{parts[-2].id}::#{short.id}.#{verb}" %}
-      {% if %w(create find find? all new allocate).includes?(verb.stringify) %}
+      {% if %w[create find find? all new allocate].includes?(verb.stringify) %}
         {% call.raise "factory #{verb} would replace #{short.id}.#{verb}: " +
                       "name it for what it makes, as in factory open" %}
       {% end %}
