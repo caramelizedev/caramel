@@ -629,6 +629,25 @@ module SugarORM
           {% unique_targets << {key: index[:columns].join("_and_"), columns: indexed} %}
         {% end %}
       {% end %}
+      # A name over PostgreSQL's 63 bytes becomes `index_<table>_on_<cut>_<fnv8>`, the
+      # FNV-1a 32-bit hash of the whole name after the column list cut to fit, as
+      # `Catalog.index_name` builds it at run time.
+      {% fitted = [] of Nil %}
+      {% for index in indexes %}
+        {% name = index[:name] %}
+        {% if name.size > 63 %}
+          {% hash = 2166136261 %}
+          {% for char in name.chars %}
+            {% hash = ((hash ^ char.ord) * 16777619) % 4294967296 %}
+          {% end %}
+          {% digits = "0123456789abcdef".chars %}
+          {% hex = [28, 24, 20, 16, 12, 8, 4, 0].map { |shift| digits[(hash >> shift) & 15] } %}
+          {% name = "#{name[0...54].id}_#{hex.join("").id}" %}
+        {% end %}
+        {% fitted << {name: name, columns: index[:columns], unique: index[:unique],
+                      tenant: index[:tenant]} %}
+      {% end %}
+      {% indexes = fitted %}
       {% if json_line %}
         {% node = json_line[:node] %}
         {% node_at = "\n  --> #{node.filename.id}:" +

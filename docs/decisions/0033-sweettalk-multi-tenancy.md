@@ -46,8 +46,8 @@ remains is which rows belong to a tenant, and which combinations would leak acro
 6. **Names fit PostgreSQL** (amends ADR 0030 decision 6 and ADR 0031 decision 11). In a
    program that requires `caramel/tenancy`, a channel name over 42 characters does not
    compile, which leaves 21 for the `t<id>:` prefix. A tenanted table's tenant index,
-   `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), does not
-   compile over 63 bytes, and in every program neither does a reference's or a key's index.
+   `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), is shortened
+   by SugarORM over 63 bytes, as every index name is (ADR 0031 decision 11).
 7. **The tenant's column is reserved, and the aggregate names it.** A `has` or a composite
    part that would store `<model>_id` (`account_id` for `App::Account`), and an entity
    whose aggregate is named like the tenant model, do not compile. Every aggregate of a
@@ -80,8 +80,8 @@ remains is which rows belong to a tenant, and which combinations would leak acro
   the central command happened to run in. A refusal can be lifted later without breaking a
   program; one added after a release would break programs.
 - Tenant ids only grow, so the channel budget subtracts the longest prefix. PostgreSQL
-  truncates an index name over 63 bytes, and the differ then drops the tenant index in its
-  next plan.
+  truncates an index name over 63 bytes, so SugarORM shortens one itself, keeping the
+  `index_<table>_on_` prefix it owns, and the differ sees the name it declared.
 - A column named after the model matches the application's own tenanted tables, so SQL,
   `frappe db diff` and ADR 0025's plug-in steps read the same.
 - Each opt-in already has a spec program of its own, and `spec/sweet_talk` keeps proving
@@ -94,5 +94,5 @@ Rejected:
 - **Requiring the domain after the routes.** Any other order compiles untenanted.
 - **Hashed channel names.** Live pages and `renamed_from:` rely on readable channels.
 - **A generator for the plug-in migrations.** It would cover only a one-tenant backfill.
-- **Deferred:** a central event delivered to every tenant, an `as:` name for the tenant
-  attribute, and a SugarORM refusal of every index name over 63 bytes.
+- **Deferred:** a central event delivered to every tenant, and an `as:` name for the
+  tenant attribute.

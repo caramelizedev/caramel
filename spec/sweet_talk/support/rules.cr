@@ -4,7 +4,8 @@
 # PostgreSQL checks too, except one that opts out, a process whose steps may overlap,
 # whose deadline a step arms for its own span and which declares queries, a policy whose
 # first delivery fails, a policy with its own retry rule, an entity a second aggregate
-# stores again as its own, a two-word state, and a jar that specifications sort.
+# stores again as its own, a two-word state, a jar that specifications sort, and a
+# service that emits the shelf's own event, which a second context follows.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
@@ -290,6 +291,24 @@ module Rules
       crate = Crate.make(label)
       crate.sign maker
       crate.id
+    end
+
+    event Renamed, name : String, means: "the shelf was given a new name"
+
+    service rename(name : String), means: "gives the shelf a new name" do
+      emit Renamed, name: name
+    end
+  end
+
+  context Signage, means: "the signs that say what the shelf is called" do
+    aggregate Sign, means: "a sign naming the shelf" do
+      has name : String
+    end
+
+    border Shelf do
+      whenever Shelf::Renamed do |renamed|
+        Sign.create(name: renamed.name)
+      end
     end
   end
 end

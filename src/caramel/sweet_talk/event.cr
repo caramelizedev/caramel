@@ -1,10 +1,12 @@
 # Events: a subject, its facts and its metadata.
 module SweetTalk
-  # Something that happened to one aggregate: its subject, its facts, recorded as JSON
-  # when it was emitted, and its metadata: an id, when it happened, who acted, what caused
-  # it and the flow it belongs to. It travels in a job's params; a notification carries the
-  # subject's id. The subject's id is read when the event is dispatched, so a factory's
-  # event can name the aggregate it creates.
+  # Something that happened to one aggregate, or in one context: its subject, its facts,
+  # recorded as JSON when it was emitted, and its metadata: an id, when it happened, who
+  # acted, what caused it and the flow it belongs to. It travels in a job's params; a
+  # notification carries the subject's id. The subject's id is read when the event is
+  # dispatched, so a factory's event can name the aggregate it creates. A context's event
+  # has the bound tenant for its subject in a program that requires caramel/tenancy, and
+  # none otherwise.
   abstract class Event
     @__sweettalk_fields : String = ""
     @__sweettalk_subject : ::SweetTalk::Aggregate? = nil
@@ -29,8 +31,8 @@ module SweetTalk
 
     abstract def __sweettalk_channel : String
 
-    def __sweettalk_subject_id : Int64
-      @__sweettalk_subject_id || __sweettalk_subject.__sweettalk_raw_id
+    def __sweettalk_subject_id : Int64?
+      @__sweettalk_subject_id || @__sweettalk_subject.try(&.__sweettalk_raw_id)
     end
 
     private def __sweettalk_subject : ::SweetTalk::Aggregate
@@ -39,6 +41,12 @@ module SweetTalk
 
     def __sweettalk_fields : String
       @__sweettalk_fields
+    end
+
+    # Records the fields again, once the command has saved, so an entity among them shows
+    # the id its row got.
+    def __sweettalk_repack : Nil
+      @__sweettalk_fields = __sweettalk_record
     end
 
     def __sweettalk_payload : String

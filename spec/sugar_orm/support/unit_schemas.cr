@@ -131,6 +131,19 @@ module SugarUnit
     end
   end
 
+  # Three indexes whose names are 62, 63 and 64 bytes: `index_unit_bounds_on_` is 21.
+  struct Bound < SugarORM::Schema
+    schema "unit_bounds" do
+      field id : Int64, primary: true
+      field aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa : Int32 = 0
+      field bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb : Int32 = 0
+      field ccccccccccccccccccccccccccccccccccccccccccc : Int32 = 0
+      index :aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      index :bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      index :ccccccccccccccccccccccccccccccccccccccccccc, unique: true
+    end
+  end
+
   class Ticket::GradeChangeset < SugarORM::Changeset(Ticket)
     param grade : Grade
 

@@ -485,6 +485,7 @@ describe "The tea shop on PostgreSQL" do
       {"Ordering", "Fulfilment", "event"},
       {"Pricing", "Calendar", "kernel"},
       {"Pricing", "Money", "kernel"},
+      {"Signage", "Shelf", "event"},
     ])
   end
 

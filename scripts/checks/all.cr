@@ -54,7 +54,7 @@ module Caramel::Checks::All
     "frappe-project" => 298, "frappe-project-build" => 216, "frappe-project-dev" => 146,
     "installations" => 91, "schema-diff" => 83, "integration" => 72, "page-boxoffice" => 55,
     "page-forms" => 50, "page-json" => 47, "browser" => 44, "page-jobs" => 37,
-    "page-webhooks" => 32, "spec" => 66, "native" => 22, "editor-tools" => 22,
+    "page-webhooks" => 32, "page-sums" => 45, "spec" => 66, "native" => 22, "editor-tools" => 22,
     "latte-postgres" => 15,
   }
 

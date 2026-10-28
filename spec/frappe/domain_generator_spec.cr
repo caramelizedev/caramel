@@ -97,15 +97,28 @@ describe Caramel::Frappe::DomainGenerator do
     end
   end
 
-  it "requires caramel/sweet_talk after caramel and the domain before the jobs" do
+  it "requires caramel/sweet_talk after caramel, the domain before the jobs, and boots" do
     domain_project do |project, generator|
       generator.generate(project, "Shop", "Ordering", MEANS)
       config = read(project, "config/application.cr")
       opening = %(require "caramel"\nrequire "caramel/sweet_talk"\n) +
                 %(require "caramel/crema/recorder"\n)
       config.should start_with(opening)
-      jobs = %(require "../app/changesets/*"\nrequire "../app/domain/*"\nrequire "../app/jobs/*"\n)
+      jobs = %(require "../app/changesets/*"\nrequire "../app/domain/*"\nSweetTalk.boot\n) +
+             %(require "../app/jobs/*"\n)
       config.should contain(jobs)
+    end
+  end
+
+  it "adds SweetTalk.boot to an application whose domain is already required" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      path = File.join(project.root, "config/application.cr")
+      File.write(path, File.read(path).sub("SweetTalk.boot\n", ""))
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should eq(%w[app/domain/ledger.cr config/application.cr spec/domain/ledger_spec.cr])
+      booted = %(require "../app/domain/*"\nSweetTalk.boot\nrequire "../app/jobs/*"\n)
+      read(project, "config/application.cr").should contain(booted)
     end
   end
 

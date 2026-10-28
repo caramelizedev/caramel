@@ -4,10 +4,10 @@ require "./resource_generator"
 
 module Caramel::Frappe
   # Adds a SweetTalk domain (ADRs 0030 and 0031): the module with its first
-  # context, its spec, on first use the require lines in config/application.cr,
-  # and the SweetTalk skill for Claude Code when the application has none. In a
-  # multi-tenant application the domain names the tenant the routes' tenant
-  # block names (ADR 0033).
+  # context, its spec, on first use the require lines and `SweetTalk.boot` in
+  # config/application.cr, and the SweetTalk skill for Claude Code when the
+  # application has none. In a multi-tenant application the domain names the
+  # tenant the routes' tenant block names (ADR 0033).
   class DomainGenerator
     CONFIG = "config/application.cr"
     ROUTES = "config/routes.cr"
@@ -20,6 +20,9 @@ module Caramel::Frappe
     TENANCY_REQUIRE    = %(require "caramel/tenancy")
     JOBS_REQUIRE       = %(require "../app/jobs/*")
     DOMAIN_REQUIRE     = %(require "../app/domain/*")
+    # Types every command, factory and service, called or not, so `frappe check`
+    # sees their bodies (ADR 0031 decision 10).
+    BOOT = "SweetTalk.boot"
 
     MISSING_ANCHORS = "config/application.cr needs exactly one require \"caramel\" " \
                       "and one require \"../app/jobs/*\"; add require \"caramel/sweet_talk\" " \
@@ -84,9 +87,10 @@ module Caramel::Frappe
       model
     end
 
-    # Adds whichever of the two require lines is missing.
+    # Adds whichever of the two require lines and the boot line is missing.
     private def wired(config : String, lines : Array(String)) : String
-      return config if lines.includes?(SWEET_TALK_REQUIRE) && lines.includes?(DOMAIN_REQUIRE)
+      present = [SWEET_TALK_REQUIRE, DOMAIN_REQUIRE, BOOT].all? { |line| lines.includes?(line) }
+      return config if present
       unless lines.count(CARAMEL_REQUIRE) == 1 && lines.count(JOBS_REQUIRE) == 1
         raise Error.new(MISSING_ANCHORS)
       end
@@ -97,6 +101,10 @@ module Caramel::Frappe
       unless lines.includes?(DOMAIN_REQUIRE)
         config = config.sub(/^#{Regex.escape(JOBS_REQUIRE)}$/m,
           "#{DOMAIN_REQUIRE}\n#{JOBS_REQUIRE}")
+      end
+      unless lines.includes?(BOOT)
+        config = config.sub(/^#{Regex.escape(DOMAIN_REQUIRE)}$/m,
+          "#{DOMAIN_REQUIRE}\n#{BOOT}")
       end
       config
     end

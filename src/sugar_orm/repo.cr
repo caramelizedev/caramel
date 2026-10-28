@@ -1,5 +1,6 @@
 require "db"
 require "pg"
+require "./catalog"
 
 class Fiber
   # The connection (and transaction) SugarORM uses for work in this fiber;
@@ -55,7 +56,7 @@ module SugarORM
     def on?(table : String, column : String) : Bool
       return false unless @table.nil? || @table == table
       return true if @columns.first? == column
-      @constraint.in?("index_#{table}_on_#{column}", "#{table}_#{column}_key")
+      @constraint.in?(Catalog.index_name(table, {column}), "#{table}_#{column}_key")
     end
   end
 

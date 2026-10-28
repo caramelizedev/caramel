@@ -78,7 +78,7 @@ module SweetTalk
 
     {% if owner %}module {{ owner }}{% end %}
     struct {{ job }} < ::Caramel::ColdBrew::Job
-      param subject : Int64
+      param subject : Int64? = nil
       param fields : String
       param meta : String
       {% if each %}

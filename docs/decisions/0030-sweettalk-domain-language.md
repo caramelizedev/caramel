@@ -41,9 +41,9 @@ or a policy, and nothing stops one context from reaching into another's types.
      precedes it in a chain. `never "message" { condition }` refuses a command that
      leaves the condition true, and `always` one that leaves it false; an entity's run
      after its aggregate's.
-   - **Commands and events.** `to verb(arg : Type) do … end` is a command (decision 5), and
-     `refuse "message"` ends it. `event Name, field : Type` declares one of the aggregate's
-     events; `emit Name, field: value` queues one, and an aggregate emits only its own.
+   - **Commands and events.** `to verb(arg : Type)` is a command (decision 5); `refuse
+     "message"` ends it. `event Name, field : Type` declares an aggregate's or a context's
+     event; `emit Name, field: value` queues it from a command or a service, its own only.
    - **Policies and projections.** `whenever Event do |event| … end`, in a context or a
      border, is a policy (decision 6). In `projection Name do … end` it updates rows, and
      `key name : Type` names the attribute that picks a row (decision 7).

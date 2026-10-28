@@ -335,7 +335,7 @@ const compileRows = {
   'A bound that is not an integer literal, unless the value takes database_check: false': ['bound_not_literal', 'length_not_literal'],
   'Two different values mixed in arithmetic, or multiplied without times:': ['value_mix', 'undeclared_times'],
   'A word out of its place: whenever or service in an aggregate, key outside a projection or a process, deadline outside a process, specification inside an aggregate, or compensate in a projection': ['whenever_in_aggregate', 'service_in_aggregate', 'key_outside_projection', 'deadline_outside_process', 'specification_in_aggregate', 'compensate_in_projection'],
-  'has or part with a type that cannot be stored, a has of a Hash, or an attribute or key whose constraint or index name would pass PostgreSQL’s 63 bytes': ['unsupported_type', 'hash_attribute', 'composite_part_type', 'check_name_long', 'reference_index_long', 'key_index_long'],
+  'has or part with a type that cannot be stored, a has of a Hash, or an attribute whose constraint name would pass PostgreSQL’s 63 bytes': ['unsupported_type', 'hash_attribute', 'composite_part_type', 'check_name_long'],
   'A key that is optional, or a handler that assigns a projection’s key': ['key_optional', 'projection_key_write'],
   'A command, factory, step, compensation or deadline that assigns @name for a reference attribute, which stores @name_id': ['stray_reference_write', 'stray_reference_write_factory', 'stray_reference_write_process', 'stray_reference_write_multiple'],
   'A finds, counts or specification that asks nil of an attribute that is not optional': ['where_nil_required_scalar', 'where_nil_required_composite', 'where_nil_required_specification'],
@@ -360,13 +360,15 @@ const compileRows = {
   'An emit that gives a field its event carries': ['emit_carried_field'],
   'renamed_from: naming its own name, or a rename whose old job name another job has': ['renamed_from_itself', 'job_alias_taken'],
   'A value with parts as a contract field': ['composite_field'],
-  'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_index_long', 'tenant_column_taken', 'tenant_parent_column'],
+  'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_column_taken', 'tenant_parent_column'],
   'A command named finalize, which would replace the garbage collector’s': ['command_finalize'],
   'has tenant or has tenant_id on an aggregate of a tenanted context, which has those accessors': ['has_tenant', 'has_tenant_id'],
   'An entity that holds entities, or an Array of scalars': ['entity_holds_entities', 'array_of_scalars'],
   'A Bool attribute named like a lifecycle state': ['bool_state_predicate'],
   'An attribute named like the tenant’s association, or an entity attribute named like its aggregate’s association or column': ['tenant_association_taken', 'parent_column_taken'],
   'A projection or process attribute whose default is a value with parts or a calendar day': ['projection_composite_default'],
+  'A command, factory or service whose body does not compile, called or not': ['uncalled_command_body'],
+  'An emit in a context outside a service body, or a context event with carries:': ['emit_outside_service', 'context_event_carries'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

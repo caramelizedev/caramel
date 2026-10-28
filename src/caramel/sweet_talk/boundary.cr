@@ -2,7 +2,7 @@
 # fiber.
 module SweetTalk
   # What a service, a compensation or a deadline should do instead of changing a second
-  # aggregate.
+  # aggregate: a service may emit its context's own event.
   INSTEAD = "emit an event and react to it in a whenever"
 
   # Checks that changing *aggregate* (nil for a new one) keeps to one aggregate per

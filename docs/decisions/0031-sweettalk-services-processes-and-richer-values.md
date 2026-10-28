@@ -47,9 +47,13 @@ aggregates over days and undo their work when a step is refused.
      after its aggregate's stored name, so it survives a rename.
 3. **Repositories.**
    - `find`, `find?`, `all` and every query read one statement per table: the roots, then
-     each list of entities through `preload`. Entities come back by id, which is insertion
+     each list of entities through `preload`. `find(id, entities: false)` and `find?` read
+     the root alone: a list of that aggregate raises `SweetTalk::Unloaded`, and a command
+     on it loads the lists under its lock. Entities come back by id, which is insertion
      order; an in-memory reorder is not persisted: store a position attribute for an order
-     the domain owns. Saving deletes dropped entities in one statement.
+     the domain owns. Saving writes the root and each entity only when a column changes,
+     and deletes the entities a list was loaded with and dropped, in one statement per
+     list, none when none was dropped.
    - `finds verb(args), where: {attribute: expression, state: :placed}` in an aggregate is a
      query: the aggregates whose columns equal the expressions (a list matches any member,
      a range its span), by id. A key that names no stored attribute, a list of entities, or
@@ -65,7 +69,9 @@ aggregates over days and undo their work when a step is refused.
    domain service and a glossary entry. It runs in one transaction and changes at most one
    aggregate, by as many commands as it likes, a `create` or a factory counting as the
    first; a command on a second aggregate raises `SweetTalk::Boundary`. Anywhere but a
-   context it does not compile.
+   context it does not compile. A context's own `event Name, field : Type, means: "…"`,
+   without `carries:`, is for a change no aggregate holds; only a service body may `emit`
+   it, on `sweettalk.<context>.<event>` with the bound tenant's id, or nil, as subject.
 6. **Event metadata** (amends decision 6). Every event records `event_id`, `occurred_at`,
    `actor`, `cause_id` and `flow_id`, and its jobs carry them. `SweetTalk.acting(by) { … }`
    names the actor of the events emitted inside it, and each policy, compensation and step
@@ -75,9 +81,10 @@ aggregates over days and undo their work when a step is refused.
    random 32-hex id that one command keeps for all its events. A field may be nilable, as
    in `reason : String?`, but not another union; a field named like the metadata or the
    subject's id does not compile. An event reads its subject's id when it is dispatched,
-   so a factory's event names the new aggregate. A retried job restores the same
-   `event_id`, the key a handler gives a side effect outside PostgreSQL, such as mail, so a
-   retry can tell it already happened.
+   so a factory's event names the new aggregate; an entity among its facts is written
+   then too, after the save, so it carries its row's id (`"id"`, null until then).
+   A retried job restores the same `event_id`, the key a handler gives a side effect
+   outside PostgreSQL, such as mail, so a retry can tell it already happened.
 7. **Compensation** (amends decision 6). `compensate Event do |event, …, refusal| … end`,
    after a `whenever` for the same event in the same context, border or process, runs when
    that handler is refused. The handler's work has rolled back; the compensation gets its
@@ -95,7 +102,11 @@ aggregates over days and undo their work when a step is refused.
    disarming came after its own, acting as `deadline <Process>.<name>`.
 10. **Units of work and checks.** A handler's projection and process rows live in a unit
     of work on its fiber and are saved when it returns. The whole-program checks run at the
-    first `find?`, dispatch or job as well as at `SweetTalk.boot`.
+    first `find?`, dispatch or job as well as at `SweetTalk.boot`. Each `to`, `factory` and
+    `service` also emits `self.__sweettalk_touch_<name>`, a never-run proc literal that
+    calls it; the checks call every one, so `--no-codegen` types each body whether or
+    not anything calls it, and `frappe make domain` writes `SweetTalk.boot` after
+    `require "../app/domain/*"` so `frappe check` reaches them.
 11. **Database checks** (amends decision 2). An integer value's bounds and a string
     value's `length:` are also SugarORM `check` constraints on every column that stores
     the value, a composite's part columns included: `check_<table>_<column>` for bounds,
@@ -105,9 +116,10 @@ aggregates over days and undo their work when a step is refused.
     Crystal only, where they may name a constant. A pattern is checked in Crystal only.
     SweetTalk's changesets do not map these constraints: SweetTalk refuses first, so a
     violation from its own write raises `SugarORM::CheckViolation`. Any other bound, a
-    constraint name over PostgreSQL's 63 bytes, a reference's or a key's index name over
-    them (a reference's foreign-key name is shorter), and two declarations whose names
-    give one table do not compile.
+    constraint name over PostgreSQL's 63 bytes, and two declarations whose names give one
+    table do not compile. A reference's or a key's index name over 63 bytes is SugarORM's
+    to shorten: `index_<table>_on_<cut>_<fnv8>`, the FNV-1a hash of the whole name after
+    the column list, cut so the name fits (a reference's foreign-key name is shorter).
 
 ## Reasons
 
