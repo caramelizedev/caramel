@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.20.0 - 2026-10-28
+
+### Upgrade notes
+
 - SweetTalk: `kernel Money, shared_by: [Pricing, Billing], means: "…" do … end` declares a shared kernel, a module of `value` and `aggregate` declarations that two or more named contexts or kernels share; each sharer says `shares: Money` (or `shares: [Money, Calendar]`), naming kernels declared before it. Only a sharer may name `Money::` types, run its aggregates' commands or react to its events, a kernel may not name a context or reach `Caramel::Outbound`, and every value or aggregate of a kernel that nothing else in it uses must be named by two or more sharers; each refusal fails compilation at the line that causes it. A kernel stores like a context (`money_vouchers`), belongs to the tenant under `caramel/tenancy`, appears in the glossary with kind `kernel`, and draws a `kernel` edge in the context map ([ADR 0044](docs/decisions/0044-sweettalk-shared-kernels.md)). Nothing changes for a program without one.
 - `APP_ORIGIN` is normalised once: the host is lowercased and an explicit `:443` dropped, so `https://Example.com:443` works, and a request whose `Host` or `Origin` header differs from the origin only in case or by `:443` is accepted instead of answering 421 or 403. `Caramel::CSRF#origin` returns the normalised form (`https://example.com`).
 - A session write that would take the `__Host-caramel_session` cookie past 4096 bytes (`session["key"] = value`, `merge!`, `update`, `put`, `put_if_absent` or `transform_values!`) raises `Caramel::Session::Overflow` at the write and leaves the session as it was, so an action fails there instead of answering 500 after the records it wrote committed. `session` is now a `Caramel::Session::Data`, a `Hash(String, String)` subclass; `Caramel::Session.fits?(data)` and `.cookie_bytes(data)` say whether and how big a hash would encode, and `Session#encode` still raises `Overflow` for a hash built some other way.
@@ -28,6 +32,34 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - `frappe corretto` reports each preparation phase with its duration (`Corretto: template checked in 0.0s`, `template migrated`, `worker databases cloned`, `workers finished`, `workers dropped`), whether each worker's spec binary was reused or built, and ends with `Corretto: M of M workers passed in <total>`; a script that matches that line exactly needs the ` in <duration>` suffix. Worker output that stays on one line for five seconds, such as progress dots, is forwarded as far as it goes.
 - Latte's runtime directory moved from `/private/tmp/caramel-<uid>-<digest>` to `~/Library/Caches/Caramel/<digest>`, which another user cannot pre-create. Stop a daemon from an earlier release with that release's `latte stop` before starting this one, and restart `frappe dev` sessions started under the old path. Latte refuses with `runtime_path_too_long` when a home directory would push a socket path past macOS's 103 bytes. `scripts/crystal` keeps its OpenSSL alias under `$TMPDIR`. The trace collector answers 421 to a request whose `Host` is not `127.0.0.1`, `localhost` or `[::1]` with its port, and keeps at most 64 MiB of traces. `latte trust install` refuses, naming the file, when a key under `services/caddy/storage/pki/authorities/caramel/` is not an owned file of mode 0600.
 - Latte's DNS, HTTP and HTTPS listeners move with `CARAMEL_LATTE_DNS_PORT`, `CARAMEL_LATTE_HTTP_PORT` and `CARAMEL_LATTE_HTTPS_PORT` (1024 to 65535; defaults 15353, 18080, 18443). With `CARAMEL_HOME` a second Latte runs beside yours; the resolver and the relay serve the default ports only, and such a Latte's HTTP listener redirects to its own HTTPS port. `frappe services start` refuses before starting anything when a listener a service needs is held, naming the owner (`DNS port 15353 is in use by coredns (pid 22064)`, `port_in_use`); a service already running keeps its port. `scripts/check latte-daemon` runs on free ports of its own, so no check needs your own Latte stopped.
+
+### Breaking changes
+
+- **core:** tenant routes fail closed; make tenancy generates a membership check (34cdf36)
+
+### Features
+
+- **core:** session issue time with a 14-day window, and APP_SECRET_PREVIOUS (18b073d)
+- **core:** refuse private addresses, cap responses and bound Outbound calls (9336008)
+- **sugar_orm:** lint destructive and blocking DDL, read dollar quotes (db8e7a9)
+- **frappe:** write a checksum and an SBOM beside the build artifact; CARAMEL_BUILD_IMAGE (a6cfd85)
+- **frappe:** report Corretto phases with durations and relay partial lines (3f464c4)
+- **latte:** configurable DNS, HTTP and HTTPS ports, and a port preflight naming the owner (3c8df84)
+- **sweet_talk:** shared kernels that named contexts share (bd2c6cf)
+
+### Fixes
+
+- **crema:** upsert a window's metrics rows in (kind, key) order (d190afe)
+- **core:** normalise APP_ORIGIN and match Host and Origin case-insensitively (eb9631b)
+- **cold_brew:** namespace the schedule lease lock and count a failed run (89521c3)
+- **sugar_orm:** keep a migration's error when the unlock in ensure fails (498de01)
+- **sugar_orm:** read the row on an update with no changes (a92d4bf)
+- **core:** refuse a session write past 4 KB at the write (b17a6a4)
+- **sugar_orm:** start serve, work and seed against a journal that is ahead (0c955a8)
+- **crema:** widen redaction, normalise exported SQL, escape text logs, trust switch (b451691)
+- **cold_brew:** ping the LISTEN link and heartbeat SSE streams (9aca278)
+- **cold_brew:** index the queue for release and claim, isolate maintenance, wake on enqueue, never strand a job (e71c9d6)
+- **latte:** private runtime directory, collector Host check and byte ceiling, CA key mode (c1c55ae)
 
 ## 0.19.0 - 2026-10-25
 
