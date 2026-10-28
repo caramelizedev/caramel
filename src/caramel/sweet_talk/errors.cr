@@ -14,6 +14,11 @@ module SweetTalk
   class Missing < Exception
   end
 
+  # A list of entities read on an aggregate found with `entities: false`. It is a
+  # programming error, and an action answers it 500.
+  class Unloaded < Exception
+  end
+
   # One entry of the ubiquitous language. *subdomain* is its context's `subdomain:`, as
   # "core", "supporting" or "generic", or nil when the context names none or is a kernel.
   record Term, kind : String, name : String, context : String, means : String,

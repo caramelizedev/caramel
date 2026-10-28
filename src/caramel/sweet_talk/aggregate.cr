@@ -10,6 +10,8 @@ module SweetTalk
     @__sweettalk_id : Int64? = nil
     @__sweettalk_removed_at : Time? = nil
     @__sweettalk_events = [] of ::SweetTalk::Event
+    # False once found with `entities: false`: the lists are empty and may not be read.
+    @__sweettalk_entities = true
 
     # `entity Line, means: "…" do … end` is an entity inside this aggregate, stored in a
     # child table named after the aggregate. In a tenanted context the aggregate's key
@@ -35,7 +37,7 @@ module SweetTalk
         SWEETTALK_ROW    = {{ "#{@type.constant("SWEETTALK_ROW").id}::#{name}" }}
         SWEETTALK_PARENT = {{ parent }}
         ::SweetTalk.__sweettalk_table({{ table }},
-          {{ "entity #{@type.name.split("::").last.id}::#{name}" }}, ::{{ @type }})
+          {{ "entity #{@type.name.split("::").last.id}::#{name}" }})
 
         {{ block ? block.body : nil }}
 
@@ -51,22 +53,10 @@ module SweetTalk
     # PostgreSQL's 63 characters, or 42 in a program that requires caramel/tenancy, which
     # prefixes a tenant's `t<id>:`. `SWEETTALK_CARRIES` lists the names it carries.
     macro event(name, *fields, carries = nil, means = nil, renamed_from = nil)
-      {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
-                    "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
-      ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
       {% subject = @type.name.split("::").last.underscore.id %}
       {% reserved = %w[event_id occurred_at actor cause_id flow_id] + ["#{subject}_id"] %}
       {% short = @type.name.split("::").last %}
-      {% names = [] of Nil %}
-      {% types = [] of Nil %}
-      {% for field in fields %}
-        {% if reserved.includes?(field.var.stringify) %}
-          {% field.raise "event #{name} cannot have a field named #{field.var}: " +
-                         "SweetTalk records it" %}
-        {% end %}
-        {% names << field.var.stringify %}
-        {% types << field.type.stringify %}
-      {% end %}
+      {% names = fields.map(&.var.stringify) %}
       {% carried = [] of Nil %}
       {% unless carries.is_a?(NilLiteral) %}
         {% unless carries.is_a?(ArrayLiteral) && carries.size > 0 %}
@@ -103,83 +93,17 @@ module SweetTalk
             {% type = "::SweetTalk::RecordId(#{attribute[10].id})#{optional.id}" %}
           {% end %}
           {% names << label %}
-          {% types << type %}
-          {% carried << label %}
+          {% carried << {label, type} %}
         {% end %}
       {% end %}
       {% stored = (renamed_from || name).stringify.underscore %}
       {% context = @type.constant("SWEETTALK_CONTEXT") %}
       {% aggregate = @type.constant("SWEETTALK_STORED") %}
       {% channel = "sweettalk.#{context.id}.#{aggregate.id}.#{stored.id}" %}
-      {% given = names.map_with_index { |field, index| "@#{field.id} : #{types[index].id}" } %}
-      {% given = given.join(", ") %}
-      {% after_subject = names.empty? ? "" : ", *, #{given.id}" %}
-      {% after_meta = names.empty? ? "" : ", #{given.id}" %}
-      {% facts = names.map_with_index do |field, index|
-           # A job queued before an optional field existed holds no such key: nil.
-           key = "data[#{field.id.stringify}]"
-           key = "(#{key.id}? || ::JSON::Any.new(nil))" if types[index] =~ /(\?|Nil)\z/
-           "#{field.id}: ::SweetTalk.unpack(#{types[index].id}, #{key.id})"
-         end %}
-      {% if ::Caramel.has_constant?("Tenancy") && channel.size > 42 %}
-        {% name.raise "event #{name}'s channel #{channel.id} is longer than 42 characters: a " +
-                      "tenant's t<id>: prefix adds up to 21 of PostgreSQL's 63; shorten the " +
-                      "context, aggregate or event name" %}
-      {% elsif channel.size > 63 %}
-        {% name.raise "event #{name}'s channel #{channel.id} is longer than PostgreSQL's 63 " +
-                      "characters: shorten the context, aggregate or event name" %}
-      {% end %}
-      class {{ name }} < ::SweetTalk::Event
-        SWEETTALK_MEANS   = {{ means }}
-        SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
-        SWEETTALK_CHANNEL = {{ channel }}
-        SWEETTALK_CARRIES = [{{ carried.splat }}] of String
-
-        {% for field, index in names %}
-          getter {{ field.id }} : {{ types[index].id }}
-        {% end %}
-
-        def initialize(subject : ::{{ @type }}{{ after_subject.id }})
-          @__sweettalk_subject = subject
-          __sweettalk_stamp
-          @__sweettalk_fields = __sweettalk_record
-        end
-
-        def initialize(*, subject_id : Int64, fields_json : String,
-                       meta_json : String{{ after_meta.id }})
-          @__sweettalk_subject_id = subject_id
-          @__sweettalk_fields = fields_json
-          __sweettalk_restore(meta_json)
-        end
-
-        def {{ subject }}_id : ::{{ @type }}::Id
-          ::{{ @type }}::Id.new(__sweettalk_subject_id)
-        end
-
-        def __sweettalk_channel : String
-          SWEETTALK_CHANNEL
-        end
-
-        private def __sweettalk_record : String
-          JSON.build do |json|
-            json.object do
-              {% for field in names %}
-                json.field({{ field.id.stringify }}) { ::SweetTalk.pack(json, @{{ field.id }}) }
-              {% end %}
-            end
-          end
-        end
-
-        def self.__sweettalk_load(subject : Int64, fields : String, meta : String) : self
-          {% if names.empty? %}
-            new(subject_id: subject, fields_json: fields, meta_json: meta)
-          {% else %}
-            data = JSON.parse(fields)
-            new(subject_id: subject, fields_json: fields, meta_json: meta,
-              {{ facts.join(", ").id }})
-          {% end %}
-        end
-      end
+      {% pairs = carried.empty? ? "[] of Nil".id : carried %}
+      ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
+        carried: {{ pairs }}, channel: {{ channel }}, means: {{ means }},
+        renamed_from: {{ renamed_from }}, subject: ::{{ @type }}, tenanted: false)
     end
 
     # `emit Placed, lines: lines` records an event; the command dispatches it when it
@@ -230,6 +154,14 @@ module SweetTalk
             {{ block.body }}
           end
         end
+      end
+
+      # Typed by `SweetTalk.boot`, so the body compiles whether or not anything calls it.
+      def self.__sweettalk_touch_{{ call.name }} : Nil
+        {% params = ["aggregate : self"] + call.args.map { |arg| "#{arg.var} : #{arg.type}" } %}
+        {% names = call.args.map(&.var) %}
+        ->({{ params.join(", ").id }}) { aggregate.{{ call.name }}({{ names.splat }}) }
+        nil
       end
     end
 
@@ -290,6 +222,13 @@ module SweetTalk
 
       private def __sweettalk_factory_{{ verb }}({{ call.args.splat }}) : Nil
         {{ block.body }}
+      end
+
+      # Typed by `SweetTalk.boot`, so the body compiles whether or not anything calls it.
+      def self.__sweettalk_touch_{{ verb }} : Nil
+        {% params = call.args.map { |arg| "#{arg.var} : #{arg.type}" } %}
+        ->({{ params.join(", ").id }}) { {{ verb }}({{ call.args.map(&.var).splat }}) }
+        nil
       end
     end
 
@@ -385,6 +324,9 @@ module SweetTalk
            name = collection[0].id
            ", #{name}: loaded.#{name}.map { |child| #{child}.new(stored: child) }"
          end %}
+      {% empties = collections.map do |collection|
+           ", #{collection[0].id}: #{collection[3].id}.new"
+         end %}
       {% missing = "There is no #{short.id} " %}
       @__sweettalk_row : {{ row }}? = nil
 
@@ -440,13 +382,21 @@ module SweetTalk
         {% end %}
       end
 
-      def initialize(*, stored row : {{ row }}{{ lists.join("").id }})
+      {% for collection in collections %}
+        # The ids of the rows this list was loaded with; a save deletes those it drops.
+        @__sweettalk_loaded_{{ collection[0].id }} = [] of Int64
+      {% end %}
+
+      def initialize(*, stored row : {{ row }}, entities : Bool = true{{ lists.join("").id }})
         @__sweettalk_row = row
         @__sweettalk_id = row.id
         @__sweettalk_removed_at = row.removed_at
+        @__sweettalk_entities = entities
         {{ loads.join("\n").id }}
         {% for collection in collections %}
           @{{ collection[0].id }} = {{ collection[0].id }}
+          @__sweettalk_loaded_{{ collection[0].id }} =
+            {{ collection[0].id }}.map(&.__sweettalk_raw_id)
         {% end %}
         {% if moves %}
           @state = State.parse(row.state)
@@ -456,6 +406,15 @@ module SweetTalk
       def id : Id
         Id.new(__sweettalk_raw_id)
       end
+
+      {% for collection in collections %}
+        # The list, once loaded; an aggregate found with `entities: false` has none to read.
+        def {{ collection[0].id }} : {{ collection[3].id }}
+          return @{{ collection[0].id }} if @__sweettalk_entities
+          raise ::SweetTalk::Unloaded.new("{{ short.id }} #{@__sweettalk_id} was found without " +
+                                          "its {{ collection[0].id }}: find it with entities")
+        end
+      {% end %}
 
       # The aggregate `create` and a factory start from: every attribute by name, each that has
       # a default or is optional left out when not given, wherever it is declared. An aggregate
@@ -483,17 +442,20 @@ module SweetTalk
         end
       {% end %}
 
-      def self.find?(id : Id) : self?
+      # The aggregate by id, or nil. `entities: false` reads the root alone, in one
+      # statement: its lists cannot be read, and a command on it loads them.
+      def self.find?(id : Id, *, entities : Bool = true) : self?
         ::SweetTalk.__sweettalk_checked
-        __sweettalk_find?(id.raw)
+        __sweettalk_find?(id.raw, entities)
       end
 
-      def self.find(id : Id) : self
-        find?(id) || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}.")
+      def self.find(id : Id, *, entities : Bool = true) : self
+        find?(id, entities: entities) || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}.")
       end
 
-      def self.__sweettalk_find?(raw : Int64) : self?
-        __sweettalk_rows({{ row }}.query.where(removed_at: nil).where(id: raw)).first?
+      def self.__sweettalk_find?(raw : Int64, entities : Bool = true) : self?
+        query = {{ row }}.query.where(removed_at: nil).where(id: raw)
+        __sweettalk_rows(query, entities).first?
       end
 
       def self.all : Array(self)
@@ -518,36 +480,48 @@ module SweetTalk
       end
 
       # Builds an aggregate from each row the query reads, with one more query per
-      # collection of entities. Protected: only this aggregate's own repository builds
-      # aggregates from rows.
-      protected def self.__sweettalk_rows(query) : Array(self)
+      # collection of entities, or none when *entities* is false. Protected: only this
+      # aggregate's own repository builds aggregates from rows.
+      protected def self.__sweettalk_rows(query, entities : Bool = true) : Array(self)
         {% if collections.empty? %}
           query.to_a.map { |row| new(stored: row) }
         {% else %}
+          unless entities
+            return query.to_a.map do |row|
+              new(stored: row, entities: false{{ empties.join("").id }})
+            end
+          end
           query{{ preloads.join("").id }}.to_a.map do |loaded|
             new(stored: loaded.record{{ children.join("").id }})
           end
         {% end %}
       end
 
-      # Writes the root through its changeset, then each entity; deletes, in one
-      # statement, the entity rows this aggregate no longer holds.
+      # Writes the root through its changeset, then each entity, each only when a column
+      # changes; deletes, in one statement per list, the entity rows this aggregate loaded
+      # and no longer holds, and none when it dropped none.
       def __sweettalk_save : Nil
         changeset = if row = @__sweettalk_row
                       {{ row }}::Changeset.new(row, {{ columns.join(", ").id }})
                     else
                       {{ row }}::Changeset.new({{ columns.join(", ").id }})
                     end
-        row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
-        raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; ")) unless changeset.saved?
-        @__sweettalk_row = changeset.record
-        @__sweettalk_id = changeset.record.id
+        unless row && changeset.changes.empty? && changeset.valid?
+          row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
+          unless changeset.saved?
+            raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; "))
+          end
+          @__sweettalk_row = changeset.record
+          @__sweettalk_id = changeset.record.id
+        end
         {% for collection in collections %}
           kept = @{{ collection[0].id }}.map(&.__sweettalk_save({{ foreign }}: __sweettalk_raw_id))
-          child = {{ row }}::{{ collection[3][6..-2].id }}
-          dropped = child.query.where({{ foreign }}: __sweettalk_raw_id)
-          dropped = dropped.where("NOT (id = ANY(?))", kept) unless kept.empty?
-          dropped.delete_all
+          dropped = @__sweettalk_loaded_{{ collection[0].id }} - kept
+          unless dropped.empty?
+            {{ row }}::{{ collection[3][6..-2].id }}.query.where({{ foreign }}: __sweettalk_raw_id)
+              .where(id: dropped).delete_all
+          end
+          @__sweettalk_loaded_{{ collection[0].id }} = kept
         {% end %}
       end
 
@@ -555,7 +529,12 @@ module SweetTalk
       def __sweettalk_copy(fresh : self) : Nil
         @__sweettalk_row = fresh.@__sweettalk_row
         @__sweettalk_removed_at = fresh.@__sweettalk_removed_at
+        @__sweettalk_entities = fresh.@__sweettalk_entities
         {{ copies.join("\n").id }}
+        {% for collection in collections %}
+          @__sweettalk_loaded_{{ collection[0].id }} =
+            fresh.@__sweettalk_loaded_{{ collection[0].id }}
+        {% end %}
         {% if moves %}
           @state = fresh.@state
         {% end %}
@@ -627,11 +606,15 @@ module SweetTalk
       {% end %}
     end
 
-    # Enqueues the jobs and notifications of the events this aggregate emitted.
+    # Enqueues the jobs and notifications of the events this aggregate emitted. Each is
+    # recorded again first, now that the save gave every entity among its facts an id.
     def __sweettalk_dispatch_events : Nil
       events = @__sweettalk_events.dup
       @__sweettalk_events.clear
-      events.each { |event| ::SweetTalk.dispatch(event) }
+      events.each do |event|
+        event.__sweettalk_repack
+        ::SweetTalk.dispatch(event)
+      end
     end
 
     # Runs a factory's body on this new aggregate as its first change, then checks the

@@ -33,6 +33,11 @@ two lists were checked only when something emitted the event.
    not there is nil.** A field typed `T?` that a queued event lacks, because the event was
    emitted before the field existed, is read as nil. A required field that is missing still
    fails, as a queued job that lacks a field of its declaration cannot be run.
+6. **An entity in an event is written when the event is dispatched, with its id.** An
+   entity's facts are packed after the command or factory has saved, so each carries
+   `"id"`, the row's, and `line.id` in a handler names it; a scalar field keeps the value
+   `emit` read. A job queued before entities carried an id has none, and `line.id` on it
+   raises; an entity that was never saved packs `"id": null`.
 
 ## Reasons
 
@@ -47,6 +52,10 @@ two lists were checked only when something emitted the event.
   when the event is emitted: an event that said `owner: nil` of an aggregate whose owner is
   set would be a fact the aggregate cannot show. An event that reports a change and needs
   the value before it declares a field of its own name, as `before_owner : Owner::Id?`.
+- An entity's id exists only once the save has run, after every `emit`, and the save is
+  in the same transaction as the dispatch. Packing entities at dispatch is the one moment
+  the id is known and the event has not left the command; a handler that follows a line
+  needs that id, and a line packed at `emit` would name nothing.
 
 **Trade-off: the event is a snapshot of the aggregate.**
 

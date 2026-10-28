@@ -140,10 +140,10 @@ module SweetTalk
     # lines, raw column type, parts, default, optional, base type, codec} for the storage macros,
     # the base type being the declared one without its `?`; a composite's parts are {part,
     # column, raw type, part type, part kind, check, codec}, the raw type ending in `?` when the
-    # composite is optional. An index name over PostgreSQL's 63 bytes is refused, as is an
-    # attribute named like the tenant's or the parent aggregate's column or association, and
-    # under caramel/tenancy a central context's reference to rows that belong to one tenant
-    # (ADR 0033).
+    # composite is optional. An attribute named like the tenant's or the parent aggregate's
+    # column or association is refused, and under caramel/tenancy a central context's
+    # reference to rows that belong to one tenant (ADR 0033); an index name over
+    # PostgreSQL's 63 bytes is SugarORM's to shorten.
     macro has(decl)
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
@@ -322,21 +322,7 @@ module SweetTalk
         {% end %}
         {% lines = "#{lines.id}\ncheck :#{suffix.id}, #{sql.stringify.id}" %}
       {% end %}
-      {% table = @type.constant("SWEETTALK_TABLE") %}
       {% stored = parts ? parts.map(&.[1]) : [column] %}
-      {% if keyed && key == name.stringify %}
-        {% index = "index_#{table.id}_on_#{stored.join("_and_").id}" %}
-        {% if index.size > 63 %}
-          {% decl.raise "key #{decl} would index its key as #{index.id}, longer than " +
-                        "PostgreSQL's 63 bytes: shorten the key" %}
-        {% end %}
-      {% elsif kind == "reference" || kind == "record" %}
-        {% index = "index_#{table.id}_on_#{column.id}" %}
-        {% if index.size > 63 %}
-          {% decl.raise "has #{decl} would index #{column.id} as #{index.id}, longer than " +
-                        "PostgreSQL's 63 bytes: shorten the attribute" %}
-        {% end %}
-      {% end %}
       {% contexts = ::SweetTalk::BoundedContext.includers %}
       {% home = contexts.find { |context| @type.name.starts_with?("#{context.name}::") } %}
       {% tenant = home && home.constant("SWEETTALK_TENANT") %}

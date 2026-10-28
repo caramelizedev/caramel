@@ -69,6 +69,7 @@ module SweetTalk
     @@checked ||= begin
       context_map
       glossary
+      __sweettalk_touch
       true
     end
   end
@@ -77,6 +78,22 @@ module SweetTalk
   def self.boot : Nil
     context_map
     glossary
+    __sweettalk_touch
+  end
+
+  # References every command, factory and service, so `crystal build --no-codegen` types
+  # their bodies whether or not anything calls them (ADR 0031 decision 10).
+  def self.__sweettalk_touch : Nil
+    {% begin %}
+      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::BoundedContext.includers %}
+      {% for owner in owners %}
+        {% for method in owner.class.methods %}
+          {% if method.name.starts_with?("__sweettalk_touch_") %}
+            ::{{ owner }}.{{ method.name }}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
   end
 
   # The context map as {from, to, kind} edges, kind "dependency", "event", "outside" or

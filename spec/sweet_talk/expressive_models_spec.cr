@@ -34,6 +34,19 @@ module ExpressiveModelsSpec
   rescue error : SugarORM::CheckViolation
     error.constraint
   end
+
+  # A batch opened by Ada with one slip per label.
+  def self.batch(*labels : String) : Counter::Batch
+    slips = labels.map { |label| Counter::Batch::Slip.new(label: label) }.to_a
+    Counter::Batch.open(teller("Ada"), slips)
+  end
+
+  # How many statements the block sent.
+  def self.statements(&) : Int64
+    before = SugarORM::Repo.statements_executed
+    yield
+    SugarORM::Repo.statements_executed - before
+  end
 end
 
 describe "SweetTalk's closed-set values" do
@@ -501,6 +514,72 @@ describe "SweetTalk's entities" do
         WHERE conrelid = 'counter_entries'::regclass AND contype = 'f'
         SQL
       keys.map(&.[:target]).should eq(%w[counter_entries])
+    end
+  end
+end
+
+describe "SweetTalk's entities when an aggregate is saved" do
+  it "writes one UPDATE for the entity a command changed, and nothing for the rest" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("fee", "salary", "rent")
+      ids = batch.slips.map(&.id)
+      # The locked root, its slips, then the one slip that changed.
+      ExpressiveModelsSpec.statements { batch.retitle("salary", "wages") }.should eq(3)
+      # The two reads alone: neither the root nor a slip changed.
+      ExpressiveModelsSpec.statements { batch.retitle("wages", "wages") }.should eq(2)
+      reloaded = Ledger::Counter::Batch.find(batch.id)
+      reloaded.slips.map(&.label).should eq(%w[fee wages rent])
+      reloaded.slips.map(&.id).should eq(ids)
+    end
+  end
+
+  it "deletes only the entity rows a command dropped, in one statement" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("fee", "salary", "rent")
+      ids = batch.slips.map(&.id)
+      # The locked root, its slips, then one DELETE of the struck slip.
+      ExpressiveModelsSpec.statements { batch.strike("salary") }.should eq(3)
+      Ledger::Counter::Batch.find(batch.id).slips.map(&.id).should eq([ids[0], ids[2]])
+      SweetTalkSpec.count("counter_batch_slips").should eq(2)
+    end
+  end
+
+  it "finds an aggregate without its entities in one statement, and a command on it loads them" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("fee", "salary")
+      before = SugarORM::Repo.statements_executed
+      found = Ledger::Counter::Batch.find(batch.id, entities: false)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      found.opened_by.should eq(ExpressiveModelsSpec.teller("Ada"))
+      message = "Batch #{batch.id} was found without its slips: find it with entities"
+      expect_raises(SweetTalk::Unloaded, message) { found.slips }
+      found.retitle("fee", "levy")
+      found.slips.map(&.label).should eq(%w[levy salary])
+      Ledger::Counter::Batch.find(batch.id).slips.map(&.label).should eq(%w[levy salary])
+      Ledger::Counter::Batch.find?(batch.id, entities: false).should eq(batch)
+    end
+  end
+
+  it "gives each entity in a factory's event the id its row got, in memory and in the job" do
+    SweetTalkSpec.rolled_back do |connection|
+      Ledger::Counter.openings.clear
+      opened = SweetTalk.emitted(Ledger::Counter::Batch::Opened) do
+        ExpressiveModelsSpec.batch("fee", "salary")
+      end.first
+      ids = opened.slips.map(&.id.raw)
+      ids.size.should eq(2)
+      fields = SugarORM.sql("SELECT payload->>'fields' AS fields FROM caramel_jobs",
+        as: {fields: String})
+      slips = JSON.parse(fields.first[:fields])["slips"].as_a
+      slips.map(&.["id"].as_i64).should eq(ids)
+      Caramel::ColdBrew.drain_queue(connection).should eq(1)
+      Ledger::Counter.openings.should eq([ids])
+      unsaved = Ledger::Counter::Batch::Slip.new(label: "rent")
+      expect_raises(NilAssertionError, "Slip has no id until its aggregate is saved") { unsaved.id }
+      queued_before = Ledger::Counter::Batch::Slip.new(fact: JSON.parse(%({"label":"rent"})))
+      expect_raises(NilAssertionError, "Slip has no id until its aggregate is saved") do
+        queued_before.id
+      end
     end
   end
 end

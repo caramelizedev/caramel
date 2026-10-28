@@ -189,18 +189,6 @@ PROBLEMS = [
   {"channel_tenant_budget",
    "event TemperatureRecorded's channel sweettalk.warehousing.cold_container." \
    "temperature_recorded is longer than 42 characters"},
-  {"tenant_index_long",
-   "aggregate RefrigeratedShippingContainer would store its rows in " \
-   "warehousing_refrigerated_shipping_containers, whose tenant index " \
-   "index_warehousing_refrigerated_shipping_containers_on_account_id_and_id is longer than " \
-   "PostgreSQL's 63 bytes"},
-  {"reference_index_long",
-   "has destination_warehouse : Warehouse would index destination_warehouse_id as " \
-   "index_warehousing_refrigerated_shipping_containers_on_destination_warehouse_id"},
-  {"key_index_long",
-   "key refrigerated_container_serial_number : Int64 would index its key as " \
-   "index_warehousing_container_readings_on_refrigerated_container_serial_number, longer " \
-   "than PostgreSQL's 63 bytes: shorten the key"},
   {"tenant_column_taken",
    "has account : Account would store account_id, which names each row's tenant " \
    "Shop::Account"},
@@ -399,6 +387,13 @@ PROBLEMS = [
    "has deliver_to : Address = Address.new(street: \"\", city: \"\") in projection Sales " \
    "cannot have a default: a value with parts or a calendar day has no SQL default, and its " \
    "row starts from its key alone; make it optional, as in has deliver_to : Address?"},
+  {"emit_outside_service",
+   "emit belongs in a service body: a context emits Renamed from a service, as in service " \
+   "rename(name : String), means: \"…\" do … end, and an aggregate from a command"},
+  {"context_event_carries",
+   "event Renamed in Catalogue takes no carries:: a context holds no attributes to carry; " \
+   "declare the fields it records, as in event Renamed, name : String"},
+  {"uncalled_command_body", "undefined local variable or method 'dispatched!'"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

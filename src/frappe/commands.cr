@@ -167,8 +167,8 @@ module Caramel::Frappe
       Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
         "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
-        "require \"caramel/sweet_talk\" and require \"../app/domain/*\" in " \
-        "config/application.cr. When the application has no SweetTalk skill for agents, " \
+        "require \"caramel/sweet_talk\", require \"../app/domain/*\" and SweetTalk.boot " \
+        "in config/application.cr. When the application has no SweetTalk skill for agents, " \
         "it also writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application " \
         "the domain names the tenant, and --central makes the context one every tenant " \
         "shares."),

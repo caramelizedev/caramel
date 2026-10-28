@@ -2,8 +2,9 @@
 # attributes of each stored kind (an aggregate, a value, a closed-set value, a value with
 # parts, an application's schema record), the same inside an entity, a projection and a
 # process, events that take their fields from the aggregate by name, an entity with a
-# defaulted attribute before a required one and an invariant of its own, and an aggregate
-# that refers to its own type.
+# defaulted attribute before a required one and an invariant of its own, an aggregate
+# that refers to its own type, and a batch of slips a factory opens and commands retitle
+# and strike, for what a save writes and what an event says of its entities.
 require "../../../src/caramel/sweet_talk"
 
 module Ledger
@@ -137,6 +138,35 @@ module Ledger
       end
     end
 
+    aggregate Batch, means: "the transfers the desk opens together at one sitting" do
+      has opened_by : Teller
+      has slips : Array(Slip)
+
+      entity Slip, means: "one transfer a batch will open, by its label" do
+        has label : String
+
+        def retitle(label : String) : Nil
+          @label = label
+        end
+      end
+
+      event Opened, carries: [opened_by, slips], means: "a batch was opened, with its slips"
+
+      factory open(opened_by : Teller, slips : Array(Slip)) do
+        emit Opened
+      end
+
+      to retitle(label : String, new_label : String) do
+        slip = @slips.find { |each| each.label == label }
+        refuse "There is no slip #{label}." unless slip
+        slip.retitle(new_label)
+      end
+
+      to strike(label : String) do
+        @slips.reject! { |each| each.label == label }
+      end
+    end
+
     projection Standing, means: "the last settlement of each owner" do
       key owner : Owner
       has last_settled_by : Teller?
@@ -190,6 +220,17 @@ module Ledger
 
     whenever Transfer::Undone do |undone|
       undoings << [undone.owner.try(&.raw), undone.reason, undone.note].join("|")
+    end
+
+    @@openings = [] of Array(Int64)
+
+    # The ids of the slips each Opened handler read from its job, in the order they ran.
+    def self.openings : Array(Array(Int64))
+      @@openings
+    end
+
+    whenever Batch::Opened do |opened|
+      openings << opened.slips.map(&.id.raw)
     end
 
     specification Unsettled, on: Transfer, where: {settled_by: nil},

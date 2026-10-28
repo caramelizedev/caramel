@@ -11,10 +11,8 @@ module SweetTalk
   # `SWEETTALK_TABLE`, the plural of *singular* by English rules: unchanged when it ends
   # in s, -ies for a consonant and y, -es after x, z, ch and sh, and -s otherwise. A
   # declaration, *owner* as in "aggregate TeaTin", whose name gives a table another
-  # declaration already stores its rows in is refused here, in the domain's words, and
-  # so is one whose tenant index would pass PostgreSQL's 63 bytes; *scope* is the context,
-  # or the aggregate of an entity.
-  macro __sweettalk_table(singular, owner, scope)
+  # declaration already stores its rows in is refused here, in the domain's words.
+  macro __sweettalk_table(singular, owner)
     {% plural = singular + "s" %}
     {% plural = singular[0..-2] + "ies" if singular =~ /[^aeiou]y\z/ %}
     {% plural = singular + "es" if singular =~ /(x|z|ch|sh)\z/ %}
@@ -28,16 +26,6 @@ module SweetTalk
         {% singular.raise "#{owner.id} would store its rows in #{plural.id}, already the " +
                           "table of #{kind.id} #{held.id}: rename one of them" %}
       {% end %}
-    {% end %}
-    {% within = "#{scope.resolve.name}::" %}
-    {% home = ::SweetTalk::BoundedContext.includers
-         .find { |context| within.starts_with?("#{context.name}::") } %}
-    {% tenant = home && home.constant("SWEETTALK_TENANT") %}
-    {% index = tenant && "index_#{plural.id}_on_#{tenant[1].id}_id_and_id" %}
-    {% if index && index.size > 63 %}
-      {% singular.raise "#{owner.id} would store its rows in #{plural.id}, whose tenant index " +
-                        "#{index.id} is longer than PostgreSQL's 63 bytes: shorten the " +
-                        "context's or the #{owner.split(" ")[0].id}'s name" %}
     {% end %}
     SWEETTALK_TABLE = {{ plural }}
   end
@@ -513,7 +501,7 @@ module SweetTalk
         SWEETTALK_STORED  = {{ stored }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
         SWEETTALK_BASE    = {{ base }}
-        ::SweetTalk.__sweettalk_table({{ base }}, {{ "aggregate #{name}" }}, ::{{ @type }})
+        ::SweetTalk.__sweettalk_table({{ base }}, {{ "aggregate #{name}" }})
 
         {{ block ? block.body : nil }}
 
@@ -541,7 +529,7 @@ module SweetTalk
         SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
         SWEETTALK_CONTEXT = {{ context }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
-        ::SweetTalk.__sweettalk_table({{ table }}, {{ "projection #{name}" }}, ::{{ @type }})
+        ::SweetTalk.__sweettalk_table({{ table }}, {{ "projection #{name}" }})
 
         {{ body }}
 
@@ -570,7 +558,7 @@ module SweetTalk
         SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
         SWEETTALK_CONTEXT = {{ context }}
         SWEETTALK_ROW     = {{ "::#{@type}::Rows::#{name}" }}
-        ::SweetTalk.__sweettalk_table({{ table }}, {{ "process #{name}" }}, ::{{ @type }})
+        ::SweetTalk.__sweettalk_table({{ table }}, {{ "process #{name}" }})
 
         {{ body }}
 
@@ -602,7 +590,9 @@ module SweetTalk
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
             ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
               ::SugarORM::Repo.transaction do
+                __sweettalk_events = [] of ::SweetTalk::Event
                 {{ block.body }}
+                __sweettalk_events.each { |event| ::SweetTalk.dispatch(event) }
               end
             end
           end
@@ -613,15 +603,64 @@ module SweetTalk
             ::SweetTalk.__sweettalk_handling({{ what }}, ::SweetTalk::INSTEAD) do
               %result = nil
               ::SugarORM::Repo.transaction do
+                __sweettalk_events = [] of ::SweetTalk::Event
                 %result = begin
                   {{ block.body }}
                 end
+                __sweettalk_events.each { |event| ::SweetTalk.dispatch(event) }
               end
               %result.as({{ returns }})
             end
           end
         end
       {% end %}
+
+      # Typed by `SweetTalk.boot`, so the body compiles whether or not anything calls it.
+      def self.__sweettalk_touch_{{ call.name }} : Nil
+        {% params = call.args.map { |arg| "#{arg.var} : #{arg.type}" } %}
+        ->({{ params.join(", ").id }}) { {{ call.name }}({{ call.args.map(&.var).splat }}) }
+        nil
+      end
+    end
+
+    # `event Renamed, name : String, means: "…"` is one of this context's events: what a
+    # service records when it changes what no aggregate holds, such as the tenant's own
+    # settings. A context holds no attributes, so it takes no `carries:`. Its channel is
+    # `sweettalk.<context>.<event>`, within the limits an aggregate's event keeps.
+    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil)
+      {% short = @type.name.split("::").last %}
+      {% unless carries.is_a?(NilLiteral) %}
+        {% carries.raise "event #{name} in #{short.id} takes no carries:: a context holds no " +
+                         "attributes to carry; declare the fields it records, as in " +
+                         "event #{name}, name : String" %}
+      {% end %}
+      {% stored = (renamed_from || name).stringify.underscore %}
+      {% channel = "sweettalk.#{@type.constant("SWEETTALK_STORED").id}.#{stored.id}" %}
+      {% tenanted = @type.constant("SWEETTALK_TENANT") ? true : false %}
+      ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
+        carried: [] of Nil, channel: {{ channel }}, means: {{ means }},
+        renamed_from: {{ renamed_from }}, subject: nil, tenanted: {{ tenanted }})
+    end
+
+    # `emit Renamed, name: name` in a service body records one of this context's events;
+    # the service dispatches it when its transaction commits.
+    macro emit(event, **fields)
+      {% short = @type.name.split("::").last %}
+      {% service = @def.is_a?(Def) && @def.name.stringify %}
+      {% unless service && @type.has_constant?("SWEETTALK_SERVICE_#{service.upcase.id}") %}
+        {% event.raise "emit belongs in a service body: a context emits #{event} from a " +
+                       "service, as in service rename(name : String), means: \"…\" do … end, " +
+                       "and an aggregate from a command" %}
+      {% end %}
+      {% found = event.is_a?(Path) && event.names.size == 1 && event.resolve? %}
+      {% own = found && found.is_a?(TypeNode) && found < ::SweetTalk::Event &&
+               found.name.stringify == "#{@type.name}::#{event}" %}
+      {% unless own %}
+        {% event.raise "#{short.id} emits only its own events, and #{event} is not one of " +
+                       "them: an aggregate's event is emitted by its commands" %}
+      {% end %}
+      {% given = fields.map { |key, value| "#{key}: #{value}" }.join(", ") %}
+      __sweettalk_events << {{ event }}.new({{ given.id }})
     end
 
     # `specification Dispatchable, on: Order, where: {state: :placed}, means: "…"` is a

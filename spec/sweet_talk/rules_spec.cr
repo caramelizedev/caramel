@@ -178,6 +178,23 @@ describe "SweetTalk's rules" do
     end
   end
 
+  it "dispatches the event a service emits when its transaction commits" do
+    SweetTalkSpec.rolled_back do
+      renamed = SweetTalk.emitted(Rules::Shelf::Renamed) { Rules::Shelf.rename("tea wall") }
+      renamed.map(&.name).should eq(["tea wall"])
+      renamed.first.__sweettalk_channel.should eq("sweettalk.shelf.renamed")
+      renamed.first.__sweettalk_subject_id.should be_nil
+    end
+  end
+
+  it "lets a whenever in another context follow a service's event" do
+    SweetTalkSpec.rolled_back do |connection|
+      Rules::Shelf.rename("tea wall")
+      Caramel::ColdBrew.drain_queue!(connection).should eq(1)
+      Rules::Signage::Sign.all.map(&.name).should eq(["tea wall"])
+    end
+  end
+
   it "lets a compensation run two commands on one aggregate" do
     SweetTalkSpec.rolled_back do |connection|
       box = RulesSpec.box("doubted")

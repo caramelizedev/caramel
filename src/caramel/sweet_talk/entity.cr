@@ -117,8 +117,33 @@ module SweetTalk
         {{ loads.join("\n").id }}
       end
 
-      # A detached copy rebuilt from an event's facts; it has no row.
+      # This entity's typed id, once its aggregate is saved.
+      struct Id < ::SweetTalk::Identity
+        include ::Caramel::FieldValue(Int64)
+
+        getter raw : Int64
+
+        def initialize(@raw : Int64)
+        end
+
+        # Builds the id a contract field binds; any Int64 is one.
+        def self.from_field(raw : Int64, & : String ->) : self
+          new(raw)
+        end
+
+        def to_s(io : IO) : Nil
+          io << raw
+        end
+      end
+
+      def id : Id
+        Id.new(__sweettalk_raw_id)
+      end
+
+      # A detached copy rebuilt from an event's facts; it has no row. A job queued before
+      # facts carried an id holds none: nil.
       def initialize(*, fact : JSON::Any)
+        @__sweettalk_id = fact["id"]?.try(&.as_i64?)
         {{ facts.join("\n").id }}
       end
 
@@ -126,16 +151,19 @@ module SweetTalk
         new(fact: any)
       end
 
-      # Writes this entity's attributes as a fact.
+      # Writes this entity's attributes as a fact, after its id: the row's, or null until its
+      # aggregate is saved.
       def __sweettalk_pack(json : JSON::Builder) : Nil
         json.object do
+          json.field("id", @__sweettalk_id)
           {{ packs.join("\n").id }}
         end
       end
 
       # Inserts or updates this entity's row under its aggregate; returns its id. A row
       # another aggregate holds, or one a rolled-back create or factory left behind, is not
-      # this aggregate's, so the entity is inserted again as a new row of its own.
+      # this aggregate's, so the entity is inserted again as a new row of its own. A row
+      # whose columns all hold what the entity says is left as it is: no statement.
       def __sweettalk_save(*, {{ foreign }} : Int64) : Int64
         row = @__sweettalk_row
         row = nil if row && row.{{ foreign }} != {{ foreign }}
@@ -144,6 +172,7 @@ module SweetTalk
                     else
                       {{ row }}::Changeset.new({{ arguments.id }})
                     end
+        return row.id if row && changeset.changes.empty? && changeset.valid?
         row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
         raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; ")) unless changeset.saved?
         @__sweettalk_row = changeset.record
@@ -159,6 +188,12 @@ module SweetTalk
           {{ method.name }}
         {% end %}
       {% end %}
+    end
+
+    def __sweettalk_raw_id : Int64
+      short = self.class.name.split("::").last
+      @__sweettalk_id ||
+        raise NilAssertionError.new("#{short} has no id until its aggregate is saved")
     end
   end
 end
