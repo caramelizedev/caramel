@@ -6,9 +6,12 @@ module SweetTalk
   # the handler is refused. The block arrives as written, so errors point at its lines.
   # With `each:` the filter enqueues one job per element of the event's list, and the
   # handler receives the element too. In a process, `key:` picks the row the block runs
-  # on. The job is named after its owner (the context and its border, the projection or
-  # the process) and the event's path, because `caramel_jobs` stores the name.
-  macro __sweettalk_policy(scope, event, each, border, kind, key, *arguments, &block)
+  # on. `attempts:`, `backoff:` and `base:` are the job's retry rule for any error but a
+  # refusal or a boundary, which fail it at once; Cold Brew checks the literals. The job
+  # is named after its owner (the context and its border, the projection or the process)
+  # and the event's path, because `caramel_jobs` stores the name.
+  macro __sweettalk_policy(scope, event, each, border, kind, key, attempts, backoff, base,
+                           *arguments, &block)
     {% type = scope.resolve %}
     {% owner = border ? "#{border.names.last}Border".id : nil %}
     {% job = "When#{event.names.join("").id}".id %}
@@ -83,6 +86,7 @@ module SweetTalk
       {% end %}
       retry_on ::SweetTalk::Refusal, attempts: 1
       retry_on ::SweetTalk::Boundary, attempts: 1
+      ::SweetTalk.__sweettalk_retries({{ attempts }}, {{ backoff }}, {{ base }})
 
       # Once every name is known: the job's old name, when a rename changed it, and the
       # check that a tenanted handler does not follow a central event.
@@ -121,6 +125,19 @@ module SweetTalk
       end
     end
     {% if owner %}end{% end %}
+  end
+
+  # The retry rule a `whenever` or a `deadline` declares with `attempts:`, `backoff:` and
+  # `base:`, in a generated job's body after the two refusal rules, so a refusal or a
+  # boundary still fails at once. With none given, Cold Brew's default rule applies.
+  macro __sweettalk_retries(attempts, backoff, base)
+    {% if attempts || backoff || base %}
+      {% rule = [] of Nil %}
+      {% rule << "attempts: #{attempts}" if attempts %}
+      {% rule << "backoff: #{backoff}" if backoff %}
+      {% rule << "base: #{base}" if base %}
+      retry_on ::Exception, {{ rule.join(", ").id }}
+    {% end %}
   end
 
   # One `compensate`: what to do when the handler of the `whenever` before it for the same

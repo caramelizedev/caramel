@@ -13,10 +13,12 @@ module SweetTalk
     end
 
     # `whenever Order::Placed, each: :lines do |placed, line| … end` updates rows from an
-    # event, as a job, or one job per element of the event's list.
-    macro whenever(event, border = nil, each = nil, &block)
+    # event, as a job, or one job per element of the event's list; `attempts:`,
+    # `backoff:` and `base:` set the job's retry rule.
+    macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
+                   &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "projection", nil,
-        {{ block.args.splat }}) do
+        {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
         {{ block.body }}
       end
     end
@@ -130,17 +132,16 @@ module SweetTalk
       {{ row }}.query.order_by(:id, :asc).to_a.map { |row| new(stored: row) }
     end
 
-    {% if type < ::SweetTalk::Projection %}
-      # The rows every `finds` and `counts` starts from: all of them.
-      protected def self.__sweettalk_live
-        {{ row }}.query
-      end
+    # The rows every `finds` and `counts` starts from: all of them.
+    protected def self.__sweettalk_live
+      {{ row }}.query
+    end
 
-      # Builds a projection from each row the query reads. Protected, as an aggregate's is.
-      protected def self.__sweettalk_rows(query) : Array(self)
-        query.to_a.map { |row| new(stored: row) }
-      end
-    {% end %}
+    # Builds a projection or a process from each row the query reads. Protected, as an
+    # aggregate's is.
+    protected def self.__sweettalk_rows(query) : Array(self)
+      query.to_a.map { |row| new(stored: row) }
+    end
 
     # The key as JSON, for a deadline's job, and back.
     def __sweettalk_key_json : String

@@ -48,9 +48,13 @@ remains is which rows belong to a tenant, and which combinations would leak acro
    compile, which leaves 21 for the `t<id>:` prefix. A tenanted table's tenant index,
    `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), does not
    compile over 63 bytes, and in every program neither does a reference's or a key's index.
-7. **The tenant's column is reserved.** A `has` or a composite part that would store
-   `<model>_id` (`account_id` for `App::Account`), and an entity whose aggregate is named
-   like the tenant model, do not compile.
+7. **The tenant's column is reserved, and the aggregate names it.** A `has` or a composite
+   part that would store `<model>_id` (`account_id` for `App::Account`), and an entity
+   whose aggregate is named like the tenant model, do not compile. Every aggregate of a
+   tenanted context has `tenant_id : Int64`, its row's, or the bound tenant's before its
+   first save, and `tenant`, the tenant model's row, so rows read under
+   `Caramel::Tenancy.without` still say whose they are; `has tenant` or `has tenant_id`
+   on such an aggregate does not compile.
 8. **Plugging in on existing data** follows ADR 0025's steps, and `frappe db diff` halts on
    each SweetTalk table they apply to. Every queue is drained before the first deploy with
    tenancy, because a job enqueued without a tenant runs with none.

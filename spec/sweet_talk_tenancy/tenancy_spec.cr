@@ -135,6 +135,27 @@ describe "SweetTalk with tenancy" do
     end
   end
 
+  it "names each aggregate's tenant, read across tenants with without" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      orders = [acme, globex].map do |account|
+        Caramel::Tenancy.with(account) { Ordering::Order.open("ada") }
+      end
+
+      ids = [acme.id, globex.id]
+      orders.map(&.tenant_id).should eq(ids)
+      Caramel::Tenancy.without { Ordering::Order.all.map(&.tenant_id) }.should eq(ids)
+      Caramel::Tenancy.without { Ordering::Order.all.map(&.tenant.slug) }.should eq(%w[acme globex])
+    end
+  end
+
+  it "names the bound tenant of an aggregate not yet saved" do
+    SweetTalkTenancySpec.rolled_back do
+      acme = SweetTalkTenancySpec.account("acme")
+      Caramel::Tenancy.with(acme) { Ordering::Order.new("ada").tenant_id }.should eq(acme.id)
+    end
+  end
+
   it "lets a tenanted aggregate reference a central one" do
     SweetTalkTenancySpec.rolled_back do
       acme = SweetTalkTenancySpec.account("acme")

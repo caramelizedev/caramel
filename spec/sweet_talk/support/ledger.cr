@@ -1,7 +1,9 @@
 # A counter where money changes hands, for the expressive models: closed-set values, optional
 # attributes of each stored kind (an aggregate, a value, a closed-set value, a value with
 # parts, an application's schema record), the same inside an entity, a projection and a
-# process, and events that take their fields from the aggregate by name.
+# process, events that take their fields from the aggregate by name, an entity with a
+# defaulted attribute before a required one and an invariant of its own, and an aggregate
+# that refers to its own type.
 require "../../../src/caramel/sweet_talk"
 
 module Ledger
@@ -48,10 +50,12 @@ module Ledger
       moves open >> settled >> undone, open >> undone
 
       entity Line, means: "one part of a transfer, optionally for another owner" do
+        has memo : String = ""
         has label : String
         has payee : Owner?
         has paid_by : Teller?
         has share : Money?
+        never "A line names what it pays." { label.blank? }
       end
 
       the line_count : Int32 = lines.size
@@ -121,6 +125,15 @@ module Ledger
 
       to remark_on(remark : String?) do
         @remark = remark
+      end
+    end
+
+    aggregate Entry, means: "one line of the journal, and the entry it reverses" do
+      has amount : Cents
+      has reversal_of : Entry?
+
+      to reverse(entry : Entry) do
+        self.reversal_of = entry
       end
     end
 

@@ -17,7 +17,10 @@ module SweetTalk
 
   # Enqueues one job per policy, projection and process step that follows the event, then
   # notifies live pages; both run on the current connection, so they commit with the
-  # command.
+  # command. The jobs are enqueued in declaration order: the policies of every context
+  # and its borders, then the projections' handlers, then the processes' steps; Cold Brew
+  # starts them in that order and finishes them in any. A collector `emitted` opened on
+  # this fiber sees the event too.
   def self.dispatch(event : ::SweetTalk::Event) : Nil
     __sweettalk_checked
     {% begin %}
@@ -32,6 +35,30 @@ module SweetTalk
       {% end %}
     {% end %}
     ::Caramel::ColdBrew.publish(event.__sweettalk_channel, event.__sweettalk_payload)
+    ::Fiber.current.__sweettalk_emitted.try &.each(&.<< event)
+  end
+
+  # The events `dispatch` sees on this fiber while the block runs, in dispatch order, for
+  # a spec that asserts what a command emitted; the jobs are still enqueued. A nested
+  # call collects its own, and the outer one sees those events too. A refused command
+  # dispatches nothing, so its refusal leaves the block with an empty list.
+  def self.emitted(&) : Array(::SweetTalk::Event)
+    fiber = ::Fiber.current
+    collectors = fiber.__sweettalk_emitted ||= [] of Array(::SweetTalk::Event)
+    events = [] of ::SweetTalk::Event
+    collectors << events
+    begin
+      yield
+    ensure
+      collectors.pop
+      fiber.__sweettalk_emitted = nil if collectors.empty?
+    end
+    events
+  end
+
+  # The events of one class among those, typed: `SweetTalk.emitted(Order::Placed) { … }`.
+  def self.emitted(kind : E.class, &) : Array(E) forall E
+    emitted { yield }.compact_map(&.as?(E))
   end
 
   @@checked = false
@@ -317,4 +344,9 @@ module SweetTalk
     {% end %}
     terms
   end
+end
+
+class Fiber
+  # The open `SweetTalk.emitted` collectors on this fiber, innermost last.
+  property __sweettalk_emitted : Array(Array(::SweetTalk::Event))? = nil
 end

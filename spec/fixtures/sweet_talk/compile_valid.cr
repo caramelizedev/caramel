@@ -42,6 +42,16 @@ module Shop
       end
     end
 
+    # An aggregate may refer to its own type.
+    aggregate Entry, means: "one line of the journal" do
+      has amount : Int64
+      has reversal_of : Entry?
+
+      to reverse(entry : Entry) do
+        self.reversal_of = entry
+      end
+    end
+
     aggregate Order, means: "what a member buys at one checkout" do
       has receipt_to : Email
       has deliver_to : Address
@@ -58,9 +68,13 @@ module Shop
       the courier : Courier? = shipped_by
       moves open >> placed, open >> cancelled, placed >> cancelled
 
+      # A defaulted attribute may sit between required ones: `Line.new` by name leaves it
+      # out, and an entity has its own invariants.
       entity Line, means: "one tea in an order and how many tins" do
         has tea : Int64
+        has note : String = ""
         has quantity : Quantity
+        never "A line names a tea." { tea <= 0 }
       end
 
       event Opened, receipt_to : Email, means: "a member started an order"
@@ -85,7 +99,7 @@ module Shop
 
       to add(tea : Int64, quantity : Quantity) do
         refuse "Teas can be added only while the order is open." unless open?
-        @lines << Line.new(tea, quantity)
+        @lines << Line.new(tea: tea, quantity: quantity)
       end
 
       to place do

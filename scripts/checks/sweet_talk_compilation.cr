@@ -129,8 +129,9 @@ PROBLEMS = [
   {"process_whenever_without_key",
    "whenever Order::Placed in process Hold needs key:, the expression that picks its row"},
   {"process_attribute_default",
-   "has tins : Int32 in process Hold needs a literal default, as in has tins : Int32 = 0: its " \
-   "row starts from its key alone"},
+   "has tins : Int32 in process Hold needs a literal default, as in has tins : Int32 = 0, or " \
+   "a value built from one, as in has total : Cents = Cents.new(0): its row starts from its " \
+   "key alone"},
   {"compensate_without_whenever",
    "compensate Order::Placed needs a whenever Order::Placed before it in Ordering"},
   {"compensate_in_projection",
@@ -201,7 +202,7 @@ PROBLEMS = [
    "index_warehousing_container_readings_on_refrigerated_container_serial_number, longer " \
    "than PostgreSQL's 63 bytes: shorten the key"},
   {"tenant_column_taken",
-   "has account : Account would store account_id, the column that names each row's tenant " \
+   "has account : Account would store account_id, which names each row's tenant " \
    "Shop::Account"},
   {"tenant_parent_column",
    "entity Charge would name its aggregate in account_id, the column that names each row's " \
@@ -364,6 +365,40 @@ PROBLEMS = [
    "Shop::Money::Millionths is named only by Catalogue: a kernel holds what two or more of " \
    "its sharers name; move Millionths into Catalogue"},
   {"kernel_word_unused", "Shop::Money::Millionths is named by none of its sharers"},
+  {"command_finalize",
+   "command finalize would replace the garbage collector's finalize on Run: name it for what " \
+   "it does, as in to wind_up"},
+  {"has_tenant",
+   "has tenant : String would replace Tea#tenant, which names each row's tenant Shop::Account " \
+   "on an aggregate of a tenanted context: name the attribute for its role, as in has owner : " \
+   "String"},
+  {"has_tenant_id",
+   "has tenant_id : Int64 would replace Tea#tenant_id, which names each row's tenant " \
+   "Shop::Account on an aggregate of a tenanted context: name the attribute for its role, as " \
+   "in has owner : Int64"},
+  {"process_finds_named_all", "finds all would replace Hold.all: name it for what it finds"},
+  {"process_finds_satisfying",
+   "finds held takes satisfying: only in an aggregate: a specification is a rule on an " \
+   "aggregate, and Hold is a process"},
+  {"entity_holds_entities",
+   "has slices : Array(Slice) cannot be stored in entity Rule: an entity holds no entities; " \
+   "declare Slice beside Rule and key it by Rule's number"},
+  {"array_of_scalars",
+   "has tags : Array(String) cannot be stored: use a value or an entity; an Array of scalars " \
+   "is not stored"},
+  {"bool_state_predicate",
+   "moves placed would define Order#placed?, which Order already has from has placed : Bool: " \
+   "name the state or the attribute for what it means"},
+  {"tenant_association_taken",
+   "has account : Bool = false would store account, which names each row's tenant " \
+   "Shop::Account: name the attribute for its role, as in has owner : Bool"},
+  {"parent_column_taken",
+   "has tea : Bool = false would store tea, which names the aggregate that holds each Tin: " \
+   "name the attribute for its role, as in has owner : Bool"},
+  {"projection_composite_default",
+   "has deliver_to : Address = Address.new(street: \"\", city: \"\") in projection Sales " \
+   "cannot have a default: a value with parts or a calendar day has no SQL default, and its " \
+   "row starts from its key alone; make it optional, as in has deliver_to : Address?"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

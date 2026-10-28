@@ -1,5 +1,6 @@
 # SweetTalk's rules on a small shelf: one aggregate per command, per handler and per
-# service, unit-safe multiplication, a branching lifecycle, a factory whose event's
+# service, changed by as many commands as they like, two commands committed in one
+# Repo.transaction, unit-safe multiplication, a branching lifecycle, a factory whose event's
 # policy runs as the actor who made the aggregate, string lengths, a process row two
 # steps update at once, a deadline armed for a step's own span, a retried policy, and
 # entities stored again by a second aggregate or after a failed create.
@@ -9,9 +10,17 @@ module RulesSpec
   FAILED  = "SELECT last_error FROM caramel_jobs WHERE failed_at IS NOT NULL"
   TALLIED = "SELECT count(*) AS value FROM caramel_jobs " \
             "WHERE class_name = 'Rules::Shelf::Tally::WhenBoxTallied' AND finished_at IS NOT NULL"
+  # How long the Weighed policy's retry waits: run_at and now() share the transaction's clock.
+  WEIGHED_WAIT = "SELECT extract(epoch FROM run_at - now())::float8 AS wait FROM caramel_jobs " \
+                 "WHERE class_name = 'Rules::Shelf::WhenBoxWeighed'"
 
   def self.box(label : String) : Rules::Shelf::Box
     Rules::Shelf::Box.create(label: label, count: Rules::Shelf::Count.new(0))
+  end
+
+  # The stored count of each of *boxes*, read again.
+  def self.counts(*boxes : Rules::Shelf::Box) : Array(Int32)
+    boxes.map { |box| Rules::Shelf::Box.find(box.id).count.raw }.to_a
   end
 
   # Ten jars, the first to the tenth: label, count, size, sealed, note, and a move.
@@ -124,6 +133,83 @@ describe "SweetTalk's rules" do
         Rules::Shelf.fill_two(first.id, second.id)
       end
       [first, second].map { |box| Rules::Shelf::Box.find(box.id).count.raw }.should eq([0, 0])
+    end
+  end
+
+  it "commits two commands on two aggregates in one Repo.transaction together" do
+    SweetTalkSpec.rolled_back do
+      first, second = RulesSpec.box("first"), RulesSpec.box("second")
+      SugarORM::Repo.transaction do
+        first.fill Rules::Shelf::Count.new(1)
+        second.fill Rules::Shelf::Count.new(2)
+      end
+      RulesSpec.counts(first, second).should eq([1, 2])
+    end
+  end
+
+  it "rolls two commands in one Repo.transaction back together" do
+    SweetTalkSpec.rolled_back do
+      first, second = RulesSpec.box("first"), RulesSpec.box("second")
+      expect_raises(Exception, "the books do not balance") do
+        SugarORM::Repo.transaction do
+          first.fill Rules::Shelf::Count.new(1)
+          second.fill Rules::Shelf::Count.new(2)
+          raise "the books do not balance"
+        end
+      end
+      RulesSpec.counts(first, second).should eq([0, 0])
+    end
+  end
+
+  it "lets a handler run two commands on one aggregate" do
+    SweetTalkSpec.rolled_back do |connection|
+      box = RulesSpec.box("twice")
+      box.fill_twice
+      Caramel::ColdBrew.drain_queue!(connection).should eq(1)
+      RulesSpec.counts(box).should eq([2])
+    end
+  end
+
+  it "lets a service run two commands on one aggregate" do
+    SweetTalkSpec.rolled_back do
+      box = RulesSpec.box("twice")
+      Rules::Shelf.fill_one_twice(box.id)
+      RulesSpec.counts(box).should eq([2])
+    end
+  end
+
+  it "lets a compensation run two commands on one aggregate" do
+    SweetTalkSpec.rolled_back do |connection|
+      box = RulesSpec.box("doubted")
+      box.doubt
+      Caramel::ColdBrew.drain_queue!(connection).should eq(1)
+      found = Rules::Shelf::Box.find(box.id)
+      {found.label, found.count.raw}.should eq({"Box cannot become sold while draft", 1})
+    end
+  end
+
+  it "lets a deadline run two commands on one aggregate" do
+    SweetTalkSpec.rolled_back do |connection|
+      box = RulesSpec.box("quiet")
+      box.tally 3
+      Caramel::ColdBrew.drain_queue!(connection).should eq(1)
+      Caramel::ColdBrew.drain_queue!(connection, include_scheduled: true).should eq(1)
+      RulesSpec.counts(box).should eq([2])
+      Rules::Shelf::Tally.all.map(&.total).should eq([0])
+    end
+  end
+
+  it "counts a create and a command on the new aggregate as one change" do
+    SweetTalkSpec.rolled_back do
+      id = Rules::Shelf.make_filled("new")
+      Rules::Shelf::Box.find(id).count.raw.should eq(1)
+    end
+  end
+
+  it "counts a factory and a command on the new aggregate as one change" do
+    SweetTalkSpec.rolled_back do
+      id = Rules::Shelf.make_signed("oak", "member:9")
+      Rules::Shelf::Crate.find(id).maker.should eq("member:9")
     end
   end
 
@@ -292,6 +378,55 @@ describe "SweetTalk's rules" do
       Rules::Shelf::Jar.labelled_like("f").should be_empty
       RulesSpec.places(jars, Rules::Shelf::Jar.fullest(3)).should eq([9, 3, 8])
       Rules::Shelf::Jar.live_jars.should eq(9)
+    end
+  end
+
+  it "returns the events a command emitted, typed with their fields" do
+    SweetTalkSpec.rolled_back do |connection|
+      box = RulesSpec.box("weighed")
+      events = SweetTalk.emitted { box.tally 4 }
+      events.map(&.class.name).should eq(["Rules::Shelf::Box::Tallied"])
+      tallied = SweetTalk.emitted(Rules::Shelf::Box::Tallied) do
+        box.tally 2
+        box.weigh
+      end
+      tallied.map { |event| {event.box_id, event.by} }.should eq([{box.id, 2}])
+      Caramel::ColdBrew.drain_queue(connection).should eq(3)
+    end
+  end
+
+  it "returns no event for a refused command" do
+    SweetTalkSpec.rolled_back do
+      box = RulesSpec.box("doubted")
+      events = SweetTalk.emitted do
+        expect_raises(SweetTalk::Refusal, "Box cannot become sold while draft") { box.sell }
+      end
+      events.should be_empty
+    end
+  end
+
+  it "retries a policy as many times as its whenever declares, with its delay" do
+    SweetTalkSpec.rolled_back do |connection|
+      Rules::Shelf.weighings.clear
+      RulesSpec.box("scaled").weigh
+      waits = [2.0, 4.0].map do
+        Caramel::ColdBrew.drain_queue(connection, include_scheduled: true).should eq(1)
+        SugarORM.sql(RulesSpec::WEIGHED_WAIT, as: {wait: Float64}).first[:wait]
+      end
+      waits.should eq([2.0, 4.0])
+      Caramel::ColdBrew.drain_queue!(connection, include_scheduled: true).should eq(1)
+      Rules::Shelf.weighings.uniq.size.should eq(1)
+      Rules::Shelf.weighings.size.should eq(3)
+    end
+  end
+
+  it "finds and counts the rows of a process" do
+    SweetTalkSpec.rolled_back do |connection|
+      RulesSpec.box("one").tally 1
+      RulesSpec.box("three").tally 3
+      Caramel::ColdBrew.drain_queue!(connection).should eq(2)
+      Rules::Shelf::Tally.tallied_to(3).map(&.total).should eq([3])
+      Rules::Shelf::Tally.tallies.should eq(2)
     end
   end
 end

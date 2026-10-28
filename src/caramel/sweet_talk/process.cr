@@ -2,12 +2,13 @@
 module SweetTalk
   # A process manager: a row per key that follows events from any context, moves
   # through its own lifecycle, runs one aggregate's command per step, compensates a
-  # refused step, and keeps deadlines. Its steps run in units of work, as a projection's
-  # handlers do, and changing its own row does not count toward the one aggregate a step
-  # may change.
+  # refused step, keeps deadlines, and declares `finds` and `counts` over its rows as a
+  # projection does. Its steps run in units of work, as a projection's handlers do, and
+  # changing its own row does not count toward the one aggregate a step may change.
   abstract class Process < Model
     include Keyed
     include Lifecycle
+    include Queried
 
     # `key slot : Slot` names the attribute that picks a row.
     macro key(decl)
@@ -18,8 +19,10 @@ module SweetTalk
 
     # `whenever Order::Placed, each: :lines, key: Slot.new(…) do |placed, line| … end` is
     # a step: the job finds the row that `key:` picks, inserting it in its first state
-    # when absent, and runs the block on it.
-    macro whenever(event, key = nil, each = nil, &block)
+    # when absent, and runs the block on it. `attempts:`, `backoff:` and `base:` set the
+    # job's retry rule.
+    macro whenever(event, key = nil, each = nil, attempts = nil, backoff = nil, base = nil,
+                   &block)
       {% process = @type.name.split("::").last %}
       {% if key.is_a?(NilLiteral) %}
         {% event.raise "whenever #{event} in process #{process.id} needs key:, " +
@@ -27,7 +30,7 @@ module SweetTalk
       {% end %}
       __sweettalk_no_stray_writes({{ "whenever #{event}" }}, {{ block.body.stringify }})
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "process",
-        {{ key }}, {{ block.args.splat }}) do
+        {{ key }}, {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
         {{ block.body }}
       end
     end
@@ -46,8 +49,9 @@ module SweetTalk
     # it to fire after the span, or `arm lapse, after: 2.days` after another one,
     # `disarm lapse` cancels it, and `lapse_due` tells when it fires. Each arming
     # enqueues a job to run at that time; the job runs the block only if no arming or
-    # disarming came after its own, which an arming counter tells.
-    macro deadline(name, after = nil, &block)
+    # disarming came after its own, which an arming counter tells. `attempts:`,
+    # `backoff:` and `base:` set the job's retry rule.
+    macro deadline(name, after = nil, attempts = nil, backoff = nil, base = nil, &block)
       {% process = @type.name.split("::").last %}
       {% job = "#{name.id.camelcase}Deadline".id %}
       SWEETTALK_DEADLINE_{{ name.id.upcase }} = { {{ name.id.stringify }}, {{ name.line_number }} }
@@ -87,6 +91,7 @@ module SweetTalk
         param flow : String? = nil
         retry_on ::SweetTalk::Refusal, attempts: 1
         retry_on ::SweetTalk::Boundary, attempts: 1
+        ::SweetTalk.__sweettalk_retries({{ attempts }}, {{ backoff }}, {{ base }})
 
         # Once every name is known: the job's old name, when a rename changed it.
         macro finished

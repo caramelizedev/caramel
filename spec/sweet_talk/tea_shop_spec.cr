@@ -754,4 +754,28 @@ describe "The tea shop on PostgreSQL" do
       end
     end
   end
+
+  it "reads a Bool attribute as a predicate too" do
+    SweetTalkSpec.rolled_back do
+      order = TeaShopSpec.order({TeaShopSpec.tea("Sencha"), 1})
+      order.late_parcel?.should be_false
+      order.cancel
+      order.note_late_parcel
+      found = Ordering::Order.find(order.id)
+      {found.late_parcel?, found.late_parcel}.should eq({true, true})
+    end
+  end
+
+  it "starts a projection attribute from its value default and keeps the value's type" do
+    SweetTalkSpec.rolled_back do |connection|
+      Ordering::Rows::Sales.__sugar_required_columns.should eq(["tea_id"])
+      tea = TeaShopSpec.tea("Sencha")
+      SweetTalk.__sweettalk_unit { Ordering::Sales[tea.id].sold += 1 }
+      Ordering::Sales.all.map(&.takings).should eq([Catalogue::Cents.zero])
+
+      TeaShopSpec.order({tea, 2}).place
+      TeaShopSpec.drain(connection)
+      Ordering::Sales.all.map(&.takings).should eq([Catalogue::Cents.new(1800)])
+    end
+  end
 end

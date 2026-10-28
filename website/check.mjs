@@ -342,7 +342,7 @@ const compileRows = {
   'An event whose channel would pass PostgreSQL’s 63 characters': ['channel_long'],
   'Two declarations whose names give one table': ['table_taken'],
   'A context that names Rows, or code outside the domain that reads an aggregate’s rows': ['rows_named', 'finds_block_rows', 'loader_outside'],
-  'A projection or a process without key, a process step without key:, or a process attribute without a literal default': ['projection_without_key', 'process_without_key', 'process_whenever_without_key', 'process_attribute_default'],
+  'A projection or a process without key, a process step without key:, or a process attribute without a default its column takes': ['projection_without_key', 'process_without_key', 'process_whenever_without_key', 'process_attribute_default'],
   'Two whenever blocks for one event in one place, or each: naming a field that is not a list': ['duplicate_handler', 'each_not_list'],
   'A handler that reads an aggregate from an event, as in placed.order': ['event_loads_nothing'],
   'A factory that leaves an attribute unset, or named like a repository method': ['factory_unset_attribute', 'factory_repository_name'],
@@ -350,9 +350,9 @@ const compileRows = {
   'A query on an unknown attribute, state or order, on a list of entities, with a value of the wrong type, with an argument it does not take, with nothing, with where: or order: that is not a tuple, or with a direction other than :asc or :desc': ['finds_unknown_attribute', 'finds_unknown_state', 'finds_uncalled_unknown_key', 'finds_order_unknown', 'finds_order_entities', 'finds_entities', 'finds_value_type', 'finds_unknown_argument', 'finds_nothing', 'finds_where_not_tuple', 'counts_where_not_tuple', 'finds_order_not_tuple', 'finds_order_direction', 'projection_finds_order_unknown'],
   'A finds with a block and an option, a block of more than one expression, or a block that does more than narrow its rows': ['finds_block_and_where', 'finds_block_two', 'finds_block_count', 'finds_block_delete', 'finds_block_sql', 'projection_finds_block_count'],
   'A counts with order: or a block': ['counts_with_order', 'counts_with_block'],
-  'A query named all or like another query': ['query_name_taken', 'finds_name_taken', 'finds_named_all', 'counts_named_all', 'projection_finds_named_all'],
+  'A query named all or like another query': ['query_name_taken', 'finds_name_taken', 'finds_named_all', 'counts_named_all', 'projection_finds_named_all', 'process_finds_named_all'],
   'A specification on an unknown attribute or state, on a list of entities or a derived value, with a block, without on:, outside a context, whose predicate the aggregate already has, or whose where: is neither a tuple nor specifications joined by &, | and !': ['specification_entities', 'specification_block', 'specification_derived', 'specification_unknown_state', 'specification_predicate_taken', 'specification_joins_unknown', 'specification_without_on', 'specification_state_without_moves', 'specification_not_a_where', 'specification_value_type'],
-  'satisfying: with anything but a specification on that aggregate, or satisfying: and state: on a projection': ['all_satisfying_other', 'finds_satisfying_value', 'projection_finds_satisfying', 'projection_counts_satisfying', 'projection_finds_state'],
+  'satisfying: with anything but a specification on that aggregate, or satisfying: and state: on a projection, or satisfying: on a process': ['all_satisfying_other', 'finds_satisfying_value', 'projection_finds_satisfying', 'projection_counts_satisfying', 'projection_finds_state', 'process_finds_satisfying'],
   'A compensate without its whenever': ['compensate_without_whenever'],
   'arm of a deadline the process lacks': ['arm_unknown_deadline'],
   'An event field named like its metadata, or typed as a union of other types': ['event_reserved_field', 'event_reserved_flow', 'event_union_field'],
@@ -361,6 +361,12 @@ const compileRows = {
   'renamed_from: naming its own name, or a rename whose old job name another job has': ['renamed_from_itself', 'job_alias_taken'],
   'A value with parts as a contract field': ['composite_field'],
   'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_index_long', 'tenant_column_taken', 'tenant_parent_column'],
+  'A command named finalize, which would replace the garbage collector’s': ['command_finalize'],
+  'has tenant or has tenant_id on an aggregate of a tenanted context, which has those accessors': ['has_tenant', 'has_tenant_id'],
+  'An entity that holds entities, or an Array of scalars': ['entity_holds_entities', 'array_of_scalars'],
+  'A Bool attribute named like a lifecycle state': ['bool_state_predicate'],
+  'An attribute named like the tenant’s association, or an entity attribute named like its aggregate’s association or column': ['tenant_association_taken', 'parent_column_taken'],
+  'A projection or process attribute whose default is a value with parts or a calendar day': ['projection_composite_default'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

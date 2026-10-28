@@ -444,3 +444,63 @@ describe "SweetTalk's events that carry attributes" do
     end
   end
 end
+
+describe "SweetTalk's entities" do
+  it "builds an entity by name, leaving out a defaulted attribute declared before a required one" do
+    SweetTalkSpec.rolled_back do
+      transfer = ExpressiveModelsSpec.transfer
+      transfer.pay_line("fee", nil, nil, nil)
+      line = Ledger::Counter::Transfer.find(transfer.id).lines.first
+      {line.memo, line.label}.should eq({"", "fee"})
+      by_position = Ledger::Counter::Transfer::Line.new("for the desk", "salary")
+      {by_position.memo, by_position.label}.should eq({"for the desk", "salary"})
+    end
+  end
+
+  it "refuses a command that leaves an entity's never true, and saves nothing" do
+    SweetTalkSpec.rolled_back do
+      transfer = ExpressiveModelsSpec.transfer
+      expect_raises(SweetTalk::Refusal, "A line names what it pays.") do
+        transfer.pay_line(" ", nil, nil, nil)
+      end
+      Ledger::Counter::Transfer.find(transfer.id).lines.should be_empty
+    end
+  end
+
+  it "reads created_at and updated_at from the row, and moves updated_at only on a change" do
+    SweetTalkSpec.committed do
+      Ledger::Counter::Transfer::Line.new("", "fee").created_at.should be_nil
+      owner = Ledger::Counter::Owner.create(name: "Ada")
+      transfer = ExpressiveModelsSpec.transfer
+      created = transfer.created_at.not_nil!
+      transfer.updated_at.should eq(created)
+      transfer.leave_unassigned
+      Ledger::Counter::Transfer.find(transfer.id).updated_at.should eq(created)
+      transfer.assign(owner)
+      transfer.updated_at.not_nil!.should be > created
+      Ledger::Counter::Transfer.find(transfer.id).updated_at.should eq(transfer.updated_at)
+      transfer.pay_line("fee", nil, nil, nil)
+      line = transfer.lines.first
+      line.created_at.should eq(line.updated_at)
+      transfer.leave_unassigned
+      Ledger::Counter::Transfer.find(transfer.id).lines.first.updated_at.should eq(line.updated_at)
+    end
+  end
+
+  it "follows an optional reference to the aggregate's own type" do
+    SweetTalkSpec.rolled_back do
+      amount = Ledger::Counter::Cents.new(9_i64)
+      original = Ledger::Counter::Entry.create(amount: amount)
+      reversal = Ledger::Counter::Entry.create(amount: amount)
+      reversal.reverse(original)
+      reloaded = Ledger::Counter::Entry.find(reversal.id)
+      reloaded.reversal_of.should eq(original.id)
+      Ledger::Counter::Entry.find(reloaded.reversal_of.not_nil!).reversal_of.should be_nil
+      keys = SugarORM.sql(<<-SQL, as: {target: String})
+        SELECT confrelid::regclass::text AS target FROM pg_constraint
+        WHERE conrelid = 'counter_entries'::regclass AND contype = 'f'
+        SQL
+      keys.map(&.[:target]).should eq(%w[counter_entries])
+    end
+  end
+end

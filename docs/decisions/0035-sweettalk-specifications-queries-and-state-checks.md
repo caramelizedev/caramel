@@ -46,10 +46,12 @@ and a two-word state was written without its underscore, so `finds state:` misse
      wrong type, an unknown argument, a query name used twice or named like a repository
      method, or a `satisfying:` that is not a specification on the same aggregate does not
      compile.
-   - A projection declares `finds` and `counts` too, over its own attributes and its key,
-     with `order:`, `first:` and the block; it takes no `state:` and no `satisfying:`, and
-     every row is live.
-   - Only the aggregate or projection builds itself from rows: its loader is protected.
+   - A projection or a process declares `finds` and `counts` too, over its own attributes
+     and its key, with `order:`, `first:` and the block; a process's `state:` too. Neither
+     takes `satisfying:`, and every row is live. A query named `all`, `new` or `allocate`
+     on either does not compile.
+   - Only the aggregate, projection or process builds itself from rows: its loader is
+     protected.
 3. **Lifecycle checks** (amends ADR 0031 decision 11). A lifecycle stores each state as
    `moves` spells it, and its `state` column has a check `check_<table>_state_<hash>`,
    `"state" IN ('open', …)`. The hash is the FNV-1a 32-bit hash of the states, sorted and

@@ -30,16 +30,17 @@ or a policy, and nothing stops one context from reaching into another's types.
    - **Values.** `value Name, Int32, at_least:, at_most:, within:` (or `Int64`) is an
      immutable integer, validated when built and by every arithmetic result. `+` and `-`
      take the same value or an integer, `*` an integer, and `times: Other` lets `*` take
-     `Other`, as in `Cents * Quantity`. Any other mix of values does not compile.
+     `Other`, as in `Cents * Quantity`. Any other mix does not compile.
    - **Aggregates.** `aggregate Name do … end` is a root with an id, `Name::Id`, and a
      repository: `create`, `find`, `find?` and `all`. `entity Name` inside it is stored with
      it. `has name : Type` is an attribute (decision 4); `the name : Type = expression` is
      a derived value, never stored.
    - **Lifecycle and invariants.** `moves open >> placed >> shipped, placed >> cancelled`
-     lists chains of states, the first state being the initial one. It adds a predicate per
+     lists chains of states, the first being the initial one. It adds a predicate per
      state and a private mover per later state, which refuses unless the current state
-     comes just before it in a chain. `never "message" { condition }` refuses a command
-     that leaves the condition true, and `always` one that leaves it false.
+     precedes it in a chain. `never "message" { condition }` refuses a command that
+     leaves the condition true, and `always` one that leaves it false; an entity's run
+     after its aggregate's.
    - **Commands and events.** `to verb(arg : Type) do … end` is a command (decision 5), and
      `refuse "message"` ends it. `event Name, field : Type` declares one of the aggregate's
      events; `emit Name, field: value` queues one, and an aggregate emits only its own.
@@ -58,29 +59,33 @@ or a policy, and nothing stops one context from reaching into another's types.
    unknown context, a foreign name elsewhere, or a cycle of dependency edges does not
    compile, so two contexts may react to each other's events. `SweetTalk.context_map`
    returns the edges.
-4. **Aggregates, entities and projections are SugarORM schemas.** Each generates a schema
-   in `<Context>::Rows`, its table (`<context>_<name>` with an `s` added; an entity's is
-   `<context>_<aggregate>_<entity>`), and a changeset with a `param` per column. Every
-   write goes through that changeset
-   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)), and a context that names
-   `Rows` does not compile. `has` stores:
-   - `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` as a column;
-   - a value as its raw column, rebuilt and so validated on every load;
-   - an aggregate as a foreign key, whose getter returns the aggregate's `Id`;
-   - an `Array` of the aggregate's own entity as a child table, loaded with `preload`.
+4. **Aggregates, entities and projections are SugarORM schemas.** Each is a schema in
+   `<Context>::Rows` over the table `<context>_<name>` pluralised (entities:
+   `<context>_<aggregate>_<entity>`), written only through its changeset
+   ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)); naming `Rows` in a context
+   does not compile. `has` stores:
+   - `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` as a column; a non-optional
+     `Bool` reads as `name?` too, and no state or specification shares that name;
+   - a value as its raw column, rebuilt and so validated on load;
+   - an aggregate as a foreign key; its getter returns the aggregate's `Id`;
+   - an `Array` of the aggregate's own entity as a child table, loaded with `preload`; an
+     entity holds none, nor is an `Array` of scalars stored.
 
-   Any other type does not compile. An entity updates only a row of the aggregate that
-   saves it; a row another aggregate holds, or one a failed `create` or factory left, is
-   inserted anew. A value or an aggregate is declared before the aggregate that stores it.
-   A projection's table has a unique index on its key's column. `frappe db diff` derives
-   the migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
+   Any other type, or a name the tenant's or the parent's column or association takes,
+   does not compile. An entity updates only its saving aggregate's row; one held elsewhere,
+   or left by a failed `create` or factory, is inserted anew. Stored types are declared
+   first. A projection's key column is uniquely indexed. `frappe db diff` derives the
+   migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
 5. **A command is one transaction on one aggregate.** `to` runs in
-   `SugarORM::Repo.transaction`: it loads the aggregate with its root's row locked
-   (SugarORM's `lock`), runs the body, checks every `never` and `always`, saves the root
-   and then its entities, and dispatches the events. A `SweetTalk::Refusal` rolls the
-   transaction back, and the aggregate reloads what is stored. A command or `create` on
-   another aggregate while a command runs raises `SweetTalk::Boundary`, and so does a
-   second one in a `whenever` handler.
+   `SugarORM::Repo.transaction`: it loads the aggregate with its root's row locked, runs
+   the body, checks every `never` and `always`, saves the root and then its entities, and
+   dispatches the events. A `SweetTalk::Refusal` rolls the transaction back, and the
+   aggregate reloads what is stored. A command or `create` on another aggregate while a
+   command runs raises `SweetTalk::Boundary`, and so does a command on a second aggregate
+   in a `whenever` handler. Two commands called in turn inside one
+   `SugarORM::Repo.transaction`, each a savepoint, commit and roll back together: the
+   supported atomic seam across aggregates. `to finalize` does not compile: it would
+   replace the garbage collector's.
 6. **Events carry their facts and leave through Cold Brew, in the command's transaction.**
    - **Facts.** An event holds its subject's id (`order_id`) and its fields as they were
      when emitted: column types, values, ids and an `Array` of the aggregate's entity. No
@@ -88,14 +93,23 @@ or a policy, and nothing stops one context from reaching into another's types.
    - **Jobs.** The command enqueues one job per `whenever` that follows the event, carrying
      the event as JSON; `enqueue` joins the transaction
      ([ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decision 2). `whenever Event, each:
-     :lines do |event, line|` enqueues one job per element instead.
+     :lines do |event, line|` enqueues one job per element instead. Jobs are enqueued in
+     declaration order: the contexts' and borders' policies, then the projections'
+     handlers, then the processes' steps; Cold Brew starts them in that order and finishes
+     them in any, so no handler assumes another's work is saved. For specs,
+     `SweetTalk.emitted { … }` returns the events `dispatch` saw on the fiber while the
+     block ran, in that order, and `SweetTalk.emitted(Order::Placed) { … }` those of one
+     class, typed; the jobs are enqueued all the same.
    - **Job names.** A job is named after its owner (a context and its border, or a
      projection) and the event's path as written; when a rename changes that name, the job
      declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. An old
      name that another job has or claims does not compile. Two `whenever`s for one event in
      one owner do not compile.
-   - **Retries.** A refusal or `SweetTalk::Boundary` fails a job at once. Other errors
-     follow ADR 0009 decision 2.
+   - **Retries.** A refusal or `SweetTalk::Boundary` fails a job at once. For other errors
+     `whenever Event, attempts: 5, backoff: :linear, base: 2.seconds` and the same keywords
+     on `deadline` set the job's rule, as `retry_on ::Exception` after the two refusal
+     rules, so a literal Cold Brew refuses does not compile; without them the job follows
+     ADR 0009 decision 2.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
      63 characters, or 42 in a program that requires `caramel/tenancy`, does not compile.
