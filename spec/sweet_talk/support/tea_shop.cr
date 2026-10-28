@@ -177,6 +177,7 @@ module TeaShop
     projection Sales, means: "tins sold of one tea" do
       key tea : Catalogue::Tea
       has sold : Int32 = 0
+      has takings : Catalogue::Cents = Catalogue::Cents.new(0_i64)
       has last_order : Order?
       finds best_sellers(count : Int32), order: {sold: :desc}, first: count
       finds selling(least : Int32), where: {sold: least..}, order: {sold: :desc}
@@ -190,6 +191,7 @@ module TeaShop
       whenever Order::Placed, each: :lines do |placed, line|
         row = Sales[line.tea]
         row.sold += line.quantity.to_i
+        row.takings += line.cost
         row.last_order = placed.order_id
       end
     end

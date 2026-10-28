@@ -56,7 +56,7 @@ describe "SweetTalk's database checks" do
       checks.map(&.[:name]).should eq(%w[
         check_billing_bills_amount check_billing_bills_state_16e92b19 check_catalogue_teas_held
         check_catalogue_teas_price check_catalogue_teas_roast_one_of_59746504
-        check_catalogue_teas_stock
+        check_catalogue_teas_stock check_counter_entries_amount
         check_counter_followups_followed_by_length_2_20
         check_counter_followups_followed_with_all_or_none_437ba1f3
         check_counter_followups_followed_with_cents
@@ -85,7 +85,7 @@ describe "SweetTalk's database checks" do
         check_ordering_order_lines_quantity check_ordering_orders_courier_length_2_30
         check_ordering_orders_gift_to_all_or_none_333c6ad0
         check_ordering_orders_receipt_to_length_3_254
-        check_ordering_orders_state_ef9524ce check_pricing_teas_price
+        check_ordering_orders_state_ef9524ce check_ordering_sales_takings check_pricing_teas_price
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
         check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8

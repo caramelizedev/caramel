@@ -1,8 +1,10 @@
 # Entities, stored with their aggregate.
 module SweetTalk
   # An entity inside an aggregate: a row of the aggregate's child table, or a detached
-  # fact inside an event.
+  # fact inside an event. Its `never` and `always` run with its aggregate's.
   abstract class Entity < Model
+    include Guarded
+
     @__sweettalk_id : Int64? = nil
 
     # The constructors, facts, loading and saving, from the attributes declared so far.
@@ -12,6 +14,7 @@ module SweetTalk
       {% row = @type.constant("SWEETTALK_ROW").id %}
       {% foreign = "#{@type.constant("SWEETTALK_PARENT")[0].id}_id".id %}
       {% positional = [] of Nil %}
+      {% keywords = [] of Nil %}
       {% loads = [] of Nil %}
       {% columns = [] of Nil %}
       {% facts = [] of Nil %}
@@ -32,9 +35,11 @@ module SweetTalk
           {% accepted = "#{accepted.id} | Nil" if nilable %}
           {% positional << "#{name} : #{accepted.id}" +
                            (trailing && nilable ? " = #{attribute[8].id}" : "") %}
+          {% keywords << "#{name} : #{accepted.id}" + (nilable ? " = #{attribute[8].id}" : "") %}
         {% else %}
           {% default = trailing && attribute[8] ? " = #{attribute[8].id}" : "" %}
           {% positional << "@#{name} : #{type}" + default %}
+          {% keywords << "#{name} : #{type}" + (attribute[8] ? " = #{attribute[8].id}" : "") %}
         {% end %}
         {% if attribute[2] == "value" %}
           {% if nilable %}
@@ -82,11 +87,29 @@ module SweetTalk
       {% arguments = (["#{foreign}: #{foreign}"] + columns).join(", ") %}
       @__sweettalk_row : {{ row }}? = nil
 
+      # When this entity's row was inserted; nil until its aggregate is saved.
+      def created_at : Time?
+        @__sweettalk_row.try(&.created_at)
+      end
+
+      # When this entity's row last changed; nil until its aggregate is saved.
+      def updated_at : Time?
+        @__sweettalk_row.try(&.updated_at)
+      end
+
       def initialize({{ positional.join(", ").id }})
         {% for attribute in referring %}
           @{{ attribute[4].id }} = ::SweetTalk.raw_id({{ attribute[0].id }})
         {% end %}
       end
+
+      {% unless keywords.empty? %}
+        # Every attribute by name, each that has a default or is optional left out when not
+        # given, wherever it is declared.
+        def initialize(*, {{ keywords.join(", ").id }})
+          initialize({{ attributes.map(&.[0].id).splat }})
+        end
+      {% end %}
 
       def initialize(*, stored row : {{ row }})
         @__sweettalk_row = row
@@ -126,6 +149,16 @@ module SweetTalk
         @__sweettalk_row = changeset.record
         @__sweettalk_id = changeset.record.id
       end
+    end
+
+    # Runs every `never` and `always` of this entity.
+    def __sweettalk_check : Nil
+      {% for method in @type.methods %}
+        {% if method.name.starts_with?("__sweettalk_never_") ||
+                method.name.starts_with?("__sweettalk_always_") %}
+          {{ method.name }}
+        {% end %}
+      {% end %}
     end
   end
 end

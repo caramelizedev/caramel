@@ -62,7 +62,9 @@ many attributes and many `never` lines that said only "this set goes together".
    keyword arguments, in which an optional attribute or one with a default may be left out
    wherever it is declared. A positional constructor cannot give a default to a parameter
    that a required one follows, so a factory that took the optional parameter first failed
-   to compile.
+   to compile. An entity's `new` takes the same keyword arguments beside its positional
+   ones, so `Line.new(tea: tea, quantity: quantity)` leaves out a defaulted attribute
+   wherever it is declared; the positional form gives a default only to the trailing ones.
 
 7. **An optional attribute now defaults to nil, which is a change of behaviour.** Before, a
    factory that did not set `has note : String?` failed with "factory does not set note"; now

@@ -6,7 +6,9 @@ module SweetTalk
   INSTEAD = "emit an event and react to it in a whenever"
 
   # Checks that changing *aggregate* (nil for a new one) keeps to one aggregate per
-  # transaction. True when this fiber already runs a command on that aggregate.
+  # transaction. True when this fiber already runs a command on that aggregate. In a
+  # handling, the first aggregate changed is remembered, and a command on it again passes;
+  # a second aggregate, or a new one once any is changed, is refused.
   def self.__sweettalk_enter(aggregate : Aggregate?) : Bool
     fiber = ::Fiber.current
     if running = fiber.__sweettalk_command
@@ -16,16 +18,24 @@ module SweetTalk
                          "command: a command changes one aggregate; react to its event " \
                          "in a whenever instead")
     end
-    if changes = fiber.__sweettalk_changes
-      if changes >= 1
-        handled = fiber.__sweettalk_handled
-        what, remedy = handled || {"a whenever handler", "use each: or a second whenever"}
+    if handled = fiber.__sweettalk_handled
+      changed = fiber.__sweettalk_changed
+      return false if aggregate && changed && changed.__sweettalk_same?(aggregate)
+      if changed
+        what, remedy = handled
         raise Boundary.new("#{what} changes one aggregate, and this one already changed " \
                            "one: #{remedy}")
       end
-      fiber.__sweettalk_changes = changes + 1
+      fiber.__sweettalk_changed = aggregate
     end
     false
+  end
+
+  # Remembers *aggregate*, just created in the open handling, as the aggregate it changed,
+  # so a command on it afterwards passes.
+  def self.__sweettalk_created(aggregate : Aggregate) : Nil
+    fiber = ::Fiber.current
+    fiber.__sweettalk_changed = aggregate if fiber.__sweettalk_handled
   end
 
   # An aggregate's class and id, as a refusal names it.
@@ -33,18 +43,18 @@ module SweetTalk
     "#{aggregate.class.name} #{aggregate.@__sweettalk_id || "(unsaved)"}"
   end
 
-  # Runs a handler, a service or a deadline, counting the aggregates it changes; *what*
-  # and *remedy* name it in the refusal of a second change. A nested handling shares the
-  # open one's count and description. Returns the block's value.
+  # Runs a handler, a service or a deadline, remembering the aggregate it changes; *what*
+  # and *remedy* name it in the refusal of a second one. A nested handling shares the
+  # open one's aggregate and description. Returns the block's value.
   def self.__sweettalk_handling(what : String, remedy : String, &)
     fiber = ::Fiber.current
     return yield if fiber.__sweettalk_handled
-    fiber.__sweettalk_changes = 0
+    fiber.__sweettalk_changed = nil
     fiber.__sweettalk_handled = {what, remedy}
     begin
       yield
     ensure
-      fiber.__sweettalk_changes = nil
+      fiber.__sweettalk_changed = nil
       fiber.__sweettalk_handled = nil
     end
   end
@@ -124,11 +134,11 @@ module SweetTalk
 end
 
 class Fiber
-  # The aggregate whose command this fiber runs; how many aggregates the open handling
-  # has changed, and what it is and how to fix a second change; the open unit of work;
-  # who acts; and the event being handled and its flow. SweetTalk sets and restores each.
+  # The aggregate whose command this fiber runs; the aggregate the open handling has
+  # changed, and what it is and how to fix a second one; the open unit of work; who acts;
+  # and the event being handled and its flow. SweetTalk sets and restores each.
   property __sweettalk_command : ::SweetTalk::Aggregate? = nil
-  property __sweettalk_changes : Int32? = nil
+  property __sweettalk_changed : ::SweetTalk::Aggregate? = nil
   property __sweettalk_handled : {String, String}? = nil
   property __sweettalk_unit : ::SweetTalk::Unit? = nil
   property __sweettalk_actor : String? = nil

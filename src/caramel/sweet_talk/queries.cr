@@ -1,6 +1,7 @@
-# Repository queries, `finds` and `counts`, shared by aggregates and projections.
+# Repository queries, `finds` and `counts`, shared by aggregates, projections and processes.
 module SweetTalk
-  # `finds` and `counts`: the queries an aggregate or a projection declares on its rows.
+  # `finds` and `counts`: the queries an aggregate, a projection or a process declares on
+  # its rows.
   module Queried
     # `finds placed_for(member : Account), where: {member: member, state: :placed}` is a
     # repository query: the aggregates (or a projection's rows) whose attributes equal the
@@ -30,16 +31,17 @@ module SweetTalk
         {% call.raise "finds #{verb} takes where:, satisfying:, order: and first:, or a block, " +
                       "not #{unknown.keys[0]}:" %}
       {% end %}
-      {% kept = %w[create find find? all new allocate] %}
-      {% kept = %w[all new allocate] if @type < ::SweetTalk::Projection %}
+      {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+      {% kept = keyed ? %w[all new allocate] : %w[create find find? all new allocate] %}
       {% if kept.includes?(verb.stringify) %}
         {% call.raise "finds #{verb} would replace #{short.id}.#{verb}: name it for what it " +
                       "finds" %}
       {% end %}
-      {% if @type < ::SweetTalk::Projection && !satisfying.is_a?(NilLiteral) %}
+      {% if keyed && !satisfying.is_a?(NilLiteral) %}
+        {% kind = @type < ::SweetTalk::Projection ? "projection" : "process" %}
         {% satisfying.raise "finds #{verb} takes satisfying: only in an aggregate: a " +
                             "specification is a rule on an aggregate, and #{short.id} is a " +
-                            "projection" %}
+                            "#{kind.id}" %}
       {% end %}
       {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
         {% call.raise "#{short.id} already has a query named #{verb}: give each finds and " +
@@ -184,16 +186,17 @@ module SweetTalk
       {% unless unknown.empty? %}
         {% call.raise "counts #{verb} takes where: and satisfying:, not #{unknown.keys[0]}:" %}
       {% end %}
-      {% kept = %w[create find find? all new allocate] %}
-      {% kept = %w[all new allocate] if @type < ::SweetTalk::Projection %}
+      {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+      {% kept = keyed ? %w[all new allocate] : %w[create find find? all new allocate] %}
       {% if kept.includes?(verb.stringify) %}
         {% call.raise "counts #{verb} would replace #{short.id}.#{verb}: name it for what it " +
                       "counts" %}
       {% end %}
-      {% if @type < ::SweetTalk::Projection && !satisfying.is_a?(NilLiteral) %}
+      {% if keyed && !satisfying.is_a?(NilLiteral) %}
+        {% kind = @type < ::SweetTalk::Projection ? "projection" : "process" %}
         {% satisfying.raise "counts #{verb} takes satisfying: only in an aggregate: a " +
                             "specification is a rule on an aggregate, and #{short.id} is a " +
-                            "projection" %}
+                            "#{kind.id}" %}
       {% end %}
       {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
         {% call.raise "#{short.id} already has a query named #{verb}: give each finds and " +

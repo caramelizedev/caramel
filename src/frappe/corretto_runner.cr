@@ -95,6 +95,45 @@ module Caramel::Frappe
       end
     end
 
+    # Serializes whole runs in one project across processes. Every run uses
+    # workers w1..wN: the same `.caramel/corretto/w<N>` binaries and the same
+    # Latte test-worker databases, so a second run in the same project would
+    # drop the first's databases mid-run. The lock is a file under
+    # `.caramel/corretto/`, which `remove_idle_workers` leaves alone.
+    class RunLock
+      def initialize(root : String)
+        Latte::StateSecurity.ensure_owned_directory(File.join(root, ".caramel"))
+        state = Latte::StateSecurity.ensure_owned_directory(File.join(root, ".caramel/corretto"))
+        path = File.join(state, "run.lock")
+        if info = File.info?(path, follow_symlinks: false)
+          unless Latte::StateSecurity.owned_file?(info)
+            raise Error.new("The Corretto run lock must be an owned regular file")
+          end
+        end
+        @file = File.open(path, "a", perm: Latte::StateSecurity::FILE_MODE)
+      end
+
+      # Takes the lock unless another run holds it.
+      def acquire? : Bool
+        @file.flock_exclusive(blocking: false)
+        true
+      rescue IO::Error
+        false
+      end
+
+      # Takes the lock, yielding once first if another run holds it.
+      def acquire(&) : Nil
+        return if acquire?
+        yield
+        @file.flock_exclusive
+      end
+
+      # Closing the file releases the lock.
+      def release : Nil
+        @file.close
+      end
+    end
+
     def initialize(@framework_root : String, @project : Project, @output : IO, @error : IO)
     end
 
@@ -108,6 +147,8 @@ module Caramel::Frappe
       files = self.class.spec_files(@project.root, paths)
       settings = self.class.test_environment(@project.root)
       refuse_mocks
+      lock = RunLock.new(@project.root)
+      lock.acquire { @output.puts("Corretto: waiting for another run in this project") }
       client = LatteClient.new
       client.ready!
       id = Latte::Site.id_for(@project.name, @project.root, @project.metadata.domain_suffix)
@@ -168,6 +209,8 @@ module Caramel::Frappe
 
       raise Error.new("Specs failed in #{failed.join(", ")}; " \
                       "see the prefixed output above")
+    ensure
+      lock.try(&.release)
     end
 
     # Runs the block, then reports `Corretto: <label> in <duration>`.

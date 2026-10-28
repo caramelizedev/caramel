@@ -1,10 +1,10 @@
 # A small shelf for SweetTalk's rules: one aggregate per command, per handler and per
 # service, unit-safe multiplication, a branching lifecycle, a factory whose event's
 # policy runs as the actor who made the aggregate, values whose bounds and lengths
-# PostgreSQL checks too, except one that opts out, a process whose steps may overlap and
-# whose deadline a step arms for its own span, a policy whose first delivery fails, an
-# entity a second aggregate stores again as its own, a two-word state, and a jar that
-# specifications sort.
+# PostgreSQL checks too, except one that opts out, a process whose steps may overlap,
+# whose deadline a step arms for its own span and which declares queries, a policy whose
+# first delivery fails, a policy with its own retry rule, an entity a second aggregate
+# stores again as its own, a two-word state, and a jar that specifications sort.
 require "../../../src/caramel/sweet_talk"
 
 module Rules
@@ -22,8 +22,11 @@ module Rules
       moves draft >> live >> sold, draft >> scrapped, live >> scrapped
 
       event Shared, means: "a box asked every box to be tagged"
+      event Twice, means: "a box asked to be filled twice"
+      event Doubted, means: "a box asked to be sold, which a draft box refuses"
       event Tallied, by : Int32, pause : Int32, means: "a box was counted again"
       event Noted, means: "a box asked to be noted down"
+      event Weighed, means: "a box was put on the scales"
 
       to tally(by : Int32, pause : Int32 = 0) do
         emit Tallied, by: by, pause: pause
@@ -31,6 +34,10 @@ module Rules
 
       to note do
         emit Noted
+      end
+
+      to weigh do
+        emit Weighed
       end
 
       to fill(count : Count) do
@@ -48,6 +55,14 @@ module Rules
 
       to share do
         emit Shared
+      end
+
+      to fill_twice do
+        emit Twice
+      end
+
+      to doubt do
+        emit Doubted
       end
 
       to go_live do
@@ -187,13 +202,19 @@ module Rules
       key box : Box
       has total : Int32 = 0
 
+      finds tallied_to(total : Int32), where: {total: total}
+      counts tallies
+
       whenever Box::Tallied, key: tallied.box_id do |tallied|
         @total += tallied.by
         arm quiet, after: tallied.by.hours
         sleep tallied.pause.milliseconds
       end
 
-      deadline quiet, after: 1.day do
+      deadline quiet, after: 1.day, attempts: 2 do
+        counted = Box.find(box)
+        counted.fill Count.new(1)
+        counted.fill Count.new(1)
         @total = 0
       end
     end
@@ -205,8 +226,36 @@ module Rules
       @@notes
     end
 
+    @@weighings = [] of String
+
+    # The event ids the Weighed policy has seen, one per delivery.
+    def self.weighings : Array(String)
+      @@weighings
+    end
+
+    whenever Box::Weighed, attempts: 3, backoff: :linear, base: 2.seconds do |weighed|
+      weighings << weighed.event_id
+      raise "the scales are busy" if weighings.count(weighed.event_id) < 3
+    end
+
     whenever Box::Shared do |shared|
       Box.all.each(&.tag("shared"))
+    end
+
+    whenever Box::Twice do |twice|
+      box = Box.find(twice.box_id)
+      box.fill Count.new(1)
+      box.fill Count.new(1)
+    end
+
+    whenever Box::Doubted do |doubted|
+      Box.find(doubted.box_id).sell
+    end
+
+    compensate Box::Doubted do |doubted, refusal|
+      box = Box.find(doubted.box_id)
+      box.tag refusal.message.to_s
+      box.fill Count.new(1)
     end
 
     whenever Crate::Made do |made|
@@ -221,6 +270,26 @@ module Rules
     service fill_two(first : Box::Id, second : Box::Id), means: "fills two boxes in one call" do
       Box.find(first).fill Count.new(1)
       Box.find(second).fill Count.new(1)
+    end
+
+    service fill_one_twice(box : Box::Id), means: "fills one box twice in one call" do
+      found = Box.find(box)
+      found.fill Count.new(1)
+      found.fill Count.new(1)
+    end
+
+    service make_filled(label : String), returns: Box::Id,
+      means: "creates a box and fills it in one call" do
+      box = Box.create(label: label, count: Count.new(0))
+      box.fill Count.new(1)
+      box.id
+    end
+
+    service make_signed(label : String, maker : String), returns: Crate::Id,
+      means: "makes a crate and signs it in one call" do
+      crate = Crate.make(label)
+      crate.sign maker
+      crate.id
     end
   end
 end

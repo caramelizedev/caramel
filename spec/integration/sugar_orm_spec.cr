@@ -429,6 +429,21 @@ describe "SugarORM with PostgreSQL" do
     end
   end
 
+  it "preloads has_many children by primary key regardless of insertion order" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      acme = SugarSpec::Team.create!(name: "Acme")
+      insert = "INSERT INTO sugar_users (id, email, team_id) " \
+               "OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3)"
+      [30_i64, 10_i64, 20_i64].each do |id|
+        owner.exec(insert, id, "user#{id}@acme.dev", acme.id)
+      end
+      owner.exec("UPDATE sugar_users SET score = 1.0 WHERE id = 10")
+
+      loaded = SugarSpec::Team.query.preload(:users).find!(acme.id)
+      loaded.users.map(&.id).should eq([10_i64, 20_i64, 30_i64])
+    end
+  end
+
   it "filters with scopes, Array, Range and nil conditions, and orders results" do
     SugarSpec.with_tables(owner_url, runtime_url) do
       small = SugarSpec::Team.create!(name: "Small", seats: 2)

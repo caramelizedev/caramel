@@ -823,13 +823,15 @@ module SweetTalk
       typeof({{ name }}.__sweettalk_condition)
     end
 
-    # Checks every `finds` and `counts` of this context's aggregates and projections when
-    # the context closes, whether or not anything calls them: each key names a stored
-    # attribute or `state:` a declared state, each `order:` key `id` or an attribute stored
-    # in one column, and `satisfying:` a specification on the same aggregate.
+    # Checks every `finds` and `counts` of this context's aggregates, projections and
+    # processes when the context closes, whether or not anything calls them: each key
+    # names a stored attribute or `state:` a declared state, each `order:` key `id` or an
+    # attribute stored in one column, and `satisfying:` a specification on the same
+    # aggregate.
     macro __sweettalk_check_queries
       {% depth = @type.name.split("::").size + 1 %}
-      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::Projection.all_subclasses %}
+      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::Projection.all_subclasses +
+                  ::SweetTalk::Process.all_subclasses %}
       {% owners = owners.select do |owner|
            owner.name.starts_with?("#{@type.name}::") && owner.name.split("::").size == depth
          end %}
@@ -911,11 +913,18 @@ module SweetTalk
         {% handler = expression.is_a?(Call) && !expression.block.is_a?(Nop) %}
         {% if handler && expression.name == "whenever" %}
           {% each = nil %}
+          {% attempts = nil %}
+          {% backoff = nil %}
+          {% base = nil %}
           {% for argument in (expression.named_args || [] of Nil) %}
             {% each = argument.value if argument.name.stringify == "each" %}
+            {% attempts = argument.value if argument.name.stringify == "attempts" %}
+            {% backoff = argument.value if argument.name.stringify == "backoff" %}
+            {% base = argument.value if argument.name.stringify == "base" %}
           {% end %}
           ::SweetTalk.__sweettalk_policy({{ @type }}, {{ expression.args[0] }}, {{ each }},
-            {{ other }}, "context", nil, {{ expression.block.args.splat }}) do
+            {{ other }}, "context", nil, {{ attempts }}, {{ backoff }}, {{ base }},
+            {{ expression.block.args.splat }}) do
             {{ expression.block.body }}
           end
         {% elsif handler && expression.name == "compensate" %}
@@ -930,10 +939,12 @@ module SweetTalk
     end
 
     # `whenever Event do |event| … end` is a policy, run as a Cold Brew job after the
-    # command that emitted the event commits.
-    macro whenever(event, border = nil, each = nil, &block)
+    # command that emitted the event commits. `attempts:`, `backoff:` and `base:` set its
+    # retry rule for errors other than a refusal.
+    macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
+                   &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, {{ border }}, "context",
-        nil, {{ block.args.splat }}) do
+        nil, {{ attempts }}, {{ backoff }}, {{ base }}, {{ block.args.splat }}) do
         {{ block.body }}
       end
     end

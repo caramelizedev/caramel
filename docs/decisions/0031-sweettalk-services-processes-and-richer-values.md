@@ -32,7 +32,14 @@ aggregates over days and undo their work when a step is refused.
 2. **Attributes and tables** (amends decision 4).
    - `has name : Type = expression` gives an aggregate's or an entity's attribute a default;
      its column has a SQL default when the expression is a literal. A projection's or a
-     process's attributes other than its key are nilable or have a literal default.
+     process's attributes other than its key are nilable or have a default the column
+     takes: a literal, or a value built from one (`Cents.new(0)`, `Tins.zero`, a closed-set
+     member such as `Kind.payment`), whose literal is the SQL default; the value is built
+     when the program loads, so one outside its bound stops it at start. A value with parts
+     or a calendar day has no SQL default, so it takes none there.
+   - `created_at` and `updated_at` on an aggregate and on an entity read the row's
+     timestamps, nil until the first save and refreshed by each save; a save that changes
+     no column leaves `updated_at` as it is.
    - A composite value is stored one column per part, `<attribute>_<part>`.
    - `has member : Account`, where `Account` is an application's SugarORM schema, is a
      foreign key whose getter returns `SweetTalk::RecordId(Account)`; `load` reads it.
@@ -40,8 +47,9 @@ aggregates over days and undo their work when a step is refused.
      after its aggregate's stored name, so it survives a rename.
 3. **Repositories.**
    - `find`, `find?`, `all` and every query read one statement per table: the roots, then
-     each list of entities through `preload`. Saving deletes dropped entities in one
-     statement.
+     each list of entities through `preload`. Entities come back by id, which is insertion
+     order; an in-memory reorder is not persisted: store a position attribute for an order
+     the domain owns. Saving deletes dropped entities in one statement.
    - `finds verb(args), where: {attribute: expression, state: :placed}` in an aggregate is a
      query: the aggregates whose columns equal the expressions (a list matches any member,
      a range its span), by id. A key that names no stored attribute, a list of entities, or
@@ -55,7 +63,9 @@ aggregates over days and undo their work when a step is refused.
    default covers, or a factory named like a repository method, does not compile.
 5. **Services.** `service verb(args), returns: T, means: "…" do … end` in a context is a
    domain service and a glossary entry. It runs in one transaction and changes at most one
-   aggregate. Anywhere but a context it does not compile.
+   aggregate, by as many commands as it likes, a `create` or a factory counting as the
+   first; a command on a second aggregate raises `SweetTalk::Boundary`. Anywhere but a
+   context it does not compile.
 6. **Event metadata** (amends decision 6). Every event records `event_id`, `occurred_at`,
    `actor`, `cause_id` and `flow_id`, and its jobs carry them. `SweetTalk.acting(by) { … }`
    names the actor of the events emitted inside it, and each policy, compensation and step
@@ -72,13 +82,13 @@ aggregates over days and undo their work when a step is refused.
    after a `whenever` for the same event in the same context, border or process, runs when
    that handler is refused. The handler's work has rolled back; the compensation gets its
    arguments and the refusal, and runs in its own transaction, changing at most one
-   aggregate. A refusal there fails the job.
+   aggregate as a service does. A refusal there fails the job.
 8. **Processes.** `process Name, means: "…" do … end` in a context keeps one row per
    `key`, with attributes, a lifecycle (`moves`) and deadlines. `whenever Event, key:
    expression` is a step: its job inserts the row when absent, locks it and runs the block
-   on it. A step changes at most one aggregate; its own row does not count. A process may
-   follow another context's events outside a border, which draws an event edge, and takes
-   `renamed_from:` as a projection does.
+   on it. A step changes at most one aggregate as a service does; its own row does not
+   count. A process may follow another context's events outside a border, which draws an
+   event edge, and takes `renamed_from:` as a projection does.
 9. **Deadlines.** `deadline name, after: span do … end` in a process: `arm name` sets
    `<name>_due` and enqueues a job for that time, `arm name, after: other` uses another
    span, and `disarm name` clears it. The job runs the block only when no arming or

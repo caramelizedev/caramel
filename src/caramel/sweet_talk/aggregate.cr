@@ -216,6 +216,11 @@ module SweetTalk
         {% call.raise "to takes a verb and typed arguments, " +
                       "as in to restock(tins : Tins) do … end" %}
       {% end %}
+      {% if call.name == "finalize" %}
+        {% call.raise "command finalize would replace the garbage collector's finalize on " +
+                      "#{@type.name.split("::").last.id}: name it for what it does, as in " +
+                      "to wind_up" %}
+      {% end %}
       {% parts = @type.name.split("::") %}
       {% span = "#{parts[-2].id}::#{parts[-1].id}##{call.name}" %}
       __sweettalk_no_stray_writes({{ call.name.stringify }}, {{ block.body.stringify }})
@@ -301,6 +306,9 @@ module SweetTalk
       {% short = @type.name.split("::").last %}
       {% foreign = "#{@type.constant("SWEETTALK_STORED").id}_id".id %}
       {% factories = @type.constants.select(&.starts_with?("SWEETTALK_FACTORY_")) %}
+      {% home = ::SweetTalk::BoundedContext.includers
+           .find { |context| @type.name.starts_with?("#{context.name}::") } %}
+      {% tenant = home && home.constant("SWEETTALK_TENANT") %}
       {% positional = [] of Nil %}
       {% keywords = [] of Nil %}
       {% loads = [] of Nil %}
@@ -380,6 +388,33 @@ module SweetTalk
       {% missing = "There is no #{short.id} " %}
       @__sweettalk_row : {{ row }}? = nil
 
+      # When this aggregate's row was inserted; nil until it is saved.
+      def created_at : Time?
+        @__sweettalk_row.try(&.created_at)
+      end
+
+      # When this aggregate's row last changed; nil until it is saved.
+      def updated_at : Time?
+        @__sweettalk_row.try(&.updated_at)
+      end
+
+      {% if tenant %}
+        # The id of the tenant this aggregate belongs to: its row's, or the bound tenant's
+        # before it is first saved.
+        def tenant_id : Int64
+          if row = @__sweettalk_row
+            row.{{ tenant[1].id }}_id
+          else
+            ::Caramel::Tenancy.current.id
+          end
+        end
+
+        # The tenant this aggregate belongs to, read from the tenant model.
+        def tenant : ::{{ tenant[0].id }}
+          ::Caramel::Tenancy.find(tenant_id).not_nil!
+        end
+      {% end %}
+
       # This aggregate's typed id.
       struct Id < ::SweetTalk::Identity
         include ::Caramel::FieldValue(Int64)
@@ -442,6 +477,7 @@ module SweetTalk
               aggregate.__sweettalk_check
               aggregate.__sweettalk_save
             end
+            ::SweetTalk.__sweettalk_created(aggregate)
             aggregate
           end
         end
@@ -600,7 +636,8 @@ module SweetTalk
 
     # Runs a factory's body on this new aggregate as its first change, then checks the
     # invariants, saves it and dispatches its events, in one transaction; while it runs,
-    # changing another aggregate is refused as in a command.
+    # changing another aggregate is refused as in a command. Once it is saved, the open
+    # handling remembers it as the aggregate it changed.
     def __sweettalk_making(&) : Nil
       fiber = ::Fiber.current
       fiber.__sweettalk_command = self
@@ -613,6 +650,7 @@ module SweetTalk
             __sweettalk_dispatch_events
           end
         end
+        ::SweetTalk.__sweettalk_created(self)
       ensure
         fiber.__sweettalk_command = nil
       end
@@ -624,12 +662,17 @@ module SweetTalk
       @__sweettalk_removed_at ||= Time.utc
     end
 
-    # Runs every `never` and `always` of this aggregate.
+    # Runs every `never` and `always` of this aggregate, then of each of its entities.
     def __sweettalk_check : Nil
       {% for method in @type.methods %}
         {% if method.name.starts_with?("__sweettalk_never_") ||
                 method.name.starts_with?("__sweettalk_always_") %}
           {{ method.name }}
+        {% end %}
+      {% end %}
+      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
+        {% if @type.constant(constant)[2] == "entities" %}
+          @{{ @type.constant(constant)[0].id }}.each(&.__sweettalk_check)
         {% end %}
       {% end %}
     end
