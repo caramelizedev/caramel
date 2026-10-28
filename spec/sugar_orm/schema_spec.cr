@@ -106,6 +106,36 @@ describe SugarORM::Schema do
     table.indexes.should eq([index])
   end
 
+  it "keeps an index name of up to 63 bytes and shortens a longer one with an FNV-1a hash" do
+    names = SugarUnit::Bound.__sugar_table.indexes.map(&.name)
+    names[0].should eq("index_unit_bounds_on_#{"a" * 41}")
+    names[0].bytesize.should eq(62)
+    names[1].should eq("index_unit_bounds_on_#{"b" * 42}")
+    names[1].bytesize.should eq(63)
+    full = "index_unit_bounds_on_#{"c" * 43}"
+    full.bytesize.should eq(64)
+    names[2].should eq("#{full[0, 54]}_#{Catalog.fnv8(full)}")
+    names[2].bytesize.should eq(63)
+    names[2].should start_with("index_unit_bounds_on_")
+  end
+
+  it "builds the same index name at run time as the schema macro, from the true FNV-1a" do
+    Catalog.fnv8("hello").should eq("4f9f2cab")
+    Catalog.fnv8("").should eq("811c9dc5")
+    declared = SugarUnit::Bound.__sugar_table.indexes.map(&.name)
+    Catalog.index_name("unit_bounds", ["a" * 41]).should eq(declared[0])
+    Catalog.index_name("unit_bounds", ["b" * 42]).should eq(declared[1])
+    Catalog.index_name("unit_bounds", ["c" * 43]).should eq(declared[2])
+  end
+
+  it "maps a unique violation on a shortened index to its column" do
+    column = "c" * 43
+    violation = SugarORM::UniqueViolation.new(nil, "unit_bounds",
+      SugarUnit::Bound.__sugar_table.indexes[2].name, [] of String)
+    violation.on?("unit_bounds", column).should be_true
+    violation.on?("unit_bounds", "b" * 42).should be_false
+  end
+
   it "declares each foreign key's ON DELETE action" do
     SugarUnit::Loan.__sugar_table.foreign_keys.should eq([
       Catalog::ForeignKey.new("fk_unit_loans_team_id", ["team_id"], "unit_teams",

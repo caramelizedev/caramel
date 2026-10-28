@@ -444,6 +444,20 @@ describe SugarORM::Differ do
     build.index.name.bytesize.should eq(63)
   end
 
+  it "adds a long declared index under its shortened name once and then leaves it alone" do
+    column = "c" * 49
+    index = Catalog::Index.new(Catalog.index_name("books", [column]), [column])
+    "index_books_on_#{column}".bytesize.should eq(64)
+    index.name.bytesize.should eq(63)
+    declared = books([nullable(column)], [index])
+    first = Differ.diff([declared], [books([nullable(column)])])
+    sql(first.online).should eq([
+      %(CREATE INDEX CONCURRENTLY IF NOT EXISTS "#{index.name}" ON "books" ("#{column}")),
+    ])
+    second = Differ.diff([declared], [books([nullable(column)], [index])])
+    second.empty?.should be_true
+  end
+
   it "keeps a swap index a previous run built, so only the drop and rename remain" do
     plain = Catalog::Index.new("index_books_on_isbn", ["isbn"])
     unique = plain.copy_with(unique: true)
