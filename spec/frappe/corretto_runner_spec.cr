@@ -106,6 +106,35 @@ describe Caramel::Frappe::CorrettoRunner do
     end
   end
 
+  it "serializes two runs in one project: the second waits until the first releases the lock" do
+    corretto_project do |root|
+      first = Caramel::Frappe::CorrettoRunner::RunLock.new(root)
+      second = Caramel::Frappe::CorrettoRunner::RunLock.new(root)
+      first.acquire { raise "the first run should not wait" }
+      second.acquire?.should be_false
+      waited = Channel(Nil).new(1)
+      acquired = Channel(Nil).new(1)
+      spawn do
+        second.acquire { waited.send(nil) }
+        acquired.send(nil)
+      end
+      waited.receive
+      select
+      when acquired.receive
+        fail("the second run acquired the lock while the first held it")
+      when timeout(100.milliseconds)
+      end
+      first.release
+      select
+      when acquired.receive
+      when timeout(5.seconds)
+        fail("the second run did not acquire the lock after the first released it")
+      end
+      File.file?(File.join(root, ".caramel/corretto/run.lock")).should be_true
+      second.release
+    end
+  end
+
   it "formats durations as tenths of a second under a minute, else m:ss" do
     format = ->(span : Time::Span) { Caramel::Frappe::CorrettoRunner.format_duration(span) }
     format.call(Time::Span.zero).should eq("0.0s")
