@@ -1,6 +1,6 @@
-# A tea shop shared by tenants (ADR 0033): a central catalogue every tenant sells from,
-# tenanted ordering and fulfilment with a projection, a process and a deadline, and a
-# central report that totals every tenant's orders.
+# A tea shop shared by tenants (ADR 0033): a central catalogue every tenant sells from, a
+# kernel Ordering and Fulfilment share, tenanted ordering and fulfilment with a projection,
+# a process and a deadline, and a central report that totals every tenant's orders.
 module TenantShop
   include SweetTalk
 
@@ -18,13 +18,20 @@ module TenantShop
 
   tenant Account
 
+  kernel Stock, shared_by: [Ordering, Fulfilment],
+    means: "the stock ordering and packing agree on" do
+    aggregate Crate, means: "a crate of tins one tenant keeps" do
+      has tins : Int32
+    end
+  end
+
   context Catalogue, central: true, means: "the teas every tenant sells" do
     aggregate Tea, means: "one tea on every tenant's shelf" do
       has name : String
     end
   end
 
-  context Ordering, follows: Catalogue, means: "choosing teas and checking out" do
+  context Ordering, follows: Catalogue, shares: Stock, means: "choosing teas and checking out" do
     value Slot, means: "one tea in one order" do
       part order : Int64
       part tea : Int64
@@ -98,9 +105,14 @@ module TenantShop
         end
       end
     end
+
+    service stock(tins : Int32), returns: Stock::Crate::Id,
+      means: "a crate of tins kept for orders" do
+      Stock::Crate.create(tins: tins).id
+    end
   end
 
-  context Fulfilment, means: "packing parcels" do
+  context Fulfilment, shares: Stock, means: "packing parcels" do
     aggregate Parcel, means: "the box we pack for one order" do
       has order : Int64
 
@@ -113,6 +125,11 @@ module TenantShop
         TenantShop::SEEN << Caramel::Tenancy.current.slug
         Parcel.pack placed.order_id.raw
       end
+    end
+
+    service crate_tins(crate : Stock::Crate::Id), returns: Int32,
+      means: "how many tins a crate holds" do
+      Stock::Crate.find(crate).tins
     end
   end
 

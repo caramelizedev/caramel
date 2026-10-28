@@ -10,7 +10,7 @@ alias Reporting = TenantShop::Reporting
 
 module TenancySpecs
   TENANTED = %w[fulfilment_parcels ordering_holds ordering_order_lines ordering_orders
-    ordering_sales]
+    ordering_sales stock_crates]
   LAPSE     = "TenantShop::Ordering::Hold::LapseDeadline"
   TOTALS    = "TenantShop::Reporting::Totals::WhenOrderingOrderPlaced"
   PLACED    = "sweettalk.ordering.order.placed"
@@ -70,6 +70,17 @@ describe "SweetTalk with tenancy" do
         Ordering::Order.all.should be_empty
       end
       Caramel::Tenancy.with(acme) { Ordering::Order.find?(order.id).try(&.id).should eq(order.id) }
+    end
+  end
+
+  it "keeps a kernel's rows in their tenant" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      crate = Caramel::Tenancy.with(acme) { Ordering.stock(3) }
+      Caramel::Tenancy.with(acme) { Fulfilment.crate_tins(crate).should eq(3) }
+      Caramel::Tenancy.with(globex) do
+        expect_raises(SweetTalk::Missing) { Fulfilment.crate_tins(crate) }
+      end
     end
   end
 

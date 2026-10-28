@@ -42,7 +42,7 @@ module SweetTalk
     SWEETTALK_TABLE = {{ plural }}
   end
 
-  # Included by every `context`: the words a context's body may use.
+  # Included by every `context` and `kernel`: the words their bodies may use.
   module BoundedContext
     # `value Tins, Int32, at_least: 0, means: "…"` is a value object. `+` and `-` take the
     # same value or an integer, `*` an integer, and `times: Quantity` lets `*` take a
@@ -1009,8 +1009,9 @@ module SweetTalk
   # `subdomain: :core`, `:supporting` or `:generic` says what part of the domain it is.
   # `publishes` lists the names other contexts may use, and `border X, outside: "…"`
   # faces a system outside the program.
-  macro context(name, follows = nil, means = nil, renamed_from = nil, central = nil,
-                subdomain = nil, &block)
+  # `shares: Money` names the kernels it shares, declared before it.
+  macro context(name, follows = nil, shares = nil, means = nil, renamed_from = nil,
+                central = nil, subdomain = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -1030,12 +1031,17 @@ module SweetTalk
     {% end %}
     {% tenant = @type.has_constant?("SWEETTALK_TENANT") && !central &&
                 @type.constant("SWEETTALK_TENANT") %}
+    __sweettalk_shared("context", {{ name }}, {{ shares }})
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
     {% body = block ? block.body : nil %}
     {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
     {% followed = [] of Nil %}
     {% followed = [follows] unless follows.is_a?(NilLiteral) %}
     {% followed = follows if follows.is_a?(TupleLiteral) %}
+    {% shared = [] of Nil %}
+    {% shared = [shares] unless shares.is_a?(NilLiteral) %}
+    {% shared = shares if shares.is_a?(ArrayLiteral) %}
+    {% shared = shared.select { |path| path.is_a?(Path) } %}
     # A border is outside when its outside: is text, as in the border macro; any other
     # outside:, nil included, is refused at the border's line.
     {% for node in expressions %}
@@ -1178,6 +1184,9 @@ module SweetTalk
       SWEETTALK_CENTRAL = {{ central ? true : false }}
       SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
+      SWEETTALK_SHARES  = [{{ shared.map(&.names.last.stringify).splat }}] of String
+      # The contexts and kernels that share this module when it is a kernel; nil for a context
+      SWEETTALK_SHARED_BY = nil
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}

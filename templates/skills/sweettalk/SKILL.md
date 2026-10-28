@@ -1,6 +1,6 @@
 ---
 name: sweettalk
-description: Rules for SweetTalk, the Domain-Driven Design language of this Caramel application. Use when reading or changing app/domain/ or spec/domain/, or when a task names a context, value, aggregate, entity, command, event, policy, projection, process, service, factory or border.
+description: Rules for SweetTalk, the Domain-Driven Design language of this Caramel application. Use when reading or changing app/domain/ or spec/domain/, or when a task names a context, kernel, value, aggregate, entity, command, event, policy, projection, process, service, factory or border.
 ---
 
 # SweetTalk in this application
@@ -14,9 +14,10 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 ## Rules agents most often break
 
-- Give every context, value, aggregate, entity, event, projection, specification, service and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
+- Give every context, kernel, value, aggregate, entity, event, projection, specification, service and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
 - Name another context's types (`Other::`) or call its services (`Other.price_of`) only in a context that says `follows: Other`, or inside its `border Other`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-contexts
 - Once a context `publishes`, name and call only what it publishes. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-published
+- Name a kernel's types, commands and events (`Money::Cents`) only in a context or kernel that says `shares: Money` and that the kernel's `shared_by:` lists. A kernel holds only values and aggregates, names no context, shares only kernels declared before it, and holds only what two or more of its sharers name. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-kernel
 - Name `Caramel::Outbound` or `HTTP::Client` only inside `border Name, outside: "…"`, call it from a `whenever`, and fake it in specs with `Corretto.stub_wire`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-outside
 - `subdomain: :core`, `:supporting` or `:generic` labels a context for readers and changes no rule. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-subdomains
 - Change one aggregate per command, service, policy or process step. For work across aggregates, write a `process`, or emit an event and react to it with `whenever`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
@@ -36,7 +37,7 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 Do not write these; the map says what your release has.
 
-- Shared kernel, partnership, customer/supplier and an event log: not planned. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
+- Partnership, customer/supplier and an event log: not planned. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
 ## Verify
 

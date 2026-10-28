@@ -316,11 +316,13 @@ const problems = compilation.slice(compilation.indexOf('PROBLEMS = ['), compilat
 const fixtureNames = new Set([...problems.matchAll(/\{"([a-z_]+)",/g)].map(match => match[1]));
 assert(fixtureNames.size > 100, 'sweet_talk_compilation.cr lists fewer fixtures than expected');
 const compileRows = {
-  'A noun without means:': ['missing_meaning', 'specification_without_meaning'],
+  'A noun without means:': ['missing_meaning', 'specification_without_meaning', 'kernel_without_meaning'],
   'A subdomain: other than :core, :supporting or :generic': ['subdomain_unknown'],
   'A foreign name or call outside a border, a border or follows: to an unknown context, or a cycle of dependency edges': ['foreign_name', 'context_cycle', 'cycle_without_boot', 'unknown_border', 'call_outside_border'],
   'A name or call another context does not publish, a publishes of a name the context does not declare, or of an expression': ['unpublished_name', 'unpublished_call', 'unpublished_in_border', 'published_after_use', 'publishes_unknown', 'publishes_expression'],
-  'Caramel::Outbound or HTTP::Client outside a border with an outside system, or such a border named like a context, holding a whenever, or without its outside: text': ['outbound_outside_border', 'client_in_context_border', 'outside_is_a_context', 'whenever_outside', 'outside_not_text', 'outside_nil'],
+  'A kernel whose shared_by: is not a list of two or more contexts or kernels that say shares:, that holds anything but values and aggregates or names a context, or that holds a word fewer than two of its sharers name': ['kernel_shared_by_one', 'kernel_holds_service', 'kernel_unknown_sharer', 'kernel_sharer_silent', 'kernel_names_context', 'kernel_word_alone', 'kernel_word_unused'],
+  'A shares: of anything but an earlier kernel that lists the context or kernel saying it, or a kernel named, followed or bordered by one that does not share it': ['shares_not_kernel', 'shares_unlisted', 'kernel_shares_unlisted', 'kernel_not_shared', 'follows_kernel', 'border_kernel'],
+  'Caramel::Outbound or HTTP::Client outside a border with an outside system, or such a border named like a context, holding a whenever, or without its outside: text': ['outbound_outside_border', 'client_in_context_border', 'outside_is_a_context', 'whenever_outside', 'outside_not_text', 'outside_nil', 'kernel_outbound'],
   'emit of another aggregate’s event': ['foreign_event'],
   'A mover the lifecycle does not declare': ['unknown_state'],
   'A lifecycle whose check name would pass PostgreSQL’s 63 bytes': ['state_check_long'],
