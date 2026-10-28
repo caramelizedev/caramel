@@ -15,6 +15,7 @@ export const sections = {
   islands: 'cookbook/third-party-components',
   webhooks: 'cookbook/webhooks',
   sessions: 'cookbook/revocable-sessions',
+  sums: 'cookbook/sums-and-groups',
 };
 // The page key of a built file such as docs/0.15.0/box-office/index.html.
 export const pageKey = file => {
