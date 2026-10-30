@@ -9,8 +9,8 @@ alias Fulfilment = TenantShop::Fulfilment
 alias Reporting = TenantShop::Reporting
 
 module TenancySpecs
-  TENANTED = %w[fulfilment_labels fulfilment_parcels ordering_holds ordering_order_lines
-    ordering_orders ordering_sales stock_crates]
+  TENANTED = %w[fulfilment_labels fulfilment_parcels ordering_events ordering_holds
+    ordering_order_lines ordering_orders ordering_sales stock_crates]
   LAPSE     = "TenantShop::Ordering::Hold::LapseDeadline"
   TOTALS    = "TenantShop::Reporting::Totals::WhenOrderingOrderPlaced"
   PLACED    = "sweettalk.ordering.order.placed"
@@ -24,6 +24,10 @@ module TenancySpecs
     SQL
   SOLD = <<-SQL
     SELECT account_id, sold FROM ordering_sales WHERE tea_id = $1 ORDER BY account_id
+    SQL
+  LOGGED = <<-SQL
+    SELECT account_id AS tenant, aggregate, name, subject_id AS subject
+    FROM ordering_events ORDER BY id
     SQL
   HOLDS = <<-SQL
     SELECT count(*) AS value FROM ordering_holds WHERE slot_order = $1
@@ -244,6 +248,47 @@ describe "SweetTalk with tenancy" do
     end
   end
 
+  it "logs each tenant's events in its own rows, and a shared kernel's in the sharer's log" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      order = SweetTalkTenancySpec.place(acme, sencha, 2)
+      other = SweetTalkTenancySpec.place(globex, sencha, 3)
+      crate = Caramel::Tenancy.with(acme) { Ordering.stock(1) }
+      Caramel::Tenancy.with(acme) { Ordering.fill(crate, 4) }
+
+      logged = SugarORM.sql(TenancySpecs::LOGGED, as: {tenant: Int64, aggregate: String,
+                                                       name: String, subject: Int64?})
+      logged.map(&.values).should eq([
+        {acme.id, "order", "placed", order.id.raw}, {globex.id, "order", "placed", other.id.raw},
+        {acme.id, "stock_crate", "filled", crate.raw},
+      ])
+      Caramel::Tenancy.with(acme) do
+        Ordering.logged(Ordering::Order::Placed).map(&.order_id).should eq([order.id])
+        Ordering.logged(TenantShop::Stock::Crate::Filled).map(&.tins).should eq([5])
+      end
+      Caramel::Tenancy.with(globex) do
+        Ordering.logged(Ordering::Order::Placed).map(&.lines.first.tins).should eq([3])
+      end
+      expect_raises(SugarORM::Tenancy::Missing) { Ordering.logged }
+    end
+  end
+
+  it "rebuilds the bound tenant's projection rows from its log" do
+    SweetTalkTenancySpec.rolled_back do |connection|
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      SweetTalkTenancySpec.place(acme, sencha, 2)
+      SweetTalkTenancySpec.place(globex, sencha, 3)
+      SweetTalkTenancySpec.drain(connection)
+      SugarORM.sql_exec("UPDATE ordering_sales SET sold = 0")
+
+      Caramel::Tenancy.with(acme) { SweetTalk.rebuild(Ordering::Sales) }.should eq(1)
+      sold = SugarORM.sql(TenancySpecs::SOLD, sencha.id.raw, as: {account_id: Int64, sold: Int32})
+      sold.map(&.values).should eq([{acme.id, 2}, {globex.id, 0}])
+    end
+  end
+
   it "keeps one Hold row per tenant for one slot" do
     SweetTalkTenancySpec.rolled_back do
       acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
@@ -289,7 +334,7 @@ describe "SweetTalk with tenancy" do
     SweetTalkTenancySpec.rolled_back do |connection|
       initech = SweetTalkTenancySpec.account("initech")
       SweetTalkTenancySpec.place(initech, SweetTalkTenancySpec.tea("Sencha"), 2)
-      %w[ordering_order_lines ordering_orders].each do |table|
+      %w[ordering_order_lines ordering_orders ordering_events].each do |table|
         SugarORM.sql_exec("DELETE FROM #{table} WHERE account_id = $1", initech.id)
       end
       SugarORM.sql_exec("DELETE FROM accounts WHERE id = $1", initech.id)

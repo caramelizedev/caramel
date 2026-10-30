@@ -1,9 +1,16 @@
 # Values, typed ids and record ids, composite values, and their invariants.
 module SweetTalk
-  # A value object: a validated integer or string, rebuilt and so revalidated by every
-  # arithmetic result. It is stored as a column of its raw type.
+  # A value object: a validated integer, string, day, decimal or JSON document, rebuilt
+  # and so revalidated by every arithmetic result. It is stored as a column of its raw
+  # type, or through its codec.
   abstract struct Value
     abstract def raw
+
+    # Writes this value as one JSON fact: its raw as JSON. A decimal value writes its
+    # text instead, so no reader rounds it through a float.
+    def __sweettalk_pack(json : JSON::Builder) : Nil
+      raw.to_json(json)
+    end
 
     def self.raw_of(other : Int) : Int
       other

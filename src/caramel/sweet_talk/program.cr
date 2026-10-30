@@ -15,16 +15,24 @@ module SweetTalk
     {% end %}
   end
 
-  # Enqueues one job per policy, projection and process step that follows the event, then
-  # notifies live pages; both run on the current connection, so they commit with the
-  # command. The jobs are enqueued in declaration order: the policies of every context
-  # and its borders, then the projections' handlers, then the processes' steps; Cold Brew
-  # starts them in that order and finishes them in any. A collector `emitted` opened on
-  # this fiber sees the event too.
+  # Writes the event to the log of each context that keeps one, enqueues one job per
+  # policy, projection and process step that follows the event, then notifies live
+  # pages; all run on the current connection, so they commit with the command. The jobs
+  # are enqueued in declaration order: the policies of every context and its borders,
+  # then the projections' handlers, then the processes' steps; Cold Brew starts them in
+  # that order and finishes them in any. A handler that says `after:` is enqueued by its
+  # predecessor's job instead. A collector `emitted` opened on this fiber sees the event
+  # too.
   def self.dispatch(event : ::SweetTalk::Event) : Nil
     __sweettalk_checked
     {% begin %}
-      {% owners = ::SweetTalk::BoundedContext.includers + ::SweetTalk::Projection.all_subclasses +
+      {% contexts = ::SweetTalk::BoundedContext.includers %}
+      {% for context in contexts %}
+        {% if context.has_constant?("SWEETTALK_EVENT_LOG") %}
+          ::{{ context }}.__sweettalk_log(event)
+        {% end %}
+      {% end %}
+      {% owners = contexts + ::SweetTalk::Projection.all_subclasses +
                   ::SweetTalk::Process.all_subclasses %}
       {% for owner in owners %}
         {% for method in owner.class.methods %}
@@ -59,6 +67,248 @@ module SweetTalk
   # The events of one class among those, typed: `SweetTalk.emitted(Order::Placed) { … }`.
   def self.emitted(kind : E.class, &) : Array(E) forall E
     emitted { yield }.compact_map(&.as?(E))
+  end
+
+  # Once every name is known: each `after:` names a projection, a process or a context
+  # with a handler of the same event, one that takes no `each:`, and no chain of `after:`
+  # runs in a circle; then `__sweettalk_release`, which a handler's job calls with its own
+  # key once its body has run, enqueues the handlers that follow it, with the event it
+  # handled (ADR 0048). A handler's event and `after:` are resolved as written, from the
+  # owner's scope outwards.
+  macro finished
+    {% owners = ::SweetTalk::BoundedContext.includers + ::SweetTalk::Projection.all_subclasses +
+                ::SweetTalk::Process.all_subclasses %}
+    {% handlers = [] of Nil %}
+    {% for owner in owners %}
+      {% scopes = owner.name.split("::") %}
+      {% for constant in owner.constants.select(&.starts_with?("SWEETTALK_HANDLER_")) %}
+        {% entry = owner.constant(constant) %}
+        {% event = nil %}
+        {% after = nil %}
+        {% for depth in 0..scopes.size %}
+          {% prefix = scopes[0...(scopes.size - depth)] %}
+          {% unless event %}
+            {% found = parse_type("::" + (prefix + [entry[0]]).join("::")).resolve? %}
+            {% event = found if found %}
+          {% end %}
+          {% if entry[3] && !after %}
+            {% found = parse_type("::" + (prefix + [entry[3]]).join("::")).resolve? %}
+            {% after = found if found %}
+          {% end %}
+        {% end %}
+        # {owner, its SWEETTALK_HANDLER_* entry, the event's type, the after: owner's type}
+        {% handlers << {owner, entry, event, after} %}
+      {% end %}
+    {% end %}
+    {% releases = {} of Nil => Nil %}
+    {% for handler in handlers %}
+      {% entry = handler[1] %}
+      {% if entry[3] %}
+        {% at = "\n  --> #{entry[5].id}" %}
+        {% who = "whenever #{entry[0].id}, after: #{entry[3].id} in #{entry[6].id}" %}
+        {% unless handler[2] %}
+          {% raise "#{who.id}: there is no event #{entry[0].id}" + at %}
+        {% end %}
+        {% unless handler[3] && owners.any? { |type| type.name == handler[3].name } %}
+          {% raise "#{who.id}: #{entry[3].id} is not a projection, a process or a context; " +
+                   "after: names one that follows #{entry[0].id}" + at %}
+        {% end %}
+        {% short = handler[3].name.split("::").last %}
+        {% targets = handlers.select do |other|
+             other[0].name.stringify == handler[3].name.stringify &&
+               other[2] && other[2].name.stringify == handler[2].name.stringify
+           end %}
+        {% if targets.empty? %}
+          {% raise "#{who.id}: #{short.id} does not follow #{entry[0].id}; after: names a " +
+                   "projection, a process or a context with a whenever #{entry[0].id} of its " +
+                   "own" + at %}
+        {% elsif targets.size > 1 %}
+          {% raise "#{who.id}: #{short.id} follows #{entry[0].id} twice, in a border and " +
+                   "outside it, so after: #{short.id} cannot say which runs first: keep one" + at %}
+        {% end %}
+        {% target = targets[0] %}
+        {% if target[1][2] %}
+          {% raise "#{who.id}: #{short.id} handles #{entry[0].id} with each: " +
+                   "#{target[1][2].id}, one job per element, which releases no follower; " +
+                   "follow the event without after:" + at %}
+        {% end %}
+        {% chain = [handler[0].name.stringify] %}
+        {% current = target %}
+        {% for round in handlers %}
+          {% if current %}
+            {% if chain.includes?(current[0].name.stringify) %}
+              {% names = (chain + [current[0].name.stringify]).map(&.split("::").last) %}
+              {% raise "#{who.id}: after: runs in a circle, #{names.join(" → ").id}; one of " +
+                       "them follows #{entry[0].id} without after:" + at %}
+            {% end %}
+            {% chain << current[0].name.stringify %}
+            {% step = current %}
+            {% current = nil %}
+            {% if step[1][3] %}
+              {% current = handlers.find do |other|
+                   other[0].name.stringify == step[3].name.stringify &&
+                     other[2] && other[2].name.stringify == step[2].name.stringify
+                 end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% key = "#{target[0].name.id}/#{target[1][1].id}" %}
+        {% releases[key] = (releases[key] || [] of Nil) + [handler] %}
+      {% end %}
+    {% end %}
+
+    # Enqueues the handlers that say `after:` the handler *key* names, with *event*.
+    def self.__sweettalk_release(key : String, event : ::SweetTalk::Event) : Nil
+      {% unless releases.empty? %}
+        case key
+        {% for key, followers in releases %}
+          when {{ key }}
+            {% for follower in followers %}
+              ::{{ follower[0] }}.__sweettalk_follow_{{ follower[1][1].id }}(event)
+            {% end %}
+        {% end %}
+        end
+      {% end %}
+    end
+  end
+
+  # `SweetTalk.prune_events(Billing, before: 90.days.ago)` deletes the context's logged
+  # events that occurred before the time, in chunks of *chunk* rows, each its own
+  # statement, across every tenant, and returns how many went; called from a
+  # `Caramel::ColdBrew.every` block it is the log's retention (ADR 0048). A context
+  # without `event_log: true` does not compile.
+  macro prune_events(context, before, chunk = 1000)
+    {% home = context.resolve? %}
+    {% logged = home && home.has_constant?("SWEETTALK_EVENT_LOG") &&
+                home.constant("SWEETTALK_EVENT_LOG") %}
+    {% unless logged %}
+      {% context.raise "SweetTalk.prune_events(#{context}): #{context} keeps no event log; " +
+                       "say context #{context}, event_log: true" %}
+    {% end %}
+    ::SweetTalk.__sweettalk_pruning({{ before }}, {{ chunk }}) do |%before, %chunk|
+      ::{{ home }}.__sweettalk_prune(%before, %chunk)
+    end
+  end
+
+  # Deletes in chunks until one comes back short; the total.
+  def self.__sweettalk_pruning(before : Time, chunk : Int32, &) : Int64
+    total = 0_i64
+    loop do
+      deleted = yield before, chunk
+      total += deleted
+      break if deleted < chunk
+    end
+    total
+  end
+
+  # `SweetTalk.rebuild(Billing::Sales)` empties the projection's rows and replays every
+  # event it follows from its context's log, oldest first, through its own handlers, one
+  # unit of work per event, in one transaction that holds
+  # `pg_advisory_xact_lock(Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, hashtext(table))`;
+  # it returns how many events it replayed. A job for one of the projection's handlers
+  # that is queued or running refuses it, naming the job, as the handler would write what
+  # the replay then writes again. Under `caramel/tenancy` it rebuilds the bound tenant's
+  # rows from the bound tenant's log. A projection whose context keeps no log, or that
+  # follows an event the log does not keep, does not compile (ADR 0048).
+  macro rebuild(projection)
+    {% type = projection.resolve? %}
+    {% unless type && type < ::SweetTalk::Projection %}
+      {% projection.raise "SweetTalk.rebuild(#{projection}): rebuild takes a projection, as " +
+                          "in SweetTalk.rebuild(Billing::Sales)" %}
+    {% end %}
+    {% home = ::SweetTalk::BoundedContext.includers
+         .find { |context| type.name.starts_with?("#{context.name}::") } %}
+    {% short = home.name.split("::").last %}
+    {% logged = home.has_constant?("SWEETTALK_EVENT_LOG") && home.constant("SWEETTALK_EVENT_LOG") %}
+    {% unless logged %}
+      {% projection.raise "SweetTalk.rebuild(#{projection}): #{short.id} keeps no event log to " +
+                          "replay; say context #{short.id}, event_log: true, and rebuild from " +
+                          "the events logged since" %}
+    {% end %}
+    {% logs = home.constant("SWEETTALK_LOGS") %}
+    {% scopes = type.name.split("::") %}
+    {% replays = [] of Nil %}
+    {% for constant in type.constants.select(&.starts_with?("SWEETTALK_HANDLER_")) %}
+      {% entry = type.constant(constant) %}
+      {% event = nil %}
+      {% for depth in 0..scopes.size %}
+        {% prefix = scopes[0...(scopes.size - depth)] %}
+        {% unless event %}
+          {% found = parse_type("::" + (prefix + [entry[0]]).join("::")).resolve? %}
+          {% event = found if found %}
+        {% end %}
+      {% end %}
+      {% unless event && logs.includes?(event.constant("SWEETTALK_HOME")) %}
+        {% projection.raise "SweetTalk.rebuild(#{projection}): #{projection} follows " +
+                            "#{entry[0].id}, which #{short.id}'s log does not keep; it keeps " +
+                            "the events of #{logs.join(", ").id}, and a rebuild needs every " +
+                            "event the projection follows" %}
+      {% end %}
+      {% stored = event.constant("SWEETTALK_HOME") %}
+      {% aggregate = event.constant("SWEETTALK_AGGREGATE") %}
+      {% own = stored == home.constant("SWEETTALK_STORED") %}
+      {% column = aggregate ? (own ? aggregate : "#{stored.id}_#{aggregate.id}") : stored %}
+      {% replays << {entry, event, column, event.constant("SWEETTALK_NAME")} %}
+    {% end %}
+    {% jobs = replays.map { |replay| replay[0][4] } %}
+    ::SweetTalk.__sweettalk_rebuilding({{ type.constant("SWEETTALK_TABLE") }},
+      [{{ jobs.splat }}] of String, ::{{ home }}::Rows::Events.query,
+      {{ type.constant("SWEETTALK_ROW").id }}.query) do |%row|
+      case { %row.aggregate, %row.name }
+      {% for replay in replays %}
+        when { {{ replay[2] }}, {{ replay[3] }} }
+          %event = ::{{ replay[1] }}.__sweettalk_load(%row.subject_id, %row.fields.to_json,
+            ::{{ home }}.__sweettalk_logged_meta(%row))
+          {% if replay[0][2] %}
+            %event.{{ replay[0][2].id }}.each do |%item|
+              ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event, %item, release: false)
+            end
+          {% else %}
+            ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event, release: false)
+          {% end %}
+          true
+      {% end %}
+      else
+        false
+      end
+    end
+  end
+
+  REBUILD_LOCK = "SELECT pg_advisory_xact_lock($1, hashtext($2)) IS NULL AS locked"
+  REBUILD_BUSY = <<-SQL
+    SELECT class_name, count(*) AS jobs FROM caramel_jobs
+    WHERE class_name = ANY($1) AND finished_at IS NULL AND failed_at IS NULL
+    GROUP BY class_name ORDER BY class_name
+    SQL
+  REBUILD_PAGE = 500
+
+  # Locks, refuses when a job of *jobs* is queued or running, deletes the *rows* query's
+  # rows, then pages the *log* query by id and yields each row; the count of rows the
+  # block replayed.
+  def self.__sweettalk_rebuilding(table : String, jobs : Array(String), log, rows, &) : Int64
+    replayed = 0_i64
+    ::SugarORM::Repo.transaction do
+      ::SugarORM.sql(REBUILD_LOCK, ::Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, table,
+        as: {locked: Bool})
+      busy = ::SugarORM.sql(REBUILD_BUSY, jobs, as: {class_name: String, jobs: Int64})
+      unless busy.empty?
+        queued = busy.map { |row| "#{row[:jobs]} of #{row[:class_name]}" }.join(", ")
+        raise ::SweetTalk::Refusal.new("#{table} cannot be rebuilt while jobs of its handlers " +
+                                       "are queued or running (#{queued}): let the queue " +
+                                       "drain, then rebuild")
+      end
+      rows.delete_all
+      last = 0_i64
+      loop do
+        page = log.where("id > ?", last).order_by(:id, :asc).limit(REBUILD_PAGE).to_a
+        break if page.empty?
+        page.each do |row|
+          last = row.id
+          replayed += 1 if yield row
+        end
+      end
+    end
+    replayed
   end
 
   @@checked = false

@@ -60,10 +60,10 @@ module SweetTalk
     value
   end
 
-  # Writes one fact as JSON: a value as its raw, an id as its number, an entity or a
-  # composite value as an object, nil as null.
+  # Writes one fact as JSON: a value as its raw (a decimal as its text), an id as its
+  # number, an entity or a composite value as an object, nil as null.
   def self.pack(json : JSON::Builder, value : Value) : Nil
-    value.raw.to_json(json)
+    value.__sweettalk_pack(json)
   end
 
   def self.pack(json : JSON::Builder, value : Identity) : Nil

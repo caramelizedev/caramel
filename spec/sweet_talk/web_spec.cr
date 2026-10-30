@@ -199,4 +199,20 @@ describe "SweetTalk at the web boundary" do
     route.contract.should eq("lent_on:Lending::Day(String) back_by:Lending::Day(String)? " \
                              "holidays:Array(Lending::Day(String))(max=3)")
   end
+
+  it "binds a decimal value from its text, from a form and from JSON, and answers it as text" do
+    response = WebSpec.post("/loans/price", "rate=0.05&spread=-0.25", "application/json")
+    response.status.should eq(200)
+    response.body.should eq(%({"rate":"0.05","spread":"-0.25"}))
+    WebSpec.post_json("/loans/price", %({"rate":"0.0475"})).body
+      .should eq(%({"rate":"0.0475","spread":null}))
+    WebSpec.post_json("/loans/price", %({"rate":0.05})).status.should eq(422)
+    refusal = "Rate must be a decimal written with digits and a point, as in 12.50"
+    response = WebSpec.post("/loans/price", "rate=five&spread=100", "application/json")
+    response.status.should eq(422)
+    kept = "Spread keeps 4 decimals and 2 digits before the point, not 100"
+    response.body.should eq(%({"errors":{"rate":["#{refusal}"],"spread":["#{kept}"]}}))
+    route = TeaShopWeb::AppRouter.routes.find! { |entry| entry.path == "/loans/price" }
+    route.contract.should eq("rate:Credit::Rate(String) spread:Credit::Spread(String)?")
+  end
 end

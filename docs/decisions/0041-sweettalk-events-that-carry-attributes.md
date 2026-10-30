@@ -2,7 +2,8 @@
 
 Date: 2026-10-24
 
-Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6.
+Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6; decision
+3 amended by [ADR 0048](0048-sweettalk-event-log.md).
 
 ## Context
 
@@ -27,7 +28,8 @@ two lists were checked only when something emitted the event.
    or a derived value declared above the event, a name twice, or one named like the
    event's metadata does not compile; the message lists what the aggregate has. A carried
    field is an ordinary field: it has a getter, is stored in the event's JSON and read
-   back for a `whenever` as emitted, and `SWEETTALK_CARRIES` lists the names.
+   back for a `whenever` as emitted, and from a context's event log by `logged` and a
+   rebuild ([ADR 0048](0048-sweettalk-event-log.md)); `SWEETTALK_CARRIES` lists the names.
 4. **`the` records its type**, so a derived value can be carried.
 5. **A job that is already queued reads what was written, and an optional field that is
    not there is nil.** A field typed `T?` that a queued event lacks, because the event was

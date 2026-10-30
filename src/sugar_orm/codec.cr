@@ -20,6 +20,9 @@ module SugarORM
   # also declare `ORDERABLE = true`, written before the schema that names it.
   # `where` then takes a Range of the field's type for the column, and binds
   # the encoded ends. Without the constant a Range fails compilation.
+  #
+  # `SugarORM::DecimalCodec(P, S)` in `sugar_orm/decimal` stores a `BigDecimal`
+  # in `numeric(P,S)`; it is required on its own, because `BigDecimal` links GMP.
   module Codec
     SQL_TYPE = /\A(?:numeric(?:\(([1-9]\d{0,3}),(\d{1,4})\))?|jsonb|text|date)\z/
 
