@@ -1,6 +1,6 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0048). Each
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0051). Each
 # declaration mistake fails to compile with a fixed problem text, naming its file where the
 # mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
 # application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
@@ -504,6 +504,23 @@ PROBLEMS = [
    "replaces"},
   {"composite_otherwise",
    "value Address has parts, so otherwise: belongs on the values its parts wrap"},
+  {"rebuild_with_retention",
+   "SweetTalk.rebuild(Shop::Ordering::Sales): Ordering keeps its events 90 days, so its log " \
+   "may no longer hold every event Sales followed; a rebuild needs event_log: true, which " \
+   "keeps them all"},
+  {"event_log_span",
+   "context Ordering takes event_log: true, which keeps every event in ordering_events, or a " \
+   "whole number of days or weeks to keep each, as in event_log: 90.days, not event_log: " \
+   "12.hours"},
+  {"older_not_tuple",
+   "event Placed takes older: {field: value}, what a stored Placed without that field " \
+   "reads, as in older: {total: Cents.new(0)}, not :front"},
+  {"older_unknown",
+   "event Placed gives byer in older:, a field it does not have; it has buyer"},
+  {"older_optional",
+   "event Placed gives note in older:, an optional field, which reads nil from a stored " \
+   "Placed without it: take note out of older:"},
+  {"older_type", "type must be String, not Int32"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
@@ -514,7 +531,8 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_call_outside_border compile_outside_is_a_context compile_kernel_unknown_sharer
   compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
   compile_follows_kernel compile_border_kernel compile_kernel_word_alone
-  compile_kernel_word_unused compile_unit_changes_foreign compile_json_range]
+  compile_kernel_word_unused compile_unit_changes_foreign compile_json_range
+  compile_older_type]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

@@ -1044,7 +1044,9 @@ module SweetTalk
     # service records when it changes what no aggregate holds, such as the tenant's own
     # settings. A context holds no attributes, so it takes no `carries:`. Its channel is
     # `sweettalk.<context>.<event>`, within the limits an aggregate's event keeps.
-    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil)
+    # `older: {till: "front"}` gives the value a queued job or a logged row without that
+    # field reads.
+    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil, older = nil)
       {% short = @type.name.split("::").last %}
       {% unless carries.is_a?(NilLiteral) %}
         {% carries.raise "event #{name} in #{short.id} takes no carries:: a context holds no " +
@@ -1056,7 +1058,8 @@ module SweetTalk
       {% tenanted = @type.constant("SWEETTALK_TENANT") ? true : false %}
       ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
         carried: [] of Nil, channel: {{ channel }}, means: {{ means }},
-        renamed_from: {{ renamed_from }}, subject: nil, tenanted: {{ tenanted }})
+        renamed_from: {{ renamed_from }}, subject: nil, tenanted: {{ tenanted }},
+        older: {{ older }})
     end
 
     # `emit Renamed, name: name` in a service body records one of this context's events;
@@ -1488,6 +1491,8 @@ module SweetTalk
   # faces a system outside the program.
   # `shares: Money` names the kernels it shares, declared before it. `event_log: true`
   # keeps every event of the context, and of the kernels it shares, in `<context>_events`.
+  # `event_log: 90.days` keeps an event that many days, pruned hourly by Cold Brew's
+  # scheduler.
   macro context(name, follows = nil, shares = nil, means = nil, renamed_from = nil,
                 central = nil, subdomain = nil, event_log = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
@@ -1501,9 +1506,18 @@ module SweetTalk
       {% central.raise "context #{name} takes central: true only in a program that requires " +
                        "caramel/tenancy" %}
     {% end %}
-    {% unless event_log.is_a?(NilLiteral) || (event_log.is_a?(BoolLiteral) && event_log) %}
-      {% event_log.raise "context #{name} takes event_log: true, which keeps its events in " +
-                         "#{name.stringify.underscore.id}_events, not event_log: #{event_log}" %}
+    {% days = nil %}
+    {% if event_log.is_a?(Call) && event_log.receiver.is_a?(NumberLiteral) &&
+            event_log.args.empty? && event_log.receiver.stringify =~ /\A[1-9]\d*\z/ %}
+      {% count = event_log.receiver.stringify.to_i %}
+      {% days = count if %w[day days].includes?(event_log.name.stringify) %}
+      {% days = count * 7 if %w[week weeks].includes?(event_log.name.stringify) %}
+    {% end %}
+    {% unless event_log.is_a?(NilLiteral) || (event_log.is_a?(BoolLiteral) && event_log) || days %}
+      {% event_log.raise "context #{name} takes event_log: true, which keeps every event in " +
+                         "#{name.stringify.underscore.id}_events, or a whole number of days or " +
+                         "weeks to keep each, as in event_log: 90.days, not event_log: " +
+                         "#{event_log}" %}
     {% end %}
     {% subdomains = %w[core supporting generic] %}
     {% unless subdomain.is_a?(NilLiteral) ||
@@ -1666,6 +1680,8 @@ module SweetTalk
       SWEETTALK_CENTRAL = {{ central ? true : false }}
       # Whether `<context>_events` keeps every event of this context (ADR 0048)
       SWEETTALK_EVENT_LOG = {{ event_log ? true : false }}
+      # How many days the log keeps an event, or nil to keep every event (ADR 0051)
+      SWEETTALK_EVENT_DAYS = {{ days }}
       SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
       SWEETTALK_SHARES  = [{{ shared.map(&.names.last.stringify).splat }}] of String

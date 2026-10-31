@@ -297,9 +297,39 @@ describe "SweetTalk with tenancy" do
       SweetTalkTenancySpec.drain(connection)
       SugarORM.sql_exec("UPDATE ordering_sales SET sold = 0")
 
-      Caramel::Tenancy.with(acme) { SweetTalk.rebuild(Ordering::Sales) }.should eq(1)
+      rebuilt = Caramel::Tenancy.with(acme) { SweetTalk.rebuild(Ordering::Sales) }
+      rebuilt.replayed.should eq(1)
       sold = SugarORM.sql(TenancySpecs::SOLD, sencha.id.raw, as: {account_id: Int64, sold: Int32})
       sold.map(&.values).should eq([{acme.id, 2}, {globex.id, 0}])
+    end
+  end
+
+  it "leaves one element of an order to its queued job" do
+    SweetTalkTenancySpec.rolled_back do |connection|
+      acme = SweetTalkTenancySpec.account("acme")
+      sencha, gyokuro = SweetTalkTenancySpec.tea("Sencha"), SweetTalkTenancySpec.tea("Gyokuro")
+      Caramel::Tenancy.with(acme) do
+        order = Ordering::Order.open("ada")
+        order.add sencha, 2
+        order.add gyokuro, 3
+        order.place
+      end
+      SugarORM.sql_exec("UPDATE caramel_jobs SET finished_at = now() WHERE class_name = $1 " \
+                        "AND payload->>'index' = '0'",
+        "TenantShop::Ordering::Sales::WhenOrderPlaced")
+
+      rebuilt = Caramel::Tenancy.with(acme) { SweetTalk.rebuild(Ordering::Sales) }
+      {rebuilt.replayed, rebuilt.deferred}.should eq({1_i64, 1_i64})
+      sold = ->(tea : TenantShop::Catalogue::Tea) do
+        SugarORM.sql(TenancySpecs::SOLD, tea.id.raw, as: {account_id: Int64, sold: Int32})
+          .map(&.values)
+      end
+      sold.call(sencha).should eq([{acme.id, 2}])
+      sold.call(gyokuro).should be_empty
+
+      SweetTalkTenancySpec.drain(connection)
+      sold.call(gyokuro).should eq([{acme.id, 3}])
+      sold.call(sencha).should eq([{acme.id, 2}])
     end
   end
 

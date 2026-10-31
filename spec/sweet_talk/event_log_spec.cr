@@ -1,14 +1,17 @@
-# The event log on PostgreSQL (ADR 0048): one row per event in the command's or the
-# service's transaction, the typed reader, pruning, a projection rebuilt from the log
-# under its lock, and a policy that runs after a projection's handler, enqueued by it.
+# The event log on PostgreSQL (ADR 0048, 0051): one row per event in the command's or the
+# service's transaction, the typed reader, pruning on a schedule, a projection rebuilt from
+# the log under its lock that leaves an event to the job still to apply it, an old event
+# read with older:, and a policy that runs after a projection's handler, enqueued by it.
 require "./support/app"
 
 alias Invoicing = Billing::Invoicing
+alias Receipts = Billing::Receipts
 
 module EventLogSpec
   RAISED_BY_OWED      = "Billing::Invoicing::Owed::WhenInvoiceRaised"
   SETTLED_BY_OWED     = "Billing::Invoicing::Owed::WhenInvoiceSettled"
   RAISED_BY_INVOICING = "Billing::Invoicing::WhenInvoiceRaised"
+  RAISED_BY_NUDGES    = "Billing::Invoicing::Nudges::WhenInvoiceRaised"
   TABLE               = "invoicing_events"
 
   ROWS = <<-SQL
@@ -21,6 +24,9 @@ module EventLogSpec
     SQL
   OWED = <<-SQL
     SELECT customer, raised, settled FROM invoicing_oweds ORDER BY customer
+    SQL
+  NUDGES = <<-SQL
+    SELECT customer, times FROM invoicing_nudges ORDER BY customer
     SQL
   HOLD = "SELECT pg_advisory_lock($1, hashtext($2))"
   FREE = "SELECT pg_advisory_unlock($1, hashtext($2)) AS freed"
@@ -40,18 +46,16 @@ module EventLogSpec
     SugarORM.sql(OWED, as: {customer: String, raised: Int64, settled: Int64})
   end
 
+  def self.nudges : Array({customer: String, times: Int32})
+    SugarORM.sql(NUDGES, as: {customer: String, times: Int32})
+  end
+
   def self.invoice(customer : String, total : Int64) : Invoicing::Invoice
     Invoicing::Invoice.raise_for(customer, Invoicing::Cents.new(total))
   end
 
   def self.settle(invoice : Invoicing::Invoice) : Nil
     invoice.settle(invoice.total)
-  end
-
-  # Moves every logged row's occurred_at back by *span*, to age it for pruning.
-  def self.age(span : Time::Span) : Nil
-    SugarORM.sql_exec("UPDATE invoicing_events SET occurred_at = occurred_at - " \
-                      "make_interval(secs => $1)", span.total_seconds)
   end
 
   def self.drain(connection) : Int32
@@ -62,7 +66,8 @@ end
 describe "SweetTalk event log" do
   it "declares the log table with its columns and indexes, for the context that keeps one" do
     tables = SugarORM::Catalog.declared
-    tables.map(&.name).select(&.ends_with?("_events")).should eq([EventLogSpec::TABLE])
+    tables.map(&.name).select(&.ends_with?("_events"))
+      .should eq([EventLogSpec::TABLE, "receipts_events"])
     table = tables.find! { |declared| declared.name == EventLogSpec::TABLE }
     table.columns.map(&.name).should eq(%w[id event_id aggregate name subject_id occurred_at actor
       cause_id flow_id fields created_at])
@@ -135,17 +140,31 @@ describe "SweetTalk event log" do
     end
   end
 
-  it "prunes the rows that occurred before a time, in chunks" do
+  it "prunes a log kept for a number of days on its own schedule" do
     SweetTalkSpec.rolled_back do
-      EventLogSpec.invoice("ada", 900)
-      EventLogSpec.invoice("bob", 300)
-      EventLogSpec.invoice("cyd", 100)
-      EventLogSpec.age(2.days)
-      Invoicing.close("2026-10")
+      schedule = Caramel::ColdBrew.schedules.find! do |entry|
+        entry.name == "sweettalk:prune:receipts_events"
+      end
+      schedule.span.should eq(1.hour)
+      Caramel::ColdBrew.schedules.map(&.name)
+        .should_not contain("sweettalk:prune:invoicing_events")
 
-      SweetTalk.prune_events(Invoicing, before: 1.day.ago, chunk: 2).should eq(3)
-      EventLogSpec.rows.map(&.[:name]).should eq(["closed"])
-      SweetTalk.prune_events(Invoicing, before: 1.day.ago).should eq(0)
+      Receipts.print("1", "front")
+      Receipts.print("2", "front")
+      Receipts.print("3", "back")
+      SugarORM.sql_exec("UPDATE receipts_events SET occurred_at = occurred_at - interval " \
+                        "'31 days' WHERE fields->>'number' <> '3'")
+      schedule.block.call
+      Receipts.logged(Receipts::Printed).map(&.number).should eq(["3"])
+    end
+  end
+
+  it "reads a stored event without a field from older:" do
+    SweetTalkSpec.rolled_back do
+      Receipts.print("7", "back")
+      SugarORM.sql_exec("UPDATE receipts_events SET fields = fields - 'till'")
+      printed = Receipts.logged(Receipts::Printed).first
+      {printed.number, printed.till}.should eq({"7", "front"})
     end
   end
 
@@ -162,21 +181,45 @@ describe "SweetTalk event log" do
       jobs_before = SweetTalkSpec.count("caramel_jobs")
       SugarORM.sql_exec("UPDATE invoicing_oweds SET raised = 1, settled = 1")
       SugarORM.sql_exec("DELETE FROM invoicing_oweds WHERE customer = 'bob'")
-      SweetTalk.rebuild(Invoicing::Owed).should eq(3)
+      rebuilt = SweetTalk.rebuild(Invoicing::Owed)
+      {rebuilt.replayed, rebuilt.deferred}.should eq({3_i64, 0_i64})
+      rebuilt.oldest.should eq(Invoicing.logged.first.occurred_at)
       EventLogSpec.owed.should eq(before)
       SweetTalkSpec.count("caramel_jobs").should eq(jobs_before)
       EventLogSpec.drain(connection).should eq(0)
     end
   end
 
-  it "refuses a rebuild while a job of the projection's handlers is queued" do
-    SweetTalkSpec.rolled_back do
+  it "leaves a queued job's event to that job, and replays a failed job's" do
+    SweetTalkSpec.rolled_back do |connection|
       EventLogSpec.invoice("ada", 900)
-      queued = "1 of #{EventLogSpec::RAISED_BY_OWED}"
-      expect_raises(SweetTalk::Refusal, "invoicing_oweds cannot be rebuilt while jobs of its " \
-                                        "handlers are queued or running (#{queued})") do
-        SweetTalk.rebuild(Invoicing::Owed)
-      end
+      EventLogSpec.drain(connection)
+      EventLogSpec.invoice("bob", 300)
+      cyd = EventLogSpec.invoice("cyd", 100)
+      SugarORM.sql_exec("UPDATE caramel_jobs SET failed_at = now(), last_error = 'stopped' " \
+                        "WHERE class_name = $1 AND (payload->>'subject')::bigint = $2",
+        EventLogSpec::RAISED_BY_OWED, cyd.id.raw)
+      SugarORM.sql_exec("UPDATE invoicing_oweds SET raised = 0")
+
+      rebuilt = SweetTalk.rebuild(Invoicing::Owed)
+      {rebuilt.replayed, rebuilt.deferred}.should eq({2_i64, 1_i64})
+      EventLogSpec.owed.should eq([{customer: "ada", raised: 900_i64, settled: 0_i64},
+                                   {customer: "cyd", raised: 100_i64, settled: 0_i64}])
+
+      EventLogSpec.drain(connection).should eq(3)
+      EventLogSpec.owed.should eq([{customer: "ada", raised: 900_i64, settled: 0_i64},
+                                   {customer: "bob", raised: 300_i64, settled: 0_i64},
+                                   {customer: "cyd", raised: 100_i64, settled: 0_i64}])
+    end
+  end
+
+  it "leaves an event to the queued job a follower waits for" do
+    SweetTalkSpec.rolled_back do |connection|
+      EventLogSpec.invoice("ada", 900)
+      rebuilt = SweetTalk.rebuild(Invoicing::Nudges)
+      {rebuilt.replayed, rebuilt.deferred}.should eq({0_i64, 1_i64})
+      EventLogSpec.drain(connection).should eq(3)
+      EventLogSpec.nudges.should eq([{customer: "ada", times: 1}])
     end
   end
 
@@ -185,15 +228,36 @@ describe "SweetTalk event log" do
       namespace = Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE
       SweetTalkSpec.runtime.using_connection do |holder|
         holder.exec(EventLogSpec::HOLD, namespace, "invoicing_oweds")
-        done = Channel(Int64).new
+        done = Channel(SweetTalk::Rebuilt).new
         spawn { done.send(SweetTalk.rebuild(Invoicing::Owed)) }
         select
         when replayed = done.receive
-          fail "rebuilt #{replayed} events under another session's lock"
+          fail "rebuilt #{replayed.replayed} events under another session's lock"
         when timeout(300.milliseconds)
         end
         holder.query_one(EventLogSpec::FREE, namespace, "invoicing_oweds", as: Bool).should be_true
-        done.receive.should eq(0)
+        done.receive.replayed.should eq(0)
+      end
+    end
+  end
+
+  it "makes a projection's job wait while the projection rebuilds" do
+    SweetTalkSpec.committed do
+      Invoicing.reminders.clear
+      EventLogSpec.invoice("ada", 900)
+      namespace = Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE
+      SweetTalkSpec.runtime.using_connection do |holder|
+        holder.exec(EventLogSpec::HOLD, namespace, "invoicing_oweds")
+        done = Channel(Int32).new
+        spawn { done.send(Caramel::ColdBrew.drain_queue!(SugarORM::Repo.database)) }
+        select
+        when ran = done.receive
+          fail "ran #{ran} jobs while invoicing_oweds was held for a rebuild"
+        when timeout(300.milliseconds)
+        end
+        holder.query_one(EventLogSpec::FREE, namespace, "invoicing_oweds", as: Bool).should be_true
+        done.receive.should eq(3)
+        EventLogSpec.owed.should eq([{customer: "ada", raised: 900_i64, settled: 0_i64}])
       end
     end
   end
@@ -204,12 +268,14 @@ describe "SweetTalk event log" do
       EventLogSpec.invoice("ada", 900)
       EventLogSpec.jobs.map(&.[:class_name]).should eq([EventLogSpec::RAISED_BY_OWED])
 
-      EventLogSpec.drain(connection).should eq(2)
+      EventLogSpec.drain(connection).should eq(3)
       jobs = EventLogSpec.jobs
       jobs.map { |job| {job[:class_name], job[:finished]} }.should eq([
         {EventLogSpec::RAISED_BY_OWED, true}, {EventLogSpec::RAISED_BY_INVOICING, true},
+        {EventLogSpec::RAISED_BY_NUDGES, true},
       ])
       jobs[1][:id].should be > jobs[0][:id]
+      jobs[2][:id].should be > jobs[0][:id]
       Invoicing.reminders.should eq(["ada owes 900"])
     end
   end

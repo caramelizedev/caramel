@@ -381,6 +381,28 @@ module Caramel::ColdBrew
     end
 
     # :nodoc:
+    # Every name a job of the current class *class_name* may be stored under in
+    # `caramel_jobs.class_name`: its own and each one it declares in `renamed_from`;
+    # `[class_name]` when no compiled job has that name.
+    def self.__cold_brew_stored_names(class_name : String) : Array(String)
+      {% begin %}
+        case class_name
+        {% for job in @type.all_subclasses.reject(&.abstract?) %}
+          {% names = [job.name.stringify] %}
+          {% if job.has_constant?(:COLD_BREW_RENAMED_FROM) %}
+            {% for old in job.constant(:COLD_BREW_RENAMED_FROM) %}
+              {% names << old %}
+            {% end %}
+          {% end %}
+          when {{ job.name.stringify }} then [{{ names.splat }}] of String
+        {% end %}
+        else
+          [class_name]
+        end
+      {% end %}
+    end
+
+    # :nodoc:
     def self.__cold_brew_known?(class_name : String) : Bool
       !__cold_brew_canonical(class_name).nil?
     end
