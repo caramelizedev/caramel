@@ -8,9 +8,8 @@ module Caramel::Checks
     end
 
     def proves : String
-      "the sums and groups recipe keeps one balance per heading and period, sums across " \
-      "rows in Crystal, groups in SQL for the bound tenant only, and passes frappe check, " \
-      "corretto and lint"
+      "the sums and groups recipe adds up a period's posted lines, groups them by heading " \
+      "for the bound tenant only, and passes frappe check, corretto and lint"
     end
 
     def follow : Nil
@@ -24,18 +23,14 @@ module Caramel::Checks
       %w[app/domain/ledger.cr spec/domain/ledger_spec.cr].each do |path|
         assert!(domain.stdout.includes?("Generated #{path}\n"), domain.stdout)
       end
-      # 02 · Keep the balance table as a projection
+      # 02 · Declare the journal, its sums and its groups
       copy(["app/domain/ledger.cr"])
       migration = diff("create_ledger")
-      %w[books_journals books_journal_lines books_balances].each do |table|
+      %w[books_journals books_journal_lines].each do |table|
         assert!(migration.includes?(%(CREATE TABLE "#{table}")), migration)
       end
-      assert!(migration.includes?(%("slot_heading")), migration)
-      assert!(migration.includes?(%("slot_period")), migration)
       migrate(1)
-      # 03 · Group in SQL only with the tenant written out
-      copy(["app/domain/ledger_reports.cr"])
-      # 04 · Specify the sums
+      # 03 · Specify the sums
       copy(["spec/support/ledger.cr", "spec/domain/ledger_spec.cr"])
       corretto(["spec/domain/ledger_spec.cr"])
       # Prove it

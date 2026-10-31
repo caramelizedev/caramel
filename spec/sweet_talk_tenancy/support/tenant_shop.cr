@@ -62,6 +62,8 @@ module TenantShop
       end
 
       counts placed_count, where: {state: :placed}
+      sums placed_tins, of: Line.tins, where: {state: :placed}
+      groups tins_by_tea, of: Line.tins, by: Line.tea, where: {state: :placed}
 
       to add(tea : Catalogue::Tea, tins : Int32) do
         @lines << Line.new(tea, tins)

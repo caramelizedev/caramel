@@ -256,11 +256,34 @@ PROBLEMS = [
   {"counts_with_order", "counts fullest takes where: and satisfying:, not order:"},
   {"counts_with_block", "counts big takes where: and satisfying:, not a block"},
   {"query_name_taken",
-   "Jar already has a query named gifts: give each finds and counts its own name"},
+   "Jar already has a query named gifts: give each finds, counts, sums and groups its own name"},
   {"finds_named_all", "finds all would replace Jar.all: name it for what it finds"},
   {"counts_named_all", "counts all would replace Jar.all: name it for what it counts"},
   {"finds_name_taken",
-   "Jar already has a query named gifts: give each finds and counts its own name"},
+   "Jar already has a query named gifts: give each finds, counts, sums and groups its own name"},
+  {"sums_without_of",
+   "sums grams_total takes of:, the attribute it adds up, as in of: :total or of: Line.price"},
+  {"sums_with_block", "sums grams_total takes of:, where: and satisfying:, not a block"},
+  {"sums_unknown_attribute",
+   "sums grams_total adds up :weight, which Jar does not have above this line: declare it, a " \
+   "stored attribute, before the query"},
+  {"sums_foreign_entity",
+   "sums grams_total adds up Tin.grams, but Tin is not an entity of Jar declared above this " \
+   "line"},
+  {"sums_not_number",
+   "sums grams_total adds up :label, which is not a number: add up an Int32, Int64 or Float64 " \
+   "attribute, or a value that wraps a whole number or a decimal"},
+  {"sums_bounded_value",
+   "sums grams_total adds up :dose, a Dose, whose bounds a sum can break: add up a value that " \
+   "takes 0 and has no upper bound, as in value Cents, Int64, means: \"…\""},
+  {"groups_without_by",
+   "groups grams_by_tea takes by:, the attribute it groups by, as in by: :state or by: Line.tea"},
+  {"groups_by_outside_entity",
+   "groups grams_by_tea adds up Slot.grams, so it groups by another attribute of Slot, not " \
+   ":label: narrow Jar with where: instead"},
+  {"groups_by_ungroupable",
+   "groups grams_by_tea groups by Slot.brewed_at, which has no one-column key: group by text, " \
+   "a whole number, a Bool, a day, a decimal, an aggregate it refers to, or state"},
   {"finds_where_not_tuple",
    "finds labelled takes where: {attribute: value}, as in where: {member: member, state: " \
    ":placed}"},

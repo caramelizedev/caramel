@@ -482,6 +482,27 @@ describe "SugarORM with PostgreSQL" do
     end
   end
 
+  it "sums and groups as exact text, and narrows through a parent query" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      first = SugarSpec::Team.create!(name: "First", seats: 3)
+      second = SugarSpec::Team.create!(name: "Second", seats: 4)
+      archived = SugarSpec::Team.create!(name: "Archived", seats: 5, archived: true)
+      ann = SugarSpec::User.create!(email: "ann@first.dev", team_id: first.id)
+      SugarSpec::User.create!(email: "bob@second.dev", team_id: second.id)
+      cy = SugarSpec::User.create!(email: "cy@archived.dev", team_id: archived.id)
+      owner.exec("UPDATE sugar_users SET score = 1.5 WHERE id = $1", ann.id)
+      owner.exec("UPDATE sugar_users SET score = 2.25 WHERE id = $1", cy.id)
+
+      teams = SugarSpec::Team.query
+      teams.where(archived: false).sum_text(:seats).should eq("7")
+      teams.where(name: "none").sum_text(:seats).should eq("0")
+      teams.order_by(:seats).limit(2).sum_text(:seats).should eq("7")
+      teams.group_sum_text(:archived, :seats).should eq([{"false", "7"}, {"true", "5"}])
+      active = SugarSpec::User.query.where_in(:team_id, teams.where(archived: false))
+      active.sum_text(:score).should eq("1.5")
+    end
+  end
+
   it "nests transactions with savepoints and binds a connection to the fiber" do
     SugarSpec.with_tables(owner_url, runtime_url) do |owner, runtime|
       SugarORM::Repo.transaction do

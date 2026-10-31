@@ -118,6 +118,20 @@ describe "SweetTalk with tenancy" do
     end
   end
 
+  it "adds up and groups the bound tenant's lines only" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      SweetTalkTenancySpec.place(acme, sencha, 2)
+      SweetTalkTenancySpec.place(globex, sencha, 5)
+      Caramel::Tenancy.with(acme) do
+        Ordering::Order.placed_tins.should eq(2)
+        rows = Ordering::Order.tins_by_tea.map { |row| {row[:by], row[:total]} }
+        rows.should eq([{sencha.id, 2}])
+      end
+    end
+  end
+
   it "refuses tenanted reads with no tenant bound" do
     SweetTalkTenancySpec.rolled_back do
       acme = SweetTalkTenancySpec.account("acme")

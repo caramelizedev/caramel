@@ -555,6 +555,36 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "adds up and groups a member's placed lines, and a projection's columns, in one " \
+     "statement each" do
+    SweetTalkSpec.rolled_back do |connection|
+      stock = Catalogue::Tins.new(50)
+      x = Catalogue::Tea.create(name: "Sencha", price: Catalogue::Cents.new(300), stock: stock)
+      y = Catalogue::Tea.create(name: "Assam", price: Catalogue::Cents.new(500), stock: stock)
+      ada, bob = TeaShopSpec.account("ada@example.com"), TeaShopSpec.account("bob@example.com")
+      cy = TeaShopSpec.account("cy@example.com")
+      TeaShopSpec.order({x, 1}, {y, 1}, member: ada).place
+      TeaShopSpec.order({x, 1}, member: ada).place
+      TeaShopSpec.order({y, 1}, member: ada)
+      TeaShopSpec.order({x, 1}, member: bob).place
+
+      before = SugarORM::Repo.statements_executed
+      Ordering::Order.spent_by(ada).raw.should eq(1100)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      before = SugarORM::Repo.statements_executed
+      by_tea = Ordering::Order.priced_by_tea(ada)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      by_tea.map { |row| {row[:by], row[:total].raw} }.should eq([{x.id, 600}, {y.id, 500}])
+      Ordering::Order.spent_by(cy).raw.should eq(0)
+
+      TeaShopSpec.drain(connection)
+      before = SugarORM::Repo.statements_executed
+      Ordering::Sales.tins_sold.should eq(4)
+      Ordering::Sales.takings_total.raw.should eq(1400)
+      (SugarORM::Repo.statements_executed - before).should eq(2)
+    end
+  end
+
   it "reads the best-selling teas from Sales with finds and counts" do
     SweetTalkSpec.rolled_back do |connection|
       teas = %w[Sencha Assam Darjeeling Earl\ Grey Genmaicha].map do |name|

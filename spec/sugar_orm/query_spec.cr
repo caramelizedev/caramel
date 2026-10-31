@@ -129,6 +129,26 @@ describe SugarORM::Query do
     expect_raises(ArgumentError, "delete_all does not lock rows") { locked.delete_all }
   end
 
+  it "renders where_in as a subquery whose binds follow the outer query's" do
+    teams = SugarUnit::Team.query.where(archived: false).where(name: "Acme")
+    members = SugarUnit::Member.query.where(email: "a@b.c").where_in(:team_id, teams)
+    parent = %(SELECT "id" FROM "unit_teams" WHERE "archived" = $2 AND "name" = $3)
+    members.to_sql.should end_with(%(WHERE "email" = $1 AND ("team_id" IN (#{parent}))))
+    members.binds.should eq(["a@b.c", false, "Acme"] of SugarORM::Value)
+  end
+
+  it "refuses to sum through a lock, and to group an ordered or cut query" do
+    expect_raises(ArgumentError, "sum_text does not lock rows; remove .lock from this query") do
+      SugarUnit::Team.query.lock.sum_text(:seats)
+    end
+    expect_raises(ArgumentError, "group_sum_text orders by its key; remove order_by") do
+      SugarUnit::Team.query.order_by(:seats).group_sum_text(:archived, :seats)
+    end
+    expect_raises(ArgumentError, /groups every matching row; remove limit and offset/) do
+      SugarUnit::Team.query.limit(2).group_sum_text(:archived, :seats)
+    end
+  end
+
   it "refuses a lock outside a transaction before it runs any SQL" do
     expect_raises(SugarORM::Error, /no transaction is open/) do
       SugarUnit::Team.query.lock.to_a

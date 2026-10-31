@@ -10,14 +10,20 @@ module LedgerSpec
     App::Ledger::Books::Heading.new(text)
   end
 
-  # Posts one journal of *amounts* by heading to *period*, and runs the
-  # projection jobs it enqueued, so the balances are up to date when it returns.
-  def post(db, period : String, amounts : Hash(String, Int32)) : Nil
+  # Opens one journal of *amounts* by heading to *period*, and leaves it open.
+  def draft(period : String, amounts : Hash(String, Int32)) : Nil
+    journal = App::Ledger::Books::Journal.open(self.period(period))
+    amounts.each do |heading, amount|
+      journal.add(heading(heading), App::Ledger::Books::Cents.new(amount))
+    end
+  end
+
+  # Opens one journal of *amounts* by heading to *period*, and posts it.
+  def post(period : String, amounts : Hash(String, Int32)) : Nil
     journal = App::Ledger::Books::Journal.open(self.period(period))
     amounts.each do |heading, amount|
       journal.add(heading(heading), App::Ledger::Books::Cents.new(amount))
     end
     journal.post
-    Caramel::ColdBrew.drain_queue!(db)
   end
 end
