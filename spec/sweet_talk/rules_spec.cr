@@ -250,6 +250,23 @@ describe "SweetTalk's rules" do
     end
   end
 
+  it "refuses a value outside its bounds with the sentence otherwise: gives it" do
+    expect_raises(SweetTalk::Refusal, "A tip cannot be negative.") { Rules::Shelf::Tip.new(-1) }
+    expect_raises(SweetTalk::Refusal, "Grades run from a to c.") { Rules::Shelf::Grade.new("d") }
+    expect_raises(SweetTalk::Refusal, "A share is at most the whole.") do
+      Treasury::Credit::Share.new("1.5")
+    end
+    # A decimal's shape refusals keep their own sentence.
+    expect_raises(SweetTalk::Refusal,
+      "Share keeps 2 decimals and 3 digits before the point, not 0.125") do
+      Treasury::Credit::Share.new("0.125")
+    end
+    yielded = nil
+    Rules::Shelf::Tip.from_field(-1) { |message| yielded = message }.should be_nil
+    yielded.should eq("A tip cannot be negative.")
+    Rules::Shelf::Tip.new(0).raw.should eq(0)
+  end
+
   it "keeps both changes when two steps update one process row at once" do
     SweetTalkSpec.committed do
       box = RulesSpec.box("tallied")

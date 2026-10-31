@@ -104,6 +104,10 @@ module Rules
     value Code, String, length: 2..4, means: "the code painted on a bin"
     value Tag, String, length: 2.., means: "a word written on a box"
     value Note, String, length: ...9, means: "a short note on a box"
+    value Tip, Int32, at_least: 0, otherwise: "A tip cannot be negative.",
+      means: "money left for the shelf"
+    value Grade, String, one_of: %w[a b c], otherwise: "Grades run from a to c.",
+      means: "how good a jar is"
 
     value Size, means: "the width and depth of a bin, in boxes" do
       part width : Count
