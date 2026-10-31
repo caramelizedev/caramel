@@ -6,9 +6,10 @@ module SweetTalk
   # caramel/tenancy, which prefixes a tenant's `t<id>:`. *subject* is the aggregate it
   # belongs to, or nil for a context's event, whose subject is the bound tenant's id when
   # *tenanted*, and absent otherwise. A field named like the metadata, or like the
-  # subject's id, is refused.
+  # subject's id, is refused. `older: {till: "front"}` gives a required field the value a
+  # stored event without it reads (ADR 0051); an optional field already reads nil.
   macro __sweettalk_event(name, *fields, carried, channel, means, renamed_from, subject,
-                          tenanted)
+                          tenanted, older)
     {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
@@ -29,6 +30,31 @@ module SweetTalk
       {% names << pair[0] %}
       {% types << pair[1] %}
     {% end %}
+    {% olders = [] of Nil %}
+    {% unless older.is_a?(NilLiteral) %}
+      {% unless older.is_a?(NamedTupleLiteral) %}
+        {% older.raise "event #{name} takes older: {field: value}, what a stored #{name} without " +
+                       "that field reads, as in older: {total: Cents.new(0)}, not #{older}" %}
+      {% end %}
+      {% for key, value in older %}
+        {% field = key.id.stringify %}
+        {% index = nil %}
+        {% for candidate, position in names %}
+          {% index = position if candidate == field %}
+        {% end %}
+        {% if index.nil? %}
+          {% older.raise "event #{name} gives #{field.id} in older:, a field it does not have; " +
+                         "it has #{names.join(", ").id}" %}
+        {% end %}
+        {% if types[index] =~ /(\?|Nil)\z/ %}
+          {% older.raise "event #{name} gives #{field.id} in older:, an optional field, which " +
+                         "reads nil from a stored #{name} without it: take #{field.id} out of " +
+                         "older:" %}
+        {% end %}
+        {% olders << {field, types[index], value} %}
+      {% end %}
+    {% end %}
+    {% older_fields = olders.map(&.[0]) %}
     {% parts = subject ? "context, aggregate or event" : "context or event" %}
     {% if ::Caramel.has_constant?("Tenancy") && channel.size > 42 %}
       {% name.raise "event #{name}'s channel #{channel.id} is longer than 42 characters: a " +
@@ -47,7 +73,14 @@ module SweetTalk
          # A job queued before an optional field existed holds no such key: nil.
          key = "data[#{field.id.stringify}]"
          key = "(#{key.id}? || ::JSON::Any.new(nil))" if types[index] =~ /(\?|Nil)\z/
-         "#{field.id}: ::SweetTalk.unpack(#{types[index].id}, #{key.id})"
+         fact = "#{field.id}: ::SweetTalk.unpack(#{types[index].id}, #{key.id})"
+         # A stored event before a required field existed: what older: says it reads.
+         if older_fields.includes?(field)
+           fact = "#{field.id}: (data[#{field.id.stringify}]?.nil? ? " +
+                  "__sweettalk_older_#{field.id} : ::SweetTalk.unpack(#{types[index].id}, " +
+                  "data[#{field.id.stringify}]))"
+         end
+         fact
        end %}
     class {{ name }} < ::SweetTalk::Event
       SWEETTALK_MEANS   = {{ means }}
@@ -137,6 +170,24 @@ module SweetTalk
             {{ facts.join(", ").id }})
         {% end %}
       end
+
+      {% for entry in olders %}
+        # What a stored event without {{ entry[0].id }} reads (ADR 0051).
+        def self.__sweettalk_older_{{ entry[0].id }} : {{ entry[1].id }}
+          older : {{ entry[1].id }} = {{ entry[2] }}
+          older
+        end
+      {% end %}
+      {% unless olders.empty? %}
+        # Typed by `SweetTalk.boot`, so a default of the wrong type fails compilation whether
+        # or not anything loads the event.
+        def self.__sweettalk_touch_older : Nil
+          {% for entry in olders %}
+            ->{ __sweettalk_older_{{ entry[0].id }} }
+          {% end %}
+          nil
+        end
+      {% end %}
     end
   end
 end

@@ -3,7 +3,8 @@
 Date: 2026-10-28
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6 and
-[ADR 0041](0041-sweettalk-events-that-carry-attributes.md) decision 3.
+[ADR 0041](0041-sweettalk-events-that-carry-attributes.md) decision 3. Decisions 1, 3 and 4
+are amended by [ADR 0051](0051-sweettalk-event-log-replay-and-retention.md).
 
 ## Context
 

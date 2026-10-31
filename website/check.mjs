@@ -386,7 +386,9 @@ const compileRows = {
   'A range in where: on a Json value': ['json_range'],
   'A projection or process attribute whose default is a decimal or JSON value, which take no SQL default': ['projection_decimal_default'],
   'An after: naming a projection, a process or a context that does not follow the event, or whose handler takes each:, or a chain of after: that runs in a circle': ['after_not_following', 'after_each', 'after_cycle'],
-  'SweetTalk.rebuild of a projection whose context keeps no event log, or that follows an event the log does not keep': ['rebuild_without_log'],
+  'SweetTalk.rebuild of a projection whose context keeps no event log or keeps it a number of days, or that follows an event the log does not keep': ['rebuild_without_log', 'rebuild_with_retention'],
+  'An event_log: other than true or a whole number of days or weeks': ['event_log_span'],
+  'An older: that is not a named tuple, gives a field the event does not have or an optional one, or a value of another type': ['older_not_tuple', 'older_unknown', 'older_optional', 'older_type'],
   'An event_log: true context declaring an aggregate, projection or process whose table would be CONTEXT_events': ['event_log_table_taken'],
   'An otherwise: that is not text, on a value without a bound, or on a value with parts': ['value_otherwise_not_text', 'value_otherwise_without_bound', 'composite_otherwise'],
 };

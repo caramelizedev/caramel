@@ -11,7 +11,8 @@ module SweetTalk
   # is named after its owner (the context and its border, the projection or the process)
   # and the event's path, because `caramel_jobs` stores the name. With `after: Owner` the
   # filter is `__sweettalk_follow_*`, which `dispatch` leaves alone and the owner's job
-  # calls through `SweetTalk.__sweettalk_release` once its handler has run (ADR 0048);
+  # calls through `SweetTalk.__sweettalk_release` once its handler has run (ADR 0048); a
+  # projection's handler takes the rebuild lock, shared, before it runs (ADR 0051);
   # `SWEETTALK_HANDLER_*` records each handler for that and for a rebuild, and the
   # whole-program check reads it once every name is known.
   macro __sweettalk_policy(scope, event, each, border, kind, key, attempts, backoff, base,
@@ -46,7 +47,7 @@ module SweetTalk
                 after ? after.stringify : nil, "#{type.name.id}::#{path}", at, handler} %}
     {% filter = after ? "__sweettalk_follow_#{suffix}" : "__sweettalk_enqueue_#{suffix}" %}
     {% releasing = "::SweetTalk.__sweettalk_release(#{"#{type.name.id}/#{suffix}".stringify.id}, " +
-                   "#{named[0]}) if release" %}
+                   "#{named[0]}) unless __sweettalk_replaying" %}
     # {event as written, suffix, each: field, after: as written, job, where, handler}
     SWEETTALK_HANDLER_{{ suffix.upcase }} = {{ entry }}
     {% if kind == "process" %}
@@ -60,9 +61,11 @@ module SweetTalk
       end
     {% end %}
 
-    # Runs the handler; with *release*, as a job does, the followers that say
-    # `after:` this owner are enqueued in the same transaction once the body has run.
-    def self.__sweettalk_on_{{ suffix }}({{ parameters.id }}, *, release : Bool = true) : Nil
+    # Runs the handler; unless *__sweettalk_replaying*, as a job does, the followers that
+    # say `after:` this owner are enqueued in the same transaction once the body has run,
+    # and a projection's handler waits for any rebuild of its rows first.
+    def self.__sweettalk_on_{{ suffix }}({{ parameters.id }}, *,
+                                         __sweettalk_replaying : Bool = false) : Nil
       ::SweetTalk.__sweettalk_handling("a whenever handler", "use each: or a second whenever") do
         {% if kind == "process" %}
           ::SweetTalk.__sweettalk_work do
@@ -72,6 +75,7 @@ module SweetTalk
           end
         {% elsif kind == "projection" %}
           ::SweetTalk.__sweettalk_work do
+            ::SweetTalk.__sweettalk_rebuild_shared(SWEETTALK_TABLE) unless __sweettalk_replaying
             {{ block.body }}
             {{ releasing.id }}
           end

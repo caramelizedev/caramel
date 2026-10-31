@@ -1,6 +1,7 @@
-# A billing desk that keeps its event log (ADR 0048): invoices whose commands and a
-# service's event are logged in `invoicing_events`, a projection rebuilt from the log, and
-# a policy that runs after that projection's handler of the same event.
+# A billing desk that keeps its event log (ADR 0048, 0051): invoices whose commands and a
+# service's event are logged in `invoicing_events`, a projection rebuilt from the log, a
+# policy and a second projection, Nudges, that run after that projection's handler of the
+# same event, and a receipts context whose log keeps an event for a month.
 require "../../../src/caramel/sweet_talk"
 
 module Billing
@@ -58,6 +59,24 @@ module Billing
     whenever Invoice::Raised, after: Owed do |raised|
       owed = Owed.all.find { |row| row.customer == raised.customer }
       reminders << "#{raised.customer} owes #{owed.try(&.raised)}"
+    end
+
+    projection Nudges, means: "how often each customer was reminded of an invoice" do
+      key customer : String
+      has times : Int32 = 0
+
+      whenever Invoice::Raised, after: Owed do |raised|
+        Nudges[raised.customer].times += 1
+      end
+    end
+  end
+
+  context Receipts, event_log: 30.days, means: "the receipts the tills print, kept for a month" do
+    event Printed, number : String, till : String, older: {till: "front"},
+      means: "a till printed a receipt"
+
+    service print(number : String, till : String), means: "prints a receipt at a till" do
+      emit Printed, number: number, till: till
     end
   end
 end

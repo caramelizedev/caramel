@@ -21,7 +21,9 @@ module SweetTalk
     # cannot give; the attribute is declared above the event. Its channel fits
     # PostgreSQL's 63 characters, or 42 in a program that requires caramel/tenancy, which
     # prefixes a tenant's `t<id>:`. `SWEETTALK_CARRIES` lists the names it carries.
-    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil)
+    # `older: {till: "front"}` gives the value a queued job or a logged row without that
+    # field reads.
+    macro event(name, *fields, carries = nil, means = nil, renamed_from = nil, older = nil)
       {% subject = @type.name.split("::").last.underscore.id %}
       {% reserved = %w[event_id occurred_at actor cause_id flow_id] + ["#{subject}_id"] %}
       {% short = @type.name.split("::").last %}
@@ -72,7 +74,8 @@ module SweetTalk
       {% pairs = carried.empty? ? "[] of Nil".id : carried %}
       ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
         carried: {{ pairs }}, channel: {{ channel }}, means: {{ means }},
-        renamed_from: {{ renamed_from }}, subject: ::{{ @type }}, tenanted: false)
+        renamed_from: {{ renamed_from }}, subject: ::{{ @type }}, tenanted: false,
+        older: {{ older }})
     end
 
     # `emit Placed, lines: lines` records an event; the command dispatches it when it

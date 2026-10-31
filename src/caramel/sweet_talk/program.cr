@@ -101,6 +101,7 @@ module SweetTalk
       {% end %}
     {% end %}
     {% releases = {} of Nil => Nil %}
+    {% predecessors = {} of Nil => Nil %}
     {% for handler in handlers %}
       {% entry = handler[1] %}
       {% if entry[3] %}
@@ -133,6 +134,7 @@ module SweetTalk
                    "follow the event without after:" + at %}
         {% end %}
         {% chain = [handler[0].name.stringify] %}
+        {% preceding = [] of Nil %}
         {% current = target %}
         {% for round in handlers %}
           {% if current %}
@@ -142,6 +144,7 @@ module SweetTalk
                        "them follows #{entry[0].id} without after:" + at %}
             {% end %}
             {% chain << current[0].name.stringify %}
+            {% preceding << current[1][4] %}
             {% step = current %}
             {% current = nil %}
             {% if step[1][3] %}
@@ -152,6 +155,7 @@ module SweetTalk
             {% end %}
           {% end %}
         {% end %}
+        {% predecessors[entry[4]] = preceding %}
         {% key = "#{target[0].name.id}/#{target[1][1].id}" %}
         {% releases[key] = (releases[key] || [] of Nil) + [handler] %}
       {% end %}
@@ -170,27 +174,26 @@ module SweetTalk
         end
       {% end %}
     end
-  end
 
-  # `SweetTalk.prune_events(Billing, before: 90.days.ago)` deletes the context's logged
-  # events that occurred before the time, in chunks of *chunk* rows, each its own
-  # statement, across every tenant, and returns how many went; called from a
-  # `Caramel::ColdBrew.every` block it is the log's retention (ADR 0048). A context
-  # without `event_log: true` does not compile.
-  macro prune_events(context, before, chunk = 1000)
-    {% home = context.resolve? %}
-    {% logged = home && home.has_constant?("SWEETTALK_EVENT_LOG") &&
-                home.constant("SWEETTALK_EVENT_LOG") %}
-    {% unless logged %}
-      {% context.raise "SweetTalk.prune_events(#{context}): #{context} keeps no event log; " +
-                       "say context #{context}, event_log: true" %}
-    {% end %}
-    ::SweetTalk.__sweettalk_pruning({{ before }}, {{ chunk }}) do |%before, %chunk|
-      ::{{ home }}.__sweettalk_prune(%before, %chunk)
+    # The jobs that run before *job* for one event, nearest first, along the after: chain
+    # that leads to it; empty for a handler that says no after: (ADR 0051).
+    def self.__sweettalk_predecessors(job : String) : Array(String)
+      {% if predecessors.empty? %}
+        [] of String
+      {% else %}
+        case job
+        {% for follower, names in predecessors %}
+          when {{ follower }} then [{{ names.splat }}] of String
+        {% end %}
+        else
+          [] of String
+        end
+      {% end %}
     end
   end
 
-  # Deletes in chunks until one comes back short; the total.
+  # Deletes in chunks until one comes back short; the total. The schedule that
+  # `event_log: 90.days` registers calls it (ADR 0051).
   def self.__sweettalk_pruning(before : Time, chunk : Int32, &) : Int64
     total = 0_i64
     loop do
@@ -204,12 +207,14 @@ module SweetTalk
   # `SweetTalk.rebuild(Billing::Sales)` empties the projection's rows and replays every
   # event it follows from its context's log, oldest first, through its own handlers, one
   # unit of work per event, in one transaction that holds
-  # `pg_advisory_xact_lock(Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, hashtext(table))`;
-  # it returns how many events it replayed. A job for one of the projection's handlers
-  # that is queued or running refuses it, naming the job, as the handler would write what
-  # the replay then writes again. Under `caramel/tenancy` it rebuilds the bound tenant's
-  # rows from the bound tenant's log. A projection whose context keeps no log, or that
-  # follows an event the log does not keep, does not compile (ADR 0048).
+  # `pg_advisory_xact_lock(Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, hashtext(table))`.
+  # It leaves to a queued job every event, or element of `each:`, that a job of the
+  # projection's handlers, or of a handler one says `after:`, still has to apply: that job
+  # applies it once the rebuild commits. It replays an event whose job finished, failed or
+  # was pruned. It returns a `SweetTalk::Rebuilt`. Under `caramel/tenancy` it rebuilds the
+  # bound tenant's rows from the bound tenant's log. A projection whose context keeps no
+  # log or keeps it a number of days, or that follows an event the log does not keep, does
+  # not compile (ADR 0051).
   macro rebuild(projection)
     {% type = projection.resolve? %}
     {% unless type && type < ::SweetTalk::Projection %}
@@ -224,6 +229,13 @@ module SweetTalk
       {% projection.raise "SweetTalk.rebuild(#{projection}): #{short.id} keeps no event log to " +
                           "replay; say context #{short.id}, event_log: true, and rebuild from " +
                           "the events logged since" %}
+    {% end %}
+    {% days = home.constant("SWEETTALK_EVENT_DAYS") %}
+    {% if days %}
+      {% projection.raise "SweetTalk.rebuild(#{projection}): #{short.id} keeps its events " +
+                          "#{days} days, so its log may no longer hold every event " +
+                          "#{type.name.split("::").last.id} followed; a rebuild needs " +
+                          "event_log: true, which keeps them all" %}
     {% end %}
     {% logs = home.constant("SWEETTALK_LOGS") %}
     {% scopes = type.name.split("::") %}
@@ -253,62 +265,125 @@ module SweetTalk
     {% jobs = replays.map { |replay| replay[0][4] } %}
     ::SweetTalk.__sweettalk_rebuilding({{ type.constant("SWEETTALK_TABLE") }},
       [{{ jobs.splat }}] of String, ::{{ home }}::Rows::Events.query,
-      {{ type.constant("SWEETTALK_ROW").id }}.query) do |%row|
+      {{ type.constant("SWEETTALK_ROW").id }}.query) do |%row, %pending|
       case { %row.aggregate, %row.name }
       {% for replay in replays %}
         when { {{ replay[2] }}, {{ replay[3] }} }
-          %event = ::{{ replay[1] }}.__sweettalk_load(%row.subject_id, %row.fields.to_json,
-            ::{{ home }}.__sweettalk_logged_meta(%row))
-          {% if replay[0][2] %}
-            %event.{{ replay[0][2].id }}.each do |%item|
-              ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event, %item, release: false)
-            end
-          {% else %}
-            ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event, release: false)
-          {% end %}
-          true
+          if ::SweetTalk.__sweettalk_waiting?(%pending, %row.event_id, {{ replay[0][4] }},
+               {{ replay[0][2] ? true : false }})
+            { false, true }
+          else
+            %event = ::{{ replay[1] }}.__sweettalk_load(%row.subject_id, %row.fields.to_json,
+              ::{{ home }}.__sweettalk_logged_meta(%row))
+            {% if replay[0][2] %}
+              %ran, %left = false, false
+              %event.{{ replay[0][2].id }}.each_with_index do |%item, %index|
+                if %pending.includes?(::SweetTalk.__sweettalk_pending_key(%row.event_id,
+                     {{ replay[0][4] }}, %index))
+                  %left = true
+                else
+                  ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event, %item,
+                    __sweettalk_replaying: true)
+                  %ran = true
+                end
+              end
+              { %ran || !%left, %left }
+            {% else %}
+              ::{{ type }}.__sweettalk_on_{{ replay[0][1].id }}(%event,
+                __sweettalk_replaying: true)
+              { true, false }
+            {% end %}
+          end
       {% end %}
       else
-        false
+        { false, false }
       end
     end
   end
 
-  REBUILD_LOCK = "SELECT pg_advisory_xact_lock($1, hashtext($2)) IS NULL AS locked"
-  REBUILD_BUSY = <<-SQL
-    SELECT class_name, count(*) AS jobs FROM caramel_jobs
+  REBUILD_LOCK    = "SELECT pg_advisory_xact_lock($1, hashtext($2)) IS NULL AS locked"
+  REBUILD_SHARE   = "SELECT pg_advisory_xact_lock_shared($1, hashtext($2)) IS NULL AS locked"
+  REBUILD_PENDING = <<-SQL
+    SELECT class_name, payload->>'index' AS item, (payload->>'meta')::jsonb->>'id' AS event_id
+    FROM caramel_jobs
     WHERE class_name = ANY($1) AND finished_at IS NULL AND failed_at IS NULL
-    GROUP BY class_name ORDER BY class_name
+      AND (payload->>'meta')::jsonb->>'id' = ANY($2)
     SQL
   REBUILD_PAGE = 500
 
-  # Locks, refuses when a job of *jobs* is queued or running, deletes the *rows* query's
-  # rows, then pages the *log* query by id and yields each row; the count of rows the
-  # block replayed.
-  def self.__sweettalk_rebuilding(table : String, jobs : Array(String), log, rows, &) : Int64
-    replayed = 0_i64
+  # What `SweetTalk.rebuild` did (ADR 0051): *replayed*, the logged events the projection's
+  # handlers ran for; *deferred*, the events it left, in whole or for some elements, to a
+  # queued job that applies them once the rebuild commits; *oldest*, when the oldest event
+  # the log holds occurred, nil for an empty log.
+  record Rebuilt, replayed : Int64, deferred : Int64, oldest : Time?
+
+  # Taken by a projection's job before its handler runs, in the job's transaction, so no
+  # handler of a projection runs while it rebuilds and a rebuild waits for those that run.
+  def self.__sweettalk_rebuild_shared(table : String) : Nil
+    ::SugarORM.sql(REBUILD_SHARE, ::Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, table,
+      as: {locked: Bool})
+    nil
+  end
+
+  def self.__sweettalk_pending_key(event_id : String, job : String, index : Int32?) : String
+    "#{event_id} #{job} #{index}"
+  end
+
+  # The jobs among *stored* names that still have to apply one of *events*: one key per
+  # job, by its current name and element.
+  def self.__sweettalk_pending(stored : Array(String), events : Array(String)) : Set(String)
+    rows = ::SugarORM.sql(REBUILD_PENDING, stored, events,
+      as: {class_name: String, item: String?, event_id: String})
+    rows.map do |row|
+      job = ::Caramel::ColdBrew::Job.__cold_brew_canonical(row[:class_name]) || row[:class_name]
+      __sweettalk_pending_key(row[:event_id], job, row[:item].try(&.to_i))
+    end.to_set
+  end
+
+  # Whether a job before *job* in its after: chain, or *job* itself when it takes no each:,
+  # still has to apply the event.
+  def self.__sweettalk_waiting?(pending : Set(String), event_id : String, job : String,
+                                each : Bool) : Bool
+    before = __sweettalk_predecessors(job).any? do |earlier|
+      pending.includes?(__sweettalk_pending_key(event_id, earlier, nil))
+    end
+    return true if before
+    !each && pending.includes?(__sweettalk_pending_key(event_id, job, nil))
+  end
+
+  # Locks, deletes the *rows* query's rows, then pages the *log* query by id and yields
+  # each row with the jobs still to apply that page's events; the block returns whether it
+  # replayed the row and whether it left part of it to a job. Reading the jobs after the
+  # page is exact: a log row commits with its jobs, no job of the projection can finish
+  # while this transaction holds the exclusive lock, since each takes it shared first, and
+  # a predecessor's finish commits with its followers' enqueue. Returns what it did.
+  def self.__sweettalk_rebuilding(table : String, jobs : Array(String), log, rows,
+                                  &) : Rebuilt
+    watched = jobs.flat_map { |job| [job] + __sweettalk_predecessors(job) }.uniq!
+    stored = watched.flat_map { |job| ::Caramel::ColdBrew::Job.__cold_brew_stored_names(job) }
+    stored.uniq!
+    replayed = deferred = 0_i64
+    oldest = nil.as(Time?)
     ::SugarORM::Repo.transaction do
       ::SugarORM.sql(REBUILD_LOCK, ::Caramel::ColdBrew::Scheduler::LOCK_NAMESPACE, table,
         as: {locked: Bool})
-      busy = ::SugarORM.sql(REBUILD_BUSY, jobs, as: {class_name: String, jobs: Int64})
-      unless busy.empty?
-        queued = busy.map { |row| "#{row[:jobs]} of #{row[:class_name]}" }.join(", ")
-        raise ::SweetTalk::Refusal.new("#{table} cannot be rebuilt while jobs of its handlers " +
-                                       "are queued or running (#{queued}): let the queue " +
-                                       "drain, then rebuild")
-      end
       rows.delete_all
       last = 0_i64
       loop do
         page = log.where("id > ?", last).order_by(:id, :asc).limit(REBUILD_PAGE).to_a
         break if page.empty?
+        pending = __sweettalk_pending(stored, page.map(&.event_id))
         page.each do |row|
           last = row.id
-          replayed += 1 if yield row
+          at = oldest
+          oldest = row.occurred_at if at.nil? || row.occurred_at < at
+          ran, left = yield row, pending
+          replayed += 1 if ran
+          deferred += 1 if left
         end
       end
     end
-    replayed
+    Rebuilt.new(replayed, deferred, oldest)
   end
 
   @@checked = false
@@ -331,11 +406,13 @@ module SweetTalk
     __sweettalk_touch
   end
 
-  # References every command, factory and service, so `crystal build --no-codegen` types
-  # their bodies whether or not anything calls them (ADR 0031 decision 10).
+  # References every command, factory and service, and every `older:` default of an event,
+  # so `crystal build --no-codegen` types their bodies whether or not anything calls them
+  # (ADR 0031 decision 10).
   def self.__sweettalk_touch : Nil
     {% begin %}
-      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::BoundedContext.includers %}
+      {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::BoundedContext.includers +
+                  ::SweetTalk::Event.all_subclasses %}
       {% for owner in owners %}
         {% for method in owner.class.methods %}
           {% if method.name.starts_with?("__sweettalk_touch_") %}

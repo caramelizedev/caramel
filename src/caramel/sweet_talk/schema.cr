@@ -102,9 +102,10 @@ module SweetTalk
   # `<context>_events` table, append-only and tenanted as the context's rows are;
   # `__sweettalk_log`, which `SweetTalk.dispatch` calls with every event and which writes
   # one row for an event of this context or of a kernel it shares; `logged`, the typed
-  # reader; and `__sweettalk_prune`, which `SweetTalk.prune_events` loops. Without the
-  # keyword `__sweettalk_log` does nothing. A declaration whose table the log would take
-  # is refused.
+  # reader; and `__sweettalk_prune`, which the schedule `event_log: 90.days` registers
+  # loops, once an hour in Cold Brew's scheduler (ADR 0051). Without the keyword
+  # `__sweettalk_log` does nothing. A declaration whose table the log would take is
+  # refused.
   macro __sweettalk_event_log(owner)
     {% type = owner.resolve %}
     {% short = type.name.split("::").last %}
@@ -238,6 +239,17 @@ module SweetTalk
             .delete_all
         {% end %}
       end
+
+      {% days = type.constant("SWEETTALK_EVENT_DAYS") %}
+      {% if days %}
+        # Deletes, once an hour in Cold Brew's scheduler, the events the log no longer keeps.
+        ::Caramel::ColdBrew.every(1.hour, {{ "sweettalk:prune:#{table.id}" }}) do
+          ::SweetTalk.__sweettalk_pruning({{ days }}.days.ago, 1000) do |before, chunk|
+            ::{{ type }}.__sweettalk_prune(before, chunk)
+          end
+          nil
+        end
+      {% end %}
     {% else %}
       def self.__sweettalk_log(event : ::SweetTalk::Event) : Nil
       end
