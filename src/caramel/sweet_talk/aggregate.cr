@@ -6,44 +6,13 @@ module SweetTalk
     include Guarded
     include Lifecycle
     include Queried
+    include Holding
 
     @__sweettalk_id : Int64? = nil
     @__sweettalk_removed_at : Time? = nil
     @__sweettalk_events = [] of ::SweetTalk::Event
     # False once found with `entities: false`: the lists are empty and may not be read.
     @__sweettalk_entities = true
-
-    # `entity Line, means: "…" do … end` is an entity inside this aggregate, stored in a
-    # child table named after the aggregate. In a tenanted context the aggregate's key
-    # column may not be the tenant's.
-    macro entity(name, means = nil, renamed_from = nil, &block)
-      {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
-                    "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
-      ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
-      {% stored = (renamed_from || name).stringify.underscore %}
-      {% table = "#{@type.constant("SWEETTALK_BASE").id}_#{stored.id}" %}
-      {% parent = {@type.constant("SWEETTALK_STORED"), @type.constant("SWEETTALK_ROW")} %}
-      {% home = ::SweetTalk::BoundedContext.includers
-           .find { |context| @type.name.starts_with?("#{context.name}::") } %}
-      {% tenant = home && home.constant("SWEETTALK_TENANT") %}
-      {% if tenant && parent[0] == tenant[1] %}
-        {% name.raise "entity #{name} would name its aggregate in #{tenant[1].id}_id, the " +
-                      "column that names each row's tenant #{tenant[0].id}: rename aggregate " +
-                      "#{@type.name.split("::").last.id}" %}
-      {% end %}
-      class {{ name }} < ::SweetTalk::Entity
-        SWEETTALK_KIND   = "entity"
-        SWEETTALK_MEANS  = {{ means }}
-        SWEETTALK_ROW    = {{ "#{@type.constant("SWEETTALK_ROW").id}::#{name}" }}
-        SWEETTALK_PARENT = {{ parent }}
-        ::SweetTalk.__sweettalk_table({{ table }},
-          {{ "entity #{@type.name.split("::").last.id}::#{name}" }})
-
-        {{ block ? block.body : nil }}
-
-        __sweettalk_storage
-      end
-    end
 
     # `event Placed, lines : Array(Line), means: "…"` is one of this aggregate's events. It
     # records its subject and its fields when it is emitted, with an id, the time and the
@@ -320,9 +289,8 @@ module SweetTalk
       {% lists = collections.map { |collection| ", #{collection[0].id} : #{collection[3].id}" } %}
       {% preloads = collections.map { |collection| ".preload(:#{collection[0].id})" } %}
       {% children = collections.map do |collection|
-           child = collection[3][6..-2].id
            name = collection[0].id
-           ", #{name}: loaded.#{name}.map { |child| #{child}.new(stored: child) }"
+           ", #{name}: entry.#{name}.map { |child| built_#{name}[child.id] }"
          end %}
       {% empties = collections.map do |collection|
            ", #{collection[0].id}: #{collection[3].id}.new"
@@ -502,9 +470,9 @@ module SweetTalk
         __sweettalk_rows(query.order_by(:id, :asc))
       end
 
-      # Builds an aggregate from each row the query reads, with one more query per
-      # collection of entities, or none when *entities* is false. Protected: only this
-      # aggregate's own repository builds aggregates from rows.
+      # Builds an aggregate from each row the query reads, with one more query per list of
+      # entities, then one per list under those at each depth, or none when *entities* is
+      # false. Protected: only this aggregate's own repository builds aggregates from rows.
       protected def self.__sweettalk_rows(query, entities : Bool = true) : Array(self)
         {% if collections.empty? %}
           query.to_a.map { |row| new(stored: row) }
@@ -514,9 +482,14 @@ module SweetTalk
               new(stored: row, entities: false{{ empties.join("").id }})
             end
           end
-          query{{ preloads.join("").id }}.to_a.map do |loaded|
-            new(stored: loaded.record{{ children.join("").id }})
-          end
+          loaded = query{{ preloads.join("").id }}.to_a
+          {% for collection in collections %}
+            {% name = collection[0].id %}
+            {% child = collection[3][6..-2].id %}
+            built_{{ name }} = {{ child }}.__sweettalk_load(loaded.flat_map(&.{{ name }}))
+              .index_by(&.__sweettalk_raw_id)
+          {% end %}
+          loaded.map { |entry| new(stored: entry.record{{ children.join("").id }}) }
         {% end %}
       end
 
@@ -532,17 +505,19 @@ module SweetTalk
         {% end %}
       } of String => String
 
-      # Deletes, in one statement per list, the entity rows this aggregate loaded and no
-      # longer holds, and none when it dropped none; then writes the root through its
-      # changeset and each entity, each only when a column changes. The deletes come first
-      # so an entity replaced by one with the same unique value saves.
+      # Deletes, in one statement per list per level, the entity rows this aggregate loaded
+      # and no longer holds, with the rows under them, and none when it dropped none; then
+      # writes the root through its changeset and each entity, each only when a column
+      # changes. The deletes come first so an entity replaced by one with the same unique
+      # value saves.
       def __sweettalk_save : Nil
         {% for collection in collections %}
+          {% child = collection[3][6..-2].id %}
           held = @{{ collection[0].id }}.compact_map { |entity| entity.@__sweettalk_id }
           dropped = @__sweettalk_loaded_{{ collection[0].id }} - held
           unless dropped.empty?
-            {{ row }}::{{ collection[3][6..-2].id }}.query.where({{ foreign }}: __sweettalk_raw_id)
-              .where(id: dropped).delete_all
+            mine = {{ row }}::{{ child }}.query.where({{ foreign }}: __sweettalk_raw_id)
+            {{ child }}.__sweettalk_drop(mine.where(id: dropped))
           end
         {% end %}
         changeset = if row = @__sweettalk_row
@@ -625,7 +600,7 @@ module SweetTalk
 
       ::SweetTalk.__sweettalk_schema({{ @type }})
       {% for collection in collections %}
-        ::SweetTalk.__sweettalk_schema({{ @type }}::{{ collection[3][6..-2].id }})
+        ::SweetTalk.__sweettalk_schemas({{ @type }}::{{ collection[3][6..-2].id }})
       {% end %}
     end
 

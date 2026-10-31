@@ -70,15 +70,14 @@ or a policy, and nothing stops one context from reaching into another's types.
      `Bool` reads as `name?` too, a name no state or specification shares;
    - a value as its raw column, rebuilt on load;
    - an aggregate as a foreign key, whose getter returns its `Id`;
-   - an `Array` of the aggregate's own entity as a child table; an entity holds none, nor
-     is an `Array` of scalars stored.
+   - an `Array` of its own entity as a child table, an entity's own too
+     ([ADR 0050](0050-sweettalk-nested-entities.md)); no `Array` of scalars.
 
    `has` options and the words `unique`, `index` and `check` declare database constraints
    ([ADR 0045](0045-sweettalk-database-constraints.md)). Any other type, or a name the
-   tenant's or the parent's column takes, does not compile. An entity another aggregate
+   tenant's or the parent's column takes, does not compile. An entity another parent
    holds is inserted anew. Stored types come first. A projection's key is uniquely
-   indexed. `frappe db diff` derives the migrations
-   ([ADR 0008](0008-branch-and-diff-migrations.md)).
+   indexed. `frappe db diff` derives migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
 5. **A command is one transaction on one aggregate.** `to` runs in
    `SugarORM::Repo.transaction`: it locks the root's row and loads the aggregate, runs
    the body, checks every `never` and `always`, saves the root, then its entities, and

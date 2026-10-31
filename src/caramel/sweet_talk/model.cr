@@ -184,17 +184,13 @@ module SweetTalk
         {% owner = @type.name.split("::").last %}
         {% found = element.is_a?(Path) && element.resolve? %}
         {% scalar = found && %w[String Int32 Int64 Bool Float64 Time].includes?(found.stringify) %}
-        {% if @type < ::SweetTalk::Entity %}
-          {% decl.raise "has #{decl} cannot be stored in entity #{owner.id}: an entity holds no " +
-                        "entities; declare #{element} beside #{owner.id} and key it by " +
-                        "#{owner.id}'s number" %}
-        {% elsif scalar || !element.is_a?(Path) %}
+        {% if scalar || !element.is_a?(Path) %}
           {% decl.raise "has #{decl} cannot be stored: use a value or an entity; an Array of " +
                         "scalars is not stored" %}
         {% elsif element.names.size > 1 || (found && !(found < ::SweetTalk::Entity)) %}
-          {% decl.raise "has #{decl} cannot be stored: an Array holds this aggregate's own " +
-                        "entity, declared with entity #{element.names.last.id} inside " +
-                        "#{owner.id}" %}
+          {% decl.raise "has #{decl} cannot be stored: an Array holds this " +
+                        "#{@type.constant("SWEETTALK_KIND").id}'s own entity, declared with " +
+                        "entity #{element.names.last.id} inside #{owner.id}" %}
         {% end %}
         {% child = "#{@type.constant("SWEETTALK_ROW").id}::#{element}" %}
         {% foreign = "#{@type.constant("SWEETTALK_STORED").id}_id" %}

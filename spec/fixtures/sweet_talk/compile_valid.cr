@@ -70,12 +70,18 @@ module Shop
       moves open >> placed, open >> cancelled, placed >> cancelled
 
       # A defaulted attribute may sit between required ones: `Line.new` by name leaves it
-      # out, and an entity has its own invariants.
+      # out, an entity has its own invariants, and an entity holds entities of its own.
       entity Line, means: "one tea in an order and how many tins" do
         has tea : Int64
         has note : String = ""
         has quantity : Quantity
+        has remarks : Array(Remark)
         never "A line names a tea." { tea <= 0 }
+
+        entity Remark, means: "a remark on one line" do
+          has text : String
+          never "A remark says something." { text.empty? }
+        end
       end
 
       event Opened, receipt_to : Email, means: "a member started an order"

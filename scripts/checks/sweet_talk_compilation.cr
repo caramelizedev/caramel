@@ -392,9 +392,14 @@ PROBLEMS = [
   {"process_finds_satisfying",
    "finds held takes satisfying: only in an aggregate: a specification is a rule on an " \
    "aggregate, and Hold is a process"},
-  {"entity_holds_entities",
-   "has slices : Array(Slice) cannot be stored in entity Rule: an entity holds no entities; " \
-   "declare Slice beside Rule and key it by Rule's number"},
+  {"table_long",
+   "entity Delivery::ConsignmentOfLooseLeafTeaWithProvenance would store its rows in " \
+   "catalogue_tea_delivery_consignment_of_loose_leaf_tea_with_provenances, longer than " \
+   "PostgreSQL's 63 bytes: shorten its name or the names it is built from"},
+  {"entity_key_long",
+   "entity DeliveryOfLooseLeafTea::ConsignmentOfIt would name its key to its parent " \
+   "fk_catalogue_tea_delivery_of_loose_leaf_tea_consignment_of_its_delivery_of_loose_leaf_" \
+   "tea_id, longer than PostgreSQL's 63 bytes: shorten its name or its parent's"},
   {"array_of_scalars",
    "has tags : Array(String) cannot be stored: use a value or an entity; an Array of scalars " \
    "is not stored"},

@@ -36,6 +36,16 @@ module Shop
   context Catalogue, means: "the teas on our shelves" do
     aggregate Tea, means: "one tea we sell" do
       has name : String
+      has lots : Array(Lot)
+
+      entity Lot, means: "one delivery of this tea" do
+        has code : String
+        has bags : Array(Bag)
+
+        entity Bag, means: "one bag in a lot" do
+          has grams : Int32
+        end
+      end
 
       counts named(name : String), where: {name: name}
     end
