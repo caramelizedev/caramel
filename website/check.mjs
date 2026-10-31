@@ -388,6 +388,7 @@ const compileRows = {
   'An after: naming a projection, a process or a context that does not follow the event, or whose handler takes each:, or a chain of after: that runs in a circle': ['after_not_following', 'after_each', 'after_cycle'],
   'SweetTalk.rebuild of a projection whose context keeps no event log, or that follows an event the log does not keep': ['rebuild_without_log'],
   'An event_log: true context declaring an aggregate, projection or process whose table would be CONTEXT_events': ['event_log_table_taken'],
+  'An otherwise: that is not text, on a value without a bound, or on a value with parts': ['value_otherwise_not_text', 'value_otherwise_without_bound', 'composite_otherwise'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

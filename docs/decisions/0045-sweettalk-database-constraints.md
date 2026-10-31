@@ -60,7 +60,15 @@ surfaced as a raw `SugarORM::UniqueViolation` rather than a refusal (#166).
    the next `frappe db diff` until it is dropped, and a new check stops `frappe migrate` on
    the rows that break it (ADR 0039 decision 8); find duplicates first with `SELECT
    <columns>, count(*) FROM <table> GROUP BY <columns> HAVING count(*) > 1`. A partial
-   index (`where:`) and a custom sentence for a value's own bound are not declared here.
+   index (`where:`) is not declared here.
+8. **A value's bounds take `otherwise:`.** `value Cents, Int64, at_least: 0, otherwise: "A
+   balance cannot go below zero.", means: "…"` refuses every value outside its bounds
+   with that sentence, wherever the value is built: a build, an arithmetic result, a
+   contract field or a load. It goes with `at_least:`, `at_most:` and `within:`, with
+   `matches:`, `length:` and `one_of:`, and with a decimal's `at_least:` and `at_most:`;
+   a decimal's shape refusals keep theirs, and a value without bounds, a day, a document
+   and a value with parts take none, so the word does not compile there. The database
+   check is unchanged: a write around the value still meets the raw `CheckViolation`.
 
 ## Reasons
 
@@ -81,6 +89,8 @@ surfaced as a raw `SugarORM::UniqueViolation` rather than a refusal (#166).
 - **Deletes first.** Writing the new entity before deleting the old one makes a replaced
   value a duplicate for one statement; deferrable constraints would hide this and every
   other violation until commit, past the refusal that reloads the aggregate.
+- **The sentence belongs to the value.** Every attribute of `Cents` refuses the same way,
+  so `otherwise:` is declared once, on the value, and not again on each `has`.
 
 Rejected:
 
@@ -90,5 +100,5 @@ Rejected:
   rescue, as a raw error, and an upsert cannot target a deferrable index.
 - **A partial unique index for soft-removed rows.** It needs `where:` on an index, which
   SugarORM does not declare yet (#133); the limit is named instead of worked around.
-- **A custom sentence for a value's bound.** A value's refusal is the value's, shared by
-  every attribute of that type; a per-attribute sentence is a change of its own.
+- **A sentence per attribute for a value's bound.** A value's refusal is the value's,
+  shared by every attribute of that type, so the sentence is declared once on the value.

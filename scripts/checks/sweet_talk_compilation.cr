@@ -496,6 +496,14 @@ PROBLEMS = [
   {"event_log_table_taken",
    "context Ordering keeps its event log in ordering_events, the table aggregate Event stores " \
    "its rows in: rename one of them"},
+  {"value_otherwise_not_text",
+   "value Tins takes otherwise: the sentence a value outside its bounds is refused with, as " \
+   "in otherwise: \"A balance cannot go below zero.\", not 5"},
+  {"value_otherwise_without_bound",
+   "value Tins takes otherwise: only with at_least:, at_most: or within:, whose sentences it " \
+   "replaces"},
+  {"composite_otherwise",
+   "value Address has parts, so otherwise: belongs on the values its parts wrap"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

@@ -52,14 +52,17 @@ module SweetTalk
     # on every column that stores the value, and so are literals, integers or, for a
     # decimal, decimal text; `database_check: false` keeps them in Crystal only. A pattern
     # is checked in Crystal only, because PostgreSQL reads regular expressions differently.
+    # `otherwise: "A balance cannot go below zero."` is the sentence a value outside its
+    # bounds, length, pattern or list is refused with, in place of the generated one
+    # (ADR 0045); the database check is unchanged.
     # `SWEETTALK_CHECK` records {"range", "lo..hi"}, {"length", name suffix, SQL condition}
     # or {"column", name suffix, SQL condition}, or nil. A whole number or decimal value also
     # records `SWEETTALK_BOUNDS = {least, most}`, each its source text or nil.
     # `SWEETTALK_WRAPS` is the raw type's name and `SWEETTALK_CODEC` the codec that stores
     # it, or nil for a type a column holds as it is.
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
-                matches = nil, length = nil, one_of = nil, database_check = nil, means = nil,
-                &block)
+                matches = nil, length = nil, one_of = nil, database_check = nil,
+                otherwise = nil, means = nil, &block)
       {% if block && !wraps.is_a?(NilLiteral) %}
         {% name.raise "value #{name} takes parts or a type to wrap, not both" %}
       {% elsif !block && wraps.is_a?(NilLiteral) %}
@@ -78,6 +81,11 @@ module SweetTalk
                                 "bounds in Crystal only, not database_check: #{database_check}" %}
       {% end %}
       {% checked = database_check.is_a?(NilLiteral) %}
+      {% unless otherwise.is_a?(NilLiteral) || otherwise.is_a?(StringLiteral) %}
+        {% otherwise.raise "value #{name} takes otherwise: the sentence a value outside its " +
+                           "bounds is refused with, as in otherwise: \"A balance cannot go " +
+                           "below zero.\", not #{otherwise}" %}
+      {% end %}
       {% literal = "value #{name} checks its bounds in the database too, so each is an " +
                    "integer literal, as in at_least: 0 or length: 3..254, not " %}
       {% literally = ": write the number, or add database_check: false" %}
@@ -85,6 +93,10 @@ module SweetTalk
         {% unless checked %}
           {% database_check.raise "value #{name} has parts, so database_check: false " +
                                   "belongs on the values its parts wrap" %}
+        {% end %}
+        {% unless otherwise.is_a?(NilLiteral) %}
+          {% otherwise.raise "value #{name} has parts, so otherwise: belongs on the values " +
+                             "its parts wrap" %}
         {% end %}
         {% body = block.body %}
         {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
@@ -107,6 +119,13 @@ module SweetTalk
                           "one_of:, not #{option[0].id}:" %}
           {% end %}
         {% end %}
+        {% bounded = !one_of.is_a?(NilLiteral) || !matches.is_a?(NilLiteral) ||
+                     !length.is_a?(NilLiteral) %}
+        {% if !otherwise.is_a?(NilLiteral) && !bounded %}
+          {% otherwise.raise "value #{name} takes otherwise: only with matches:, length: or " +
+                             "one_of:, whose sentences it replaces" %}
+        {% end %}
+        {% worded = !otherwise.is_a?(NilLiteral) %}
         {% listed = !one_of.is_a?(NilLiteral) %}
         {% members = [] of Nil %}
         {% if listed %}
@@ -203,18 +222,24 @@ module SweetTalk
             {% if listed %}
               unless SWEETTALK_ONE_OF.includes?(@raw)
                 raise ::SweetTalk::Refusal.new(
-                  {{ "#{name} must be one of #{members.join(", ").id}" }})
+                  {{ worded ? otherwise : "#{name} must be one of #{members.join(", ").id}" }})
               end
             {% end %}
             {% unless matches.is_a?(NilLiteral) %}
               unless {{ matches }}.matches?(@raw)
-                raise ::SweetTalk::Refusal.new({{ "#{name} must match #{matches}" }})
+                raise ::SweetTalk::Refusal.new(
+                  {{ worded ? otherwise : "#{name} must match #{matches}" }})
               end
             {% end %}
             {% unless length.is_a?(NilLiteral) %}
               unless ({{ length }}).includes?(@raw.size)
-                raise ::SweetTalk::Refusal.new(
-                  ::SweetTalk::Value.__sweettalk_length_refusal({{ name.stringify }}, {{ length }}))
+                {% if worded %}
+                  raise ::SweetTalk::Refusal.new({{ otherwise }})
+                {% else %}
+                  short = {{ name.stringify }}
+                  raise ::SweetTalk::Refusal.new(
+                    ::SweetTalk::Value.__sweettalk_length_refusal(short, {{ length }}))
+                {% end %}
               end
             {% end %}
           end
@@ -264,7 +289,8 @@ module SweetTalk
       {% elsif wraps.stringify == "Date" %}
         {% options = [{"at_least", at_least}, {"at_most", at_most}, {"within", within},
                       {"times", times}, {"matches", matches}, {"length", length},
-                      {"one_of", one_of}, {"database_check", database_check}] %}
+                      {"one_of", one_of}, {"database_check", database_check},
+                      {"otherwise", otherwise}] %}
         {% for option in options %}
           {% unless option[1].is_a?(NilLiteral) %}
             {% name.raise "value #{name} wraps Date, a real calendar day, so it takes no " +
@@ -401,6 +427,12 @@ module SweetTalk
                           "each a decimal written as text, not #{option[0].id}:" %}
           {% end %}
         {% end %}
+        {% bounded = !at_least.is_a?(NilLiteral) || !at_most.is_a?(NilLiteral) %}
+        {% if !otherwise.is_a?(NilLiteral) && !bounded %}
+          {% otherwise.raise "value #{name} takes otherwise: only with at_least: or at_most:, " +
+                             "whose sentences it replaces" %}
+        {% end %}
+        {% worded = !otherwise.is_a?(NilLiteral) %}
         {% texts = [] of Nil %}
         {% bounds = [] of Nil %}
         {% for option in [{"at_least", at_least}, {"at_most", at_most}] %}
@@ -479,12 +511,22 @@ module SweetTalk
             end
             {% unless at_least.is_a?(NilLiteral) %}
               if @raw < SWEETTALK_LEAST
-                raise ::SweetTalk::Refusal.new("{{ name }} must be at least #{ {{ at_least }} }")
+                {% if worded %}
+                  raise ::SweetTalk::Refusal.new({{ otherwise }})
+                {% else %}
+                  raise ::SweetTalk::Refusal.new(
+                    "{{ name }} must be at least #{ {{ at_least }} }")
+                {% end %}
               end
             {% end %}
             {% unless at_most.is_a?(NilLiteral) %}
               if @raw > SWEETTALK_MOST
-                raise ::SweetTalk::Refusal.new("{{ name }} must be at most #{ {{ at_most }} }")
+                {% if worded %}
+                  raise ::SweetTalk::Refusal.new({{ otherwise }})
+                {% else %}
+                  raise ::SweetTalk::Refusal.new(
+                    "{{ name }} must be at most #{ {{ at_most }} }")
+                {% end %}
               end
             {% end %}
           end
@@ -553,7 +595,8 @@ module SweetTalk
                  (wraps.is_a?(Generic) && wraps.name.stringify == "Json") %}
         {% options = [{"at_least", at_least}, {"at_most", at_most}, {"within", within},
                       {"times", times}, {"matches", matches}, {"length", length},
-                      {"one_of", one_of}, {"database_check", database_check}] %}
+                      {"one_of", one_of}, {"database_check", database_check},
+                      {"otherwise", otherwise}] %}
         {% for option in options %}
           {% unless option[1].is_a?(NilLiteral) %}
             {% name.raise "value #{name} wraps Json, a document PostgreSQL keeps whole, so it " +
@@ -618,6 +661,13 @@ module SweetTalk
                           "within: and times:, not #{option[0].id}:" %}
           {% end %}
         {% end %}
+        {% bounded = !at_least.is_a?(NilLiteral) || !at_most.is_a?(NilLiteral) ||
+                     !within.is_a?(NilLiteral) %}
+        {% if !otherwise.is_a?(NilLiteral) && !bounded %}
+          {% otherwise.raise "value #{name} takes otherwise: only with at_least:, at_most: or " +
+                             "within:, whose sentences it replaces" %}
+        {% end %}
+        {% worded = !otherwise.is_a?(NilLiteral) %}
         {% if checked %}
           {% if within && !within.is_a?(RangeLiteral) %}
             {% within.raise literal + within.stringify + literally %}
@@ -658,18 +708,30 @@ module SweetTalk
           def initialize(@raw : {{ wraps }})
             {% if within %}
               if @raw < {{ least }} || @raw > {{ most }}
-                raise ::SweetTalk::Refusal.new(
-                  "{{ name }} must be between #{ {{ least }} } and #{ {{ most }} }")
+                {% if worded %}
+                  raise ::SweetTalk::Refusal.new({{ otherwise }})
+                {% else %}
+                  raise ::SweetTalk::Refusal.new(
+                    "{{ name }} must be between #{ {{ least }} } and #{ {{ most }} }")
+                {% end %}
               end
             {% else %}
               {% unless least.is_a?(NilLiteral) %}
                 if @raw < {{ least }}
-                  raise ::SweetTalk::Refusal.new("{{ name }} must be at least #{ {{ least }} }")
+                  {% if worded %}
+                    raise ::SweetTalk::Refusal.new({{ otherwise }})
+                  {% else %}
+                    raise ::SweetTalk::Refusal.new("{{ name }} must be at least #{ {{ least }} }")
+                  {% end %}
                 end
               {% end %}
               {% unless most.is_a?(NilLiteral) %}
                 if @raw > {{ most }}
-                  raise ::SweetTalk::Refusal.new("{{ name }} must be at most #{ {{ most }} }")
+                  {% if worded %}
+                    raise ::SweetTalk::Refusal.new({{ otherwise }})
+                  {% else %}
+                    raise ::SweetTalk::Refusal.new("{{ name }} must be at most #{ {{ most }} }")
+                  {% end %}
                 end
               {% end %}
             {% end %}
