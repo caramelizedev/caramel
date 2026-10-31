@@ -85,6 +85,19 @@ module SweetTalk
     {% end %}
   end
 
+  # The schema of *owner*, an aggregate's entity, then of each entity it holds, at every
+  # depth.
+  macro __sweettalk_schemas(owner)
+    ::SweetTalk.__sweettalk_schema({{ owner }})
+    {% type = owner.resolve %}
+    {% for constant in type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
+      {% attribute = type.constant(constant) %}
+      {% if attribute[2] == "entities" %}
+        ::SweetTalk.__sweettalk_schemas({{ owner }}::{{ attribute[3][6..-2].id }})
+      {% end %}
+    {% end %}
+  end
+
   # A context's event log (ADR 0048). With `event_log: true` it is `Rows::Events`, the
   # `<context>_events` table, append-only and tenanted as the context's rows are;
   # `__sweettalk_log`, which `SweetTalk.dispatch` calls with every event and which writes

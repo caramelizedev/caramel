@@ -46,7 +46,8 @@ surfaced as a raw `SugarORM::UniqueViolation` rather than a refusal (#166).
    maps to; a constraint SweetTalk did not declare stays the error it is. A command's
    refusal rolls the transaction back, clears the events and reloads the aggregate; an
    action answers 422; a `create` or a factory raises and leaves no row.
-5. **An entity's `unique` is unique within its aggregate.** Its index leads with the
+5. **An entity's `unique` is unique within its parent, the aggregate or entity that holds
+   it** ([ADR 0050](0050-sweettalk-nested-entities.md)). Its index leads with the
    parent's column, `(<parent>_id, columns)`. A save now deletes the entity rows it loaded
    and dropped before it writes, so an entity replaced by one with the same value saves.
    Two entities that swap their values still violate: the index is not deferrable.

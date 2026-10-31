@@ -11,12 +11,17 @@ module SweetTalk
   # `SWEETTALK_TABLE`, the plural of *singular* by English rules: unchanged when it ends
   # in s, -ies for a consonant and y, -es after x, z, ch and sh, and -s otherwise. A
   # declaration, *owner* as in "aggregate TeaTin", whose name gives a table another
-  # declaration already stores its rows in is refused here, in the domain's words.
+  # declaration already stores its rows in, or one over PostgreSQL's 63 bytes, which it
+  # would truncate silently, is refused here, in the domain's words.
   macro __sweettalk_table(singular, owner)
     {% plural = singular + "s" %}
     {% plural = singular[0..-2] + "ies" if singular =~ /[^aeiou]y\z/ %}
     {% plural = singular + "es" if singular =~ /(x|z|ch|sh)\z/ %}
     {% plural = singular if singular.ends_with?("s") %}
+    {% if plural.size > 63 %}
+      {% singular.raise "#{owner.id} would store its rows in #{plural.id}, longer than " +
+                        "PostgreSQL's 63 bytes: shorten its name or the names it is built from" %}
+    {% end %}
     {% for other in ::SweetTalk::Model.all_subclasses %}
       {% if other.has_constant?("SWEETTALK_TABLE") &&
               other.constant("SWEETTALK_TABLE") == plural %}

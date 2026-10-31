@@ -523,22 +523,23 @@ describe "SweetTalk's entities when an aggregate is saved" do
     SweetTalkSpec.rolled_back do
       batch = ExpressiveModelsSpec.batch("fee", "salary", "rent")
       ids = batch.slips.map(&.id)
-      # The locked root, its slips, then the one slip that changed.
-      ExpressiveModelsSpec.statements { batch.retitle("salary", "wages") }.should eq(3)
-      # The two reads alone: neither the root nor a slip changed.
-      ExpressiveModelsSpec.statements { batch.retitle("wages", "wages") }.should eq(2)
+      # The locked root, its slips, their marks, then the one slip that changed.
+      ExpressiveModelsSpec.statements { batch.retitle("salary", "wages") }.should eq(4)
+      # The three reads alone: neither the root nor a slip changed.
+      ExpressiveModelsSpec.statements { batch.retitle("wages", "wages") }.should eq(3)
       reloaded = Ledger::Counter::Batch.find(batch.id)
       reloaded.slips.map(&.label).should eq(%w[fee wages rent])
       reloaded.slips.map(&.id).should eq(ids)
     end
   end
 
-  it "deletes only the entity rows a command dropped, in one statement" do
+  it "deletes only the entity rows a command dropped, one statement per list per level" do
     SweetTalkSpec.rolled_back do
       batch = ExpressiveModelsSpec.batch("fee", "salary", "rent")
       ids = batch.slips.map(&.id)
-      # The locked root, its slips, then one DELETE of the struck slip.
-      ExpressiveModelsSpec.statements { batch.strike("salary") }.should eq(3)
+      # The locked root, its slips, their marks, then one DELETE of the struck slip's marks
+      # and one of the slip.
+      ExpressiveModelsSpec.statements { batch.strike("salary") }.should eq(5)
       Ledger::Counter::Batch.find(batch.id).slips.map(&.id).should eq([ids[0], ids[2]])
       SweetTalkSpec.count("counter_batch_slips").should eq(2)
     end
@@ -580,6 +581,61 @@ describe "SweetTalk's entities when an aggregate is saved" do
       expect_raises(NilAssertionError, "Slip has no id until its aggregate is saved") do
         queued_before.id
       end
+      # Queued before the slip held marks: the fact has no key for them.
+      queued_before.marks.should be_empty
+    end
+  end
+
+  it "loads, keeps and counts the entities an entity holds, one statement per list per level" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("A", "B")
+      batch.mark("A", "x")
+      batch.mark("A", "y")
+      batch.mark("B", "z")
+      found = nil
+      # The root, its slips, then every mark of those slips at once.
+      ExpressiveModelsSpec.statements { found = Ledger::Counter::Batch.find(batch.id) }.should eq(3)
+      found.not_nil!.slips.map { |slip| slip.marks.map(&.note) }.should eq([%w[x y], %w[z]])
+      SweetTalkSpec.count("counter_batch_slip_marks").should eq(3)
+    end
+  end
+
+  it "deletes a dropped entity's own entities before it, one DELETE per list per level" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("A", "B")
+      batch.mark("A", "x")
+      batch.mark("A", "y")
+      batch.mark("B", "z")
+      batch.unmark("A", "x")
+      Ledger::Counter::Batch.find(batch.id).slips.first.marks.map(&.note).should eq(["y"])
+      SweetTalkSpec.count("counter_batch_slip_marks").should eq(2)
+      # The root, its slips, their marks, then one DELETE of the slip's marks and one of the slip.
+      ExpressiveModelsSpec.statements { batch.strike("A") }.should eq(5)
+      SweetTalkSpec.count("counter_batch_slip_marks").should eq(1)
+      SweetTalkSpec.count("counter_batch_slips").should eq(1)
+    end
+  end
+
+  it "checks a nested entity's invariants with its aggregate's, and saves nothing on a refusal" do
+    SweetTalkSpec.rolled_back do
+      batch = ExpressiveModelsSpec.batch("A")
+      batch.mark("A", "x")
+      expect_raises(SweetTalk::Refusal, "A mark says something.") { batch.mark("A", "") }
+      SweetTalkSpec.count("counter_batch_slip_marks").should eq(1)
+    end
+  end
+
+  it "carries a nested entity in an event with the id its row got" do
+    SweetTalkSpec.rolled_back do
+      mark = Ledger::Counter::Batch::Slip::Mark.new("x")
+      slip = Ledger::Counter::Batch::Slip.new("A", [mark])
+      opened = SweetTalk.emitted(Ledger::Counter::Batch::Opened) do
+        Ledger::Counter::Batch.open(ExpressiveModelsSpec.teller("Ada"), [slip])
+      end.first
+      carried = opened.slips.first.marks.first
+      carried.note.should eq("x")
+      carried.id.raw.should be > 0
+      SweetTalkSpec.count("counter_batch_slip_marks").should eq(1)
     end
   end
 end

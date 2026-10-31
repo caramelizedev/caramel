@@ -49,13 +49,13 @@ aggregates over days and undo their work when a step is refused.
      after its aggregate's stored name, so it survives a rename.
 3. **Repositories.**
    - `find`, `find?`, `all` and every query read one statement per table: the roots, then
-     each list of entities through `preload`. `find(id, entities: false)` and `find?` read
+     each list of entities, at every depth. `find(id, entities: false)` and `find?` read
      the root alone: a list of that aggregate raises `SweetTalk::Unloaded`, and a command
      on it loads the lists under its lock. Entities come back by id, which is insertion
      order; an in-memory reorder is not persisted: store a position attribute for an order
      the domain owns. Saving writes the root and each entity only when a column changes,
-     and deletes the entities a list was loaded with and dropped, in one statement per
-     list, none when none was dropped.
+     and deletes the entities a list was loaded with and dropped, one statement per list
+     per level, none when none dropped.
    - `finds verb(args), where: {attribute: expression, state: :placed}` in an aggregate is a
      query: the aggregates whose columns equal the expressions (a list matches any member,
      a range its span), by id. A key that names no stored attribute, a list of entities, or

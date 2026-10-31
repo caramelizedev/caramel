@@ -144,9 +144,23 @@ module Ledger
 
       entity Slip, means: "one transfer a batch will open, by its label" do
         has label : String
+        has marks : Array(Mark)
+
+        entity Mark, means: "a note on one slip" do
+          has note : String
+          never "A mark says something." { note.empty? }
+        end
 
         def retitle(label : String) : Nil
           @label = label
+        end
+
+        def mark(note : String) : Nil
+          @marks << Mark.new(note)
+        end
+
+        def unmark(note : String) : Nil
+          @marks.reject! { |each| each.note == note }
         end
       end
 
@@ -160,6 +174,18 @@ module Ledger
         slip = @slips.find { |each| each.label == label }
         refuse "There is no slip #{label}." unless slip
         slip.retitle(new_label)
+      end
+
+      to mark(label : String, note : String) do
+        slip = @slips.find { |each| each.label == label }
+        refuse "There is no slip #{label}." unless slip
+        slip.mark(note)
+      end
+
+      to unmark(label : String, note : String) do
+        slip = @slips.find { |each| each.label == label }
+        refuse "There is no slip #{label}." unless slip
+        slip.unmark(note)
       end
 
       to strike(label : String) do
