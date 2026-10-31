@@ -48,9 +48,10 @@ module SweetTalk
     # decimal, decimal text; `database_check: false` keeps them in Crystal only. A pattern
     # is checked in Crystal only, because PostgreSQL reads regular expressions differently.
     # `SWEETTALK_CHECK` records {"range", "lo..hi"}, {"length", name suffix, SQL condition}
-    # or {"column", name suffix, SQL condition}, or nil. `SWEETTALK_WRAPS` is the raw type's
-    # name and `SWEETTALK_CODEC` the codec that stores it, or nil for a type a column holds
-    # as it is.
+    # or {"column", name suffix, SQL condition}, or nil. A whole number or decimal value also
+    # records `SWEETTALK_BOUNDS = {least, most}`, each its source text or nil.
+    # `SWEETTALK_WRAPS` is the raw type's name and `SWEETTALK_CODEC` the codec that stores
+    # it, or nil for a type a column holds as it is.
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
                 matches = nil, length = nil, one_of = nil, database_check = nil, means = nil,
                 &block)
@@ -396,8 +397,11 @@ module SweetTalk
           {% end %}
         {% end %}
         {% texts = [] of Nil %}
+        {% bounds = [] of Nil %}
         {% for option in [{"at_least", at_least}, {"at_most", at_most}] %}
           {% bound = option[1] %}
+          {% bounds << (bound.is_a?(StringLiteral) ? bound : bound.stringify) %}
+          {% bounds[-1] = nil if bound.is_a?(NilLiteral) %}
           {% if bound.is_a?(NilLiteral) %}
             {% texts << nil %}
           {% elsif !bound.is_a?(StringLiteral) && checked %}
@@ -445,6 +449,7 @@ module SweetTalk
           SWEETTALK_WRAPS     = "::BigDecimal"
           SWEETTALK_CODEC     = {{ "::SugarORM::DecimalCodec(#{precision}, #{scale})" }}
           SWEETTALK_CHECK     = {{ check }}
+          SWEETTALK_BOUNDS    = {{ {bounds[0], bounds[1]} }}
           SWEETTALK_PRECISION = {{ precision }}
           SWEETTALK_SCALE     = {{ scale }}
           SWEETTALK_REFUSAL   = ::SweetTalk::Decimal.refusal({{ name.stringify }})
@@ -629,6 +634,8 @@ module SweetTalk
           {% hi = hi.gsub(/_?[iu](8|16|32|64|128)\z/, "").gsub(/_/, "") %}
           {% check = {"range", "#{lo.id}..#{hi.id}"} %}
         {% end %}
+        {% least_text = least.is_a?(NilLiteral) || least.is_a?(Nop) ? nil : least.stringify %}
+        {% most_text = most.is_a?(NilLiteral) || most.is_a?(Nop) ? nil : most.stringify %}
         {% factors = [] of Nil %}
         {% factors = times.is_a?(TupleLiteral) ? times : [times] unless times.is_a?(NilLiteral) %}
         struct {{ name }} < ::SweetTalk::Value
@@ -639,6 +646,7 @@ module SweetTalk
           SWEETTALK_WRAPS = {{ wraps.stringify }}
           SWEETTALK_CODEC = nil
           SWEETTALK_CHECK = {{ check }}
+          SWEETTALK_BOUNDS = {{ {least_text, most_text} }}
 
           getter raw : {{ wraps }}
 

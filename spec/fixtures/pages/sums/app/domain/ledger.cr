@@ -1,5 +1,5 @@
 # The Ledger domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
-# context, value, aggregate, event and whenever, exist only inside this module.
+# context, value, aggregate, event and sums, exist only inside this module.
 module App::Ledger
   include SweetTalk
   tenant App::Account
@@ -37,36 +37,11 @@ module App::Ledger
         posted!
         emit Posted, period: period, lines: lines
       end
-    end
 
-    value Slot, means: "one heading in one period" do
-      part heading : Heading
-      part period : Period
-    end
-
-    projection Balance, means: "what one heading was posted in one period" do
-      key slot : Slot
-      has total : Cents = Cents.new(0_i64)
-      has postings : Int32 = 0
-
-      whenever Journal::Posted, each: :lines do |posted, line|
-        row = Balance[Slot.new(heading: line.heading, period: posted.period)]
-        row.total += line.amount
-        row.postings += 1
-      end
-
-      finds in_period(period : Period) do |rows|
-        rows.where(slot_period: period.raw)
-      end
-
-      finds for_heading(heading : Heading) do |rows|
-        rows.where(slot_heading: heading.raw).order_by(:slot_period, :asc)
-      end
-    end
-
-    service period_total(period : Period), returns: Cents,
-      means: "everything posted to one period, across its headings" do
-      Balance.in_period(period).sum(&.total)
+      sums posted_in(period : Period), of: Line.amount, where: {period: period, state: :posted}
+      groups by_heading_in(period : Period), of: Line.amount, by: Line.heading,
+        where: {period: period, state: :posted}
+      groups by_heading, of: Line.amount, by: Line.heading, where: {state: :posted}
     end
   end
 end

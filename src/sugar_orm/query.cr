@@ -194,6 +194,64 @@ module SugarORM
       ::SugarORM::Repo.query_one?(sql, binds, &.read(Bool)) || false
     end
 
+    # The sum of *field* over the matching rows as PostgreSQL's exact text: "0" when no
+    # row matches or every value is NULL. Text keeps an integer, bigint, numeric or double
+    # precision sum exact without a Crystal type per column; the caller builds its type.
+    def sum_text(field : T::Field) : String
+      refuse_lock("sum_text")
+      table = T.__sugar_quoted_table
+      column = %("#{T.__sugar_column(field)}")
+      sql = if @clauses.limit || @clauses.offset
+              inner = "SELECT #{column} FROM #{table}#{filters}"
+              "SELECT coalesce(sum(#{column}), 0)::text FROM (#{inner}) AS sugar_sum"
+            else
+              "SELECT coalesce(sum(#{column}), 0)::text FROM #{table}#{filters(order: false)}"
+            end
+      ::SugarORM::Repo.query_one?(sql, binds, &.read(String)) || "0"
+    end
+
+    # Each value of *by* among the matching rows, as text (nil for NULL), with the sum of
+    # *of* over its rows as exact text, ordered by *by* (NULL last).
+    def group_sum_text(by : T::Field, of : T::Field) : Array({String?, String})
+      refuse_lock("group_sum_text")
+      unless @clauses.orders.empty?
+        raise ArgumentError.new(
+          "group_sum_text orders by its key; remove order_by from this query"
+        )
+      end
+      if @clauses.limit || @clauses.offset
+        raise ArgumentError.new(
+          "group_sum_text groups every matching row; remove limit and offset from this query"
+        )
+      end
+      key = %("#{T.__sugar_column(by)}")
+      column = %("#{T.__sugar_column(of)}")
+      sql = "SELECT #{key}::text, coalesce(sum(#{column}), 0)::text " \
+            "FROM #{T.__sugar_quoted_table}#{filters(order: false)} " \
+            "GROUP BY #{key} ORDER BY #{key}"
+      ::SugarORM::Repo.query_all(sql, binds) { |rows| {rows.read(String?), rows.read(String)} }
+    end
+
+    # Narrows to the rows whose *field* holds the key of a row *parent* matches:
+    # "field" IN (SELECT "<pk>" FROM <parent table> WHERE …), with the parent's conditions,
+    # tenant included, read when this is called.
+    def where_in(field : T::Field, parent : ::SugarORM::Query(U, Q)) : self forall U, Q
+      where_condition(parent.__sugar_in_condition(T.__sugar_column(field)))
+    end
+
+    # The condition `where_in` adds to a query over another schema; public for that call only.
+    def __sugar_in_condition(column : String) : ::SugarORM::Condition
+      refuse_lock("where_in")
+      predicates = conditions
+      sql = String.build do |io|
+        io << "\"#{column}\" IN (SELECT \"#{T.__sugar_primary_key}\" FROM "
+        io << T.__sugar_quoted_table
+        write_filters(io, order: true, numbered: false)
+        io << ")"
+      end
+      ::SugarORM::Condition.new(sql, predicates.flat_map(&.values))
+    end
+
     # Deletes every matching row and returns how many were deleted.
     def delete_all : Int64
       refuse_lock("delete_all")
@@ -230,6 +288,14 @@ module SugarORM
       ::SugarORM::Repo.using(db) { find!(id) }
     end
 
+    def sum_text(db : ::SugarORM::Handle, field : T::Field) : String
+      ::SugarORM::Repo.using(db) { sum_text(field) }
+    end
+
+    def group_sum_text(db : ::SugarORM::Handle, by : T::Field, of : T::Field)
+      ::SugarORM::Repo.using(db) { group_sum_text(by, of) }
+    end
+
     # `Team::Query.where(...)` and friends start from an empty query.
     def self.where(fragment : String, *args)
       new.where(fragment, *args)
@@ -237,6 +303,18 @@ module SugarORM
 
     def self.order_by(field : T::Field, direction : Symbol = :asc)
       new.order_by(field, direction)
+    end
+
+    def self.sum_text(field : T::Field)
+      new.sum_text(field)
+    end
+
+    def self.group_sum_text(by : T::Field, of : T::Field)
+      new.group_sum_text(by, of)
+    end
+
+    def self.where_in(field : T::Field, parent : ::SugarORM::Query(U, Q)) forall U, Q
+      new.where_in(field, parent)
     end
 
     def self.limit(count : Int32)
@@ -332,12 +410,15 @@ module SugarORM
       @clauses.conditions
     end
 
-    private def write_filters(io : IO, order : Bool) : Nil
+    # With *numbered* false each condition keeps its `?` binds, for a subquery whose
+    # binds the enclosing query numbers in sequence with its own.
+    private def write_filters(io : IO, order : Bool, numbered : Bool = true) : Nil
       predicates = conditions
       unless predicates.empty?
         index = 0
         io << " WHERE "
         predicates.join(io, " AND ") do |condition, inner|
+          next inner << condition.sql unless numbered
           inner << condition.sql.gsub("?") { index += 1; "$#{index}" }
         end
       end

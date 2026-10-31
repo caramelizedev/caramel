@@ -63,6 +63,7 @@ module Shop
       has packer : Int64?
       has tea : Tea?
       has shipped_on : Day?
+      has parcels_count : Int32 = 1
       has term : Term?
       # A carried name kept while `shipped_by` becomes `courier` (ADR 0041).
       the courier : Courier? = shipped_by
@@ -93,6 +94,14 @@ module Shop
       finds shipped_between(from : Day, to : Day), where: {shipped_on: from..to},
         order: {shipped_on: :desc}
       counts shipped_since(day : Day), where: {shipped_on: day..}
+      sums teas_placed, of: Line.tea, where: {state: :placed}
+      groups teas_by_note(from : Day), of: Line.tea, by: Line.note,
+        where: {shipped_on: from.., state: :placed}
+      groups lines_by_tea, of: Line.tea, by: Line.tea
+      groups by_state, of: :parcels_count, by: :state
+      groups by_day, of: :parcels_count, by: :shipped_on
+      groups by_tea, of: :parcels_count, by: :tea
+      groups by_roast, of: :parcels_count, by: :roast, where: {state: :placed}
       finds holding(tea : Int64) do |orders|
         orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea = ?)", tea)
       end
@@ -146,6 +155,8 @@ module Shop
 
       finds best_sellers(count : Int32), order: {sold: :desc}, first: count
       counts selling, where: {sold: 1..}
+      sums tins_sold, of: :sold
+      groups sold_by_tea, of: :sold, by: :tea
 
       whenever Order::Placed, each: :lines do |placed, line|
         Sales[line.tea].sold += line.quantity.raw

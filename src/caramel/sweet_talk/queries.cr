@@ -1,7 +1,8 @@
-# Repository queries, `finds` and `counts`, shared by aggregates, projections and processes.
+# Repository queries, `finds`, `counts`, `sums` and `groups`, shared by aggregates,
+# projections and processes.
 module SweetTalk
-  # `finds` and `counts`: the queries an aggregate, a projection or a process declares on
-  # its rows.
+  # `finds`, `counts`, `sums` and `groups`: the queries an aggregate, a projection or a
+  # process declares on its rows.
   module Queried
     # `finds placed_for(member : Account), where: {member: member, state: :placed}` is a
     # repository query: the aggregates (or a projection's rows) whose attributes equal the
@@ -44,8 +45,8 @@ module SweetTalk
                             "#{kind.id}" %}
       {% end %}
       {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
-        {% call.raise "#{short.id} already has a query named #{verb}: give each finds and " +
-                      "counts its own name" %}
+        {% call.raise "#{short.id} already has a query named #{verb}: give each finds, " +
+                      "counts, sums and groups its own name" %}
       {% end %}
       {% declarative = !where.is_a?(NilLiteral) || !satisfying.is_a?(NilLiteral) ||
                        !order.is_a?(NilLiteral) || !first.is_a?(NilLiteral) %}
@@ -199,8 +200,8 @@ module SweetTalk
                             "#{kind.id}" %}
       {% end %}
       {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
-        {% call.raise "#{short.id} already has a query named #{verb}: give each finds and " +
-                      "counts its own name" %}
+        {% call.raise "#{short.id} already has a query named #{verb}: give each finds, " +
+                      "counts, sums and groups its own name" %}
       {% end %}
       {% unless where.is_a?(NilLiteral) || where.is_a?(NamedTupleLiteral) %}
         {% where.raise "counts #{verb} takes where: {attribute: value}, as in where: " +
@@ -228,6 +229,362 @@ module SweetTalk
 
       def self.{{ verb }}({{ call.args.splat }}) : Int64
         __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }}).count
+      end
+
+      {% nothing = call.args.map { |arg| "Pointer(#{arg.type}).null.value".id } %}
+      typeof({{ verb }}({{ nothing.splat }}))
+    end
+
+    # `sums spent_by(member : Account), of: Line.price, where: {member: member, state:
+    # :placed}` adds up one attribute over the live aggregates (or projection rows) `finds`
+    # with the same where: and satisfying: would return, in one statement; with neither,
+    # over every live one. `of:` names an attribute of this model by symbol, or of one of
+    # its entities as `Line.price`; it is an Int32, Int64 or Float64 column, or a value that
+    # wraps a whole number or a decimal, takes 0 and has no upper bound. The sum comes back
+    # as that type, zero when nothing matches.
+    macro sums(call, of = nil, where = nil, satisfying = nil, **unknown, &block)
+      {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
+                 call.args.all?(&.is_a?(TypeDeclaration)) %}
+      {% unless typed %}
+        {% call.raise "sums takes a verb and typed arguments, as in sums " +
+                      "spent_by(member : Account), of: Line.price, where: {member: member}" %}
+      {% end %}
+      {% verb = call.name %}
+      {% short = @type.name.split("::").last %}
+      {% if block %}
+        {% call.raise "sums #{verb} takes of:, where: and satisfying:, not a block" %}
+      {% end %}
+      {% unless unknown.empty? %}
+        {% call.raise "sums #{verb} takes of:, where: and satisfying:, not " +
+                      "#{unknown.keys[0]}:" %}
+      {% end %}
+      {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+      {% kept = keyed ? %w[all new allocate] : %w[create find find? all new allocate] %}
+      {% if kept.includes?(verb.stringify) %}
+        {% call.raise "sums #{verb} would replace #{short.id}.#{verb}: name it for what it " +
+                      "adds up" %}
+      {% end %}
+      {% if keyed && !satisfying.is_a?(NilLiteral) %}
+        {% kind = @type < ::SweetTalk::Projection ? "projection" : "process" %}
+        {% satisfying.raise "sums #{verb} takes satisfying: only in an aggregate: a " +
+                            "specification is a rule on an aggregate, and #{short.id} is a " +
+                            "#{kind.id}" %}
+      {% end %}
+      {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
+        {% call.raise "#{short.id} already has a query named #{verb}: give each finds, " +
+                      "counts, sums and groups its own name" %}
+      {% end %}
+      {% unless where.is_a?(NilLiteral) || where.is_a?(NamedTupleLiteral) %}
+        {% where.raise "sums #{verb} takes where: {attribute: value}, as in where: " +
+                       "{member: member, state: :placed}" %}
+      {% end %}
+      {% shaped = of.is_a?(SymbolLiteral) ||
+                  (of.is_a?(Call) && of.receiver.is_a?(Path) && of.args.empty? &&
+                   of.named_args.is_a?(Nop) && of.block.is_a?(Nop) && of.block_arg.is_a?(Nop)) %}
+      {% unless shaped %}
+        {% (of.is_a?(NilLiteral) ? call : of).raise "sums #{verb} takes of:, the attribute " +
+                                                    "it adds up, as in of: :total or of: " +
+                                                    "Line.price" %}
+      {% end %}
+      {% if of.is_a?(SymbolLiteral) %}
+        {% unless @type.has_constant?("SWEETTALK_HAS_#{of.id.upcase}") %}
+          {% of.raise "sums #{verb} adds up #{of}, which #{short.id} does not have above " +
+                      "this line: declare it, a stored attribute, before the query" %}
+        {% end %}
+        {% summed = @type.constant("SWEETTALK_HAS_#{of.id.upcase}") %}
+        {% entity = nil %}
+        {% foreign = nil %}
+      {% else %}
+        {% entity = parse_type("#{@type.name}::#{of.receiver}").resolve? %}
+        {% held = entity && entity < ::SweetTalk::Entity &&
+                  entity.constant("SWEETTALK_PARENT")[1] == @type.constant("SWEETTALK_ROW") %}
+        {% unless held %}
+          {% of.raise "sums #{verb} adds up #{of}, but #{of.receiver} is not an entity of " +
+                      "#{short.id} declared above this line" %}
+        {% end %}
+        {% unless entity.has_constant?("SWEETTALK_HAS_#{of.name.upcase}") %}
+          {% of.raise "sums #{verb} adds up #{of}, which #{of.receiver} does not have above " +
+                      "this line: declare it, a stored attribute, before the query" %}
+        {% end %}
+        {% summed = entity.constant("SWEETTALK_HAS_#{of.name.upcase}") %}
+        {% foreign = "#{entity.constant("SWEETTALK_PARENT")[0].id}_id" %}
+      {% end %}
+      {% total = nil %}
+      {% build = nil %}
+      {% scalars = {"Int32" => "to_i32", "Int64" => "to_i64", "Float64" => "to_f64"} %}
+      {% if summed[2] == "column" && scalars[summed[6]] %}
+        {% total = summed[6] %}
+        {% build = "total.#{scalars[summed[6]].id}" %}
+      {% elsif summed[2] == "value" %}
+        {% value_type = parse_type(summed[10]).resolve? %}
+        {% wraps = value_type && value_type.constant("SWEETTALK_WRAPS") %}
+        {% if %w[Int32 Int64].includes?(wraps) %}
+          {% total = summed[10] %}
+          {% build = "#{summed[10].id}.new(total.to_i64)" %}
+        {% elsif wraps == "::BigDecimal" %}
+          {% total = summed[10] %}
+          {% build = "#{summed[10].id}.new(::BigDecimal.new(total))" %}
+        {% end %}
+        {% if total %}
+          {% bounds = value_type.constant("SWEETTALK_BOUNDS") %}
+          {% zero = bounds[0].is_a?(NilLiteral) ||
+                    bounds[0] =~ /\A0(_?[iu](8|16|32|64|128))?\z|\A0\.0+\z/ %}
+          {% unless bounds[1].is_a?(NilLiteral) && zero %}
+            {% of.raise "sums #{verb} adds up #{of}, a #{summed[10].id}, whose bounds a sum " +
+                        "can break: add up a value that takes 0 and has no upper bound, as " +
+                        "in value Cents, Int64, means: \"…\"" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% unless total %}
+        {% of.raise "sums #{verb} adds up #{of}, which is not a number: add up an Int32, " +
+                    "Int64 or Float64 attribute, or a value that wraps a whole number or a " +
+                    "decimal" %}
+      {% end %}
+      {% keys = where.is_a?(NilLiteral) ? [] of String : where.keys.map(&.stringify) %}
+      {% states = [] of String %}
+      {% if where.is_a?(NamedTupleLiteral) %}
+        {% for key, value in where %}
+          {% if key.stringify == "state" %}
+            {% listed = value.is_a?(ArrayLiteral) ? value : [value] %}
+            {% for state in listed %}
+              {% states << state.id.stringify %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% at = "#{call.filename.id}:#{call.line_number}:#{call.column_number}" %}
+      {% rule = satisfying.is_a?(NilLiteral) ? nil : satisfying.stringify %}
+      # {word, verb, where: keys, states, order: keys, satisfying:, file:line:column}
+      SWEETTALK_QUERY_{{ verb.upcase }} = {"sums", {{ verb.stringify }},
+                                           {{ keys }} of String, {{ states }} of String,
+                                           [] of String, {{ rule }}, {{ at }}}
+      __sweettalk_filter {{ call }}, {{ where }}, {{ satisfying }}
+
+      def self.{{ verb }}({{ call.args.splat }}) : {{ total.id }}
+        rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
+        {% if entity %}
+          {% row = entity.constant("SWEETTALK_ROW") %}
+          rows = {{ row.id }}.query.where_in(:{{ foreign.id }}, rows)
+        {% end %}
+        total = rows.sum_text(:{{ summed[4].id }})
+        {{ build.id }}
+      end
+
+      {% nothing = call.args.map { |arg| "Pointer(#{arg.type}).null.value".id } %}
+      typeof({{ verb }}({{ nothing.splat }}))
+    end
+
+    # `groups priced_by_tea(member : Account), of: Line.price, by: Line.tea, where: {member:
+    # member, state: :placed}` is `sums` once per value of `by:`, an attribute of the same
+    # model as `of:` with a one-column key: text, a whole number, a Bool, a day, a decimal,
+    # an aggregate it refers to, or `:state`. Each row is `{by: key, total: sum}`, ordered by
+    # the stored key, nil (an optional attribute's) last; a key no row has is absent.
+    macro groups(call, of = nil, by = nil, where = nil, satisfying = nil, **unknown, &block)
+      {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
+                 call.args.all?(&.is_a?(TypeDeclaration)) %}
+      {% unless typed %}
+        {% call.raise "groups takes a verb and typed arguments, as in groups " +
+                      "priced_by_tea(member : Account), of: Line.price, by: Line.tea, where: " +
+                      "{member: member}" %}
+      {% end %}
+      {% verb = call.name %}
+      {% short = @type.name.split("::").last %}
+      {% if block %}
+        {% call.raise "groups #{verb} takes of:, by:, where: and satisfying:, not a block" %}
+      {% end %}
+      {% unless unknown.empty? %}
+        {% call.raise "groups #{verb} takes of:, by:, where: and satisfying:, not " +
+                      "#{unknown.keys[0]}:" %}
+      {% end %}
+      {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+      {% kept = keyed ? %w[all new allocate] : %w[create find find? all new allocate] %}
+      {% if kept.includes?(verb.stringify) %}
+        {% call.raise "groups #{verb} would replace #{short.id}.#{verb}: name it for what it " +
+                      "adds up" %}
+      {% end %}
+      {% if keyed && !satisfying.is_a?(NilLiteral) %}
+        {% kind = @type < ::SweetTalk::Projection ? "projection" : "process" %}
+        {% satisfying.raise "groups #{verb} takes satisfying: only in an aggregate: a " +
+                            "specification is a rule on an aggregate, and #{short.id} is a " +
+                            "#{kind.id}" %}
+      {% end %}
+      {% if @type.has_constant?("SWEETTALK_QUERY_#{verb.upcase}") %}
+        {% call.raise "#{short.id} already has a query named #{verb}: give each finds, " +
+                      "counts, sums and groups its own name" %}
+      {% end %}
+      {% unless where.is_a?(NilLiteral) || where.is_a?(NamedTupleLiteral) %}
+        {% where.raise "groups #{verb} takes where: {attribute: value}, as in where: " +
+                       "{member: member, state: :placed}" %}
+      {% end %}
+      {% shaped = of.is_a?(SymbolLiteral) ||
+                  (of.is_a?(Call) && of.receiver.is_a?(Path) && of.args.empty? &&
+                   of.named_args.is_a?(Nop) && of.block.is_a?(Nop) && of.block_arg.is_a?(Nop)) %}
+      {% unless shaped %}
+        {% (of.is_a?(NilLiteral) ? call : of).raise "groups #{verb} takes of:, the attribute " +
+                                                    "it adds up, as in of: :total or of: " +
+                                                    "Line.price" %}
+      {% end %}
+      {% if of.is_a?(SymbolLiteral) %}
+        {% unless @type.has_constant?("SWEETTALK_HAS_#{of.id.upcase}") %}
+          {% of.raise "groups #{verb} adds up #{of}, which #{short.id} does not have above " +
+                      "this line: declare it, a stored attribute, before the query" %}
+        {% end %}
+        {% summed = @type.constant("SWEETTALK_HAS_#{of.id.upcase}") %}
+        {% entity = nil %}
+        {% foreign = nil %}
+      {% else %}
+        {% entity = parse_type("#{@type.name}::#{of.receiver}").resolve? %}
+        {% held = entity && entity < ::SweetTalk::Entity &&
+                  entity.constant("SWEETTALK_PARENT")[1] == @type.constant("SWEETTALK_ROW") %}
+        {% unless held %}
+          {% of.raise "groups #{verb} adds up #{of}, but #{of.receiver} is not an entity of " +
+                      "#{short.id} declared above this line" %}
+        {% end %}
+        {% unless entity.has_constant?("SWEETTALK_HAS_#{of.name.upcase}") %}
+          {% of.raise "groups #{verb} adds up #{of}, which #{of.receiver} does not have above " +
+                      "this line: declare it, a stored attribute, before the query" %}
+        {% end %}
+        {% summed = entity.constant("SWEETTALK_HAS_#{of.name.upcase}") %}
+        {% foreign = "#{entity.constant("SWEETTALK_PARENT")[0].id}_id" %}
+      {% end %}
+      {% total = nil %}
+      {% build = nil %}
+      {% scalars = {"Int32" => "to_i32", "Int64" => "to_i64", "Float64" => "to_f64"} %}
+      {% if summed[2] == "column" && scalars[summed[6]] %}
+        {% total = summed[6] %}
+        {% build = "total.#{scalars[summed[6]].id}" %}
+      {% elsif summed[2] == "value" %}
+        {% value_type = parse_type(summed[10]).resolve? %}
+        {% wraps = value_type && value_type.constant("SWEETTALK_WRAPS") %}
+        {% if %w[Int32 Int64].includes?(wraps) %}
+          {% total = summed[10] %}
+          {% build = "#{summed[10].id}.new(total.to_i64)" %}
+        {% elsif wraps == "::BigDecimal" %}
+          {% total = summed[10] %}
+          {% build = "#{summed[10].id}.new(::BigDecimal.new(total))" %}
+        {% end %}
+        {% if total %}
+          {% bounds = value_type.constant("SWEETTALK_BOUNDS") %}
+          {% zero = bounds[0].is_a?(NilLiteral) ||
+                    bounds[0] =~ /\A0(_?[iu](8|16|32|64|128))?\z|\A0\.0+\z/ %}
+          {% unless bounds[1].is_a?(NilLiteral) && zero %}
+            {% of.raise "groups #{verb} adds up #{of}, a #{summed[10].id}, whose bounds a sum " +
+                        "can break: add up a value that takes 0 and has no upper bound, as " +
+                        "in value Cents, Int64, means: \"…\"" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% unless total %}
+        {% of.raise "groups #{verb} adds up #{of}, which is not a number: add up an Int32, " +
+                    "Int64 or Float64 attribute, or a value that wraps a whole number or a " +
+                    "decimal" %}
+      {% end %}
+      {% shaped = by.is_a?(SymbolLiteral) ||
+                  (by.is_a?(Call) && by.receiver.is_a?(Path) && by.args.empty? &&
+                   by.named_args.is_a?(Nop) && by.block.is_a?(Nop) && by.block_arg.is_a?(Nop)) %}
+      {% unless shaped %}
+        {% (by.is_a?(NilLiteral) ? call : by).raise "groups #{verb} takes by:, the attribute " +
+                                                    "it groups by, as in by: :state or by: " +
+                                                    "Line.tea" %}
+      {% end %}
+      {% if entity %}
+        {% unless by.is_a?(Call) && by.receiver.stringify == of.receiver.stringify %}
+          {% by.raise "groups #{verb} adds up #{of}, so it groups by another attribute of " +
+                      "#{of.receiver}, not #{by}: narrow #{short.id} with where: instead" %}
+        {% end %}
+        {% key_name = by.name.stringify %}
+        {% key_owner = entity %}
+        {% key_home = of.receiver %}
+      {% else %}
+        {% unless by.is_a?(SymbolLiteral) %}
+          {% by.raise "groups #{verb} adds up #{of}, so it groups by an attribute of " +
+                      "#{short.id}, not #{by}" %}
+        {% end %}
+        {% key_name = by.id.stringify %}
+        {% key_owner = @type %}
+        {% key_home = short %}
+      {% end %}
+      {% inner = nil %}
+      {% if key_name == "state" %}
+        {% unless key_owner.has_constant?("SWEETTALK_MOVES") %}
+          {% by.raise "groups #{verb} groups by state, which #{key_home.id} does not have " +
+                      "above this line" %}
+        {% end %}
+        {% key_column = "state" %}
+        {% key_type = "#{key_owner}::State" %}
+        {% inner = "#{key_owner}::State.parse(text)" %}
+        {% optional = false %}
+      {% else %}
+        {% unless key_owner.has_constant?("SWEETTALK_HAS_#{key_name.upcase.id}") %}
+          {% by.raise "groups #{verb} groups by #{by}, which #{key_home.id} does not have " +
+                      "above this line: declare it, a stored attribute, before the query" %}
+        {% end %}
+        {% key = key_owner.constant("SWEETTALK_HAS_#{key_name.upcase.id}") %}
+        {% key_column = key[4] %}
+        {% key_type = key[10] %}
+        {% optional = key[9] %}
+        {% texts = {"String" => "text", "Int32" => "text.to_i32", "Int64" => "text.to_i64",
+                    "Bool" => "text == \"true\""} %}
+        {% if key[2] == "column" %}
+          {% inner = texts[key[10].gsub(/\A::/, "")] %}
+        {% elsif key[2] == "value" %}
+          {% key_value = parse_type(key[10]).resolve? %}
+          {% wraps = key_value && key_value.constant("SWEETTALK_WRAPS") %}
+          {% if %w[Int32 Int64].includes?(wraps) %}
+            {% inner = "#{key[10].id}.new(text.to_i64)" %}
+          {% elsif %w[String ::SugarORM::Date].includes?(wraps) %}
+            {% inner = "#{key[10].id}.new(text)" %}
+          {% elsif wraps == "::BigDecimal" %}
+            {% inner = "#{key[10].id}.new(::BigDecimal.new(text))" %}
+          {% end %}
+        {% elsif key[2] == "reference" %}
+          {% key_type = "#{key[10].id}::Id" %}
+          {% inner = "#{key[10].id}::Id.new(text.to_i64)" %}
+        {% end %}
+      {% end %}
+      {% unless inner %}
+        {% by.raise "groups #{verb} groups by #{by}, which has no one-column key: group by " +
+                    "text, a whole number, a Bool, a day, a decimal, an aggregate it refers " +
+                    "to, or state" %}
+      {% end %}
+      {% key_type = "#{key_type.id}?" if optional %}
+      {% keys = where.is_a?(NilLiteral) ? [] of String : where.keys.map(&.stringify) %}
+      {% states = [] of String %}
+      {% if where.is_a?(NamedTupleLiteral) %}
+        {% for key, value in where %}
+          {% if key.stringify == "state" %}
+            {% listed = value.is_a?(ArrayLiteral) ? value : [value] %}
+            {% for state in listed %}
+              {% states << state.id.stringify %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% at = "#{call.filename.id}:#{call.line_number}:#{call.column_number}" %}
+      {% rule = satisfying.is_a?(NilLiteral) ? nil : satisfying.stringify %}
+      # {word, verb, where: keys, states, order: keys, satisfying:, file:line:column}
+      SWEETTALK_QUERY_{{ verb.upcase }} = {"groups", {{ verb.stringify }},
+                                           {{ keys }} of String, {{ states }} of String,
+                                           [] of String, {{ rule }}, {{ at }}}
+      __sweettalk_filter {{ call }}, {{ where }}, {{ satisfying }}
+
+      def self.{{ verb }}({{ call.args.splat }}) \
+        : Array(NamedTuple(by: {{ key_type.id }}, total: {{ total.id }}))
+        rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
+        {% if entity %}
+          {% row = entity.constant("SWEETTALK_ROW") %}
+          rows = {{ row.id }}.query.where_in(:{{ foreign.id }}, rows)
+        {% end %}
+        rows.group_sum_text(:{{ key_column.id }}, :{{ summed[4].id }}).map do |key, total|
+          {% if optional %}
+            by = key.try { |text| {{ inner.id }} }
+          {% else %}
+            text = key.not_nil!
+            by = {{ inner.id }}
+          {% end %}
+          {by: by, total: {{ build.id }}}
+        end
       end
 
       {% nothing = call.args.map { |arg| "Pointer(#{arg.type}).null.value".id } %}

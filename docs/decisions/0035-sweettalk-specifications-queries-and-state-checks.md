@@ -35,21 +35,23 @@ and a two-word state was written without its underscore, so `finds state:` misse
      in one column, and `id` breaks ties.
    - `counts verb(args), where: {…}, satisfying: Rule` returns how many live aggregates
      match, in one statement; with neither, every live one.
+   - `sums` and `groups` add an attribute up over the same rows, in one statement
+     ([ADR 0049](0049-sweettalk-sums-and-groups.md)).
    - `finds verb(args) do |orders| … end` is the escape hatch. Its block gets the live
      rows, with removed ones and other tenants' already left out, and is one expression
      that narrows them with SugarORM's `where`, `where_null`, `order_by`, `limit` and
      `offset`; the aggregates are built from its result. It names neither `Rows`, nor
      SugarORM, nor its `Repo`.
-   - A specification is checked where it is declared, and a context checks every `finds`
-     and `counts` when it closes, whether or not anything calls them. A key, a state or an
-     `order:` key the aggregate lacks, a list of entities, a derived value, a value of the
-     wrong type, an unknown argument, a query name used twice or named like a repository
-     method, or a `satisfying:` that is not a specification on the same aggregate does not
-     compile.
-   - A projection or a process declares `finds` and `counts` too, over its own attributes
-     and its key, with `order:`, `first:` and the block; a process's `state:` too. Neither
-     takes `satisfying:`, and every row is live. A query named `all`, `new` or `allocate`
-     on either does not compile.
+   - A specification is checked where it is declared, and a context checks every `finds`,
+     `counts`, `sums` and `groups` when it closes, whether or not anything calls them. A
+     key, a state or an `order:` key the aggregate lacks, a list of entities, a derived
+     value, a value of the wrong type, an unknown argument, a query name used twice or
+     named like a repository method, or a `satisfying:` that is not a specification on the
+     same aggregate does not compile.
+   - A projection or a process declares `finds`, `counts`, `sums` and `groups` too, over
+     its own attributes and its key, with `order:`, `first:` and the block; a process's
+     `state:` too. Neither takes `satisfying:`, and every row is live. A query named
+     `all`, `new` or `allocate` on either does not compile.
    - Only the aggregate, projection or process builds itself from rows: its loader is
      protected.
 3. **Lifecycle checks** (amends ADR 0031 decision 11). A lifecycle stores each state as
