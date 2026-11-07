@@ -322,6 +322,7 @@ const compileRows = {
   'A name or call another context does not publish, a publishes of a name the context does not declare, or of an expression': ['unpublished_name', 'unpublished_call', 'unpublished_in_border', 'published_after_use', 'publishes_unknown', 'publishes_expression'],
   'A kernel whose shared_by: is not a list of two or more contexts or kernels that say shares:, that holds anything but values and aggregates or names a context, or that holds a word fewer than two of its sharers name': ['kernel_shared_by_one', 'kernel_holds_service', 'kernel_unknown_sharer', 'kernel_sharer_silent', 'kernel_names_context', 'kernel_word_alone', 'kernel_word_unused'],
   'A shares: of anything but an earlier kernel that lists the context or kernel saying it, or a kernel named, followed or bordered by one that does not share it': ['shares_not_kernel', 'shares_unlisted', 'kernel_shares_unlisted', 'kernel_not_shared', 'follows_kernel', 'border_kernel'],
+  'A follows: B in a context that names no B:: and calls no B.verb outside border B, or a shares: K in one that names nothing in K': ['follows_unused', 'shares_unused'],
   'Caramel::Outbound or HTTP::Client outside a border with an outside system, or such a border named like a context, holding a whenever, or without its outside: text': ['outbound_outside_border', 'client_in_context_border', 'outside_is_a_context', 'whenever_outside', 'outside_not_text', 'outside_nil', 'kernel_outbound'],
   'emit of another aggregate’s event': ['foreign_event'],
   'A mover the lifecycle does not declare': ['unknown_state'],

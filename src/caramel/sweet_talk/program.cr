@@ -474,7 +474,8 @@ module SweetTalk
   # context does not publish, `Rows` named in a context, outside borders named like a
   # context, a kernel named, followed or bordered by one that does not share it, a kernel
   # that names a context, shared by an unknown or silent context or kernel, or holding a
-  # word fewer than two of its sharers name, and cycles of dependency edges.
+  # word fewer than two of its sharers name, cycles of dependency edges, and a `follows:` or
+  # `shares:` the context's text never uses.
   def self.context_map : Array({String, String, String})
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
@@ -678,6 +679,31 @@ module SweetTalk
                      "holds what two or more of its sharers name; remove #{word.id} from " +
                      "#{short.id}" %}
           {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    # A follows: or shares: that the context's own text never uses (ADR 0059).
+    {% for context in contexts %}
+      {% short = context.name.split("::").last %}
+      {% text = context.constant("SWEETTALK_TEXT") %}
+      {% at = "\n  --> #{context.constant("SWEETTALK_AT").id}" %}
+      {% for other in follows[short] %}
+        {% texts = [text] + borders[short].reject { |border| border[0] == other }.map(&.[1]) %}
+        {% used = texts.any? do |piece_text|
+             piece_text.includes?(other + "::") ||
+               piece_text.split(other + ".")[1..-1].any? { |piece| piece =~ /\A[a-z_]/ }
+           end %}
+        {% unless used %}
+          {% raise "#{context.name} follows #{other.id}, but names no #{other.id}:: and calls " +
+                   "no #{other.id}.verb outside a border with #{other.id}: remove #{other.id} " +
+                   "from follows:" + at %}
+        {% end %}
+      {% end %}
+      {% texts = [text] + borders[short].map(&.[1]) %}
+      {% for other in context.constant("SWEETTALK_SHARES") %}
+        {% unless texts.any?(&.includes?(other + "::")) %}
+          {% raise "#{context.name} shares #{other.id}, but names nothing in it: remove " +
+                   "#{other.id} from shares: and #{short.id} from #{other.id}'s shared_by:" + at %}
         {% end %}
       {% end %}
     {% end %}

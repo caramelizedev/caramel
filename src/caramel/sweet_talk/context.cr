@@ -1947,6 +1947,8 @@ module SweetTalk
       SWEETTALK_SHARED_BY = nil
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # {first segment, path} of each event of another context a process follows
+      # Where the context is declared, for the context map's refusals
+      SWEETTALK_AT      = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
       # The names other contexts may use, or nil when every name is open to a follower
       SWEETTALK_PUBLISHES = {{ offering.id }}

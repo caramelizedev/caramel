@@ -402,6 +402,12 @@ PROBLEMS = [
    "Shop::Money::Millionths is named only by Catalogue: a kernel holds what two or more of " \
    "its sharers name; move Millionths into Catalogue"},
   {"kernel_word_unused", "Shop::Money::Millionths is named by none of its sharers"},
+  {"follows_unused",
+   "Shop::Ordering follows Catalogue, but names no Catalogue:: and calls no Catalogue.verb " \
+   "outside a border with Catalogue: remove Catalogue from follows:"},
+  {"shares_unused",
+   "Shop::Fulfilment shares Money, but names nothing in it: remove Money from shares: and " \
+   "Fulfilment from Money's shared_by:"},
   {"command_finalize",
    "command finalize would replace the garbage collector's finalize on Run: name it for what " \
    "it does, as in to wind_up"},

@@ -109,6 +109,8 @@ module SweetTalk
       # Its values and aggregates that no other of them uses: two sharers must name each
       SWEETTALK_WORDS     = [{{ checked.splat }}] of String
       SWEETTALK_TEXT      = {{ body ? body.stringify : "" }}
+      # Where the kernel is declared, for the context map's refusals
+      SWEETTALK_AT        = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
       SWEETTALK_REACTS    = [] of {String, String}
       SWEETTALK_PUBLISHES = nil
 
