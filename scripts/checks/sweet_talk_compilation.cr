@@ -673,6 +673,12 @@ PROBLEMS = [
    "calculation Billing.share calls service Billing.requote: a calculation changes nothing; " \
    "let the caller run the service and pass its answer in"},
   {"calculation_in_aggregate", "calculation belongs in a context, not in aggregate Invoice"},
+  {"property_not_calculation",
+   "Corretto.property takes a calculation, and Shop::Billing.requote is none: declare " \
+   "calculation requote in Shop::Billing"},
+  {"property_undrawable",
+   "Corretto.property cannot draw note : Shop::Billing::Note for Billing.annotate: it draws " \
+   "Int32, Int64, Bool, String, nil, arrays and unions of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

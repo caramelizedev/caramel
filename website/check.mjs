@@ -404,6 +404,7 @@ const compileRows = {
   'A calculation without means: or returns:, with an untyped argument, an argument named result, a type not declared before it, or an argument or a result that holds an aggregate': ['calculation_untyped', 'calculation_without_means', 'calculation_without_returns', 'calculation_argument_result', 'calculation_unknown_type', 'calculation_takes_aggregate'],
   'A calculation whose body or rule names SugarORM, Repo, Rows or SweetTalk.lock, emits, calls a method on an aggregate’s class, or calls a service or a unit': ['calculation_emits', 'calculation_reaches_repo', 'calculation_finds', 'calculation_calls_service'],
   'A calculation in an aggregate, an entity, a projection, a process or a kernel': ['calculation_in_aggregate'],
+  'Corretto.property of anything but a calculation, or of one with an argument it cannot draw': ['property_not_calculation', 'property_undrawable'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

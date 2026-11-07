@@ -56,6 +56,19 @@ module Lots
       Cents.new((BigDecimal.new(held.raw) * (BigDecimal.new(1) - share)).to_i64)
     end
 
+    calculation label(note : String, counted : Bool, tally : Int64?), returns: String,
+      means: "a lot's label: its note, and its tally once counted" do
+      always "a label holds its note" do
+        result.includes?(note)
+      end
+      counted ? "#{note} (#{tally || 0})" : note
+    end
+
+    calculation settle_nothing(lot : Units), returns: Cents,
+      means: "a lot that settles nothing, for a run whose every case is refused" do
+      raise SweetTalk::Refusal.new("#{lot} units settle nothing.")
+    end
+
     service record_carelessly(total : Cents, settlements : Array(Units)),
       means: "records a lot, then splits it with the careless calculation" do
       Lot.create(total: total)

@@ -4,8 +4,9 @@ Date: 2026-11-07
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 2,
 [ADR 0036](0036-sweettalk-strategic-design.md) decision 3,
-[ADR 0057](0057-sweettalk-requirements.md) decision 2 and
-[ADR 0061](0061-sweettalk-modules.md) decision 2.
+[ADR 0057](0057-sweettalk-requirements.md) decision 2,
+[ADR 0061](0061-sweettalk-modules.md) decision 2, and
+[ADR 0010](0010-corretto-harness.md) decision 8 and with decision 11.
 
 ## Context
 
@@ -47,6 +48,12 @@ its identity lived in prose and in hand-written spec loops.
    `spec/sweet_talk/calculations_spec.cr` runs the lots' calculations: a rule that holds,
    one that breaks, a refusal, a `never` line, and a broken rule inside a service that
    rolls back its write.
+7. **Corretto runs a calculation's rules on generated cases.**
+   `Corretto.property(Context.verb)` draws 200 cases from what the argument types declare
+   and fails on the first broken rule, with the seed that `CORRETTO_SEED` gives back
+   ([ADR 0010](0010-corretto-harness.md) decision 11). `spec/sweet_talk/calculations_spec.cr`
+   runs it on the lots: the careless split breaks its rule within the 200 cases, and the
+   same seed fails the same way twice.
 
 ## Reasons
 
@@ -66,6 +73,12 @@ its identity lived in prose and in hand-written spec loops.
   around it is timed already.
 - A Crystal body, not an expression language: expression bodies are a decision of their own
   for the whole language, and a calculation needs nothing a typed function lacks.
+- A property case runs the real calculation on inputs no one chose, which an example
+  cannot: the generators come from the constants the value macros already record, so a
+  case needs no hand-written generator. A refusal skips the case, because the domain said
+  the input lies outside it; only a broken rule is the calculation's fault.
+- The runner needs no database, so it lives in Corretto beside the other spec helpers and
+  runs in any example; a fixed count and a printed seed make a failure repeatable.
 
 Rejected:
 
@@ -76,3 +89,8 @@ Rejected:
   breaks on one production input would then compute a wrong number silently.
 - **Rules outside the body.** They read `result`, which exists only after it, and a rule
   in the body sits beside the code that must keep it.
+- **A plain-`spec` helper in `caramel/sweet_talk/spec`, or `frappe check properties`.**
+  The first splits spec helpers across two products; the second runs specs outside
+  `frappe corretto`, and its workers' settings.
+- **Shrinking a failing case.** The case, its seed and its arguments are printed; the
+  arrays hold at most 8 elements, so a failure reads as it is.
