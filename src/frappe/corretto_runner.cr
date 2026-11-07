@@ -334,7 +334,7 @@ module Caramel::Frappe
              Caramel::Database::Config.parse(migration).database == database
         raise Error.new("Latte returned a different test worker database; specs refused")
       end
-      {
+      environment = {
         "CARAMEL_ENV"                   => "test",
         "CARAMEL_SPEC_DATABASE"         => database,
         "APP_ORIGIN"                    => @project.origin,
@@ -349,6 +349,10 @@ module Caramel::Frappe
         "CORRETTO_SITE"                 => id,
         "CORRETTO_LATTE_SOCKET"         => client.socket_path,
       }
+      # The seed of Corretto's property cases is the one setting a worker takes from the
+      # shell, so a failing case's printed seed runs it again (ADR 0010 decision 11).
+      ENV["CORRETTO_SEED"]?.try { |seed| environment["CORRETTO_SEED"] = seed }
+      environment
     end
 
     # Starts building each group's spec binary in its own fiber. Each channel

@@ -20,11 +20,11 @@ or a policy, and nothing stops one context from reaching into another's types.
 
 ## Decision
 
-1. **`require "caramel/sweet_talk"` is the only way in, and `include SweetTalk` scopes the
-   words.** The code lives in `src/caramel/sweet_talk/`. A module that includes `SweetTalk`
-   may use `context`, and a context's body the other words. No word is a top-level macro.
-   `frappe make domain NAME CONTEXT --means=TEXT` starts one in `app/domain/`, required
-   after the models.
+1. **`require "caramel/sweet_talk"` is the way in, a module's words come by its own
+   require (ADR 0061), and `include SweetTalk` scopes the words.** A module that includes
+   `SweetTalk` may use `context`, and a context's body the other words. No word is a
+   top-level macro. `frappe make domain NAME CONTEXT --means=TEXT` starts one in
+   `app/domain/`, required after the models.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
      a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
@@ -38,11 +38,11 @@ or a policy, and nothing stops one context from reaching into another's types.
      it. `has name : Type` is an attribute (decision 4); `the name : Type = expression` is
      a derived value, never stored.
    - **Lifecycle and invariants.** `moves open >> placed >> shipped, placed >> cancelled`
-     lists chains of states, the first being the initial one. It adds a predicate per
-     state and a private mover per later state, which refuses unless the current state
-     precedes it in a chain. `never "message" { condition }` refuses a command that
-     leaves the condition true, and `always` one that leaves it false; an entity's run
-     after its aggregate's. Both take `assures: "AC-12"` (ADR 0057).
+     lists chains of states, the first the initial one: a predicate per state, a private
+     mover per later state that refuses unless the current state precedes it in a chain,
+     and `moves_from` to read the graph (ADR 0058). `never "…" { condition }` refuses
+     a command leaving it true, and `always` one leaving it false; an entity's run after
+     its aggregate's, a `calculation`'s on `result`. Both take `assures:` (ADR 0057).
    - **Commands and events.** `to verb(arg : Type)` is a command (decision 5); `refuse
      "message"` ends it. `event Name, field : Type` declares an aggregate's or a context's
      event; `emit Name, field: value` queues it from a command or a service, its own only.
@@ -101,8 +101,8 @@ or a policy, and nothing stops one context from reaching into another's types.
      them in that order and finishes them in any, so no handler assumes another's work
      saved unless it says `after: Owner`, which the owner's job enqueues in its
      transaction (ADR 0048). For specs, `SweetTalk.emitted { … }` returns the events
-     `dispatch` saw on the fiber, in order; `SweetTalk.emitted(Order::Placed) { … }` one
-     class, typed.
+     `dispatch` saw, in order, `emitted(Order::Placed)` one class typed; ADR 0060 adds
+     `preview`.
    - **Job names.** A job is named after its owner (a context and its border, or a
      projection) and the event's path as written; when a rename changes that name, the job
      declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. An old
@@ -133,9 +133,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 - A compiled glossary and a checked context map turn the drift Domain-Driven Design warns
   about into compile errors, with macros and no reflection. Contexts are modules in one
   binary, so one machine stays enough.
-- `require` keeps SweetTalk out of an application that does not ask for it, as in
-  ADRs 0024 and 0025;
-  `include` keeps the words out of every other module.
+- `require` keeps SweetTalk out of an application that does not ask for it; `include` keeps
+  the words out of every other module.
 - Expanding into SugarORM and Cold Brew keeps state in PostgreSQL and one way to migrate.
   Enqueueing in the command's transaction is the outbox: an event is never lost or sent
   for a rolled-back change.

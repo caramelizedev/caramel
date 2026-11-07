@@ -4,7 +4,9 @@ Date: 2026-10-13
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2 and 3. Its
 rejection of a shared kernel word is reversed by
-[ADR 0044](0044-sweettalk-shared-kernels.md).
+[ADR 0044](0044-sweettalk-shared-kernels.md). Amended: decision 3 by
+[ADR 0062](0062-sweettalk-calculations.md), and decision 4 by
+[ADR 0060](0060-sweettalk-preview-and-commit.md).
 
 ## Context
 
@@ -27,14 +29,14 @@ that neither follows Catalogue nor sits in its border compiles, and draws no edg
    compiles where A follows B or inside `border B`, and in a border it draws a dependency
    edge.
 3. **A context may publish a language.** `publishes Cents, Tea::Id, price_of` lists the
-   context's types and services that other contexts may name; naming a type publishes
-   what it contains. Once a context publishes, every other context, a follower or a
-   border alike, names only those and the publisher's events: every event stays nameable
-   by any context that may name the publisher, because a follower reacts to them. A name
-   it does not publish does not compile, at the line that names it when the publisher is
-   declared first, and when the program's checks run otherwise. `publishes` lists only
-   names declared before it in the same context. A context that does not publish keeps
-   ADR 0030's rules.
+   context's types, services, units and calculations that other contexts may name; naming
+   a type publishes what it contains. Once a context publishes, every other context, a
+   follower or a border alike, names only those and the publisher's events: every event
+   stays nameable by any context that may name the publisher, because a follower reacts to
+   them. A name it does not publish does not compile, at the line that names it when the
+   publisher is declared first, and when the program's checks run otherwise. `publishes`
+   lists only names declared before it in the same context. A context that does not
+   publish keeps ADR 0030's rules.
 4. **A border may face a system outside the program.** `border Cards, outside: "…" do …
    end` declares a module `Cards` in the context and an `outside` edge in the context
    map; `outside:` is the line its glossary entry shows, with kind "outside", and anything
@@ -44,6 +46,8 @@ that neither follows Catalogue nor sits in its border compiles, and draws no edg
    method defined outside the context, is not caught. The border holds no `whenever` or
    `compensate`, because an outside system emits no events; a webhook arrives through an
    action, which runs a command. An outside border named like a context does not compile.
+   A command, a factory or a unit body that names the border's module does not compile,
+   and `Caramel::Outbound` refuses while a preview runs ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
 5. **Checks.** Each refusal above has a fixture in `sweet-talk-compilation`, and
    `spec/sweet_talk` runs a domain that uses all four decisions against PostgreSQL, with
    the outside system faked by `Corretto.stub_wire`.

@@ -44,10 +44,30 @@ module Caramel
     class TooLarge < Exception
     end
 
+    # A request made while `refusing` runs; the message is the reason it gave.
+    class Refused < Exception
+    end
+
+    # Runs the block with every request refused with *reason*, as `Refused`; a SweetTalk
+    # preview runs its body this way. Returns the block's value.
+    def self.refusing(reason : String, &)
+      fiber = Fiber.current
+      previous = fiber.__caramel_outbound_refused
+      fiber.__caramel_outbound_refused = reason
+      begin
+        yield
+      ensure
+        fiber.__caramel_outbound_refused = previous
+      end
+    end
+
     def self.request(method : String,
                      url : String,
                      headers : HTTP::Headers = HTTP::Headers.new,
                      body : String? = nil) : HTTP::Client::Response
+      if reason = Fiber.current.__caramel_outbound_refused
+        raise Refused.new(reason)
+      end
       unless ExternalURL.valid?(url)
         raise ArgumentError.new("Outbound requests need an absolute http(s) URL " \
                                 "without credentials or whitespace: #{url.inspect}")
@@ -267,4 +287,9 @@ module Caramel
       end
     end
   end
+end
+
+class Fiber
+  # Why `Caramel::Outbound` refuses requests on this fiber, while `refusing` runs.
+  property __caramel_outbound_refused : String? = nil
 end

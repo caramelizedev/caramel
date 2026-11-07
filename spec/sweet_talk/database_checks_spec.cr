@@ -55,7 +55,8 @@ describe "SweetTalk's database checks" do
         SQL
       checks.map(&.[:name]).should eq(%w[
         check_billing_bills_amount check_billing_bills_state_16e92b19
-        check_books_journals_state_c588884a check_catalogue_teas_held
+        check_books_journals_state_c588884a check_carrying_lots_total
+        check_catalogue_teas_held
         check_catalogue_teas_price check_catalogue_teas_roast_one_of_59746504
         check_catalogue_teas_stock check_counter_batches_opened_by_length_2_20
         check_counter_entries_amount
@@ -99,11 +100,22 @@ describe "SweetTalk's database checks" do
         check_ordering_orders_receipt_to_length_3_254
         check_ordering_orders_state_ef9524ce check_ordering_sales_takings
         check_pantry_adjustments_pending_is_zero_0f316047 check_pantry_adjustments_state_ec1638eb
-        check_pantry_crates_quantity_69784f25 check_pricing_teas_price
+        check_pantry_crates_quantity_69784f25 check_payments_entries_fee_all_or_none
+        check_payments_entries_fee_currency_one_of_8931cfef
+        check_payments_entries_original_currency_one_of_8931cfef
+        check_payments_entries_rate_all_or_none_f890cf76
+        check_payments_entries_rate_from_one_of_8931cfef
+        check_payments_entries_rate_to_one_of_8931cfef check_payments_entries_reported_all_or_none
+        check_payments_entries_reported_currency_one_of_8931cfef
+        check_payments_entry_lines_share_currency_one_of_8931cfef
+        check_payments_totals_reported_all_or_none
+        check_payments_totals_reported_currency_one_of_8931cfef check_pricing_teas_price
+        check_rates_quotes_rate_from_one_of_8931cfef check_rates_quotes_rate_to_one_of_8931cfef
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
         check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8
         check_shelf_tabs_state_d74ee900 check_store_teas_stock
+        check_till_receipts_state_0d631dad
       ])
     end
   end

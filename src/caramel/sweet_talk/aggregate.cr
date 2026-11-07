@@ -273,7 +273,7 @@ module SweetTalk
                  read = "row.#{part[1].id}"
                  "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
                end %}
-            {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
+            {% loads << "@#{name} = #{base.id}.new(#{parts.join(", ").id})" %}
             {% for part in attribute[7] %}
               {% raw = part[4] == "value" ? ".raw" : "" %}
               {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
@@ -726,6 +726,7 @@ module SweetTalk
               locked = {{ row }}.query.where(removed_at: nil).where(id: __sweettalk_raw_id).lock
               loaded = self.class.__sweettalk_rows(locked).first?
               __sweettalk_copy(loaded || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}."))
+              fiber.__sweettalk_run.try &.before(self)
               yield
               __sweettalk_check
               __sweettalk_save
@@ -740,6 +741,7 @@ module SweetTalk
         end
       end
 
+      __sweettalk_canonical
       ::SweetTalk.__sweettalk_schema({{ @type }})
       {% for collection in collections %}
         ::SweetTalk.__sweettalk_schemas({{ @type }}::{{ collection[3][6..-2].id }})
@@ -786,6 +788,7 @@ module SweetTalk
     # Enqueues the jobs and notifications of the events this aggregate emitted. Each is
     # recorded again first, now that the save gave every entity among its facts an id.
     def __sweettalk_dispatch_events : Nil
+      ::Fiber.current.__sweettalk_run.try &.saved(self)
       events = @__sweettalk_events.dup
       @__sweettalk_events.clear
       events.each do |event|

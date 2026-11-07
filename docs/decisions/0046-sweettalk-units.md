@@ -4,7 +4,7 @@ Date: 2026-10-28
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 5 and
 [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md) decisions 5, 7, 8 and
-10.
+10. Amended: decision 2 by [ADR 0060](0060-sweettalk-preview-and-commit.md).
 
 ## Context
 
@@ -39,7 +39,9 @@ aggregate first.
    commits. Each command inside it is a savepoint that dispatches its events as it does
    today; the unit pins one flow for them. A refusal, a boundary or any other error rolls
    the whole unit back, every aggregate instance its commands touched reloads what is
-   stored, and the error goes on.
+   stored, and the error goes on. Inside `SweetTalk.preview` it runs dry: the same locks,
+   body and lines, then the preview always rolls back and every instance reloads; a
+   `warn` line runs with them ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
 3. **`SweetTalk.lock` is the ordered lock.** `SweetTalk.lock(*ids)` takes ids, aggregates
    and arrays of either, groups them by table and locks each table's rows in one statement,
    `WHERE removed_at IS NULL AND id = ANY($1) ORDER BY id FOR UPDATE`, through the

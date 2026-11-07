@@ -39,7 +39,8 @@ module SweetTalk
     # `moves open >> placed >> shipped, placed >> cancelled` is the lifecycle, stored in a
     # `state` column. The first state is the initial one; `cancelled?` asks, and
     # `cancelled!`, private so only a command or a step moves it, refuses unless the
-    # current state comes just before it in a chain.
+    # current state comes just before it in a chain. `moves_from` and `may_become?` read
+    # the graph (`__sweettalk_graph`).
     macro moves(*chains)
       {% states = [] of Nil %}
       {% nodes = {} of Nil => Nil %}
@@ -91,6 +92,20 @@ module SweetTalk
       {% too_long = "moves would check #{owner}'s states as @name, longer than PostgreSQL's 63 " +
                     "bytes: shorten the context or the #{owner} name\n  --> #{at.id}" %}
       SWEETTALK_MOVES = [{{ states.splat }}]
+      # The states no move leaves (ADR 0060)
+      {% leaving = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% leaving = leaving + predecessors %}
+      {% end %}
+      SWEETTALK_FINAL = [{{ states.reject { |state| leaving.includes?(state) }.splat }}] of String
+      # Each move as `moves` allows it, "open >> placed", for the report (ADR 0059)
+      {% steps = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% for predecessor in predecessors %}
+          {% steps << "#{predecessor.id} >> #{state.id}" %}
+        {% end %}
+      {% end %}
+      SWEETTALK_STEPS = [{{ steps.splat }}] of String
       # {constraint suffix, expression} of the check that keeps `state` to these states
       ::SweetTalk.__sweettalk_hashed(SWEETTALK_STATE_CHECK,
         {"state_@digest", {{ "\"state\" IN (#{listed.id})" }}}, {{ states.sort.join(",") }},
@@ -132,6 +147,8 @@ module SweetTalk
           __sweettalk_entered(State::{{ state.camelcase.id }})
         end
       {% end %}
+
+      __sweettalk_graph({{ states }}, {{ before.empty? ? nil : before }})
     end
 
     # Called when a mover enters a state; an aggregate that pins a reference at a state
@@ -188,6 +205,7 @@ module SweetTalk
       {% codec = nil %}
       {% parts = nil %}
       {% nilable = false %}
+      {% optional_check = nil %}
       {% base = type.stringify %}
       {% if type.is_a?(Generic) && type.name.stringify == "Array" %}
         {% kind = "entities" %}
@@ -219,6 +237,11 @@ module SweetTalk
         {% nilable = resolved.nilable? %}
         {% members = [resolved] %}
         {% members = resolved.union_types.reject { |member| member == Nil } if resolved.union? %}
+        # An alias of a union, such as `Money::Amount?`, nests it in the union with Nil.
+        {% flat = [] of Nil %}
+        {% for member in members %}
+          {% flat = flat + (member.union? ? member.union_types : [member]) %}
+        {% end %}
         {% single = members.size == 1 && (!resolved.union? || nilable) %}
         {% base = "::#{members[0].name}" if single && nilable %}
         {% optional = nilable ? "?" : "" %}
@@ -253,6 +276,25 @@ module SweetTalk
           {% raw = "Int64#{optional.id}" %}
           {% column = "#{name}_id" %}
           {% lines = "belongs_to #{name} : ::#{members[0]}#{optional.id}" %}
+        {% elsif flat.all? do |member|
+                   marker = member.type_vars.size == 1 && member.type_vars[0]
+                   marker.is_a?(TypeNode) && marker.has_constant?("SWEETTALK_LOADER")
+                 end %}
+          # An amount (caramel/sweet_talk/money, ADR 0063): its currency in `<name>_currency`
+          # under the currencies' CHECK, its minor units in `<name>`, rebuilt by the loader
+          # its currency marker names.
+          {% kind = "composite" %}
+          {% column = nil %}
+          {% loader = flat[0].type_vars[0].constant("SWEETTALK_LOADER") %}
+          {% currency = parse_type(loader[1]).resolve %}
+          {% base = flat.size == 1 ? "::#{flat[0]}" : loader[0] %}
+          {% optional_check = {"all_or_none"} %}
+          {% listed = currency.constant("SWEETTALK_CHECK") %}
+          {% parts = [{"currency", "#{name}_currency", "String#{optional.id}", loader[1], "value",
+                       listed, nil},
+                      {"raw", name.stringify, "Int64#{optional.id}", "Int64", "column", nil,
+                       nil}] %}
+          {% lines = parts.map { |part| "field #{part[1].id} : #{part[2].id}" }.join("\n") %}
         {% elsif members.size == 1 && columns.includes?(members[0].stringify) %}
           {% kind = "column" %}
           {% raw = type.stringify %}
@@ -341,7 +383,7 @@ module SweetTalk
         {% lines = "#{lines.id}\n#{line.id}" %}
       {% end %}
       {% if kind == "composite" && nilable && parts.size > 1 %}
-        {% digest = composite.constant("SWEETTALK_OPTIONAL_CHECK")[0] %}
+        {% digest = (optional_check || composite.constant("SWEETTALK_OPTIONAL_CHECK"))[0] %}
         {% suffix = "#{name}_#{digest.id}" %}
         {% listed = parts.map { |part| "\"#{part[1].id}\"" }.join(", ") %}
         {% sql = "num_nonnulls(#{listed.id}) IN (0, #{parts.size})" %}
@@ -886,8 +928,9 @@ module SweetTalk
       {% name.raise "deadline belongs in a process, not in #{owner.id}" %}
     end
 
-    def refuse(message : String) : NoReturn
-      raise ::SweetTalk::Refusal.new(message)
+    # Ends the command with a refusal; `on: :quantity` names the field it is about.
+    def refuse(message : String, on : Symbol? = nil) : NoReturn
+      raise ::SweetTalk::Refusal.new(message, on: on)
     end
   end
 end

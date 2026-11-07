@@ -74,7 +74,7 @@ module SweetTalk
                  read = "row.#{part[1].id}"
                  "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
                end %}
-            {% loads << "@#{name} = #{type}.new(#{parts.join(", ").id})" %}
+            {% loads << "@#{name} = #{base.id}.new(#{parts.join(", ").id})" %}
             {% for part in attribute[7] %}
               {% raw = part[4] == "value" ? ".raw" : "" %}
               {% columns << "#{part[1].id}: @#{name}.#{part[0].id}#{raw.id}" %}
@@ -286,7 +286,11 @@ module SweetTalk
         raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; ")) unless changeset.saved?
         @__sweettalk_row = changeset.record
         @__sweettalk_id = changeset.record.id
+        ::Fiber.current.__sweettalk_run.try &.made(self) unless row
+        changeset.record.id
       end
+
+      __sweettalk_canonical
     end
 
     # Runs every `never` and `always` of this entity, then of each entity in its lists.

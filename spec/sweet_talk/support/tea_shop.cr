@@ -54,7 +54,7 @@ module TeaShop
       end
 
       to ship_free(tins : Tins) do
-        refuse "Only #{stock - held} tins of #{name} free." if held + tins > stock
+        refuse "Only #{stock - held} tins of #{name} free.", on: :tins if held + tins > stock
         @stock -= tins
       end
     end
@@ -90,7 +90,7 @@ module TeaShop
       has courier : Courier?
       has packer : Account?
       moves open >> placed >> shipped, open >> cancelled, placed >> cancelled
-      never "An order needs at least one tea." { placed? && lines.empty? }
+      never "An order needs at least one tea.", on: :lines { placed? && lines.empty? }
 
       entity Line, means: "one tea in an order, its price when added, and how many tins" do
         has tea : Catalogue::Tea

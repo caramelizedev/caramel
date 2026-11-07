@@ -9,6 +9,7 @@ require "./corretto/worker"
 require "./corretto/wire"
 require "./corretto/client"
 require "./corretto/matchers"
+require "./corretto/property"
 
 # Corretto: zero-mock integration testing. Specs require
 # "caramel/corretto" and call `Corretto.configure` once in spec/spec_helper.cr;

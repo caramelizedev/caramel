@@ -142,6 +142,13 @@ module Caramel::Frappe
       Command.new("requirements [ID]",
         "List the requirement ids the SweetTalk domain declares, each with the never, " \
         "always, specification and unit lines that assure it; ID shows one."),
+      Command.new("glossary [--json]",
+        "Print the SweetTalk domain's detailed glossary as Markdown: each term's meaning, " \
+        "a value's bounds and words, an aggregate's states and moves, an event's handlers " \
+        "in the order they run, a unit's changes: and locks:; --json prints the document."),
+      Command.new("contexts [--mermaid]",
+        "Print the SweetTalk context map: each context and kernel with what it depends on, " \
+        "reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart."),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
         "where none expands, the call whose block encloses it, such as " \

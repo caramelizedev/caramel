@@ -3,7 +3,9 @@
 Date: 2026-10-13
 
 Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decision 1, and
-applies [ADR 0030](0030-sweettalk-domain-language.md) to actions.
+applies [ADR 0030](0030-sweettalk-domain-language.md) to actions. Amended: decision 2 by
+[ADR 0058](0058-sweettalk-closed-sets-on-the-screen.md) and
+[ADR 0060](0060-sweettalk-preview-and-commit.md).
 
 ## Context
 
@@ -23,11 +25,16 @@ answer, not a fault. A contract field took only `String`, `Int32`, `Int64`, `Flo
 2. **`require "caramel/sweet_talk"` redefines the hook.**
    - A `SweetTalk::Refusal` that `handle` does not rescue answers 422 through
      `render_refusal(contract, refusal)`. Its message joins the contract's errors under
-     `_base`. A JSON client gets `{"errors": {"_base": [message]}}`, a browser or an htmx
-     request `contract_failure_page(contract)`, and any other client MRDP text starting
+     the field the refusal names with `on:` when the contract declares that field, and
+     under `_base` otherwise (ADR 0058). A JSON client gets
+     `{"errors": {"_base": [message]}}`, a browser or an htmx request
+     `contract_failure_page(contract)`, and any other client MRDP text starting
      `ERR INVALID:422`, as `render_errors` answers. An action overrides
      `contract_failure_page` to re-render its form with the refusal, or `render_refusal`
      to answer otherwise.
+   - A `SweetTalk::Stale`, a refusal, answers 422 through `render_stale(contract, stale)`,
+     which gives a JSON client the fresh preview under `preview` too
+     ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
    - A `SweetTalk::Missing` answers 404 with `Not found`, as a route parameter that does
      not convert does. `find`, and a command whose aggregate is gone, raise it. Asking an
      aggregate for its id before `create`, or an event for its subject before it is

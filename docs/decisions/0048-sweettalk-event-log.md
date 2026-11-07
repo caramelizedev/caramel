@@ -4,7 +4,8 @@ Date: 2026-10-28
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6 and
 [ADR 0041](0041-sweettalk-events-that-carry-attributes.md) decision 3. Decisions 1, 3 and 4
-are amended by [ADR 0051](0051-sweettalk-event-log-replay-and-retention.md).
+are amended by [ADR 0051](0051-sweettalk-event-log-replay-and-retention.md). Decision 3
+gained `before:` on 2026-11-07.
 
 ## Context
 
@@ -38,10 +39,14 @@ be said (#248, split from #168).
    does, so each tenant reads its own rows and a central context's log is shared. A
    declaration whose table would be `<context>_events` does not compile.
 3. **`Billing.logged` reads typed events.** `Billing.logged(Invoiced, subject: id, since: t,
-   limit: 100)` returns `Array(Invoiced)` built through the event's `__sweettalk_load` from
-   the row's fields and metadata, oldest first and newest last, the first `limit` rows after
-   `since:` by `occurred_at`; `subject:` takes an id or an `Int64`. `Billing.logged(subject:
-   id)` returns every class as `Array(SweetTalk::Event)`, chosen by the row's aggregate and
+   before: u, limit: 100)` returns `Array(Invoiced)` built through the event's
+   `__sweettalk_load` from the row's fields and metadata, oldest first and newest last, the
+   first `limit` rows whose `occurred_at` is at or after `since:` and before `before:`;
+   `subject:` takes an id or an `Int64`. `before:` reads the log as it stood at a moment:
+   what the program knew then, by when each event was emitted, not when what it records
+   took effect. A log kept a number of days (ADR 0051) answers with the rows it still
+   holds, none older than its window. `Billing.logged(subject: id)` returns every class as
+   `Array(SweetTalk::Event)` under the same keywords, chosen by the row's aggregate and
    name; a row no event stores any more raises `ArgumentError`, naming `renamed_from:`, as
    does a class the log does not keep. `SweetTalk.prune_events(Billing, before: t, chunk:
    1000)` deletes the rows that occurred before `t`, `chunk` rows a statement until one
@@ -76,10 +81,10 @@ be said (#248, split from #168).
    statement in `dispatch`; the existing specs run unchanged, and `after:` works without a
    log.
 7. **Checks.** `spec/sweet_talk/event_log_spec.cr` on the billing desk and the tenant shop's
-   examples prove the rows, the reader, pruning, the rebuild and its lock and refusal, the
-   ordering and the absence of followers after a failed predecessor against PostgreSQL; the
-   fixtures `after_not_following`, `after_cycle`, `after_each`, `rebuild_without_log` and
-   `event_log_table_taken` prove the refusals.
+   examples prove the rows, the reader and its bounds, pruning, the rebuild and its lock and
+   refusal, the ordering and the absence of followers after a failed predecessor against
+   PostgreSQL; the fixtures `after_not_following`, `after_cycle`, `after_each`,
+   `rebuild_without_log` and `event_log_table_taken` prove the refusals.
 
 ## Reasons
 
@@ -104,6 +109,15 @@ be said (#248, split from #168).
   transaction is atomic with the work it waits for, and is never enqueued when that work
   rolls back, which is also the consequence stated in decision 5.
 - **Not after `each:`.** One job per element would release the followers once per element.
+- **What was known at a time is a read of the log.** `occurred_at` is stamped when an
+  event is emitted, so the rows before a moment are what the program knew then. `before:`
+  excludes its bound and `since:` includes it, so two reads split at one moment share no
+  event and miss none. A log kept a number of days answers with what remains, as `since:`
+  and `reached` do; its declaration already says how far back it reaches.
+- **What is in effect after a correction is a column.** A command that finalises a
+  correction sets the aggregate's effective result, so a reader asks the row and the log
+  says when it changed. Astrona scanned its finalised corrections newest first for it, in
+  19 lines with three callers and a second copy.
 
 Rejected:
 
@@ -112,6 +126,16 @@ Rejected:
   different one and nothing could rebuild from it.
 - **Event sourcing.** Loading an aggregate from its log changes every command's read and
   the model ADR 0030 chose; the log is kept beside the rows, not instead of them.
+- **Keeping one aggregate's events as its truth, for now.** With `kept: :as_events` only a
+  fold of its events would write the row, and `find(id, as_of: t)` would fold to a moment.
+  Commands would still read the row, so the reason above does not reach it. On Astrona's
+  corrections, 2,306 lines, a reading of the code finds about 55 lines it would delete and
+  none of the seven documented refusals it would lift: the rest is a replay of what would
+  have been recorded under revised inputs, and policy, which no fold of recorded events
+  computes. Ten percent, 230 lines, or one lifted refusal would have justified the word, so
+  it waits for a second application that shows the need. Rows versioned by a `daterange`
+  key `WITHOUT OVERLAPS` (PostgreSQL 18) break one row per id and its lock; a
+  `<table>_history` beside each table adds a table and says nothing about corrections.
 - **Logging only what a projection follows.** The audit needs every event, and a projection
   added later follows events nobody followed when they occurred.
 - **A watermark instead of the refusal.** Jobs would carry log ids and the replay would skip

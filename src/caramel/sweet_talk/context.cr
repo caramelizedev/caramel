@@ -214,6 +214,8 @@ module SweetTalk
           {% end %}
           {% if listed %}
             SWEETTALK_ONE_OF = {{ members }}
+
+            __sweettalk_members({{ methods }})
           {% end %}
 
           getter raw : String
@@ -942,12 +944,13 @@ module SweetTalk
     # is a unit (ADR 0046): one transaction whose commands change the aggregates named in
     # `changes:`, each existing row locked first through `SweetTalk.lock` on the arguments
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
-    # rule over the set, checked after the body. It is a glossary entry, timed as a domain
-    # span named `Ledger.post`. `once_by: key` makes it run once per operation key: the first
-    # run keeps the key, a fingerprint of the other arguments and what it returned in the
-    # context's `<context>_operations` table; a repeat with the same arguments answers the
-    # first outcome without running, and one with other arguments is refused with
-    # `otherwise:` (ADR 0055).
+    # rule over the set, checked after the body; a `warn "…" { … }` line, checked with them,
+    # refuses a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
+    # entry, timed as a domain span named `Ledger.post`. `once_by: key` makes it run once
+    # per operation key: the first run keeps the key, a fingerprint of the other arguments
+    # and what it returned in the context's `<context>_operations` table; a repeat with the
+    # same arguments answers the first outcome without running, and one with other
+    # arguments is refused with `otherwise:` (ADR 0055).
     macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
                assures = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
@@ -1068,13 +1071,14 @@ module SweetTalk
       {% body = block.body %}
       {% steps = body.is_a?(Expressions) ? body.expressions : [body] %}
       {% rules = steps.select do |step|
-           step.is_a?(Call) && %w[never always].includes?(step.name.stringify) &&
+           step.is_a?(Call) && %w[never always warn].includes?(step.name.stringify) &&
              step.args.size == 1 && step.args[0].is_a?(StringLiteral) && !step.block.is_a?(Nop)
          end %}
       {% work = steps.reject { |step| rules.includes?(step) } %}
       {% what = "unit #{short.id}.#{call.name}" %}
       {% span = "#{short.id}.#{call.name}" %}
-      {% unit = {call.name.stringify, means, call.line_number, once} %}
+      {% unit = {call.name.stringify, means, call.line_number, once,
+                 named.map(&.stringify).join(", "), held.map(&.stringify).join(", ")} %}
       {% kinds = allowed.map { |name| "::#{name.id}" }.join(", ") %}
       {% refusal = "#{short.id}.#{call.name} already ran under this key with other arguments" %}
       {% refusal = otherwise unless otherwise.is_a?(NilLiteral) %}
@@ -1084,6 +1088,15 @@ module SweetTalk
         {{ "SWEETTALK_ASSURES_UNIT_#{call.name.upcase}" }})
       {% for rule in rules %}
         {% said = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "assures" } %}
+        {% field = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "on" } %}
+        {% if field %}
+          ::SweetTalk.__sweettalk_refusal_field({{ rule.name.stringify }}, {{ field.value }})
+        {% end %}
+        {% if said && rule.name == "warn" %}
+          {% said.raise "warn in unit #{short.id}.#{call.name} takes no assures:: a warning " +
+                        "that a person confirms lets the change through, so it assures nothing; " +
+                        "make it a never to assure the requirement" %}
+        {% end %}
         {% if said %}
           ::SweetTalk.__sweettalk_assures({{ rule.name.stringify }},
             {{ "#{rule.name} in unit #{short.id}.#{call.name}" }}, {{ rule.args[0] }},
@@ -1140,10 +1153,19 @@ module SweetTalk
               {% end %}
             end
             {% for rule in rules %}
+              {% named = rule.named_args || [] of Nil %}
+              {% field = named.find { |arg| arg.name.stringify == "on" } %}
+              {% on = field ? field.value : nil %}
               {% if rule.name == "never" %}
-                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) if ({{ rule.block.body }})
+                if ({{ rule.block.body }})
+                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                end
+              {% elsif rule.name == "warn" %}
+                ::SweetTalk.__sweettalk_warn({{ rule.args[0] }}) if ({{ rule.block.body }})
               {% else %}
-                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) unless ({{ rule.block.body }})
+                unless ({{ rule.block.body }})
+                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                end
               {% end %}
             {% end %}
             {% if once && !returns.is_a?(NilLiteral) %}
@@ -1561,9 +1583,9 @@ module SweetTalk
     end
 
     # `publishes Cents, Tea::Id, price_of` is this context's published language: the
-    # types, services and units another context may name. Once a context publishes, every
-    # other context names only those, and the events it reacts to. `context` reads the
-    # list; this checks that each name is declared before it.
+    # types, services, units and calculations another context may name. Once a context
+    # publishes, every other context names only those, and the events it reacts to.
+    # `context` reads the list; this checks that each name is declared before it.
     macro publishes(*names)
       {% short = @type.name.split("::").last %}
       {% for name in names %}
@@ -1571,15 +1593,17 @@ module SweetTalk
           {% found = name.resolve? %}
           {% declared = found && found.name.starts_with?("#{@type.name}::") %}
         {% elsif name.is_a?(Call) && name.receiver.is_a?(Nop) && name.args.empty? %}
-          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") ||
-                        @type.has_constant?("SWEETTALK_UNIT_#{name.name.upcase}") %}
+          {% declared = %w[SERVICE UNIT CALCULATION].any? do |kind|
+               @type.has_constant?("SWEETTALK_#{kind.id}_#{name.name.upcase}")
+             end %}
         {% else %}
-          {% name.raise "publishes takes the context's types, services and units, as in " +
-                        "publishes Cents, Tea::Id, price_of, not #{name}" %}
+          {% name.raise "publishes takes the context's types, services, units and " +
+                        "calculations, as in publishes Cents, Tea::Id, price_of, not #{name}" %}
         {% end %}
         {% unless declared %}
           {% name.raise "#{short.id} publishes #{name}, which it does not declare: declare " +
-                        "a type, a service or a unit of that name before publishes" %}
+                        "a type, a service, a unit or a calculation of that name before " +
+                        "publishes" %}
         {% end %}
       {% end %}
     end
@@ -1832,6 +1856,41 @@ module SweetTalk
                           "reaches, as in border Cards, outside: \"…\" do … end" %}
       {% end %}
     {% end %}
+    # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
+    # an outside system cannot be taken back, so none names an outside border (ADR 0060).
+    {% systems = outsides.map(&.args[0].names.last.stringify) %}
+    {% bodies = [] of Nil %}
+    {% for node in (systems.empty? ? [] of Nil : expressions) %}
+      {% if node.is_a?(Call) && node.name == "unit" && !node.block.is_a?(Nop) &&
+              node.args[0].is_a?(Call) %}
+        {% bodies << {"unit #{name}.#{node.args[0].name}", node.block.body} %}
+      {% elsif node.is_a?(Call) && node.name == "aggregate" && !node.block.is_a?(Nop) %}
+        {% inner = node.block.body %}
+        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+          {% if step.is_a?(Call) && %w[to factory].includes?(step.name.stringify) &&
+                  !step.block.is_a?(Nop) && step.args[0].is_a?(Call) %}
+            {% joint = step.name == "to" ? "#" : "." %}
+            {% what = step.name == "to" ? "command" : "factory" %}
+            {% bodies << {"#{what.id} #{node.args[0]}#{joint.id}#{step.args[0].name}",
+                          step.block.body} %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% for checked in bodies %}
+      {% inner = checked[1] %}
+      {% for statement in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+        {% padded = " " + statement.stringify.gsub(/[^\w:.]/, " ") %}
+        {% for system in systems %}
+          {% if padded.includes?(" #{system.id}.") || padded.includes?(" #{system.id}::") %}
+            {% statement.raise "#{checked[0].id} names #{system.id}, a border with an outside " +
+                               "system: a preview runs it and rolls back, and a call outside " +
+                               "cannot be taken back; call #{system.id} from a whenever on its " +
+                               "event, or before the change" %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
     {% kinds = %w[value aggregate projection process] %}
     {% own = expressions.select do |node|
          node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?
@@ -1888,6 +1947,8 @@ module SweetTalk
       # The contexts and kernels that share this module when it is a kernel; nil for a context
       SWEETTALK_SHARED_BY = nil
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
+      # Where the context is declared, for the context map's refusals
+      SWEETTALK_AT      = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
       # {first segment, path} of each event of another context a process follows
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
       # The names other contexts may use, or nil when every name is open to a follower

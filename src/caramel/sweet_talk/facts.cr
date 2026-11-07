@@ -88,7 +88,20 @@ module SweetTalk
 
   # Reads one fact back from JSON.
   def self.unpack(type : T.class, any : JSON::Any) : T forall T
-    {% if T.nilable? || T.union? %}
+    # An amount, its currency a type or data, optional or not (ADR 0063).
+    {% if T != Nil && T.union_types.reject { |member| member == Nil }.all? do |member|
+            marker = member.type_vars.size == 1 && member.type_vars[0]
+            marker.is_a?(TypeNode) && marker.has_constant?("SWEETTALK_LOADER")
+          end %}
+      {% held = T.union_types.reject { |member| member == Nil } %}
+      {% loader = held[0].type_vars[0].constant("SWEETTALK_LOADER") %}
+      {% loading = held.size == 1 ? held[0] : loader[0].id %}
+      {% if T.nilable? %}
+        any.raw.nil? ? nil : {{ loading }}.__sweettalk_from_json(any)
+      {% else %}
+        {{ loading }}.__sweettalk_from_json(any)
+      {% end %}
+    {% elsif T.nilable? || T.union? %}
       {% members = T.union_types.reject { |member| member == Nil } %}
       {% unless T.nilable? && members.size == 1 %}
         {% raise "an event field may be nilable, as in reason : String?, but not a union " +

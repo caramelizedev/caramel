@@ -51,7 +51,8 @@ module SweetTalk
     {% declared = [] of Nil %}
     {% for node in expressions %}
       {% unless node.is_a?(Nop) || node.is_a?(NilLiteral) %}
-        {% unless node.is_a?(Call) && %w[value aggregate].includes?(node.name.stringify) %}
+        {% held = %w[value aggregate currencies quote] %}
+        {% unless node.is_a?(Call) && held.includes?(node.name.stringify) %}
           {% what = node.is_a?(Call) ? node.name.stringify : node.class_name.downcase %}
           {% node.raise "kernel #{name} holds values and aggregates only, not #{what.id}: " +
                         "move it into a context that shares #{name}" %}
@@ -70,7 +71,7 @@ module SweetTalk
     # The words no other word of this kernel uses: two sharers must name each.
     {% checked = [] of Nil %}
     {% for node, index in declared %}
-      {% unless node.args.empty? %}
+      {% unless node.args.empty? || node.name == "currencies" %}
         {% word = node.args[0].stringify %}
         {% inside = false %}
         {% for other, position in declared %}
@@ -108,6 +109,8 @@ module SweetTalk
       # Its values and aggregates that no other of them uses: two sharers must name each
       SWEETTALK_WORDS     = [{{ checked.splat }}] of String
       SWEETTALK_TEXT      = {{ body ? body.stringify : "" }}
+      # Where the kernel is declared, for the context map's refusals
+      SWEETTALK_AT        = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
       SWEETTALK_REACTS    = [] of {String, String}
       SWEETTALK_PUBLISHES = nil
 

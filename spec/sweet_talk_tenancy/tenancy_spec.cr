@@ -289,6 +289,30 @@ describe "SweetTalk with tenancy" do
     end
   end
 
+  it "reads each tenant's log as it stood before a moment" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      sencha = SweetTalkTenancySpec.tea("Sencha")
+      order = SweetTalkTenancySpec.place(acme, sencha, 2)
+      other = SweetTalkTenancySpec.place(globex, sencha, 3)
+      sleep 2.milliseconds
+      moment = Time.utc
+      sleep 2.milliseconds
+      SweetTalkTenancySpec.place(acme, sencha, 1)
+
+      Caramel::Tenancy.with(acme) do
+        Ordering.logged(Ordering::Order::Placed, before: moment).map(&.order_id)
+          .should eq([order.id])
+        Ordering.logged(Ordering::Order::Placed).size.should eq(2)
+      end
+      Caramel::Tenancy.with(globex) do
+        logged = Ordering.logged(before: moment)
+        logged.map(&.as(Ordering::Order::Placed).order_id).should eq([other.id])
+      end
+      expect_raises(SugarORM::Tenancy::Missing) { Ordering.logged(before: moment) }
+    end
+  end
+
   it "runs a once_by unit once for each tenant that sends the same key" do
     SweetTalkTenancySpec.rolled_back do
       acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")

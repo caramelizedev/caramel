@@ -1,16 +1,23 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0051). Each
-# declaration mistake fails to compile with a fixed problem text, naming its file where the
-# mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
-# application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
-# and spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
+# caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051 and 0053 to
+# 0063). Each declaration mistake fails to compile with a fixed problem text, naming its file
+# where the mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
+# application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
+# holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
+# scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
 ABSENT   = "SweetTalk code must be absent from an application that does not require " \
            "caramel/sweet_talk"
 # A string only SweetTalk's boundary holds.
 MARKER = "a command changes one aggregate"
+# Each module of caramel/sweet_talk (ADR 0061) with a string only its own code holds, and
+# the modules it requires; the application spec/fixtures/sweet_talk/<module>.cr requires it.
+MODULES = {
+  "decimal" => {"must be a decimal written with digits and a point", [] of String},
+  "money"   => {" decimals, not ", ["decimal"]},
+}
 
 # Each fixture's problem text, by the fixture's name after `compile_`.
 PROBLEMS = [
@@ -85,6 +92,16 @@ PROBLEMS = [
   {"one_of_keyword",
    "value Roast lists end in one_of:, which would define Roast.end and Roast#end?, names " \
    "Roast already has: choose another word"},
+  {"member_case_missing",
+   "case is not exhaustive for enum Shop::Ordering::Roast::Member.\n\nMissing members:\n - Dark"},
+  {"moves_case_missing",
+   "case is not exhaustive for enum Shop::Seating::Show::State.\n\nMissing members:\n - Postponed"},
+  {"never_on_not_symbol",
+   "never takes on: the field its refusal is about, as in on: :quantity, not \"stock\""},
+  {"unit_rule_on_not_symbol",
+   "never takes on: the field its refusal is about, as in on: :quantity, not \"count\""},
+  {"refuse_on_not_symbol",
+   "expected argument 'on' to 'Shop::Catalogue::Tea#refuse' to be (Symbol | Nil), not String"},
   {"key_optional", "key tea cannot be optional: every row has its key"},
   {"stray_reference_write",
    "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \
@@ -325,16 +342,24 @@ PROBLEMS = [
   {"published_after_use",
    "Shop::Reporting names Catalogue::Tea, which Catalogue does not publish"},
   {"publishes_unknown",
-   "Catalogue publishes Teas, which it does not declare: declare a type, a service or a unit " \
-   "of that name before publishes"},
+   "Catalogue publishes Teas, which it does not declare: declare a type, a service, a unit or " \
+   "a calculation of that name before publishes"},
   {"publishes_expression",
-   "publishes takes the context's types, services and units, as in publishes Cents, Tea::Id, " \
-   "price_of, not price_of(1)"},
+   "publishes takes the context's types, services, units and calculations, as in publishes " \
+   "Cents, Tea::Id, price_of, not price_of(1)"},
   {"call_outside_border",
    "Shop::Reporting calls Catalogue.teas_on_shelf outside a border: move that call into " \
    "border Catalogue do … end, or declare follows: Catalogue"},
   {"outbound_outside_border",
    "Shop::Billing reaches Caramel::Outbound outside a border with an outside system"},
+  {"unit_names_outside",
+   "unit Billing.charge names Cards, a border with an outside system: a preview runs it and " \
+   "rolls back, and a call outside cannot be taken back; call Cards from a whenever on its " \
+   "event, or before the change"},
+  {"command_names_outside", "command Payment#charge names Cards, a border with an outside system"},
+  {"warn_assures",
+   "warn in unit Ordering.annotate takes no assures:: a warning that a person confirms lets " \
+   "the change through, so it assures nothing; make it a never to assure the requirement"},
   {"client_in_context_border",
    "Shop::Billing reaches HTTP::Client outside a border with an outside system"},
   {"outside_is_a_context",
@@ -377,6 +402,12 @@ PROBLEMS = [
    "Shop::Money::Millionths is named only by Catalogue: a kernel holds what two or more of " \
    "its sharers name; move Millionths into Catalogue"},
   {"kernel_word_unused", "Shop::Money::Millionths is named by none of its sharers"},
+  {"follows_unused",
+   "Shop::Ordering follows Catalogue, but names no Catalogue:: and calls no Catalogue.verb " \
+   "outside a border with Catalogue: remove Catalogue from follows:"},
+  {"shares_unused",
+   "Shop::Fulfilment shares Money, but names nothing in it: remove Money from shares: and " \
+   "Fulfilment from Money's shared_by:"},
   {"command_finalize",
    "command finalize would replace the garbage collector's finalize on Run: name it for what " \
    "it does, as in to wind_up"},
@@ -459,6 +490,60 @@ PROBLEMS = [
    "has lines : Array(Line) takes no unique:, index: or check:: what makes Line unique, or " \
    "what it keeps, is declared inside entity Line"},
   {"unique_twice", "Crate declares unique :label twice"},
+  {"money_without_require",
+   "currencies needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "declares no currency holds none of its code"},
+  {"money_currency_shape",
+   "currencies takes a list of ISO 4217 codes, as in currencies %w[USD EUR], not"},
+  {"money_currency_unknown",
+   "currencies lists XAU, but ISO 4217 marks XAU N.A., with no minor unit: give its " \
+   "minor-unit digits, as in exponent: {XAU: 2}"},
+  {"money_currency_not_iso",
+   "currencies lists ABC, but ISO 4217 does not list ABC: give its minor-unit digits, as in " \
+   "exponent: {ABC: 2}"},
+  {"money_exponent_listed",
+   "currencies gives exponent: for EUR, which ISO 4217 counts in 2 minor-unit digits: drop its " \
+   "exponent"},
+  {"money_excess_decimals",
+   "currencies gives XAU 12 minor-unit digits: give a whole number from 0 to 9"},
+  {"money_quote_without_currencies",
+   "quote Rate converts between currencies: declare currencies %w[…] before it in Shop::Till"},
+  {"money_quote_rounding",
+   "quote Rate takes rounding: :half_up, :half_even, :down or :up, how a converted amount " \
+   "becomes whole minor units, not :nearest"},
+  {"money_allocation_without_require",
+   "allocation needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "declares no currency holds none of its code"},
+  {"allocation_not_verb",
+   "allocation takes a verb, as in allocation split, of: Money::Amount, by: Weight, " \
+   "remainder: :largest_fraction, means: \"…\", not Split"},
+  {"allocation_without_by",
+   "allocation split needs by:, the weight of each key, as in by: Weight"},
+  {"allocation_remainder",
+   "allocation split takes remainder: :largest_fraction, :first, :last or :to, where the " \
+   "units left after flooring each share go, not :nearest"},
+  {"allocation_ties",
+   "allocation split breaks ties by key, the smaller first: write ties: :key or leave it " \
+   "out, not ties: :random"},
+  {"allocation_float_weight",
+   "allocation split counts exactly, so by: holds no Float64, to_f or float literal: use a " \
+   "whole number or a Decimal(P, S) value"},
+  {"allocation_rule_float",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
+  {"allocation_rule_to_f",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
+  {"allocation_rule_float_literal",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
+  {"money_mix",
+   "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::USD)#+' to be " \
+   "Shop::Till::Minor(Shop::Till::Currency::USD), not " \
+   "Shop::Till::Minor(Shop::Till::Currency::EUR)"},
+  {"money_amounts_added",
+   "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::EUR)#+' to be " \
+   "Shop::Till::Minor(Shop::Till::Currency::EUR), not (Shop::Till::Minor"},
   {"decimal_without_require",
    "value Rate wraps Decimal, which needs require \"caramel/sweet_talk/decimal\" before this " \
    "domain: a program that declares no decimal value never links GMP"},
@@ -615,6 +700,46 @@ PROBLEMS = [
   {"assures_unit_rule_unknown",
    "never in unit Ordering.annotate assures AC-9, which Shop does not list in requirements; " \
    "it lists AC-1: add AC-9 there, or correct the id"},
+  {"assures_calculation_rule_unknown",
+   "never in calculation Billing.share assures AC-9, which Shop does not list in " \
+   "requirements; it lists AC-1: add AC-9 there, or correct the id"},
+  {"calculation_untyped",
+   "calculation takes a verb and typed arguments, as in calculation share(total : Cents, " \
+   "parts : Int32), returns: Array(Cents) do … end"},
+  {"calculation_without_means",
+   "Shop::Billing.share needs a meaning: add means: \"…\", the line its glossary entry shows"},
+  {"calculation_without_returns",
+   "calculation Billing.share needs returns:, the type of its result, as in returns: Cents"},
+  {"calculation_argument_result",
+   "calculation Billing.share takes an argument named result, the name its rules read its " \
+   "result by: rename the argument"},
+  {"calculation_unknown_type",
+   "calculation Billing.share takes total : Centz, which is no type declared before it: " \
+   "declare it above the calculation"},
+  {"calculation_takes_aggregate",
+   "calculation Billing.share takes invoice : Invoice, which holds the aggregate " \
+   "Shop::Billing::Invoice: a calculation computes from values, so take what it needs from " \
+   "it, or its id, and let the caller load it"},
+  {"calculation_emits",
+   "calculation Billing.share emits an event: a calculation records nothing; emit from the " \
+   "command or the service that calls it"},
+  {"calculation_reaches_repo",
+   "calculation Billing.share reaches SugarORM: a calculation computes from its arguments " \
+   "alone, with no repository or transaction; let the caller load what it needs and pass " \
+   "it in"},
+  {"calculation_finds",
+   "calculation Billing.share calls Invoice.find, on the aggregate Shop::Billing::Invoice: a " \
+   "calculation computes from its arguments alone, with no repository or transaction"},
+  {"calculation_calls_service",
+   "calculation Billing.share calls service Billing.requote: a calculation changes nothing; " \
+   "let the caller run the service and pass its answer in"},
+  {"calculation_in_aggregate", "calculation belongs in a context, not in aggregate Invoice"},
+  {"property_not_calculation",
+   "Corretto.property takes a calculation, and Shop::Billing.requote is none: declare " \
+   "calculation requote in Shop::Billing"},
+  {"property_undrawable",
+   "Corretto.property cannot draw note : Shop::Billing::Note for Billing.annotate: it draws " \
+   "Int32, Int64, Bool, String, nil, arrays, hashes and unions of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
@@ -649,21 +774,29 @@ cases.each_with_index do |(name, problem), index|
   puts "PASS: #{name}"
 end
 
-# The same application without and with caramel/sweet_talk: only the second holds
-# its code, and both run alike.
+# The same application without and with caramel/sweet_talk, and with each of its modules
+# (ADR 0061): only an application that requires a module holds its code, and all run alike.
 root = Caramel::Checks.private_temp("caramel-sweet-talk-")
 at_exit { FileUtils.rm_rf(root) }
-{"plain", "sweet"}.each do |name|
+(["plain", "sweet"] + MODULES.keys).each do |name|
   binary = File.join(root, name)
   build = Caramel::Checks.crystal(["build", "#{FIXTURES}/#{name}.cr", "-o", binary],
     timeout: 1.hour)
   Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
-  present = File.read(binary).includes?(MARKER)
-  Caramel::Checks.fail(ABSENT) unless present == (name == "sweet")
+  held = File.read(binary)
+  if {"plain", "sweet"}.includes?(name) && held.includes?(MARKER) != (name == "sweet")
+    Caramel::Checks.fail(ABSENT)
+  end
+  MODULES.each do |required, (marker, _)|
+    holds = name == required || MODULES[name]?.try(&.[1].includes?(required)) || false
+    next if held.includes?(marker) == holds
+    Caramel::Checks.fail("#{name}: caramel/sweet_talk/#{required} code must be present " \
+                         "exactly when the application requires it")
+  end
   ran = Caramel::Checks.run([binary], timeout: 1.minute)
   unless ran.success? && ran.stdout == "#{name}\n"
     Caramel::Checks.fail("#{name} printed:\n#{ran.stdout}#{ran.stderr}")
   end
 end
-puts "PASS: an application without caramel/sweet_talk holds none of its code, " \
-     "and both run alike"
+puts "PASS: an application without caramel/sweet_talk, or without one of its modules, " \
+     "holds none of its code, and all run alike"

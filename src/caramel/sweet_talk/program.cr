@@ -474,7 +474,8 @@ module SweetTalk
   # context does not publish, `Rows` named in a context, outside borders named like a
   # context, a kernel named, followed or bordered by one that does not share it, a kernel
   # that names a context, shared by an unknown or silent context or kernel, or holding a
-  # word fewer than two of its sharers name, and cycles of dependency edges.
+  # word fewer than two of its sharers name, cycles of dependency edges, and a `follows:` or
+  # `shares:` the context's text never uses.
   def self.context_map : Array({String, String, String})
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
@@ -681,6 +682,31 @@ module SweetTalk
         {% end %}
       {% end %}
     {% end %}
+    # A follows: or shares: that the context's own text never uses (ADR 0059).
+    {% for context in contexts %}
+      {% short = context.name.split("::").last %}
+      {% text = context.constant("SWEETTALK_TEXT") %}
+      {% at = "\n  --> #{context.constant("SWEETTALK_AT").id}" %}
+      {% for other in follows[short] %}
+        {% texts = [text] + borders[short].reject { |border| border[0] == other }.map(&.[1]) %}
+        {% used = texts.any? do |piece_text|
+             piece_text.includes?(other + "::") ||
+               piece_text.split(other + ".")[1..-1].any? { |piece| piece =~ /\A[a-z_]/ }
+           end %}
+        {% unless used %}
+          {% raise "#{context.name} follows #{other.id}, but names no #{other.id}:: and calls " +
+                   "no #{other.id}.verb outside a border with #{other.id}: remove #{other.id} " +
+                   "from follows:" + at %}
+        {% end %}
+      {% end %}
+      {% texts = [text] + borders[short].map(&.[1]) %}
+      {% for other in context.constant("SWEETTALK_SHARES") %}
+        {% unless texts.any?(&.includes?(other + "::")) %}
+          {% raise "#{context.name} shares #{other.id}, but names nothing in it: remove " +
+                   "#{other.id} from shares: and #{short.id} from #{other.id}'s shared_by:" + at %}
+        {% end %}
+      {% end %}
+    {% end %}
     edges = [] of {String, String, String}
     {% for edge in edges %}
       edges << { {{ edge[0] }}, {{ edge[1] }}, {{ edge[2] }} }
@@ -689,9 +715,9 @@ module SweetTalk
     {% end %}
   end
 
-  # The ubiquitous language: every context, kernel, service, unit, outside system, value,
-  # aggregate, entity, event, projection, specification and process with its meaning, and
-  # its context's subdomain.
+  # The ubiquitous language: every context, kernel, service, unit, calculation, outside
+  # system, value, aggregate, entity, event, projection, specification and process with its
+  # meaning, and its context's subdomain.
   def self.glossary : Array(::SweetTalk::Term)
     terms = [] of ::SweetTalk::Term
     {% begin %}
@@ -711,6 +737,11 @@ module SweetTalk
         {% unit = context.constant(constant) %}
         terms << ::SweetTalk::Term.new("unit", {{ unit[0] }}, {{ short }}, {{ unit[1] }},
           {{ part }})
+      {% end %}
+      {% for constant in context.constants.select(&.starts_with?("SWEETTALK_CALCULATION_")) %}
+        {% calculation = context.constant(constant) %}
+        terms << ::SweetTalk::Term.new("calculation", {{ calculation[0] }}, {{ short }},
+          {{ calculation[1] }}, {{ part }})
       {% end %}
       {% for constant in context.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
         {% system = context.constant(constant) %}

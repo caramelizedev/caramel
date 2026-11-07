@@ -90,8 +90,9 @@ its base to `value` without another change to `has` (#247).
 Rejected:
 
 - **`Float64` values.** A rate of `0.1` is not representable, and a sum of rates drifts.
-- **Integer minor units for rates.** A rate has no unit to count in, and a `Cents` value
-  already covers money.
+- **Integer minor units for rates.** A rate has no unit to count in. Money counts minor
+  units with its currency beside them, in `caramel/sweet_talk/money`
+  ([ADR 0063](0063-sweettalk-money.md)).
 - **Bounds as number literals.** `at_least: 0.1` is a `Float64` in Crystal and would round
   before it reached the CHECK; text keeps the digits the author wrote.
 - **A `Json` value with `order:`.** It would sort by `jsonb`'s internal order, which reads

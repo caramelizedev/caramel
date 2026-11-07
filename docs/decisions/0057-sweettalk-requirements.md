@@ -5,7 +5,8 @@ Date: 2026-11-07
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 2,
 [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md) decision 1,
 [ADR 0046](0046-sweettalk-units.md) decision 1 and
-[ADR 0010](0010-corretto-harness.md) with decision 10.
+[ADR 0010](0010-corretto-harness.md) with decision 10. Decision 2 is amended by
+[ADR 0062](0062-sweettalk-calculations.md).
 
 ## Context
 
@@ -22,9 +23,9 @@ answered, and a renamed id left both comments wrong (#264).
    compile. Each context and kernel copies the list as `SWEETTALK_REQUIREMENTS`.
 2. **`assures:` names the ids a line answers.** `never`, `always`, `specification` and `unit`
    take `assures: "AC-12"` or `assures: ["AC-12", "D04"]`, and so does a `never` or an
-   `always` in a unit's body. An `assures:` of anything but ids, in a module that declares
-   no requirements, or naming an id its module does not list, does not compile, and says
-   which ids the module lists.
+   `always` in a unit's or a calculation's body. An `assures:` of anything but ids, in a
+   module that declares no requirements, or naming an id its module does not list, does
+   not compile, and says which ids the module lists.
 3. **`SweetTalk.declared_requirements`** returns each id, in declaration order across the
    modules and merged when two list one, as a `SweetTalk::Requirement` with the
    `SweetTalk::Assurance` lines (`kind`, `text`, `owner`) that assure it, read from the

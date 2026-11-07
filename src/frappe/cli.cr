@@ -20,6 +20,7 @@ require "./schema_diff"
 require "./editor_tools"
 require "./traces"
 require "./expand_fallback"
+require "./glossary"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -144,6 +145,12 @@ module Caramel::Frappe
         return translations
       when "requirements"
         return requirements(invocation["ID"]?)
+      when "glossary"
+        glossary = Glossary.load(Project.load, Tools.new(@framework_root, @output, @error))
+        @output.puts(invocation.flag?("--json") ? glossary.document.to_json : glossary.to_markdown)
+      when "contexts"
+        glossary = Glossary.load(Project.load, Tools.new(@framework_root, @output, @error))
+        @output.print(invocation.flag?("--mermaid") ? glossary.to_mermaid : glossary.to_text)
       when "migrate"
         return migrate(invocation)
       when "seed"

@@ -1,0 +1,20 @@
+require "../../../src/caramel/sweet_talk"
+
+module Shop
+  include SweetTalk
+
+  context Billing, means: "what members pay" do
+    value Cents, Int64, at_least: 0, means: "an amount in cents"
+
+    service requote(total : Cents), returns: Cents, means: "a total quoted again" do
+      total
+    end
+
+    calculation share(total : Cents, parts : Int32), returns: Cents,
+      means: "one part of a total" do
+      requote(total)
+    end
+  end
+end
+
+SweetTalk.boot
