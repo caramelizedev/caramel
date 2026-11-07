@@ -87,6 +87,8 @@ PROBLEMS = [
    "Roast already has: choose another word"},
   {"member_case_missing",
    "case is not exhaustive for enum Shop::Ordering::Roast::Member.\n\nMissing members:\n - Dark"},
+  {"moves_case_missing",
+   "case is not exhaustive for enum Shop::Seating::Show::State.\n\nMissing members:\n - Postponed"},
   {"key_optional", "key tea cannot be optional: every row has its key"},
   {"stray_reference_write",
    "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \

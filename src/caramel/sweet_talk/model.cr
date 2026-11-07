@@ -39,7 +39,8 @@ module SweetTalk
     # `moves open >> placed >> shipped, placed >> cancelled` is the lifecycle, stored in a
     # `state` column. The first state is the initial one; `cancelled?` asks, and
     # `cancelled!`, private so only a command or a step moves it, refuses unless the
-    # current state comes just before it in a chain.
+    # current state comes just before it in a chain. `moves_from` and `may_become?` read
+    # the graph (`__sweettalk_graph`).
     macro moves(*chains)
       {% states = [] of Nil %}
       {% nodes = {} of Nil => Nil %}
@@ -132,6 +133,8 @@ module SweetTalk
           __sweettalk_entered(State::{{ state.camelcase.id }})
         end
       {% end %}
+
+      __sweettalk_graph({{ states }}, {{ before.empty? ? nil : before }})
     end
 
     # Called when a mover enters a state; an aggregate that pins a reference at a state

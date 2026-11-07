@@ -38,7 +38,7 @@ https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 - In a multi-tenant application, name the `tenant` before the first context, and mark a context `central: true` only when every tenant shares it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-tenancy
 - After changing what the domain stores, run `frappe db diff`, then `frappe migrate`; a row breaking a new CHECK, key or unique index stops it. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-aggregates
 - A contract field may be a value or an aggregate's id: it binds from the type the value wraps, and its refusal is the field's error. A value with parts is one field per part. A refusal `handle` does not rescue answers 422, and `SweetTalk::Missing` answers 404; override `render_refusal` to answer otherwise. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-actions
-- On a screen, never compare a closed-set value's text or branch on it with `else`: write `case kind.member in .receipt? … end` naming every member, and give each member a catalog message in that `case`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-screens
+- On a screen, never compare a closed-set value's or a state's text or branch on it with `else`: write `case kind.member in .receipt? … end` naming every member, give each member a catalog message in that `case`, and offer commands by mapping each state of `Order.moves_from(order.state)` in a `case … in`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-screens
 
 ## Not planned
 

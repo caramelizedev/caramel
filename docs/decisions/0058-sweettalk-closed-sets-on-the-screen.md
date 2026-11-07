@@ -3,13 +3,14 @@
 Date: 2026-11-07
 
 Status: accepted. Amends [ADR 0040](0040-sweettalk-closed-set-values.md) decision 4 and its
-rejection of an enum.
+rejection of an enum, and [ADR 0030](0030-sweettalk-domain-language.md) decision 2.
 
 ## Context
 
 A closed set is declared once in the domain, and Crystal and PostgreSQL both check it. The
-screens then restated it: they compared text and branched on members with a default arm.
-When the domain added a member, nothing failed; the new member fell into the default arm.
+screens then restated it: they compared text, branched on members with a default arm, and
+decided which actions to offer by restating the lifecycle. When the domain added a member,
+nothing failed; the new member fell into the default arm.
 
 ## Decision
 
@@ -29,6 +30,11 @@ When the domain added a member, nothing failed; the new member fell into the def
 3. **Labels take no word.** A screen labels each member with such a `case` and one catalog
    message per member ([ADR 0024](0024-internationalization.md)), so a new member fails
    compilation at the `case` and a missing message at the catalog.
+4. **A lifecycle's graph is public to read.** `moves` also writes `Order.moves_from(state)`,
+   the states a mover may enter from `state` in the order `moves` first names them, and
+   `order.may_become?(state)`, whether the mover of `state` may run from the current state.
+   The movers stay private. A screen maps each state it offers to its command in a
+   `case … in` over the states, which fails compilation when a state is added.
 
 ## Reasons
 
@@ -41,6 +47,9 @@ When the domain added a member, nothing failed; the new member fell into the def
 - The enum belongs to the value, so kinds with parts and later declared subsets build on
   it, and each subset method's body becomes exhaustive too.
 - Labels need no new word while a `case` and a catalog already fail compilation on a gap.
+- The graph is read, not mapped to commands, because states and commands are not one to
+  one: one state can be entered by two commands. `may_become?` answers for the graph only;
+  a command may still refuse for another rule.
 
 Rejected:
 
@@ -48,3 +57,5 @@ Rejected:
   words in existing data would not map (ADR 0040).
 - **A label word**, `means:` per member or a `label` read from a catalog group named for the
   value. The first is a second list; the second ties `caramel/i18n` to SweetTalk.
+- **`to ship(…), moves: :shipped`.** It is another declared list beside the body, and
+  reading the movers from a body is inference.
