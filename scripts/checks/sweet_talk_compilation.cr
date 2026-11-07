@@ -1,8 +1,10 @@
 require "./support/harness"
+require "../../src/frappe/word_drift"
 
 # caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051 and 0053 to
 # 0063). Each declaration mistake fails to compile with a fixed problem text, naming its file
-# where the mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
+# where the mistake has a line; a valid domain compiles, with and without caramel/tenancy; the
+# example of each word `frappe words` prints compiles; and an
 # application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
 # holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
 # scripts/check integration runs them.
@@ -773,6 +775,27 @@ cases.each_with_index do |(name, problem), index|
   end
   puts "PASS: #{name}"
 end
+
+# The example of each word `frappe words` prints (the @example of its doc comment in
+# src/caramel/sweet_talk) compiles as written: the examples that need the same requires are
+# one program, a module each, with SweetTalk.boot. WordDrift holds each block to its macro.
+words = Caramel::Frappe::Words.load(Caramel::Checks::REPO)
+drift = Caramel::Frappe::WordDrift.new(words)
+scratch = Caramel::Checks.private_temp("caramel-words-")
+at_exit { FileUtils.rm_rf(scratch) }
+up = "../../../#{Caramel::Checks::REPO.lstrip('/')}"
+programs = drift.programs(up).to_a
+Caramel::Checks.fail("no word has an @example") if programs.empty?
+written = programs.map_with_index do |(_, program), index|
+  File.join(scratch, "words_#{index}.cr").tap { |path| File.write(path, program) }
+end
+Caramel::Checks.type_check(written).each_with_index do |result, index|
+  Caramel::Checks.fail("the words' examples time out") if result.timed_out?
+  next if result.success?
+  Caramel::Checks.fail("the examples requiring #{programs[index][0].inspect} fail to compile:\n" \
+                       "#{result.stdout}#{result.stderr}\n#{programs[index][1]}")
+end
+puts "PASS: the examples of #{words.words.size} SweetTalk words compile as written"
 
 # The same application without and with caramel/sweet_talk, and with each of its modules
 # (ADR 0061): only an application that requires a module holds its code, and all run alike.
