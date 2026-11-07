@@ -399,7 +399,7 @@ module Caramel
           {% end %}
         {% end %}
         input.strict_keys.each do |key|
-          next if __caramel_field?(key)
+          next if field?(key)
           contract.add_error("_base", ::Caramel::Wording.unknown_field(key))
         end
         contract
@@ -434,15 +434,21 @@ module Caramel
         false
       end
 
-      private def self.__caramel_field?(key : String) : Bool
+      # Whether this contract declares a field named *name*.
+      def self.field?(name : String) : Bool
         {% verbatim do %}
           {% for constant in @type.constants %}
             {% if constant.stringify.starts_with?("CARAMEL_FIELD_") %}
-              return true if key == {{ @type.constant(constant)[0] }}
+              return true if name == {{ @type.constant(constant)[0] }}
             {% end %}
           {% end %}
         {% end %}
         false
+      end
+
+      # Whether this contract declares a field named *name*.
+      def field?(name : String) : Bool
+        self.class.field?(name)
       end
     end
   end

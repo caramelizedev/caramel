@@ -55,6 +55,34 @@ module TeaShopWeb
     end
   end
 
+  # Ships free tins: the refusal names its field, `tins`, which this contract has.
+  struct Ship < PageAction
+    contract do
+      field tea : Int64
+      field tins : Int32
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      tea = TeaShop::Catalogue::Tea.find(TeaShop::Catalogue::Tea::Id.new(contract.tea))
+      tea.ship_free(TeaShop::Catalogue::Tins.new(contract.tins))
+      Caramel::Response.new(200, "shipped")
+    end
+  end
+
+  # Ships free tins counted in a field of another name, so the refusal's field is not its.
+  struct ShipCount < PageAction
+    contract do
+      field tea : Int64
+      field count : Int32
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      tea = TeaShop::Catalogue::Tea.find(TeaShop::Catalogue::Tea::Id.new(contract.tea))
+      tea.ship_free(TeaShop::Catalogue::Tins.new(contract.count))
+      Caramel::Response.new(200, "shipped")
+    end
+  end
+
   # Changes a second box inside the first box's command.
   struct FillWith < PageAction
     contract do
@@ -134,6 +162,8 @@ module TeaShopWeb
     get "/teas/:tea/hold", Hold
     get "/teas/:tea/form", HoldForm
     get "/teas/:tea/claim", HoldOrConflict
+    get "/teas/:tea/ship", Ship
+    get "/teas/:tea/ship_count", ShipCount
     get "/boxes/:box/fill", FillWith
     post "/orders/:order/lines", AddLine
     post "/loans/lend", Lend

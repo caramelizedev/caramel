@@ -3,14 +3,16 @@
 Date: 2026-11-07
 
 Status: accepted. Amends [ADR 0040](0040-sweettalk-closed-set-values.md) decision 4 and its
-rejection of an enum, and [ADR 0030](0030-sweettalk-domain-language.md) decision 2.
+rejection of an enum, [ADR 0030](0030-sweettalk-domain-language.md) decision 2 and
+[ADR 0034](0034-sweettalk-at-the-web-boundary.md) decision 2.
 
 ## Context
 
 A closed set is declared once in the domain, and Crystal and PostgreSQL both check it. The
 screens then restated it: they compared text, branched on members with a default arm, and
 decided which actions to offer by restating the lifecycle. When the domain added a member,
-nothing failed; the new member fell into the default arm.
+nothing failed; the new member fell into the default arm. A refusal reached the form under
+`_base`, so an application mapped sentences back to fields by comparing strings.
 
 ## Decision
 
@@ -35,6 +37,13 @@ nothing failed; the new member fell into the default arm.
    `order.may_become?(state)`, whether the mover of `state` may run from the current state.
    The movers stay private. A screen maps each state it offers to its command in a
    `case … in` over the states, which fails compilation when a state is added.
+5. **A refusal may name its field.** `refuse "…", on: :tins`, and `on:` on `never`, `always`
+   and the rules in a unit's body, set `Refusal#on` to `"tins"`; a service raises
+   `SweetTalk::Refusal.new("…", on: :tins)`. `render_refusal` adds the message under that
+   field when the action's contract declares it, which core answers with
+   `contract.field?(name)`, and under `_base` otherwise. An `on:` that is not a symbol does
+   not compile.
+6. **Translated refusals stay deferred** ([ADR 0034](0034-sweettalk-at-the-web-boundary.md)).
 
 ## Reasons
 
@@ -50,6 +59,11 @@ nothing failed; the new member fell into the default arm.
 - The graph is read, not mapped to commands, because states and commands are not one to
   one: one state can be entered by two commands. `may_become?` answers for the graph only;
   a command may still refuse for another rule.
+- A refusal from `never` or `always` reaches the same `render_refusal` as one from
+  `refuse`, so every line that raises one takes the same keyword.
+- The domain does not know the contract, so the field is checked when the refusal is
+  answered, and a contract without it keeps the refusal under `_base`, which every
+  generated form lists.
 
 Rejected:
 
@@ -59,3 +73,4 @@ Rejected:
   value. The first is a second list; the second ties `caramel/i18n` to SweetTalk.
 - **`to ship(…), moves: :shipped`.** It is another declared list beside the body, and
   reading the movers from a body is inference.
+- **A field chosen by a rule's identity.** `on:` names it where the rule is written.

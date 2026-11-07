@@ -323,7 +323,7 @@ module Rules
       sleep pause.milliseconds unless pause.zero?
       second.fill Count.new(by)
       raise "the shelf fell over" if by == 13
-      never "A box holds at most nine things.", assures: "SHELF-3" do
+      never "A box holds at most nine things.", assures: "SHELF-3", on: :by do
         first.count.raw > 9 || second.count.raw > 9
       end
     end

@@ -1,5 +1,5 @@
 # What a screen reads of the domain's closed sets (ADR 0058): a closed-set value's member as
-# an enum, and a lifecycle's graph.
+# an enum, a lifecycle's graph, and the field a refusal is about.
 require "./support/app"
 
 module ClosedSetsSpec
@@ -37,6 +37,14 @@ module ClosedSetsSpec
   def self.tea(stock : Int32) : TeaShop::Catalogue::Tea
     TeaShop::Catalogue::Tea.create(name: "Sencha", price: TeaShop::Catalogue::Cents.new(900),
       stock: TeaShop::Catalogue::Tins.new(stock))
+  end
+
+  # The refusal *block* raises.
+  def self.refusal(&) : SweetTalk::Refusal
+    yield
+    raise "expected a refusal"
+  rescue error : SweetTalk::Refusal
+    error
   end
 end
 
@@ -94,6 +102,35 @@ describe "SweetTalk's lifecycle graph" do
       order.may_become?(:placed).should be_false
       order.cancel
       ClosedSetsSpec::State.values.none? { |state| order.may_become?(state) }.should be_true
+    end
+  end
+end
+
+describe "SweetTalk's refusal fields" do
+  it "names the field a refuse line gives with on:" do
+    SweetTalkSpec.rolled_back do
+      tea = ClosedSetsSpec.tea(3)
+      refusal = ClosedSetsSpec.refusal { tea.ship_free TeaShop::Catalogue::Tins.new(5) }
+      refusal.message.should eq("Only 3 tins of Sencha free.")
+      refusal.on.should eq("tins")
+    end
+  end
+
+  it "names the field of a never line, and none for a refusal that gives none" do
+    SweetTalkSpec.rolled_back do
+      tea = ClosedSetsSpec.tea(3)
+      ClosedSetsSpec.refusal { ClosedSetsSpec.order.place }.on.should eq("lines")
+      ClosedSetsSpec.refusal { tea.hold TeaShop::Catalogue::Tins.new(5) }.on.should be_nil
+    end
+  end
+
+  it "names the field of a rule in a unit's body" do
+    SweetTalkSpec.rolled_back do
+      boxes = {"first", "second"}.map do |label|
+        Rules::Shelf::Box.create(label: label, count: Rules::Shelf::Count.new(0))
+      end
+      refusal = ClosedSetsSpec.refusal { Rules::Shelf.fill_both(boxes[0], boxes[1], 10) }
+      refusal.on.should eq("by")
     end
   end
 end

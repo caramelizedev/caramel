@@ -75,23 +75,26 @@ module SweetTalk
   # `never` and `always`, the invariants of an aggregate or a composite value.
   module Guarded
     # `never "message" { condition }` refuses any change that leaves the condition true.
-    # `assures: "AC-12"` names the requirement ids it answers (ADR 0057).
-    macro never(message, assures = nil, &block)
+    # `assures: "AC-12"` names the requirement ids it answers (ADR 0057), and `on: :stock`
+    # the field the refusal is about (ADR 0058).
+    macro never(message, assures = nil, on = nil, &block)
+      ::SweetTalk.__sweettalk_refusal_field("never", {{ on }})
       ::SweetTalk.__sweettalk_assures("never", {{ "never in #{@type.name.split("::").last.id}" }},
         {{ message }}, {{ assures }}, {{ @type.name.stringify }}, {{ @type.name.stringify }},
         {{ "SWEETTALK_ASSURES_NEVER_#{message.line_number}" }})
       private def __sweettalk_never_{{ message.line_number }} : Nil
-        raise ::SweetTalk::Refusal.new({{ message }}) if ({{ block.body }})
+        raise ::SweetTalk::Refusal.new({{ message }}, on: {{ on }}) if ({{ block.body }})
       end
     end
 
     # `always "message" { condition }` refuses any change that leaves it false.
-    macro always(message, assures = nil, &block)
+    macro always(message, assures = nil, on = nil, &block)
+      ::SweetTalk.__sweettalk_refusal_field("always", {{ on }})
       ::SweetTalk.__sweettalk_assures("always", {{ "always in #{@type.name.split("::").last.id}" }},
         {{ message }}, {{ assures }}, {{ @type.name.stringify }}, {{ @type.name.stringify }},
         {{ "SWEETTALK_ASSURES_ALWAYS_#{message.line_number}" }})
       private def __sweettalk_always_{{ message.line_number }} : Nil
-        raise ::SweetTalk::Refusal.new({{ message }}) unless ({{ block.body }})
+        raise ::SweetTalk::Refusal.new({{ message }}, on: {{ on }}) unless ({{ block.body }})
       end
     end
   end

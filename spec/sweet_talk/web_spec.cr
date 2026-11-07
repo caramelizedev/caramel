@@ -140,6 +140,27 @@ describe "SweetTalk at the web boundary" do
     response.body.should eq(%({"errors":{"quantity":["Quantity must be between 1 and 10"]}}))
   end
 
+  it "answers a refusal that names a field of the contract under that field" do
+    SweetTalkSpec.rolled_back do
+      tea = WebSpec.tea.id.raw
+      json = WebSpec.get("/teas/#{tea}/ship?tins=5", WebSpec.accepting("application/json"))
+      json.status.should eq(422)
+      json.body.should eq(%({"errors":{"tins":["Only 3 tins of Sencha free."]}}))
+
+      text = WebSpec.get("/teas/#{tea}/ship?tins=5", WebSpec.accepting("*/*"))
+      text.body.should contain("FIELD tins: Only 3 tins of Sencha free.")
+    end
+  end
+
+  it "answers a refusal under _base when the contract lacks the field it names" do
+    SweetTalkSpec.rolled_back do
+      tea = WebSpec.tea.id.raw
+      json = WebSpec.get("/teas/#{tea}/ship_count?count=5", WebSpec.accepting("application/json"))
+      json.status.should eq(422)
+      json.body.should eq(%({"errors":{"_base":["Only 3 tins of Sencha free."]}}))
+    end
+  end
+
   it "binds an aggregate's id from the route and 404s one that is not an Int64" do
     response = WebSpec.post("/orders/7/lines", "quantity=3")
     response.status.should eq(200)

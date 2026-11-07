@@ -1086,6 +1086,10 @@ module SweetTalk
         {{ "SWEETTALK_ASSURES_UNIT_#{call.name.upcase}" }})
       {% for rule in rules %}
         {% said = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "assures" } %}
+        {% field = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "on" } %}
+        {% if field %}
+          ::SweetTalk.__sweettalk_refusal_field({{ rule.name.stringify }}, {{ field.value }})
+        {% end %}
         {% if said %}
           ::SweetTalk.__sweettalk_assures({{ rule.name.stringify }},
             {{ "#{rule.name} in unit #{short.id}.#{call.name}" }}, {{ rule.args[0] }},
@@ -1142,10 +1146,17 @@ module SweetTalk
               {% end %}
             end
             {% for rule in rules %}
+              {% named = rule.named_args || [] of Nil %}
+              {% field = named.find { |arg| arg.name.stringify == "on" } %}
+              {% on = field ? field.value : nil %}
               {% if rule.name == "never" %}
-                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) if ({{ rule.block.body }})
+                if ({{ rule.block.body }})
+                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                end
               {% else %}
-                raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) unless ({{ rule.block.body }})
+                unless ({{ rule.block.body }})
+                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                end
               {% end %}
             {% end %}
             {% if once && !returns.is_a?(NilLiteral) %}

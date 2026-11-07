@@ -889,8 +889,9 @@ module SweetTalk
       {% name.raise "deadline belongs in a process, not in #{owner.id}" %}
     end
 
-    def refuse(message : String) : NoReturn
-      raise ::SweetTalk::Refusal.new(message)
+    # Ends the command with a refusal; `on: :quantity` names the field it is about.
+    def refuse(message : String, on : Symbol? = nil) : NoReturn
+      raise ::SweetTalk::Refusal.new(message, on: on)
     end
   end
 end

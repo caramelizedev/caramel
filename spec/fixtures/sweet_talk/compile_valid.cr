@@ -29,6 +29,7 @@ module Shop
 
     aggregate Tea, means: "one tea we sell" do
       has name : String
+      never "A tea has a name.", on: :name { name.empty? }
     end
 
     # An aggregate with a lifecycle and no attributes still builds.
