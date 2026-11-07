@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.22.0 - 2026-11-07
+
+### Upgrade notes
+
 - SweetTalk: `Billing.logged(…, before: moment)` reads a context's event log as it stood at a moment, on the typed, all-classes and `subject:` forms: the events whose `occurred_at` is earlier than `moment`, the bound left out, beside `since:`, which keeps it. It reads when an event was emitted, so what was known then; a log kept a number of days answers with what remains. The SweetTalk guide's "Read what was known at a time" shows the pattern for corrections: keep the result in effect on the aggregate, set by the command that finalises the correction, and read what was known before it from the log. Nothing changes for an application that does not pass `before:` ([ADR 0048](docs/decisions/0048-sweettalk-event-log.md) decision 3).
 - SweetTalk: a value with `one_of:` also writes `enum Kind::Member`, one member per word in the listed order (`net_settlement` is `NetSettlement`), with `kind.member` and `Kind.new(member)` (or `Kind.new(:receipt)`) between the two; the column, its CHECK and the check's hash are unchanged, so nothing migrates. Write a branch over a kind as `case kind.member in .receipt? … end`, with no `else`: a member added to the list then fails compilation at every `case` that misses it, naming the member, where a `when … else` sent it to the default arm ([ADR 0058](docs/decisions/0058-sweettalk-closed-sets-on-the-screen.md)).
 - SweetTalk: `moves` also writes `Order.moves_from(state)`, the states a mover may enter from `state` in the order `moves` first names them, and `order.may_become?(state)`; the movers stay private. A screen that offered commands by comparing `state` text can map each state of `moves_from(order.state)` to its command in a `case … in`, which fails compilation when a state is added.
@@ -15,6 +19,25 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - SweetTalk: `allocation split, of: Money::Amount, by: Weight, remainder: :largest_fraction, means: "…"`, after `require "caramel/sweet_talk/money"`, declares the calculation `split(total, weights)` that shares an amount among the keys of a `Hash` (`Int64`, or the type `per:` names) in proportion to their weights, exactly: each key gets the floor of its share, and the units left go one each to the largest fractions, ties to the smaller key, or all to the first or last key with a weight (`:first`, `:last`) or to a key passed as a third argument (`:to`). Its rules on `result` say the parts add up to the total, each is the floor or ceiling of its share and a zero weight gets nothing, and `Corretto.property` now draws hashes and amounts to run them; a negative weight or weights summing to zero refuse, and `Float64`, `to_f` or a float literal in its types or block fails compilation ([ADR 0063](docs/decisions/0063-sweettalk-money.md) decision 8).
 - SweetTalk: a `follows: Catalogue` in a context whose text names no `Catalogue::` and calls no `Catalogue.verb` outside `border Catalogue`, and a `shares: Money` in a context or kernel that names nothing in Money, no longer compile; the error names the edge at the context's line ([ADR 0059](docs/decisions/0059-sweettalk-domain-report.md)). Remove each edge it names: `Catalogue` from `follows:`, or `Money` from `shares:` and the sharer from Money's `shared_by:`. An unused edge used to count in the cycle check.
 - SweetTalk: `SweetTalk.report` returns every glossary term with the facts its declaration holds (a value's bounds and `one_of:` words, an aggregate's states and moves, an event's handlers in run order, a unit's `changes:` and `locks:`, a context's `follows:` and `shares:`), and the application answers `glossary` with it and the context map as JSON. `frappe glossary [--json]` prints it as Markdown and caches it in `.caramel/glossary.json`; `frappe contexts [--mermaid]` prints the context map ([ADR 0059](docs/decisions/0059-sweettalk-domain-report.md)). Nothing to change in an application.
+
+### Breaking changes
+
+- **sweet_talk:** keep outside systems out of a body a preview runs (6bf87d7)
+- **sweet_talk:** refuse a follows: or shares: the context never uses (246c2f7)
+
+### Features
+
+- **sweet_talk:** read the event log as it stood before a moment (38594e8)
+- **sweet_talk:** closed-set values have a member enum (dc11fd4)
+- **sweet_talk:** lifecycles read their graph in public (6108555)
+- **sweet_talk:** refusals name their field (04251f2)
+- **sweet_talk:** preview a change and commit it against the preview (003cccc)
+- **sweet_talk:** warn lines in units, confirmed by a preview's fingerprint (ab3f598)
+- **sweet_talk:** name a calculation and the rules on its result (c69682c)
+- **corretto:** run a calculation's rules on drawn cases (531f6c9)
+- **sweet_talk:** count money in its currency with caramel/sweet_talk/money (ebfde28)
+- **sweet_talk:** allocate an amount by weights with rules on its parts (a33a61b)
+- **sweet_talk:** report the domain with frappe glossary and frappe contexts (2a27b65)
 
 ## 0.21.0 - 2026-11-07
 
