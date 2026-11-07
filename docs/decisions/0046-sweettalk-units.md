@@ -26,6 +26,8 @@ aggregate first.
    its commands may change, declared before it; `locks:` names the arguments whose rows it
    locks first, each an id, an aggregate or an array of either; `returns:` defaults to
    `Nil`. A `never` or `always` line in its body is a rule over the set, run after the body.
+   `once_by: key` makes it run once per operation key, and `otherwise:` is the sentence a
+   key used again with other arguments is refused with ([ADR 0055](0055-sweettalk-units-that-run-once.md)).
    A unit without `means:`, with `changes:` that is not a list of aggregates declared before
    it, or with `locks:` naming anything but its arguments does not compile, nor does `unit`
    in an aggregate, an entity, a projection, a process or a kernel. `publishes` may name a

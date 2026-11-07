@@ -826,7 +826,8 @@ module SweetTalk
       {% call.raise "service belongs in a context, not in #{owner.id}" %}
     end
 
-    macro unit(call, changes = nil, locks = nil, returns = nil, means = nil, &block)
+    macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
+               means = nil, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% call.raise "unit belongs in a context, not in #{owner.id}" %}
     end

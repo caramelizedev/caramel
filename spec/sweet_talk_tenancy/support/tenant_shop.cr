@@ -124,6 +124,11 @@ module TenantShop
     service fill(crate : Stock::Crate::Id, more : Int32), means: "tops a crate up" do
       Stock::Crate.find(crate).fill(more)
     end
+
+    unit open_once(key : String, buyer : String), changes: [Order], once_by: key,
+      returns: Order::Id, means: "opens one order per key and answers its id" do
+      Order.open(buyer).id
+    end
   end
 
   context Fulfilment, shares: Stock, means: "packing parcels" do

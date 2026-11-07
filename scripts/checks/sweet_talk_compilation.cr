@@ -557,6 +557,28 @@ PROBLEMS = [
   {"parts_predicate_taken",
    "has kind : Kind would define Transfer#as_trade, which Transfer already has: rename that " \
    "method"},
+  {"once_by_unknown",
+   "unit annotate_once runs once by request, which is not one of its arguments: once_by: " \
+   "names the argument that names the operation, one of order, note"},
+  {"once_by_type",
+   "unit annotate_once runs once by request : Int32, which is no text: once_by: names a " \
+   "String argument or a value that wraps String"},
+  {"once_by_aggregate_argument",
+   "unit annotate_once runs once by request, so it keeps its other arguments to tell a " \
+   "retry from another request: take order : Order::Id, not order : Order"},
+  {"once_by_returns_aggregate",
+   "unit annotate_once runs once by request, so it keeps what it returns for a retry: " \
+   "return Order::Id, not Order"},
+  {"otherwise_without_once_by",
+   "unit annotate_once takes otherwise: only with once_by:, the sentence a key used again " \
+   "with other arguments is refused with"},
+  {"unit_otherwise_not_text",
+   "unit annotate_once takes otherwise: the sentence a key used again with other arguments " \
+   "is refused with, as in otherwise: \"That transfer was already recorded differently.\", " \
+   "not 5"},
+  {"operations_table_taken",
+   "context Ordering keeps its units' operations in ordering_operations, the table " \
+   "aggregate Operation stores its rows in: rename one of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

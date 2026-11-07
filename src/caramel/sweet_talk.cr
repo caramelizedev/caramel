@@ -9,6 +9,7 @@
 # (`sweet_talk/action.cr`).
 require "../caramel"
 require "uuid"
+require "digest/sha256"
 require "./sweet_talk/errors"
 require "./sweet_talk/facts"
 require "./sweet_talk/boundary"

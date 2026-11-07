@@ -173,4 +173,67 @@ describe "SweetTalk's units" do
     term.try(&.context).should eq("Shelf")
     term.try(&.means).should eq("fills two boxes by one count in one transaction")
   end
+
+  it "answers a repeat under one key with the first run's count, and fills once" do
+    SweetTalkSpec.rolled_back do
+      first, second = UnitsSpec.box("first"), UnitsSpec.box("second")
+      answered = Rules::Shelf.fill_once("fill-1", first.id, second.id, 2)
+      again = Rules::Shelf.fill_once("fill-1", first.id, second.id, 2)
+      {answered, again}.should eq({2, 2})
+      UnitsSpec.counts(first, second).should eq([2, 2])
+    end
+  end
+
+  it "refuses a key used again with other arguments, in the unit's own words" do
+    SweetTalkSpec.rolled_back do
+      first, second = UnitsSpec.box("first"), UnitsSpec.box("second")
+      Rules::Shelf.fill_once("fill-1", first.id, second.id, 2)
+      expect_raises(SweetTalk::Refusal, "That fill was already made with other boxes.") do
+        Rules::Shelf.fill_once("fill-1", first.id, second.id, 3)
+      end
+      UnitsSpec.counts(first, second).should eq([2, 2])
+    end
+  end
+
+  it "refuses a reused key in generated words for a unit with no answer to keep" do
+    SweetTalkSpec.rolled_back do
+      box = UnitsSpec.box("first")
+      Rules::Shelf.tag_once("tag-1", box.id, "red")
+      message = "Shelf.tag_once already ran under this key with other arguments"
+      expect_raises(SweetTalk::Refusal, message) { Rules::Shelf.tag_once("tag-1", box.id, "blue") }
+      Rules::Shelf.tag_once("tag-1", box.id, "red")
+      Rules::Shelf::Box.find(box.id).label.should eq("red")
+    end
+  end
+
+  it "gives the key back when the unit raises, so the same key runs again" do
+    SweetTalkSpec.rolled_back do
+      first, second = UnitsSpec.box("first"), UnitsSpec.box("second")
+      expect_raises(Exception, "the shelf fell over") do
+        Rules::Shelf.fill_once("fill-2", first.id, second.id, 13)
+      end
+      UnitsSpec.counts(first, second).should eq([0, 0])
+      Rules::Shelf.fill_once("fill-2", first.id, second.id, 1).should eq(1)
+      UnitsSpec.counts(first, second).should eq([1, 1])
+    end
+  end
+
+  it "runs once when two connections send one key at the same time, and both get the count" do
+    SweetTalkSpec.committed do
+      first, second = UnitsSpec.box("first"), UnitsSpec.box("second")
+      done = Channel({Int32?, Exception?}).new
+      2.times do
+        spawn do
+          done.send({Rules::Shelf.fill_once("same", first.id, second.id, 1, 200), nil})
+        rescue ex
+          done.send({nil, ex})
+        end
+      end
+      results = [done.receive, done.receive]
+      results.map(&.[1]).should eq([nil, nil])
+      results.map(&.[0]).should eq([1, 1])
+      UnitsSpec.counts(first, second).should eq([1, 1])
+      SweetTalkSpec.count("shelf_operations").should eq(1)
+    end
+  end
 end

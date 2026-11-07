@@ -255,4 +255,44 @@ module SweetTalk
       end
     {% end %}
   end
+
+  # The operations table of a context whose units say `once_by:` (ADR 0055): one row per
+  # unit and key holding a fingerprint of the other arguments and what the first run
+  # returned. It is `Rows::Operations`, the `<context>_operations` table, part of the derived
+  # schema and tenanted as the context's rows are, and exists only when some unit asks for it.
+  # A declaration whose table it would take is refused.
+  macro __sweettalk_operations(owner)
+    {% type = owner.resolve %}
+    {% short = type.name.split("::").last %}
+    {% units = type.constants.select(&.starts_with?("SWEETTALK_UNIT_"))
+         .map { |constant| type.constant(constant) } %}
+    {% if units.any? { |unit| unit[3] } %}
+      {% stored = type.constant("SWEETTALK_STORED") %}
+      {% table = "#{stored.id}_operations" %}
+      {% tenant = type.constant("SWEETTALK_TENANT") %}
+      {% for other in ::SweetTalk::Model.all_subclasses %}
+        {% taken = other.has_constant?("SWEETTALK_TABLE") && other.constant("SWEETTALK_TABLE") %}
+        {% if taken == table %}
+          {% raise "context #{short.id} keeps its units' operations in #{table.id}, the table " +
+                   "#{other.constant("SWEETTALK_KIND").id} #{other.name.split("::").last.id} " +
+                   "stores its rows in: rename one of them" %}
+        {% end %}
+      {% end %}
+
+      struct Rows::Operations < ::SugarORM::Schema
+        schema {{ table }} do
+          field id : Int64, primary: true
+          {% if tenant %}
+            tenant {{ tenant[1].id }} : ::{{ tenant[0].id }}
+          {% end %}
+          field unit : String
+          field key : String
+          field fingerprint : String
+          field outcome : JSON::Any, codec: ::SugarORM::JSONB(JSON::Any)
+          field created_at : Time
+          index :unit, :key, unique: true
+        end
+      end
+    {% end %}
+  end
 end

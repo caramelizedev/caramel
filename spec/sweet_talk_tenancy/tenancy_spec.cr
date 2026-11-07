@@ -10,7 +10,7 @@ alias Reporting = TenantShop::Reporting
 
 module TenancySpecs
   TENANTED = %w[fulfilment_labels fulfilment_parcels ordering_events ordering_holds
-    ordering_order_lines ordering_orders ordering_sales stock_crates]
+    ordering_operations ordering_order_lines ordering_orders ordering_sales stock_crates]
   LAPSE     = "TenantShop::Ordering::Hold::LapseDeadline"
   TOTALS    = "TenantShop::Reporting::Totals::WhenOrderingOrderPlaced"
   PLACED    = "sweettalk.ordering.order.placed"
@@ -286,6 +286,23 @@ describe "SweetTalk with tenancy" do
         Ordering.logged(Ordering::Order::Placed).map(&.lines.first.tins).should eq([3])
       end
       expect_raises(SugarORM::Tenancy::Missing) { Ordering.logged }
+    end
+  end
+
+  it "runs a once_by unit once for each tenant that sends the same key" do
+    SweetTalkTenancySpec.rolled_back do
+      acme, globex = SweetTalkTenancySpec.account("acme"), SweetTalkTenancySpec.account("globex")
+      opened = ->(account : TenantShop::Account) do
+        Caramel::Tenancy.with(account) { Ordering.open_once("checkout-1", "ann") }
+      end
+      acme_order, globex_order = opened.call(acme), opened.call(globex)
+      acme_order.should_not eq(globex_order)
+      opened.call(acme).should eq(acme_order)
+      opened.call(globex).should eq(globex_order)
+      kept = SugarORM.sql("SELECT account_id, key FROM ordering_operations ORDER BY account_id",
+        as: {account_id: Int64, key: String})
+      kept.map(&.values).should eq([{acme.id, "checkout-1"}, {globex.id, "checkout-1"}])
+      Caramel::Tenancy.without { Ordering::Order.all.size }.should eq(2)
     end
   end
 

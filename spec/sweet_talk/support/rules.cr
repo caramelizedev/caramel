@@ -323,6 +323,26 @@ module Rules
       never "A box holds at most nine things." { first.count.raw > 9 || second.count.raw > 9 }
     end
 
+    # Fills two boxes once per key, whichever way many requests carry it, and answers the
+    # first box's new count; a repeat under the key answers the first run's count.
+    unit fill_once(key : String, first : Box::Id, second : Box::Id, by : Int32, pause : Int32 = 0),
+      changes: [Box], locks: [first, second], once_by: key, returns: Int32,
+      otherwise: "That fill was already made with other boxes.",
+      means: "fills two boxes once per key and answers the first box's new count" do
+      one, two = Box.find(first), Box.find(second)
+      one.fill Count.new(by)
+      sleep pause.milliseconds unless pause.zero?
+      two.fill Count.new(by)
+      raise "the shelf fell over" if by == 13
+      Box.find(first).count.raw
+    end
+
+    unit tag_once(key : String, box : Box::Id, word : String),
+      changes: [Box], locks: [box], once_by: key,
+      means: "tags a box once per key, with no answer to keep" do
+      Box.find(box).tag word
+    end
+
     unit tag_and_sign(box : Box::Id, crate : Crate::Id, word : String),
       changes: [Box, Crate], locks: [box, crate],
       means: "tags a box and signs a crate with one word in one transaction" do

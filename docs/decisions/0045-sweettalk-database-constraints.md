@@ -95,7 +95,8 @@ surfaced as a raw `SugarORM::UniqueViolation` rather than a refusal (#166).
 Rejected:
 
 - **A claims table written in the same transaction.** It is the workaround this replaces:
-  nothing in the schema says which aggregate it guards.
+  nothing in the schema says which aggregate it guards. A unit that runs once declares a
+  derived table, which is the claim, named by the unit ([ADR 0055](0055-sweettalk-units-that-run-once.md)).
 - **Deferrable unique indexes.** A violation at commit would surface after the command's
   rescue, as a raw error, and an upsert cannot target a deferrable index.
 - **A partial unique index for soft-removed rows.** It needs `where:` on an index, which
