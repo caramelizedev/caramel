@@ -505,6 +505,32 @@ PROBLEMS = [
   {"money_quote_rounding",
    "quote Rate takes rounding: :half_up, :half_even, :down or :up, how a converted amount " \
    "becomes whole minor units, not :nearest"},
+  {"money_allocation_without_require",
+   "allocation needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "declares no currency holds none of its code"},
+  {"allocation_not_verb",
+   "allocation takes a verb, as in allocation split, of: Money::Amount, by: Weight, " \
+   "remainder: :largest_fraction, means: \"…\", not Split"},
+  {"allocation_without_by",
+   "allocation split needs by:, the weight of each key, as in by: Weight"},
+  {"allocation_remainder",
+   "allocation split takes remainder: :largest_fraction, :first, :last or :to, where the " \
+   "units left after flooring each share go, not :nearest"},
+  {"allocation_ties",
+   "allocation split breaks ties by key, the smaller first: write ties: :key or leave it " \
+   "out, not ties: :random"},
+  {"allocation_float_weight",
+   "allocation split counts exactly, so by: holds no Float64, to_f or float literal: use a " \
+   "whole number or a Decimal(P, S) value"},
+  {"allocation_rule_float",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
+  {"allocation_rule_to_f",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
+  {"allocation_rule_float_literal",
+   "allocation split counts exactly, so its rules hold no Float64, to_f or float literal: " \
+   "compare whole numbers or BigRational"},
   {"money_mix",
    "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::USD)#+' to be " \
    "Shop::Till::Minor(Shop::Till::Currency::USD), not " \
@@ -707,7 +733,7 @@ PROBLEMS = [
    "calculation requote in Shop::Billing"},
   {"property_undrawable",
    "Corretto.property cannot draw note : Shop::Billing::Note for Billing.annotate: it draws " \
-   "Int32, Int64, Bool, String, nil, arrays and unions of them"},
+   "Int32, Int64, Bool, String, nil, arrays, hashes and unions of them"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

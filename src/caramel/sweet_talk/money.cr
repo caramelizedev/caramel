@@ -4,6 +4,7 @@
 # currency holds none of this file.
 require "./decimal"
 require "./money/iso4217"
+require "./money/allocation"
 
 module SweetTalk
   # The words every currency, amount and rate shares.

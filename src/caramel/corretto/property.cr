@@ -7,8 +7,9 @@ module Corretto
   # and fails the example when one breaks a rule on its result (ADR 0010 decision 11,
   # ADR 0062). Each argument is drawn from what its type declares: a value's bounds, its
   # `one_of:` members, its decimal precision and scale, its parts; an array holds at most
-  # 8 elements. A case the calculation or a value refuses is outside the domain: it is
-  # skipped and counted. A broken rule, or any other error, fails the example with the
+  # 8 elements and a hash 8 keys, and an amount of `caramel/sweet_talk/money` is a whole
+  # number of minor units. A case the calculation or a value refuses is outside the
+  # domain: it is skipped and counted. A broken rule, or any other error, fails the example with the
   # case's arguments and the seed, which `CORRETTO_SEED` gives back. It needs no session
   # and no database. Returns the run's counts.
   macro property(calculation)
@@ -40,6 +41,11 @@ module Corretto
             {% queue = queue + type.union_types %}
           {% elsif type < ::Array %}
             {% queue << type.type_vars[0] %}
+          {% elsif type < ::Hash %}
+            {% queue = queue + type.type_vars %}
+          {% elsif type.type_vars.size == 1 && type.type_vars[0].is_a?(TypeNode) &&
+                     type.type_vars[0].has_constant?("SWEETTALK_LOADER") %}
+            # An amount of caramel/sweet_talk/money, drawn as a whole number of minor units.
           {% elsif type < ::SweetTalk::Composite %}
             {% for part in type.constants.select(&.starts_with?("SWEETTALK_PART_")) %}
               {% queue << parse_type(type.constant(part)[2]).resolve %}
@@ -48,9 +54,9 @@ module Corretto
                      supported.includes?(type.constant("SWEETTALK_WRAPS"))) %}
             {% calculation.raise "Corretto.property cannot draw #{pair[0].id} : #{type} for " +
                                  "#{label.id}: it draws Int32, Int64, Bool, String, nil, " +
-                                 "arrays and unions of them, SweetTalk values that wrap a " +
-                                 "whole number, text, a day or a decimal, and values with " +
-                                 "parts of those" %}
+                                 "arrays, hashes and unions of them, amounts of money, " +
+                                 "SweetTalk values that wrap a whole number, text, a day " +
+                                 "or a decimal, and values with parts of those" %}
           {% end %}
         {% end %}
       {% end %}
@@ -76,7 +82,7 @@ module Corretto
   module Property
     # Cases per run
     CASES = 200
-    # Elements in a drawn array, at most
+    # Elements in a drawn array, and keys in a drawn hash, at most
     ARRAY_MOST = 8
     # Characters in drawn text, at most
     TEXT_MOST = 12
@@ -177,6 +183,15 @@ module Corretto
       {% elsif T < ::Array %}
         {% element = T.type_vars[0] %}
         Array({{ element }}).new(random.rand(0..ARRAY_MOST)) { draw({{ element }}, random) }
+      {% elsif T < ::Hash %}
+        {% key = T.type_vars[0] %}
+        {% value = T.type_vars[1] %}
+        Array.new(random.rand(0..ARRAY_MOST)) do
+          {draw({{ key }}, random), draw({{ value }}, random)}
+        end.to_h
+      {% elsif T.type_vars.size == 1 && T.type_vars[0].is_a?(TypeNode) &&
+                 T.type_vars[0].has_constant?("SWEETTALK_LOADER") %}
+        T.new(whole(random, nil, nil))
       {% elsif T < ::SweetTalk::Composite %}
         {% parts = T.constants.select(&.starts_with?("SWEETTALK_PART_"))
              .map { |constant| T.constant(constant) } %}

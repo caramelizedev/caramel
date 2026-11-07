@@ -62,9 +62,22 @@ currency in a type needs a type per currency.
    quote declares, and refuses an amount in another currency than `from`. `inverse` and
    `through(other)` are exact cross rates; `through` joins rates of one day, and their
    sources. A rate's window, a fallback and an override are the application's.
-8. **Checks.** Each refusal has a fixture in `sweet-talk-compilation`, which also builds
+8. **`allocation split, of: Money::Amount, by: Weight, remainder: :largest_fraction,
+   means: "…"`** declares an [ADR 0062](0062-sweettalk-calculations.md) calculation,
+   `split(total, weights : Hash(Int64, Weight))`, keyed by `per:` when given. Each key gets
+   the floor of its exact share, a `BigRational`; the units left go one each to the
+   largest fractions (`:largest_fraction`), all to the first or last key of weight above
+   zero (`:first`, `:last`), or all to a third argument (`:to`). Ties go by key, smaller
+   first; `ties:` takes only `:key`. A negative weight, weights summing to zero, or a `:to`
+   key without weight refuses. Generated rules on `result` say the parts sum to the total
+   in its currency, each is the floor or ceiling of its share (the floor, but the receiving
+   key's, for the other modes), and a zero weight gets zero; `Corretto.property` draws
+   hashes and amounts to run them. `Float64`, `to_f` or a float literal in its types or
+   block fails compilation at that line.
+9. **Checks.** Each refusal has a fixture in `sweet-talk-compilation`, which also builds
    `spec/fixtures/sweet_talk/money.cr` to prove decision 1 on the binary, and
-   `spec/sweet_talk` runs amounts and rates on PostgreSQL with the other modules.
+   `spec/sweet_talk` runs amounts, rates and allocations on PostgreSQL with the other
+   modules, and catches a split seeded one unit short within 200 drawn cases.
 
 ## Reasons
 
@@ -82,6 +95,11 @@ currency in a type needs a type per currency.
   data, as a ninth on a `Decimal(20, 8)` is (ADR 0047); an import rounds by saying how.
 - **One load path.** A currency column beside every amount, under a CHECK, holds for a
   reporting currency too, so no amount reads its currency from the tenant or a setting.
+- **An allocation is a calculation.** Its identity, that the parts sum to the total, is a
+  rule on `result` that every call checks and `Corretto.property` draws cases against, so
+  a hand-written split one unit short fails within 200 cases. Ties by key make the result
+  one function of its arguments, and refusing floats at the author's line keeps the shares
+  exact.
 
 Rejected:
 
@@ -91,3 +109,5 @@ Rejected:
   a column that says nothing alone.
 - **`Float64` and rounding on parse.** A float drifts, and silent rounding hides the
   mistake the refusal names.
+- **A tie broken at random, or by insertion order.** The same weights would split two
+  ways, and a property case could not be replayed from its seed.

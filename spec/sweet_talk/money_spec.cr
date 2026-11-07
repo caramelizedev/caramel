@@ -1,14 +1,27 @@
 # SweetTalk's money module (ADR 0063): amounts in a currency's minor units, their currency
 # a type or data, stored with a currency column under a CHECK; text read exactly or
 # rounded on purpose; dated rates kept as exact fractions, converting as their quote
-# rounds; and an event, a projection, a finder and a specification over amounts.
+# rounds; an event, a projection, a finder and a specification over amounts; and
+# allocations whose rules hold on drawn cases and catch a seeded off-by-one.
 require "./support/app"
+require "../../src/caramel/corretto/property"
 
 module MoneySpec
   alias Money = Books::Cash
   alias Ledger = Books::Payments
   alias USD = Money::Minor(Money::Currency::USD)
   alias EUR = Money::Minor(Money::Currency::EUR)
+  alias JPY = Money::Minor(Money::Currency::JPY)
+
+  # Weights by key, each written as a decimal percent.
+  def self.weights(pairs : Hash(Int64, String)) : Hash(Int64, Ledger::Weight)
+    pairs.transform_values { |text| Ledger::Weight.new(text) }
+  end
+
+  # The parts of an allocation as minor units, in key order.
+  def self.units(parts : Hash(Int64, V)) : Hash(Int64, Int64) forall V
+    parts.transform_values(&.raw)
+  end
 
   def self.amount(text : String, code : String) : Money::Amount
     Money::Amounts.parse(text, Money::Currency.new(code))
@@ -206,5 +219,61 @@ describe "SweetTalk's quotes" do
       row.reported.should eq(MoneySpec.amount("108.51", "USD"))
       row.conversions.should eq(1)
     end
+  end
+end
+
+describe "SweetTalk's allocations" do
+  it "splits exactly, gives the units left to the largest fractions, and breaks ties by key" do
+    thirds = MoneySpec.weights({3_i64 => "1", 1_i64 => "1", 2_i64 => "1"})
+    parts = MoneySpec::Ledger.split(MoneySpec.amount("100", "USD"), thirds)
+    parts.keys.should eq([1, 2, 3])
+    MoneySpec.units(parts).should eq({1 => 3334, 2 => 3333, 3 => 3333})
+    parts.values.all?(MoneySpec::USD).should be_true
+    owners = MoneySpec.weights({1_i64 => "50.5", 2_i64 => "49.5", 3_i64 => "0"})
+    MoneySpec.units(MoneySpec::Ledger.split(MoneySpec.amount("0.07", "EUR"), owners))
+      .should eq({1 => 4, 2 => 3, 3 => 0})
+    MoneySpec.units(MoneySpec::Ledger.split(MoneySpec.amount("-0.07", "EUR"), owners))
+      .should eq({1 => -4, 2 => -3, 3 => 0})
+  end
+
+  it "gives the units left to the first, the last or a named key, as remainder: says" do
+    owners = MoneySpec.weights({1_i64 => "1", 2_i64 => "1", 3_i64 => "1", 4_i64 => "0"})
+    total = MoneySpec.amount("1.00", "USD")
+    MoneySpec.units(MoneySpec::Ledger.front(total, owners))
+      .should eq({1 => 34, 2 => 33, 3 => 33, 4 => 0})
+    MoneySpec.units(MoneySpec::Ledger.sweep(MoneySpec.amount("1.01", "USD"), owners, 2_i64))
+      .should eq({1 => 33, 2 => 35, 3 => 33, 4 => 0})
+    shares = {1_i64 => 1, 2_i64 => 1, 3_i64 => 1}
+    MoneySpec.units(MoneySpec::Ledger.back(MoneySpec::JPY.new(1000), shares))
+      .should eq({1 => 333, 2 => 333, 3 => 334})
+    expect_raises(SweetTalk::Refusal,
+      "The remainder of an allocation goes to a key with a weight above zero, not 4") do
+      MoneySpec::Ledger.sweep(MoneySpec.amount("1.01", "USD"), owners, 4_i64)
+    end
+  end
+
+  it "refuses a weight below zero, or weights that add up to nothing" do
+    expect_raises(SweetTalk::Refusal, "An allocation takes no weight below zero") do
+      MoneySpec::Ledger.back(MoneySpec::JPY.new(10), {1_i64 => 2, 2_i64 => -1})
+    end
+    expect_raises(SweetTalk::Refusal, "An allocation needs a weight above zero") do
+      MoneySpec::Ledger.split(MoneySpec.amount("1", "USD"), MoneySpec.weights({1_i64 => "0"}))
+    end
+  end
+
+  it "holds its rules on 200 drawn cases of each remainder" do
+    Corretto.property(Books::Payments.split).held.should be > 0
+    Corretto.property(Books::Payments.front).held.should be > 0
+    Corretto.property(Books::Payments.back).held.should be > 0
+    Corretto.property(Books::Payments.sweep).held.should be > 0
+  end
+
+  it "catches a split that gives out one unit too few within 200 drawn cases" do
+    failure = expect_raises(Spec::AssertionFailed, "broke its rule") do
+      Corretto.property(Books::Payments.short)
+    end
+    failure.message.to_s.should contain(
+      "Payments.short broke its rule: the parts add up to the total, in its currency")
+    failure.message.to_s.should contain("rerun with CORRETTO_SEED=")
   end
 end
