@@ -943,8 +943,13 @@ module SweetTalk
     # `changes:`, each existing row locked first through `SweetTalk.lock` on the arguments
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
     # rule over the set, checked after the body. It is a glossary entry, timed as a domain
-    # span named `Ledger.post`.
-    macro unit(call, changes = nil, locks = nil, returns = nil, means = nil, &block)
+    # span named `Ledger.post`. `once_by: key` makes it run once per operation key: the first
+    # run keeps the key, a fingerprint of the other arguments and what it returned in the
+    # context's `<context>_operations` table; a repeat with the same arguments answers the
+    # first outcome without running, and one with other arguments is refused with
+    # `otherwise:` (ADR 0055).
+    macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
+               assures = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
       {% unless typed %}
@@ -991,6 +996,75 @@ module SweetTalk
                         "[#{arguments.join(", ").id}]" %}
         {% end %}
       {% end %}
+      {% once = nil %}
+      {% once_text = nil %}
+      {% others = call.args %}
+      {% if once_by.is_a?(NilLiteral) %}
+        {% unless otherwise.is_a?(NilLiteral) %}
+          {% otherwise.raise "unit #{call.name} takes otherwise: only with once_by:, the " +
+                             "sentence a key used again with other arguments is refused with" %}
+        {% end %}
+      {% else %}
+        {% known = (once_by.is_a?(Var) ||
+                    (once_by.is_a?(Call) && once_by.args.empty? && once_by.receiver.is_a?(Nop))) &&
+                   arguments.includes?(once_by.stringify) %}
+        {% unless known %}
+          {% once_by.raise "unit #{call.name} runs once by #{once_by}, which is not one of its " +
+                           "arguments: once_by: names the argument that names the operation, " +
+                           "one of #{arguments.join(", ").id}" %}
+        {% end %}
+        {% once = once_by.stringify %}
+        {% key_arg = call.args.find { |arg| arg.var.stringify == once } %}
+        {% key_type = key_arg.type.resolve? %}
+        {% once_text = key_type == String %}
+        {% wraps_text = key_type && key_type < ::SweetTalk::Value &&
+                        key_type.constant("SWEETTALK_WRAPS") == "String" %}
+        {% unless once_text || wraps_text %}
+          {% once_by.raise "unit #{call.name} runs once by #{once.id} : #{key_arg.type}, which " +
+                           "is no text: once_by: names a String argument or a value that " +
+                           "wraps String" %}
+        {% end %}
+        {% unless otherwise.is_a?(NilLiteral) || otherwise.is_a?(StringLiteral) %}
+          {% otherwise.raise "unit #{call.name} takes otherwise: the sentence a key used " +
+                             "again with other arguments is refused with, as in otherwise: " +
+                             "\"That transfer was already recorded differently.\", not " +
+                             "#{otherwise}" %}
+        {% end %}
+        {% others = call.args.reject { |arg| arg.var.stringify == once } %}
+        {% for arg in others %}
+          {% candidates = arg.type.is_a?(Union) ? arg.type.types : [arg.type] %}
+          {% for candidate in candidates %}
+            {% element = candidate %}
+            {% if candidate.is_a?(Generic) && candidate.name.stringify == "Array" %}
+              {% element = candidate.type_vars[0] %}
+            {% end %}
+            {% held_type = element.is_a?(Path) ? element.resolve? : nil %}
+            {% if held_type && held_type < ::SweetTalk::Aggregate %}
+              {% fixed = arg.type.stringify.split(element.id.stringify)
+                   .join("#{element.id}::Id") %}
+              {% arg.raise "unit #{call.name} runs once by #{once.id}, so it keeps its other " +
+                           "arguments to tell a retry from another request: take " +
+                           "#{arg.var} : #{fixed.id}, not #{arg.var} : #{arg.type}" %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% unless returns.is_a?(NilLiteral) %}
+          {% candidates = returns.is_a?(Union) ? returns.types : [returns] %}
+          {% for candidate in candidates %}
+            {% element = candidate %}
+            {% if candidate.is_a?(Generic) && candidate.name.stringify == "Array" %}
+              {% element = candidate.type_vars[0] %}
+            {% end %}
+            {% held_type = element.is_a?(Path) ? element.resolve? : nil %}
+            {% if held_type && held_type < ::SweetTalk::Aggregate %}
+              {% fixed = returns.stringify.split(element.id.stringify)
+                   .join("#{element.id}::Id") %}
+              {% returns.raise "unit #{call.name} runs once by #{once.id}, so it keeps what it " +
+                               "returns for a retry: return #{fixed.id}, not #{returns}" %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
       {% body = block.body %}
       {% steps = body.is_a?(Expressions) ? body.expressions : [body] %}
       {% rules = steps.select do |step|
@@ -1000,9 +1074,23 @@ module SweetTalk
       {% work = steps.reject { |step| rules.includes?(step) } %}
       {% what = "unit #{short.id}.#{call.name}" %}
       {% span = "#{short.id}.#{call.name}" %}
-      {% unit = {call.name.stringify, means, call.line_number} %}
+      {% unit = {call.name.stringify, means, call.line_number, once} %}
       {% kinds = allowed.map { |name| "::#{name.id}" }.join(", ") %}
+      {% refusal = "#{short.id}.#{call.name} already ran under this key with other arguments" %}
+      {% refusal = otherwise unless otherwise.is_a?(NilLiteral) %}
       SWEETTALK_UNIT_{{ call.name.upcase }} = {{ unit }}
+      ::SweetTalk.__sweettalk_assures("unit", {{ "unit #{short.id}.#{call.name}" }}, {{ means }},
+        {{ assures }}, {{ @type.name.stringify }}, {{ "#{@type.name}.#{call.name}" }},
+        {{ "SWEETTALK_ASSURES_UNIT_#{call.name.upcase}" }})
+      {% for rule in rules %}
+        {% said = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "assures" } %}
+        {% if said %}
+          ::SweetTalk.__sweettalk_assures({{ rule.name.stringify }},
+            {{ "#{rule.name} in unit #{short.id}.#{call.name}" }}, {{ rule.args[0] }},
+            {{ said.value }}, {{ @type.name.stringify }}, {{ "#{@type.name}.#{call.name}" }},
+            {{ "SWEETTALK_ASSURES_UNIT_#{call.name.upcase}_#{rule.args[0].line_number}" }})
+        {% end %}
+      {% end %}
 
       {% result = returns.is_a?(NilLiteral) ? Nil : returns %}
       def self.{{ call.name }}({{ call.args.splat }}) : {{ result }}
@@ -1010,6 +1098,39 @@ module SweetTalk
           %allowed = [{{ kinds.id }}] of ::SweetTalk::Aggregate.class
           %result = nil
           ::SweetTalk.__sweettalk_unit({{ what }}, %allowed) do
+            {% if once %}
+              %payload = ::JSON.build do |json|
+                json.object do
+                  {% for arg in others %}
+                    json.field({{ arg.var.stringify }}) { ::SweetTalk.pack(json, {{ arg.var }}) }
+                  {% end %}
+                end
+              end
+              %fingerprint = ::Digest::SHA256.hexdigest(%payload)
+              %key = {{ once_text ? once.id : "#{once.id}.raw".id }}
+              # The claim is a savepoint: a key already claimed rolls back the insert alone, and
+              # a concurrent first run holds this one on its uncommitted row.
+              %claim = begin
+                ::SugarORM::Repo.transaction do
+                  Rows::Operations.create!(unit: {{ call.name.stringify }}, key: %key,
+                    fingerprint: %fingerprint, outcome: ::JSON::Any.new(nil),
+                    created_at: Time.utc)
+                end
+              rescue ::SugarORM::UniqueViolation | ::SugarORM::Invalid
+                nil
+              end
+              unless %claim
+                %earlier = Rows::Operations.query
+                  .where(unit: {{ call.name.stringify }}, key: %key).first!
+                unless %earlier.fingerprint == %fingerprint
+                  raise ::SweetTalk::Refusal.new({{ refusal }})
+                end
+                {% unless returns.is_a?(NilLiteral) %}
+                  %result = ::SweetTalk.unpack({{ returns }}, %earlier.outcome)
+                {% end %}
+                next
+              end
+            {% end %}
             {% unless held.empty? %}
               ::SweetTalk.lock({{ held.splat }})
             {% end %}
@@ -1024,6 +1145,11 @@ module SweetTalk
               {% else %}
                 raise ::SweetTalk::Refusal.new({{ rule.args[0] }}) unless ({{ rule.block.body }})
               {% end %}
+            {% end %}
+            {% if once && !returns.is_a?(NilLiteral) %}
+              %claim.update!(outcome: ::JSON.parse(::JSON.build do |json|
+                ::SweetTalk.pack(json, %result.as({{ returns }}))
+              end))
             {% end %}
           end
           {% unless returns.is_a?(NilLiteral) %}
@@ -1090,7 +1216,7 @@ module SweetTalk
     # condition, read by PostgreSQL in `Order.all(satisfying: Dispatchable)` and in
     # `finds …, satisfying: Dispatchable`. `!` reads as `IS NOT TRUE`, so a NULL column
     # fails a rule and passes its negation in both readings.
-    macro specification(name, on = nil, where = nil, means = nil, &block)
+    macro specification(name, on = nil, where = nil, means = nil, assures = nil, &block)
       {% context = @type.name.split("::").last %}
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -1107,6 +1233,9 @@ module SweetTalk
                       "{state: :placed}" %}
       {% end %}
       {% short = target.name.split("::").last %}
+      ::SweetTalk.__sweettalk_assures("specification", {{ "specification #{name}" }}, {{ means }},
+        {{ assures }}, {{ @type.name.stringify }}, {{ "#{@type.name}::#{name}" }},
+        {{ "SWEETTALK_ASSURES_SPECIFICATION_#{name.stringify.upcase.id}" }})
       {% predicate = "#{name.stringify.underscore.id}?" %}
       {% if target.has_method?(predicate) %}
         {% name.raise "specification #{name} would define #{short.id}##{predicate.id}, which " +
@@ -1456,6 +1585,74 @@ module SweetTalk
     end
   end
 
+  # `requirements "AC-01", "AC-02"`, before the first context, lists the requirement ids this
+  # domain module answers to (ADR 0057). `SWEETTALK_REQUIREMENTS` records them; every
+  # context and kernel copies the list, or nil, as it copies `SWEETTALK_TENANT`.
+  macro requirements(*ids)
+    {% if ids.empty? %}
+      {% raise "requirements takes at least one requirement id, as in requirements \"AC-01\"" %}
+    {% end %}
+    {% seen = [] of Nil %}
+    {% for id in ids %}
+      {% unless id.is_a?(StringLiteral) %}
+        {% id.raise "requirements takes requirement ids as text, as in requirements " +
+                    "\"AC-01\", \"AC-02\", not #{id}" %}
+      {% end %}
+      {% unless id =~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/ %}
+        {% id.raise "requirements takes ids of letters, digits, '.', '_' and '-', starting " +
+                    "with a letter or a digit, not \"#{id.id}\"" %}
+      {% end %}
+      {% if seen.includes?(id) %}
+        {% id.raise "requirements lists #{id.id} twice" %}
+      {% end %}
+      {% seen << id %}
+    {% end %}
+    {% if @type.has_constant?("SWEETTALK_REQUIREMENTS") %}
+      {% ids[0].raise "requirements is declared twice in #{@type.name.id}: keep one" %}
+    {% end %}
+    {% earlier = ::SweetTalk::BoundedContext.includers
+         .find(&.name.starts_with?("#{@type.name}::")) %}
+    {% if earlier %}
+      {% ids[0].raise "requirements comes after context #{earlier.name.split("::").last.id}: " +
+                      "list the requirements before the contexts" %}
+    {% end %}
+    SWEETTALK_REQUIREMENTS = [{{ ids.splat }}]
+  end
+
+  # Checks `assures:` of a `never`, an `always`, a specification or a unit against the
+  # requirements of the module that holds the context *home*, and records
+  # `{kind, text, [ids], owner}` as the constant *constant* (ADR 0057). *what* names the
+  # declaration in a refusal.
+  macro __sweettalk_assures(kind, what, text, ids, home, owner, constant)
+    {% unless ids.is_a?(NilLiteral) %}
+      {% shaped = ids.is_a?(StringLiteral) ||
+                  (ids.is_a?(ArrayLiteral) && ids.size > 0 && ids.all?(&.is_a?(StringLiteral))) %}
+      {% unless shaped %}
+        {% ids.raise "#{what.id} takes assures: a requirement id or a list of them, as in " +
+                     "assures: \"AC-12\" or assures: [\"AC-12\", \"D04\"], not #{ids}" %}
+      {% end %}
+      {% listed = ids.is_a?(ArrayLiteral) ? ids : [ids] %}
+      {% holder = ::SweetTalk::BoundedContext.includers.find do |context|
+           home == context.name.stringify || home.starts_with?("#{context.name}::")
+         end %}
+      {% key = "SWEETTALK_REQUIREMENTS" %}
+      {% declared = holder && holder.has_constant?(key) ? holder.constant(key) : nil %}
+      {% parts = holder ? holder.name.split("::")[0..-2] : [] of Nil %}
+      {% module_name = parts.empty? ? "the program" : parts.join("::") %}
+      {% for id in listed %}
+        {% if !declared %}
+          {% ids.raise "#{what.id} assures #{id.id}, but #{module_name.id} declares no " +
+                       "requirements: add requirements \"#{id.id}\" before its first context" %}
+        {% elsif !declared.includes?(id) %}
+          {% ids.raise "#{what.id} assures #{id.id}, which #{module_name.id} does not list " +
+                       "in requirements; it lists #{declared.join(", ").id}: add #{id.id} " +
+                       "there, or correct the id" %}
+        {% end %}
+      {% end %}
+      {{ constant.id }} = { {{ kind }}, {{ text }}, [{{ listed.splat }}], {{ owner }} }
+    {% end %}
+  end
+
   # `tenant App::Account`, before the first context, names the tenant model of a program
   # that requires caramel/tenancy: the model the routes' `tenant` block names.
   # `SWEETTALK_TENANT` records {the model's path, the attribute named after its last
@@ -1677,6 +1874,9 @@ module SweetTalk
       SWEETTALK_STORED  = {{ (renamed_from || name).stringify.underscore }}
       # {tenant model, attribute} when this context's rows belong to one tenant
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
+      # The requirement ids the module that holds this context lists, or nil (ADR 0057)
+      {% key = "SWEETTALK_REQUIREMENTS" %}
+      SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
       # Whether `<context>_events` keeps every event of this context (ADR 0048)
       SWEETTALK_EVENT_LOG = {{ event_log ? true : false }}
@@ -1720,6 +1920,7 @@ module SweetTalk
       {{ body }}
 
       ::SweetTalk.__sweettalk_event_log(::{{ prefix.id }}{{ name }})
+      ::SweetTalk.__sweettalk_operations(::{{ prefix.id }}{{ name }})
       __sweettalk_check_queries
     end
   end

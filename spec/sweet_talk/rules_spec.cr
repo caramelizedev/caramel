@@ -124,6 +124,17 @@ describe "SweetTalk's rules" do
     end
   end
 
+  it "announces the declared Created of an aggregate with no factory, with what it carries" do
+    SweetTalkSpec.rolled_back do
+      made = SweetTalk.emitted(Rules::Shelf::Tab::Created) do
+        Rules::Shelf::Tab.create(label: "a")
+      end
+      made.map(&.label).should eq(["a"])
+      made.first.__sweettalk_channel.should eq("sweettalk.shelf.tab.created")
+      Rules::Shelf::Tab::Created::SWEETTALK_CARRIES.should eq(["label"])
+    end
+  end
+
   it "refuses a service that changes a second aggregate, and rolls both back" do
     SweetTalkSpec.rolled_back do
       first, second = RulesSpec.box("first"), RulesSpec.box("second")
@@ -314,7 +325,7 @@ describe "SweetTalk's rules" do
       box = RulesSpec.box("held")
       held = Rules::Shelf::Rack::Slot.new(box)
       missing = Rules::Shelf::Rack::Slot.new(Rules::Shelf::Box::Id.new(999_999))
-      expect_raises(PQ::PQError, "fk_shelf_rack_slots_box_id") do
+      expect_raises(SugarORM::ForeignKeyViolation, "fk_shelf_rack_slots_box_id") do
         Rules::Shelf::Rack.create(slots: [held, missing])
       end
       rack = Rules::Shelf::Rack.create(slots: [held])
@@ -462,5 +473,41 @@ describe "SweetTalk's rules" do
       Rules::Shelf::Tally.tallied_to(3).map(&.total).should eq([3])
       Rules::Shelf::Tally.tallies.should eq(2)
     end
+  end
+end
+
+describe "SweetTalk's requirements" do
+  it "lists each id with the lines that assure it, and an id nothing assures" do
+    found = SweetTalk.declared_requirements.map do |requirement|
+      {requirement.id, requirement.assured_by.map { |line| {line.kind, line.owner, line.text} }}
+    end
+    found.should eq([
+      {"SHELF-1", [{"never", "Rules::Shelf::Jar", "A jar on sale needs a label."}]},
+      {"SHELF-2", [{"specification", "Rules::Shelf::Full", "a jar of five or more"}]},
+      {"SHELF-3", [
+        {"unit", "Rules::Shelf.fill_both", "fills two boxes by one count in one transaction"},
+        {"never", "Rules::Shelf.fill_both", "A box holds at most nine things."},
+      ]},
+      {"SHELF-4", [] of {String, String, String}},
+    ])
+  end
+
+  it "prints every requirement, one, or only the ids, and refuses what it cannot read" do
+    output, errors = IO::Memory.new, IO::Memory.new
+    SweetTalk.__sweettalk_print_requirements(["--ids"], output, errors).should eq(0)
+    output.to_s.should eq("SHELF-1\nSHELF-2\nSHELF-3\nSHELF-4\n")
+    output.clear
+    SweetTalk.__sweettalk_print_requirements(["SHELF-4"], output, errors).should eq(0)
+    output.to_s.should eq("SHELF-4\n  nothing assures it\n")
+    output.clear
+    SweetTalk.__sweettalk_print_requirements([] of String, output, errors).should eq(0)
+    first = "SHELF-1\n  never Rules::Shelf::Jar: A jar on sale needs a label.\n"
+    output.to_s.should start_with(first)
+    SweetTalk.__sweettalk_print_requirements(["SHELF-9"], output, errors).should eq(1)
+    listed = "SHELF-1, SHELF-2, SHELF-3, SHELF-4"
+    errors.to_s.should eq("SHELF-9 is not a requirement; requirements: #{listed}\n")
+    errors.clear
+    SweetTalk.__sweettalk_print_requirements(["--all"], output, errors).should eq(2)
+    errors.to_s.should eq("Usage: requirements [ID|--ids]\n")
   end
 end

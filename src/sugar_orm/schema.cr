@@ -911,6 +911,10 @@ module SugarORM
         {{ selected.join(", ") }}
       end
 
+      def self.__sugar_column_names : Array(String)
+        {{ columns.map(&.[:name]) }} of String
+      end
+
       def self.__sugar_timestamps? : Bool
         {{ !timestamps.empty? }}
       end
@@ -1223,6 +1227,31 @@ module SugarORM
           def self.preload(association : Preload{{ camel.id }})
             new.preload(association)
           end
+
+          {% if association[:kind] == "belongs_to" %}
+            # An INNER JOIN with the rows of {{ preloaded }} that *parent* matches (every row
+            # by default): this query keeps the rows whose {{ association[:key].id }} holds
+            # one. Tenant scoping applies to both tables.
+            def joins(association : Preload{{ camel.id }}) : self
+              joins(association, {{ preloaded }}.query)
+            end
+
+            def joins(association : Preload{{ camel.id }},
+                      parent : ::SugarORM::Query({{ preloaded }}, Q)) : self forall Q
+              __sugar_join({{ association[:name].id.stringify }}, {{ foreign_key }}, parent)
+            end
+
+            # Orders by *field* of the parent that `joins(:{{ association[:name].id }})` joined.
+            def order_by_joined(association : Preload{{ camel.id }},
+                                field : {{ preloaded }}::Field,
+                                direction : Symbol = :asc) : self
+              __sugar_order_by_joined(
+                {{ association[:name].id.stringify }},
+                {{ preloaded }}.__sugar_column(field),
+                direction
+              )
+            end
+          {% end %}
         {% end %}
       end
 

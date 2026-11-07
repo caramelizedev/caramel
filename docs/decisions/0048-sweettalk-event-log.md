@@ -21,8 +21,8 @@ be said (#248, split from #168).
 1. **`context Billing, event_log: true, means: "…"` keeps the context's events in
    `billing_events`.** `SweetTalk.dispatch` calls each context's generated
    `__sweettalk_log`, a no-op without the keyword, before it enqueues jobs; with the keyword
-   it inserts one row for every event of the context, from an aggregate's command or a
-   service's `emit`, and for every event of a kernel the context shares, on the current
+   it inserts one row for every event of the context, from an aggregate's command, `create`
+   or factory, or a service's `emit`, and for every event of a kernel the context shares, on the current
    connection, so the row commits and rolls back with the command. A kernel takes no
    `event_log:`: its events are logged by each sharer that keeps a log, under the aggregate
    name `<kernel>_<aggregate>`. The keyword takes `true` only.
@@ -47,6 +47,8 @@ be said (#248, split from #168).
    1000)` deletes the rows that occurred before `t`, `chunk` rows a statement until one
    comes back short, across every tenant, and returns the count; a context without the
    keyword does not compile. A `Caramel::ColdBrew.every` block is its retention.
+   `Billing.reached(event)` walks every context's log forward by `cause_id`
+   ([ADR 0056](0056-sweettalk-reached-events-and-pinned-references.md)).
 4. **`SweetTalk.rebuild(Billing::Sales)` replays the log through the projection's own
    handlers.** In one transaction it takes `pg_advisory_xact_lock(LOCK_NAMESPACE,
    hashtext(table))` in Cold Brew's two-key namespace, counts `caramel_jobs` rows of the

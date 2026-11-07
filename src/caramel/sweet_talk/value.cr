@@ -75,14 +75,21 @@ module SweetTalk
   # `never` and `always`, the invariants of an aggregate or a composite value.
   module Guarded
     # `never "message" { condition }` refuses any change that leaves the condition true.
-    macro never(message, &block)
+    # `assures: "AC-12"` names the requirement ids it answers (ADR 0057).
+    macro never(message, assures = nil, &block)
+      ::SweetTalk.__sweettalk_assures("never", {{ "never in #{@type.name.split("::").last.id}" }},
+        {{ message }}, {{ assures }}, {{ @type.name.stringify }}, {{ @type.name.stringify }},
+        {{ "SWEETTALK_ASSURES_NEVER_#{message.line_number}" }})
       private def __sweettalk_never_{{ message.line_number }} : Nil
         raise ::SweetTalk::Refusal.new({{ message }}) if ({{ block.body }})
       end
     end
 
     # `always "message" { condition }` refuses any change that leaves it false.
-    macro always(message, &block)
+    macro always(message, assures = nil, &block)
+      ::SweetTalk.__sweettalk_assures("always", {{ "always in #{@type.name.split("::").last.id}" }},
+        {{ message }}, {{ assures }}, {{ @type.name.stringify }}, {{ @type.name.stringify }},
+        {{ "SWEETTALK_ASSURES_ALWAYS_#{message.line_number}" }})
       private def __sweettalk_always_{{ message.line_number }} : Nil
         raise ::SweetTalk::Refusal.new({{ message }}) unless ({{ block.body }})
       end

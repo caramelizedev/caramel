@@ -142,7 +142,7 @@ module Caramel::Frappe
     QUIET        = 5.seconds
     RELAY_BUFFER = 4096
 
-    def run(paths : Array(String), concurrency : Int32) : Nil
+    def run(paths : Array(String), concurrency : Int32, full : Bool) : Nil
       started = Time.instant
       files = self.class.spec_files(@project.root, paths)
       settings = self.class.test_environment(@project.root)
@@ -184,6 +184,7 @@ module Caramel::Frappe
             settings.merge(worker_environment(client, id, index, worker, secret))
           end
         end
+        groups.each_index { |offset| File.delete?(examples_path(offset + 1)) }
         phase("workers finished") { run_workers(tools, builds, environments) }
       ensure
         # A failed migration or clone still waits for the builds it started.
@@ -205,12 +206,55 @@ module Caramel::Frappe
       total = self.class.format_duration(Time.instant - started)
       @output.puts("Corretto: #{results.size - failed.size} of #{results.size} workers passed " \
                    "in #{total}")
-      return if failed.empty?
+      if failed.empty?
+        check_requirements(tools, groups.size) if full
+        return
+      end
 
       raise Error.new("Specs failed in #{failed.join(", ")}; " \
                       "see the prefixed output above")
     ensure
       lock.try(&.release)
+    end
+
+    # `.caramel/corretto/w<N>.examples`: the descriptions of the examples worker N ran, one
+    # a line, which a full run reads to see every requirement named.
+    private def examples_path(index : Int32) : String
+      File.join(@project.root, ".caramel/corretto/w#{index}.examples")
+    end
+
+    # After a full run in which every worker passed: each requirement id the application
+    # declares must be named by an example that ran. An application that does not require
+    # caramel/sweet_talk declares none, and is not checked.
+    private def check_requirements(tools : Tools, workers : Int32) : Nil
+      binary = tools.compile(@project)
+      errors = IO::Memory.new
+      development = {"CARAMEL_ENV" => "development"}
+      arguments = ["requirements", "--ids"]
+      status, listing = tools.capture(binary, arguments, @project.root, development, errors)
+      return if status.exit_code == 2 && errors.to_s.starts_with?("Usage:")
+      unless status.success?
+        raise Error.new("The application's requirements command failed: #{errors.to_s.strip}")
+      end
+      ids = listing.lines.map(&.strip).reject(&.empty?)
+      descriptions = (1..workers).flat_map do |index|
+        path = examples_path(index)
+        File.file?(path) ? File.read_lines(path) : [] of String
+      end
+      missing = self.class.uncovered(ids, descriptions)
+      return if missing.empty?
+      raise Error.new("No example names requirement #{missing.join(", ")}: put each id in " \
+                      "the name of an example that proves it, as in " \
+                      "it \"refuses an unbalanced journal (AC-12)\"")
+    end
+
+    # The ids of *ids* that no description in *descriptions* names. An id is named as a
+    # token: AC-1 is not named by "AC-12" or "XAC-1".
+    def self.uncovered(ids : Array(String), descriptions : Array(String)) : Array(String)
+      ids.reject do |id|
+        token = /(?<![A-Za-z0-9_-])#{Regex.escape(id)}(?![A-Za-z0-9_-])/
+        descriptions.any?(&.matches?(token))
+      end
     end
 
     # Runs the block, then reports `Corretto: <label> in <duration>`.
@@ -301,6 +345,7 @@ module Caramel::Frappe
         "SPEC_MIGRATION_DATABASE_URL"   => migration,
         "CARAMEL_EXPECTED_DATABASE_URL" => runtime,
         "CORRETTO_WORKER"               => index.to_s,
+        "CORRETTO_EXAMPLES"             => examples_path(index),
         "CORRETTO_SITE"                 => id,
         "CORRETTO_LATTE_SOCKET"         => client.socket_path,
       }

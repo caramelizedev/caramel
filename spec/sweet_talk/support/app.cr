@@ -9,6 +9,7 @@ require "./library"
 require "./constraints"
 require "./treasury"
 require "./billing"
+require "./corrections"
 
 # Only scripts/check integration supplies these URLs for its newly owned cluster.
 private def owned_url(variable : String) : String

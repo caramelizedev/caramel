@@ -192,4 +192,16 @@ describe Caramel::Frappe::CorrettoRunner do
     lines.all?(&.starts_with?("[w2] .")).should be_true
     lines.join.count('.').should eq(40)
   end
+
+  it "names a requirement only by its whole id in an example's description" do
+    uncovered = ->(ids : Array(String), names : Array(String)) do
+      Caramel::Frappe::CorrettoRunner.uncovered(ids, names)
+    end
+    uncovered.call(["AC-1"], ["Journal refuses an unbalanced entry (AC-12)"]).should eq(["AC-1"])
+    uncovered.call(["AC-12"], ["Journal refuses an unbalanced entry (AC-12)."]).should be_empty
+    uncovered.call(["AC-12"], ["AC-12 holds"]).should be_empty
+    uncovered.call(["AC-12"], ["XAC-12 holds", "AC-123 holds"]).should eq(["AC-12"])
+    both = ["AC-1", "AC-2"]
+    uncovered.call(both, ["Journal refuses (AC-2)", "Ledger sums"]).should eq(["AC-1"])
+  end
 end

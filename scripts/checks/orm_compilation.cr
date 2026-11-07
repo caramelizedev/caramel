@@ -239,6 +239,16 @@ cases = {
     "compile_json_twice.cr:8:",
     "Team declares json twice.",
   ],
+  "compile_joins_has_many" => [
+    "compile_joins_has_many.cr:3:",
+    "expected argument #1 to 'Team::QueryOf(NamedTuple())#joins' to match a member of enum",
+    "Options are: :owner",
+  ],
+  "compile_order_by_joined_unknown_field" => [
+    "compile_order_by_joined_unknown_field.cr:3:",
+    "to 'User::QueryOf(NamedTuple())#order_by_joined' to match a member of enum",
+    "field : Team::Field",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)

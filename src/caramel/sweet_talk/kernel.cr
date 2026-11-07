@@ -97,6 +97,8 @@ module SweetTalk
       SWEETTALK_WAS       = nil
       SWEETTALK_STORED    = {{ name.stringify.underscore }}
       SWEETTALK_TENANT    = {{ tenant ? tenant : nil }}
+      {% key = "SWEETTALK_REQUIREMENTS" %}
+      SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}
       SWEETTALK_CENTRAL   = false
       SWEETTALK_SUBDOMAIN = nil
       SWEETTALK_FOLLOWS   = [] of String

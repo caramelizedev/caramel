@@ -359,6 +359,12 @@ module Caramel
       Response.new(404, message)
     end
 
+    # A refusal because the record is still used elsewhere, such as a delete that a foreign
+    # key stops.
+    def conflict(message : String = Wording.conflict) : Response
+      Response.new(409, message)
+    end
+
     # Streams the body; uploaded files are already deleted when the block runs.
     def stream(content_type : String,
                status : Int32 = @status,

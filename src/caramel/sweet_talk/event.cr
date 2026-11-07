@@ -36,6 +36,10 @@ module SweetTalk
     abstract def __sweettalk_home : String
     abstract def __sweettalk_logged_as(context : String) : {String, String}
 
+    # The name of the aggregate or context this event belongs to, such as
+    # `Shop::Ordering::Order`.
+    abstract def __sweettalk_subject_name : String
+
     def __sweettalk_subject_id : Int64?
       @__sweettalk_subject_id || @__sweettalk_subject.try(&.__sweettalk_raw_id)
     end

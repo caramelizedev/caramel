@@ -89,6 +89,7 @@ module Corretto
       item = example.example
       application(worker) # rebinds SugarORM::Repo.database after a reset
       leaked = worker.run(item.all_tags.includes?("catalog")) { example.run }
+      record_example(item)
       if leaked
         warning = "\nCorretto: #{item.file}:#{item.line} changed the database catalog " \
                   "outside its transaction; worker #{index} was reset from the " \
@@ -106,6 +107,20 @@ module Corretto
       worker.close
       wire.close
     end
+  end
+
+  # Appends the example's full description, its groups' and its own joined by spaces, to the
+  # file `frappe corretto` names in CORRETTO_EXAMPLES, so a full run can check that each
+  # requirement id is named by an example.
+  private def self.record_example(item : ::Spec::Example) : Nil
+    path = ENV["CORRETTO_EXAMPLES"]? || return
+    names = [item.description]
+    group = item.parent
+    while group.is_a?(::Spec::ExampleGroup)
+      names.unshift(group.description)
+      group = group.parent
+    end
+    File.open(path, "a") { |file| file.puts(names.join(" ").gsub('\n', ' ')) }
   end
 
   # Yields a client for the configured application and the example's

@@ -65,8 +65,10 @@ aggregates over days and undo their work when a step is refused.
 4. **Factories.** `factory verb(args) do … end` in an aggregate makes one. Arguments named
    like attributes set them; the body runs as the aggregate's first change and may `emit`;
    the aggregate is checked, saved and its events dispatched in one transaction. An
-   aggregate with a factory has no `create`. An attribute that no argument sets and no
-   default covers, or a factory named like a repository method, does not compile.
+   aggregate with a factory has no `create`; one without has `create`, which announces
+   `Created` (ADR 0053). An attribute that no
+   argument sets and no default covers, or a factory named like a repository method, does
+   not compile.
 5. **Services.** `service verb(args), returns: T, means: "…" do … end` in a context is a
    domain service and a glossary entry. It runs in one transaction and changes at most one
    aggregate by any number of commands, a `create` or a factory counting as the first, or
@@ -140,8 +142,7 @@ aggregates over days and undo their work when a step is refused.
   ([ADR 0008](0008-branch-and-diff-migrations.md)) instead of a later read. A range or a
   length is evaluated on the written row alone, with no reads, and `database_check:
   false` serves a table whose writes cannot spare it.
-- Removing by a timestamp keeps every reference valid: an order line still names its tea,
-  and a projection still keys its rows by it.
+- Removing by a timestamp keeps every reference valid.
 - `acting` keeps call sites unchanged: no command takes an actor argument, yet every event
   and every job that follows it knows who acted. `cause_id` and `flow_id` follow it the
   same way. A flow is the trace id where one exists, so a trace and its events share an

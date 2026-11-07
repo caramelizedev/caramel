@@ -521,6 +521,100 @@ PROBLEMS = [
    "event Placed gives note in older:, an optional field, which reads nil from a stored " \
    "Placed without it: take note out of older:"},
   {"older_type", "type must be String, not Int32"},
+  {"created_with_fields",
+   "event Created in Crate declares label, but create announces Created with what Crate " \
+   "holds: declare it with carries: alone, as in event Created, carries: [reading], or give " \
+   "Crate a factory"},
+  {"created_channel_long",
+   "aggregate RefrigeratedShippingContainerForTransport's create announces Created on " \
+   "sweettalk.warehousing.refrigerated_shipping_container_for_transport.created, longer than " \
+   "PostgreSQL's 63 characters: shorten the context or the aggregate name, or give " \
+   "RefrigeratedShippingContainerForTransport a factory, which replaces create and Created"},
+  {"parts_in_projection",
+   "parts: belongs on an aggregate's or an entity's closed-set attribute, not on projection " \
+   "Totals's"},
+  {"parts_not_closed_set",
+   "has amount : Int32 = 0 takes parts: only on a required value with one_of:, as in value " \
+   "Kind, String, one_of: %w[trade cash fee]"},
+  {"parts_optional_kind",
+   "takes parts: only on a required value with one_of:, as in value Kind, String, one_of: " \
+   "%w[trade cash fee]"},
+  {"parts_not_tuple",
+   "has kind : Kind takes parts: {member: [attribute, …]}, as in parts: {payment: [payee]}, " \
+   "not [:payee]"},
+  {"parts_unknown_member",
+   "has kind : Kind names parts for gift, which Kind does not list; it lists trade, cash, fee"},
+  {"parts_unknown_attribute",
+   "has kind : Kind gives trade the part payer, which Transfer does not declare above it; it " \
+   "has payee"},
+  {"parts_entities",
+   "has kind : Kind gives trade the part lines, a list of entities: a part is one optional " \
+   "attribute"},
+  {"parts_required_attribute",
+   "has kind : Kind gives trade the part payee, which is required: a part some kinds lack is " \
+   "optional, as in has payee : String?"},
+  {"parts_twice", "has kind : Kind gives trade the part payee twice"},
+  {"parts_predicate_taken",
+   "has kind : Kind would define Transfer#as_trade, which Transfer already has: rename that " \
+   "method"},
+  {"once_by_unknown",
+   "unit annotate_once runs once by request, which is not one of its arguments: once_by: " \
+   "names the argument that names the operation, one of order, note"},
+  {"once_by_type",
+   "unit annotate_once runs once by request : Int32, which is no text: once_by: names a " \
+   "String argument or a value that wraps String"},
+  {"once_by_aggregate_argument",
+   "unit annotate_once runs once by request, so it keeps its other arguments to tell a " \
+   "retry from another request: take order : Order::Id, not order : Order"},
+  {"once_by_returns_aggregate",
+   "unit annotate_once runs once by request, so it keeps what it returns for a retry: " \
+   "return Order::Id, not Order"},
+  {"otherwise_without_once_by",
+   "unit annotate_once takes otherwise: only with once_by:, the sentence a key used again " \
+   "with other arguments is refused with"},
+  {"unit_otherwise_not_text",
+   "unit annotate_once takes otherwise: the sentence a key used again with other arguments " \
+   "is refused with, as in otherwise: \"That transfer was already recorded differently.\", " \
+   "not 5"},
+  {"operations_table_taken",
+   "context Ordering keeps its units' operations in ordering_operations, the table " \
+   "aggregate Operation stores its rows in: rename one of them"},
+  {"pinned_not_symbol",
+   "has terms : Terms takes pinned_at: a state, as in pinned_at: :finalized, not \"placed\""},
+  {"pinned_outside_aggregate",
+   "has terms : Terms takes pinned_at: only in an aggregate, whose moves enter the state"},
+  {"pinned_not_reference",
+   "has rate : Int64 takes pinned_at: only as a reference to another aggregate, which it " \
+   "copies when the state is entered"},
+  {"pinned_unknown_state",
+   "has terms is pinned at :shipped, which Order's moves do not list; it lists open, placed"},
+  {"pinned_initial_state",
+   "has terms is pinned at :open, the state Order starts in, which no mover enters: pin it " \
+   "at a later state"},
+  {"requirements_empty",
+   "requirements takes at least one requirement id, as in requirements \"AC-01\""},
+  {"requirements_not_text",
+   "requirements takes requirement ids as text, as in requirements \"AC-01\", \"AC-02\", " \
+   "not :AC1"},
+  {"requirements_id_shape",
+   "requirements takes ids of letters, digits, '.', '_' and '-', starting with a letter or a " \
+   "digit, not \"AC 1\""},
+  {"requirements_duplicate", "requirements lists AC-1 twice"},
+  {"requirements_twice", "requirements is declared twice in Shop: keep one"},
+  {"requirements_after_context",
+   "requirements comes after context Ordering: list the requirements before the contexts"},
+  {"assures_not_text",
+   "never in Order takes assures: a requirement id or a list of them, as in assures: " \
+   "\"AC-12\" or assures: [\"AC-12\", \"D04\"], not 5"},
+  {"assures_without_requirements",
+   "never in Order assures AC-1, but Shop declares no requirements: add requirements " \
+   "\"AC-1\" before its first context"},
+  {"assures_unknown",
+   "never in Order assures AC-2, which Shop does not list in requirements; it lists AC-1: " \
+   "add AC-2 there, or correct the id"},
+  {"assures_unit_rule_unknown",
+   "never in unit Ordering.annotate assures AC-9, which Shop does not list in requirements; " \
+   "it lists AC-1: add AC-9 there, or correct the id"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

@@ -23,4 +23,11 @@ module SweetTalk
   # "core", "supporting" or "generic", or nil when the context names none or is a kernel.
   record Term, kind : String, name : String, context : String, means : String,
     subdomain : String? = nil
+
+  # What assures a requirement: the kind of declaration, `never`, `always`, `specification`
+  # or `unit`, its sentence or meaning, and what holds it.
+  record Assurance, kind : String, text : String, owner : String
+
+  # One requirement id and every declaration that assures it, in the order they were found.
+  record Requirement, id : String, assured_by : Array(Assurance)
 end

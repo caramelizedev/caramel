@@ -139,6 +139,9 @@ module Caramel::Frappe
       Command.new("routes [FILTER]",
         "List routes with their contracts; FILTER keeps routes whose method, " \
         "path or action contains it (any case)."),
+      Command.new("requirements [ID]",
+        "List the requirement ids the SweetTalk domain declares, each with the never, " \
+        "always, specification and unit lines that assure it; ID shows one."),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
         "where none expands, the call whose block encloses it, such as " \
