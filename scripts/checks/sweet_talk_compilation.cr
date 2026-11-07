@@ -530,6 +530,33 @@ PROBLEMS = [
    "sweettalk.warehousing.refrigerated_shipping_container_for_transport.created, longer than " \
    "PostgreSQL's 63 characters: shorten the context or the aggregate name, or give " \
    "RefrigeratedShippingContainerForTransport a factory, which replaces create and Created"},
+  {"parts_in_projection",
+   "parts: belongs on an aggregate's or an entity's closed-set attribute, not on projection " \
+   "Totals's"},
+  {"parts_not_closed_set",
+   "has amount : Int32 = 0 takes parts: only on a required value with one_of:, as in value " \
+   "Kind, String, one_of: %w[trade cash fee]"},
+  {"parts_optional_kind",
+   "takes parts: only on a required value with one_of:, as in value Kind, String, one_of: " \
+   "%w[trade cash fee]"},
+  {"parts_not_tuple",
+   "has kind : Kind takes parts: {member: [attribute, …]}, as in parts: {payment: [payee]}, " \
+   "not [:payee]"},
+  {"parts_unknown_member",
+   "has kind : Kind names parts for gift, which Kind does not list; it lists trade, cash, fee"},
+  {"parts_unknown_attribute",
+   "has kind : Kind gives trade the part payer, which Transfer does not declare above it; it " \
+   "has payee"},
+  {"parts_entities",
+   "has kind : Kind gives trade the part lines, a list of entities: a part is one optional " \
+   "attribute"},
+  {"parts_required_attribute",
+   "has kind : Kind gives trade the part payee, which is required: a part some kinds lack is " \
+   "optional, as in has payee : String?"},
+  {"parts_twice", "has kind : Kind gives trade the part payee twice"},
+  {"parts_predicate_taken",
+   "has kind : Kind would define Transfer#as_trade, which Transfer already has: rename that " \
+   "method"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

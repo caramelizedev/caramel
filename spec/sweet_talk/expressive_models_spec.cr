@@ -639,3 +639,53 @@ describe "SweetTalk's entities when an aggregate is saved" do
     end
   end
 end
+
+describe "SweetTalk's kinds with parts" do
+  it "creates a payment with its payee, and a receipt with neither part" do
+    SweetTalkSpec.rolled_back do
+      owner = Ledger::Counter::Owner.create(name: "Bo")
+      kind = Ledger::Counter::Kind
+      payment = Ledger::Counter::Settlement.create(kind: kind.payment, payee: owner)
+      receipt = Ledger::Counter::Settlement.create(kind: kind.receipt)
+      Ledger::Counter::Settlement.find(payment.id).payee.should eq(owner.id)
+      Ledger::Counter::Settlement.find(receipt.id).kind.receipt?.should be_true
+    end
+  end
+
+  it "refuses a payment without its payee, and a receipt with one, before anything is written" do
+    SweetTalkSpec.rolled_back do
+      owner = Ledger::Counter::Owner.create(name: "Bo")
+      kind = Ledger::Counter::Kind
+      expect_raises(SweetTalk::Refusal, "Settlement kind payment holds payee and no leg") do
+        Ledger::Counter::Settlement.create(kind: kind.payment)
+      end
+      expect_raises(SweetTalk::Refusal, "Settlement kind receipt holds no payee or leg") do
+        Ledger::Counter::Settlement.create(kind: kind.receipt, payee: owner)
+      end
+      SweetTalkSpec.count("counter_settlements").should eq(0)
+    end
+  end
+
+  it "reads a member's parts as a named tuple, and raises TypeCastError for another member" do
+    SweetTalkSpec.rolled_back do
+      owner = Ledger::Counter::Owner.create(name: "Bo")
+      kind = Ledger::Counter::Kind
+      payment = Ledger::Counter::Settlement.create(kind: kind.payment, payee: owner)
+      receipt = Ledger::Counter::Settlement.create(kind: kind.receipt)
+      payment.as_payment.should eq({payee: owner.id})
+      expect_raises(TypeCastError, "Settlement is kind receipt, not payment") do
+        receipt.as_payment
+      end
+    end
+  end
+
+  it "has PostgreSQL refuse a part a member does not hold, written around the domain" do
+    SweetTalkSpec.rolled_back do
+      owner = Ledger::Counter::Owner.create(name: "Bo")
+      receipt = Ledger::Counter::Settlement.create(kind: Ledger::Counter::Kind.receipt)
+      broken = ExpressiveModelsSpec.broken(
+        "UPDATE counter_settlements SET payee_id = $2 WHERE id = $1", receipt.id.raw, owner.id.raw)
+      broken.not_nil!.should start_with("check_counter_settlements_kind_receipt_")
+    end
+  end
+end

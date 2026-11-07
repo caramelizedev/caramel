@@ -36,6 +36,12 @@ module Ledger
       has name : String
     end
 
+    aggregate Settlement, means: "money settled for one kind of transfer" do
+      has payee : Owner?
+      has leg : Money?
+      has kind : Kind, parts: {payment: [payee], net_settlement: [payee, leg]}
+    end
+
     aggregate Transfer, means: "one movement of money across the counter" do
       has kind : Kind
       has amount : Money

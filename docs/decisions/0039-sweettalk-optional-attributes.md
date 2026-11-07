@@ -84,8 +84,10 @@ many attributes and many `never` lines that said only "this set goes together".
    Adding a part to a value changes a check's name, so the old one is dropped and the new
    one added and validated the same way.
 9. **When not to use `?`.** An optional attribute is one the thing may lack. A column that is
-   present only for some kinds of the thing is another concept: group it in a value with
-   parts, which is set whole or not at all, or give the aggregate a state that holds it. A
+   present only for some kinds of the thing is another concept: tie each such optional
+   attribute to the members of a closed-set value with `parts:` ([ADR 0054](0054-sweettalk-kinds-with-parts.md)),
+   group it in a value with parts, which is set whole or not at all, or give the aggregate a
+   state that holds it. A
    rule that ties one attribute's presence to another, as in "a refund has a reason", stays
    a `never`: `?` says an attribute may be absent, not when.
 

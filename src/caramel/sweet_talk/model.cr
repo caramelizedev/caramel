@@ -158,8 +158,13 @@ module SweetTalk
     # reference to rows that belong to one tenant (ADR 0033); an index name over
     # PostgreSQL's 63 bytes is SugarORM's to shorten. `unique: true` or `unique: "…"`,
     # `index: true` and `check: {"sql", "…"}` are database constraints on the attribute's
-    # columns (ADR 0045), recorded by `__sweettalk_constraint`.
-    macro has(decl, unique = nil, index = nil, check = nil)
+    # columns (ADR 0045), recorded by `__sweettalk_constraint`. `parts: {payment: [payee],
+    # cash: [leg]}` on a required closed-set value says which optional attributes each member
+    # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
+    # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
+    # as a named tuple (ADR 0054).
+    macro has(decl, unique = nil, index = nil, check = nil, parts = nil)
+      {% member_parts = parts %}
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
       {% end %}
@@ -422,6 +427,168 @@ module SweetTalk
         {% end %}
         __sweettalk_constraint("check", [{{ name.stringify }}], nil,
           {{ name.stringify }}, {{ check[1] }}, {{ check[0] }})
+      {% end %}
+
+      {% unless member_parts.is_a?(NilLiteral) %}
+        {% short = @type.name.split("::").last %}
+        {% if @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+          {% decl.raise "parts: belongs on an aggregate's or an entity's closed-set attribute, " +
+                        "not on #{@type.constant("SWEETTALK_KIND").id} #{short.id}'s" %}
+        {% end %}
+        {% unless kind == "value" && !nilable && members[0].has_constant?("SWEETTALK_ONE_OF") %}
+          {% decl.raise "has #{decl} takes parts: only on a required value with one_of:, as " +
+                        "in value Kind, String, one_of: %w[trade cash fee]" %}
+        {% end %}
+        {% listed_members = members[0].constant("SWEETTALK_ONE_OF") %}
+        {% underscored = listed_members.map(&.underscore) %}
+        {% value_name = members[0].name.split("::").last %}
+        {% shaped = member_parts.is_a?(NamedTupleLiteral) && member_parts.size > 0 %}
+        {% if shaped %}
+          {% for key, list in member_parts %}
+            {% shaped = false unless list.is_a?(ArrayLiteral) && list.size > 0 %}
+            {% if list.is_a?(ArrayLiteral) %}
+              {% for item in list %}
+                {% bare = item.is_a?(Var) ||
+                          (item.is_a?(Call) && item.receiver.is_a?(Nop) && item.args.empty?) %}
+                {% shaped = false unless bare %}
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% unless shaped %}
+          {% decl.raise "has #{decl} takes parts: {member: [attribute, …]}, as in parts: " +
+                        "{payment: [payee]}, not #{member_parts}" %}
+        {% end %}
+        {% above = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |found| @type.constant(found) }.sort_by { |attribute| attribute[1] } %}
+        {% sets = [] of Nil %}
+        {% every = [] of Nil %}
+        {% for key, list in member_parts %}
+          {% member = key.id.stringify %}
+          {% found = false %}
+          {% for candidate in underscored %}
+            {% found = true if candidate == member %}
+          {% end %}
+          {% unless found %}
+            {% decl.raise "has #{decl} names parts for #{member.id}, which #{value_name.id} " +
+                          "does not list; it lists #{underscored.join(", ").id}" %}
+          {% end %}
+          {% held = [] of Nil %}
+          {% for item in list %}
+            {% part = item.id.stringify %}
+            {% attribute = above.find { |candidate| candidate[0] == part } %}
+            {% unless attribute %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, which " +
+                            "#{short.id} does not declare above it; it has " +
+                            "#{above.map(&.[0]).join(", ").id}" %}
+            {% end %}
+            {% if attribute[2] == "entities" %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, a list of " +
+                            "entities: a part is one optional attribute" %}
+            {% end %}
+            {% unless attribute[9] %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, which is " +
+                            "required: a part some kinds lack is optional, as in has " +
+                            "#{part.id} : #{attribute[3].id}?" %}
+            {% end %}
+            {% if held.includes?(part) %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id} twice" %}
+            {% end %}
+            {% held << part %}
+            {% every << part unless every.includes?(part) %}
+          {% end %}
+          {% if @type.has_method?("as_#{member.id}") %}
+            {% decl.raise "has #{decl} would define #{short.id}#as_#{member.id}, which " +
+                          "#{short.id} already has: rename that method" %}
+          {% end %}
+          {% sets << {member, held} %}
+        {% end %}
+        {% located = [] of Nil %}
+        {% for part in every %}
+          {% attribute = above.find { |candidate| candidate[0] == part } %}
+          {% cells = [] of Nil %}
+          {% if attribute[2] == "composite" %}
+            {% for piece in attribute[7] %}
+              {% cells << piece[1] %}
+            {% end %}
+          {% else %}
+            {% cells << attribute[4] %}
+          {% end %}
+          {% located << {part, cells} %}
+        {% end %}
+        {% rules = [] of Nil %}
+        {% for raw_member, position in listed_members %}
+          {% member = underscored[position] %}
+          {% set = [] of Nil %}
+          {% for entry in sets %}
+            {% set = entry[1] if entry[0] == member %}
+          {% end %}
+          {% unset = every.reject { |part| set.includes?(part) } %}
+          {% set_cells = [] of Nil %}
+          {% unset_cells = [] of Nil %}
+          {% for entry in located %}
+            {% for cell in entry[1] %}
+              {% if set.includes?(entry[0]) %}
+                {% set_cells << "\"#{cell.id}\"" %}
+              {% else %}
+                {% unset_cells << "\"#{cell.id}\"" %}
+              {% end %}
+            {% end %}
+          {% end %}
+          {% sentence = "#{short.id} #{name.id} #{member.id} holds " %}
+          {% if set.empty? %}
+            {% sentence = sentence + "no #{unset.join(" or ").id}" %}
+          {% else %}
+            {% sentence = sentence + set.join(" and ") %}
+            {% sentence = sentence + " and no #{unset.join(" or ").id}" unless unset.empty? %}
+          {% end %}
+          {% conjuncts = [] of Nil %}
+          {% conjuncts << "num_nulls(#{set_cells.join(", ").id}) = 0" unless set_cells.empty? %}
+          {% unless unset_cells.empty? %}
+            {% conjuncts << "num_nonnulls(#{unset_cells.join(", ").id}) = 0" %}
+          {% end %}
+          {% sql = "\"#{column.id}\" <> '#{raw_member.id}' OR (#{conjuncts.join(" AND ").id})" %}
+          {% tests = set.map { |part| "!#{part.id}.nil?" } +
+                     unset.map { |part| "#{part.id}.nil?" } %}
+          {% rules << {raw_member, sentence, tests.join(" && ")} %}
+          __sweettalk_constraint("check", [{{ name.stringify }}], nil,
+            {{ "#{name.id}_#{member.id}" }}, {{ sentence }}, {{ sql }})
+        {% end %}
+
+        # Refuses a {{ name }} whose parts do not match its member, before a save.
+        private def __sweettalk_never_parts_{{ name }} : Nil
+          case {{ name }}.raw
+          {% for rule in rules %}
+          when {{ rule[0] }}
+            refuse({{ rule[1] }}) unless {{ rule[2].id }}
+          {% end %}
+          end
+        end
+
+        {% for entry in sets %}
+          {% fields = [] of Nil %}
+          {% reads = [] of Nil %}
+          {% for part in entry[1] %}
+            {% attribute = above.find { |candidate| candidate[0] == part } %}
+            {% shown = attribute[10].id %}
+            {% shown = "#{attribute[10].id}::Id" if attribute[2] == "reference" %}
+            {% if attribute[2] == "record" %}
+              {% shown = "::SweetTalk::RecordId(#{attribute[10].id})" %}
+            {% end %}
+            {% fields << "#{part.id}: #{shown.id}" %}
+            {% reads << "#{part.id}: #{part.id}.not_nil!" %}
+          {% end %}
+          # The parts of a {{ entry[0].id }} {{ name }}, each set; raises TypeCastError for any
+          # other member.
+          def as_{{ entry[0].id }} : NamedTuple({{ fields.join(", ").id }})
+            current = {{ name }}.raw
+            unless {{ name }}.{{ entry[0].id }}?
+              raise TypeCastError.new(
+                "{{ short.id }} is {{ name }} #{current}, not {{ entry[0].id }}")
+            end
+            { {{ reads.join(", ").id }} }
+          end
+        {% end %}
       {% end %}
 
       {% if kind == "reference" || kind == "record" %}

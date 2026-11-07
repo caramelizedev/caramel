@@ -62,6 +62,13 @@ describe "SweetTalk's database checks" do
         check_counter_followups_followed_with_all_or_none_437ba1f3
         check_counter_followups_followed_with_cents
         check_counter_followups_followed_with_currency_one_of_3910bcb7
+        check_counter_settlements_kind_net_settlement_08e32f59
+        check_counter_settlements_kind_one_of_897bbc40
+        check_counter_settlements_kind_payment_3188e8fd
+        check_counter_settlements_kind_receipt_75464217
+        check_counter_settlements_leg_all_or_none_437ba1f3
+        check_counter_settlements_leg_cents
+        check_counter_settlements_leg_currency_one_of_3910bcb7
         check_counter_standings_last_leg_all_or_none_437ba1f3
         check_counter_standings_last_leg_cents
         check_counter_standings_last_leg_currency_one_of_3910bcb7
