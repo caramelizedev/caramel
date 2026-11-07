@@ -9,8 +9,8 @@ Status: accepted. Amended: decisions 2, 4 and 6 by
 [ADR 0036](0036-sweettalk-strategic-design.md), 6 by
 [ADR 0041](0041-sweettalk-events-that-carry-attributes.md) and
 [ADR 0048](0048-sweettalk-event-log.md), 3 by [ADR 0044](0044-sweettalk-shared-kernels.md),
-4 by [ADR 0045](0045-sweettalk-database-constraints.md) and 5 by
-[ADR 0046](0046-sweettalk-units.md).
+4 by [ADR 0045](0045-sweettalk-database-constraints.md), 5 by
+[ADR 0046](0046-sweettalk-units.md), 4 and 6 by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -66,8 +66,8 @@ or a policy, and nothing stops one context from reaching into another's types.
    `<context>_<aggregate>_<entity>`), written only through its changeset
    ([ADR 0007](0007-sugarorm-schemas-changesets-preload.md)); a context may not name
    `Rows`. `has` stores:
-   - `String`, `Int32`, `Int64`, `Bool`, `Float64` or `Time` as a column; a non-optional
-     `Bool` reads as `name?` too, a name no state or specification shares;
+   - `String`, `Int32`, `Int64`, `UUID`, `Bool`, `Float64` or `Time` as a column; a
+     non-optional `Bool` reads as `name?` too, a name no state or specification shares;
    - a value as its raw column, rebuilt on load;
    - an aggregate as a foreign key, whose getter returns its `Id`;
    - an `Array` of its own entity as a child table, an entity's own too
@@ -114,8 +114,8 @@ or a policy, and nothing stops one context from reaching into another's types.
      rules, so a literal Cold Brew refuses does not compile; without them the job follows
      ADR 0009 decision 2. A failed job releases no `after:` follower.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
-     `sweettalk.<context>.<aggregate>.<event>`, each part underscored. A channel name over
-     63 characters, or 42 in a program that requires `caramel/tenancy`, does not compile.
+     `sweettalk.<context>.<aggregate>.<event>`, each part underscored; a channel over
+     its budget (ADR 0033) does not compile.
 7. **A projection keeps one row per key.** In a `whenever` block, `Projection[key]` reads
    the key's row locked; when it is absent, a SugarORM upsert that does nothing on a
    conflict inserts it with its defaults, and the row is read locked again. The rows a

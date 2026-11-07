@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Ordering, means: "choosing teas and checking out" do
     value Cents, Int64, at_least: 0, means: "an amount in minor units"

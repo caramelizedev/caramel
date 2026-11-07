@@ -1,7 +1,7 @@
 module App::@@COLLECTION@@
   # Shared by the actions that render the @@LABEL@@ form.
   module Form
-    private def render_form(values : Hash(String, String), errors : Hash(String, Array(String)), id : Int64? = nil, status : Int32 = 200) : Caramel::Response
+    private def render_form(values : Hash(String, String), errors : Hash(String, Array(String)), id : @@ID@@? = nil, status : Int32 = 200) : Caramel::Response
       action = id ? @@SINGULAR@@_path(id) : @@PLURAL@@_path
       form = Views::@@COLLECTION@@::Form.new(action, id ? "PATCH" : "POST", csrf_token, values, errors)
       # frappe:only edit
@@ -29,7 +29,8 @@ module App::@@COLLECTION@@
 
     # Re-renders the submitted form with every contract error.
     def contract_failure_page(contract : Caramel::RequestContract) : Caramel::Response
-      render_form(contract.values, contract.errors, contract.values["id"]?.try(&.to_i64?), 422)
+      id = contract.values["id"]?.try { |text| Caramel::RequestContract.convert(text, @@ID@@) }
+      render_form(contract.values, contract.errors, id, 422)
     end
   end
 end

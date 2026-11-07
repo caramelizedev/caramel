@@ -371,7 +371,7 @@ const compileRows = {
   'An emit that gives a field its event carries': ['emit_carried_field'],
   'renamed_from: naming its own name, or a rename whose old job name another job has': ['renamed_from_itself', 'job_alias_taken'],
   'A value with parts as a contract field': ['composite_field'],
-  'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'tenant_column_taken', 'tenant_parent_column'],
+  'With caramel/tenancy, the mistakes listed under Share a domain between tenants': ['central_not_true', 'central_without_tenancy', 'tenant_unnamed', 'tenant_after_context', 'tenant_without_tenancy', 'tenant_not_schema', 'tenant_twice', 'tenant_mismatch', 'central_has_tenanted', 'central_event_tenanted_handler', 'channel_tenant_budget', 'channel_uuid_tenant_budget', 'ids_tenant_mismatch', 'tenant_column_taken', 'tenant_parent_column'],
   'A command named finalize, which would replace the garbage collector’s': ['command_finalize'],
   'has tenant or has tenant_id on an aggregate of a tenanted context, which has those accessors': ['has_tenant', 'has_tenant_id'],
   'An Array of scalars': ['array_of_scalars'],

@@ -141,8 +141,8 @@ PROBLEMS = [
   {"event_carries_reserved",
    "event Placed cannot have a field named actor: SweetTalk records it"},
   {"composite_part_type",
-   "part weight : Float32 cannot be stored: a part is String, Int32, Int64, Bool, Float64, Time " \
-   "or a value that wraps one"},
+   "part weight : Float32 cannot be stored: a part is String, Int32, Int64, UUID, Bool, " \
+   "Float64, Time or a value that wraps one"},
   {"composite_without_parts", "value Address needs parts, as in part street : String"},
   {"process_without_key",
    "process Hold needs a key, as in key slot : Slot, the attribute that picks its row"},
@@ -209,6 +209,11 @@ PROBLEMS = [
   {"channel_tenant_budget",
    "event TemperatureRecorded's channel sweettalk.warehousing.cold_container." \
    "temperature_recorded is longer than 42 characters"},
+  {"channel_uuid_tenant_budget",
+   "event TemperatureNoted's channel sweettalk.stock.bin.temperature_noted is longer than 36 " \
+   "characters: a tenant's t<id>: prefix adds up to 27"},
+  {"ids_tenant_mismatch",
+   "Shop declares ids Int64, but its tenant Shop::Account is keyed by UUID"},
   {"tenant_column_taken",
    "has account : Account would store account_id, which names each row's tenant " \
    "Shop::Account"},
@@ -302,7 +307,7 @@ PROBLEMS = [
    ":label: narrow Jar with where: instead"},
   {"groups_by_ungroupable",
    "groups grams_by_tea groups by Slot.brewed_at, which has no one-column key: group by text, " \
-   "a whole number, a Bool, a day, a decimal, an aggregate it refers to, or state"},
+   "a whole number, a UUID, a Bool, a day, a decimal, an aggregate it refers to, or state"},
   {"finds_where_not_tuple",
    "finds labelled takes where: {attribute: value}, as in where: {member: member, state: " \
    ":placed}"},

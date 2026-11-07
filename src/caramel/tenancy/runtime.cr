@@ -14,8 +14,9 @@ module Caramel::Tenancy
   SLUG = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
   # The JSON key that carries a job's tenant.
   CARRY_KEY = "caramel_tenant"
-  # The form of a bound tenant's name prefix.
-  PREFIXED = /\At[0-9]+:/
+  # The form of a bound tenant's name prefix: `t`, then an Int64 tenant's id or a UUID
+  # tenant's 25 base-36 characters, then `:`.
+  PREFIXED = /\At(?:[0-9]+|[0-9a-z]{25}):/
 
   # :nodoc:
   NO_TENANT = <<-TEXT
@@ -26,7 +27,7 @@ module Caramel::Tenancy
 
   # The tenant a job was enqueued in was deleted before it ran.
   class Gone < Exception
-    def initialize(id : Int64)
+    def initialize(id : ::SugarORM::Key)
       super("The tenant #{id} this job was enqueued in no longer exists")
     end
   end
@@ -107,11 +108,18 @@ module Caramel::Tenancy
   end
 
   # :nodoc:
+  # *tenant*'s name prefix: `t`, its id (a UUID's in 25 base-36 characters), `:`.
+  def self.prefix(tenant : ::SugarORM::Tenancy::Tenant) : String
+    key = tenant.__sugar_primary_value
+    "t#{key.is_a?(UUID) ? ColdBrew.short_id(key) : key}:"
+  end
+
+  # :nodoc:
   # *name* under the bound tenant's `t<id>:` prefix. With none bound, a *name*
   # that already looks prefixed raises, except inside `without`.
   def self.scoped(name : String, kind : String) : String
     if tenant = current?
-      return "t#{tenant.__sugar_primary_value}:#{name}"
+      return "#{prefix(tenant)}#{name}"
     end
     if name.matches?(PREFIXED) && !Fiber.current.__sugar_untenanted?
       raise ArgumentError.new(
@@ -125,14 +133,14 @@ module Caramel::Tenancy
   end
 
   # :nodoc:
-  # The tenant id a job's *payload* carries. jsonb reorders keys, so the
-  # whole object is read.
-  def self.carried_id(payload : String) : Int64?
+  # The tenant id a job's *payload* carries: a number for an Int64 tenant, a string for
+  # a UUID one. jsonb reorders keys, so the whole object is read.
+  def self.carried_id(payload : String) : ::SugarORM::Tenancy::Tenant::PrimaryKey?
     parser = JSON::PullParser.new(payload)
     id = nil
     parser.read_object do |key|
       if key == CARRY_KEY
-        id = parser.read_int
+        id = ::SugarORM::Tenancy::Tenant::PrimaryKey.new(parser)
       else
         parser.skip
       end
@@ -158,15 +166,15 @@ module Caramel
       Tenancy.scoped(key, "Cache key")
     end
 
-    # `LIKE` needs no escaping: a prefix is `t`, digits and `:`.
+    # `LIKE` needs no escaping: a prefix is `t`, digits and lowercase letters, and `:`.
     CLEAR_TENANT  = "DELETE FROM caramel_cache WHERE key LIKE $1"
-    CLEAR_CENTRAL = "DELETE FROM caramel_cache WHERE key !~ '^t[0-9]+:'"
+    CLEAR_CENTRAL = "DELETE FROM caramel_cache WHERE key !~ '^t([0-9]+|[0-9a-z]{25}):'"
 
     # The bound tenant's keys; with none bound, the keys no tenant owns; inside
     # Tenancy.without, every key.
     def self.clear : Nil
       if tenant = Tenancy.current?
-        SugarORM.sql_exec(CLEAR_TENANT, "t#{tenant.__sugar_primary_value}:%")
+        SugarORM.sql_exec(CLEAR_TENANT, "#{Tenancy.prefix(tenant)}%")
       elsif Fiber.current.__sugar_untenanted?
         SugarORM.sql_exec("DELETE FROM caramel_cache")
       else
@@ -190,7 +198,7 @@ module Caramel
     # *payload* with the bound tenant's id under Tenancy::CARRY_KEY.
     def self.carry(payload : String) : String
       tenant = Tenancy.current? || return payload
-      carried = %({"#{Tenancy::CARRY_KEY}":#{tenant.__sugar_primary_value})
+      carried = %({"#{Tenancy::CARRY_KEY}":#{tenant.__sugar_primary_value.to_json})
       payload == "{}" ? "#{carried}}" : "#{carried},#{payload.lchop('{')}"
     end
 

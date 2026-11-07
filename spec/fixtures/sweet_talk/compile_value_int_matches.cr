@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Catalogue, means: "the teas on our shelves" do
     value Tins, Int32, matches: /\A\d+\z/, means: "a count of tins on the shelf"

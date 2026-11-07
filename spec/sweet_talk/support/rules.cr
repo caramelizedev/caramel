@@ -11,6 +11,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Rules
   include SweetTalk
+  ids Int64
 
   TALLEST = 3
 

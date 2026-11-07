@@ -1,7 +1,7 @@
 module App::Books
   struct Show < App::ApplicationAction
     contract do
-      field id : Int64, min: 1
+      field id : UUID
     end
 
     def handle(contract : Contract)

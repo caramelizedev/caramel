@@ -5,6 +5,7 @@ require "../../../src/caramel/sweet_talk/decimal"
 
 module Lots
   include SweetTalk
+  ids Int64
 
   context Carrying, means: "the amount a lot of units carries, settled unit by unit" do
     value Cents, Int64, at_least: 0, means: "an amount in cents"

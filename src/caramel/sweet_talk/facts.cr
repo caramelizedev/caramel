@@ -12,16 +12,16 @@ module SweetTalk
   end
 
   # The raw id behind an aggregate, its typed id or an application's schema record, for a
-  # reference's column.
-  def self.raw_id(target : Aggregate) : Int64
+  # reference's column: a UUID or an Int64, as the target is keyed.
+  def self.raw_id(target : Aggregate)
     target.__sweettalk_raw_id
   end
 
-  def self.raw_id(target : Identity) : Int64
+  def self.raw_id(target : Identity)
     target.raw
   end
 
-  def self.raw_id(record : ::SugarORM::Schema) : Int64
+  def self.raw_id(record : ::SugarORM::Schema)
     record.__sugar_primary_value
   end
 
@@ -30,21 +30,21 @@ module SweetTalk
     nil
   end
 
-  # The value a query compares a column with: a value's raw, an id's number, an
-  # aggregate's or a record's id, and lists and ranges of them.
+  # The value a query compares a column with: a value's raw, an id's raw, an aggregate's
+  # or a record's id, and lists and ranges of them.
   def self.column(value : Value)
     value.raw
   end
 
-  def self.column(value : Identity) : Int64
+  def self.column(value : Identity)
     value.raw
   end
 
-  def self.column(value : Aggregate) : Int64
+  def self.column(value : Aggregate)
     value.__sweettalk_raw_id
   end
 
-  def self.column(value : ::SugarORM::Schema) : Int64
+  def self.column(value : ::SugarORM::Schema)
     value.__sugar_primary_value
   end
 
@@ -56,18 +56,48 @@ module SweetTalk
     Range.new(column(value.begin), column(value.end), value.excludes_end?)
   end
 
-  def self.column(value : (String | Int32 | Int64 | Bool | Float64 | Time)?)
+  def self.column(value : (String | Int32 | Int64 | UUID | Bool | Float64 | Time)?)
     value
   end
 
+  # A raw id read back from an event's or a pin's JSON: a number for an Int64 id, a string
+  # for a UUID; and from the text a grouped query reads.
+  def self.__sweettalk_raw(type : Int64.class, any : JSON::Any) : Int64
+    any.as_i64
+  end
+
+  def self.__sweettalk_raw(type : UUID.class, any : JSON::Any) : UUID
+    UUID.new(any.as_s)
+  end
+
+  def self.__sweettalk_raw(type : Int64.class, text : String) : Int64
+    text.to_i64
+  end
+
+  def self.__sweettalk_raw(type : UUID.class, text : String) : UUID
+    UUID.new(text)
+  end
+
+  # The raw id an optional reference's fact holds, or nil when it holds null.
+  def self.__sweettalk_raw?(type : K.class, any : JSON::Any) : K? forall K
+    any.raw.nil? ? nil : __sweettalk_raw(K, any)
+  end
+
+  # The raw of *id*, which must be keyed by *type*, as an event log's subject column is.
+  def self.__sweettalk_raw(type : K.class, id : Identity) : K forall K
+    raw = id.raw
+    return raw if raw.is_a?(K)
+    raise ArgumentError.new("#{id.class.name} is keyed by #{raw.class}, not #{K}")
+  end
+
   # Writes one fact as JSON: a value as its raw (a decimal as its text), an id as its
-  # number, an entity or a composite value as an object, nil as null.
+  # number or UUID, an entity or a composite value as an object, nil as null.
   def self.pack(json : JSON::Builder, value : Value) : Nil
     value.__sweettalk_pack(json)
   end
 
   def self.pack(json : JSON::Builder, value : Identity) : Nil
-    json.number(value.raw)
+    value.raw.to_json(json)
   end
 
   def self.pack(json : JSON::Builder, value : Entity | Composite) : Nil
@@ -78,7 +108,8 @@ module SweetTalk
     json.array { value.each { |item| pack(json, item) } }
   end
 
-  def self.pack(json : JSON::Builder, value : String | Int32 | Int64 | Bool | Float64 | Time) : Nil
+  def self.pack(json : JSON::Builder,
+                value : String | Int32 | Int64 | UUID | Bool | Float64 | Time) : Nil
     value.to_json(json)
   end
 
@@ -111,7 +142,7 @@ module SweetTalk
     {% elsif T < ::SweetTalk::Value || T < ::SweetTalk::Composite %}
       T.__sweettalk_from_json(any)
     {% elsif T < ::SweetTalk::Identity %}
-      T.new(any.as_i64)
+      T.__sweettalk_from_json(any)
     {% elsif T < ::SweetTalk::Entity %}
       T.__sweettalk_unpack(any)
     {% elsif T.name(generic_args: false).stringify == "Array" %}
@@ -128,9 +159,11 @@ module SweetTalk
       any.as_f
     {% elsif T == Time %}
       Time.parse_rfc3339(any.as_s)
+    {% elsif T == UUID %}
+      UUID.new(any.as_s)
     {% else %}
-      {% raise "an event field holds String, Int32, Int64, Bool, Float64, Time, a value, " +
-               "an id or an Array of an entity, not #{T}" %}
+      {% raise "an event field holds String, Int32, Int64, UUID, Bool, Float64, Time, a " +
+               "value, an id or an Array of an entity, not #{T}" %}
     {% end %}
   end
 end

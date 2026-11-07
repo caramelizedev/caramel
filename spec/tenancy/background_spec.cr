@@ -29,6 +29,7 @@ end
 describe "A job" do
   it "runs in the tenant it was enqueued in" do
     acme = TenancySpec.account("acme")
+    Tenancy.with(acme) { Brew.carry("{}") }.should eq(%({"caramel_tenant":"#{acme.id}"}))
     Tenancy.with(acme) { TenancySpec::Record.enqueue }
     TenancySpec.drain.should eq(1)
     runs.should eq(["acme"])
@@ -75,26 +76,30 @@ describe "The cache" do
     expect_raises(ArgumentError, message) { Caramel::Cache.write("t5:plan", "x") }
     expect_raises(ArgumentError, message) { Caramel::Cache.read("t5:plan") }
     expect_raises(ArgumentError, message) { Caramel::Cache.delete("t5:plan") }
+    expect_raises(ArgumentError, message) { Caramel::Cache.write("t#{"a" * 25}:plan", "x") }
   end
 
   it "accepts names that only resemble the prefix" do
     Caramel::Cache.write("t5", "a")
     Caramel::Cache.write("task:1", "a")
     Caramel::Cache.write("t5x:a", "a")
+    Caramel::Cache.write("t#{"a" * 24}:plan", "a")
     Brew.validate_channel!("t5:x")
   end
 
   it "lets without reach prefixed names" do
     acme = TenancySpec.account("acme")
     Tenancy.with(acme) { Caramel::Cache.write("plan", "gold") }
-    Tenancy.without { Caramel::Cache.read("t#{acme.id}:plan") }.should eq("gold")
+    prefix = Tenancy.prefix(acme)
+    prefix.should match(/\At[0-9a-z]{25}:\z/)
+    Tenancy.without { Caramel::Cache.read("#{prefix}plan") }.should eq("gold")
   end
 
   it "keeps a bound tenant inside its own prefix" do
     acme = TenancySpec.account("acme")
     globex = TenancySpec.account("globex")
-    Tenancy.with(acme) { Caramel::Cache.write("t#{globex.id}:plan", "evil") }
-    forged = "t#{acme.id}:t#{globex.id}:plan"
+    Tenancy.with(acme) { Caramel::Cache.write("#{Tenancy.prefix(globex)}plan", "evil") }
+    forged = "#{Tenancy.prefix(acme)}#{Tenancy.prefix(globex)}plan"
     Tenancy.without { Caramel::Cache.read(forged) }.should eq("evil")
     Tenancy.with(globex) { Caramel::Cache.read("plan") }.should be_nil
   end

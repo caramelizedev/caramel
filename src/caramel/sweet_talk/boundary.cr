@@ -11,7 +11,7 @@ module SweetTalk
   class Unit
     getter name : String
     getter allowed : Array(Aggregate.class)
-    getter locked = Set({String, Int64}).new
+    getter locked = Set({String, ::SugarORM::Key}).new
     getter touched = [] of Aggregate
     property? open = true
 
@@ -27,7 +27,8 @@ module SweetTalk
                            "add #{short(type)} to its changes:")
       end
       return unless aggregate
-      unless @locked.includes?({type.__sweettalk_table, aggregate.__sweettalk_raw_id})
+      raw = aggregate.__sweettalk_raw_id.as(::SugarORM::Key)
+      unless @locked.includes?({type.__sweettalk_table, raw})
         raise Boundary.new("#{SweetTalk.__sweettalk_named(aggregate)} changed inside #{@name} " \
                            "without its lock: lock it in locks:")
       end
@@ -36,7 +37,8 @@ module SweetTalk
 
     # Counts *aggregate*, just created inside this unit, as locked and touched.
     def made(aggregate : Aggregate) : Nil
-      @locked << {aggregate.class.__sweettalk_table, aggregate.__sweettalk_raw_id}
+      raw = aggregate.__sweettalk_raw_id.as(::SugarORM::Key)
+      @locked << {aggregate.class.__sweettalk_table, raw}
       touch(aggregate)
     end
 
@@ -197,8 +199,7 @@ module SweetTalk
     ids.each { |id| __sweettalk_wanted(wanted, id) }
     unit = __sweettalk_open_unit
     wanted.group_by(&.__sweettalk_table).to_a.sort_by!(&.[0]).each do |table, batch|
-      raws = batch.map(&.raw).uniq!.sort!
-      batch[0].__sweettalk_lock(raws)
+      raws = batch[0].__sweettalk_lock(batch)
       raws.each { |raw| unit.locked << {table, raw} } if unit
     end
   end

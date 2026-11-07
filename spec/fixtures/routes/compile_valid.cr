@@ -71,6 +71,47 @@ module Fixture
     end
   end
 
+  struct BadgeId
+    include Caramel::FieldValue(UUID)
+
+    getter raw : UUID
+
+    def initialize(@raw : UUID)
+    end
+
+    def self.from_field(raw : UUID, & : String ->) : self?
+      new(raw)
+    end
+  end
+
+  struct BadgeShow < Caramel::Action
+    contract do
+      field id : UUID
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      Caramel::Response.new(body: contract.id.to_s)
+    end
+
+    def layout(page : Caramel::Page) : String
+      page.body
+    end
+  end
+
+  struct BadgeEdit < Caramel::Action
+    contract do
+      field badge : BadgeId
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      Caramel::Response.new(body: contract.badge.raw.to_s)
+    end
+
+    def layout(page : Caramel::Page) : String
+      page.body
+    end
+  end
+
   struct FileShow < Caramel::Action
     contract do
       field name : String
@@ -149,6 +190,8 @@ module Fixture
     patch "/teams/:team_id", TeamUpdate
     get "/teams/:team_id/members/:member_id", MemberShow
     get "/files/:name", FileShow
+    get "/badges/:id", BadgeShow
+    get "/badges/:badge/edit", BadgeEdit
   end
 end
 

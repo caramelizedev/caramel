@@ -1,7 +1,7 @@
 module App
   struct @@MODEL@@ < SugarORM::Schema
     schema "@@PLURAL@@" do
-      field id : Int64, primary: true
+      field id : @@ID@@, primary: true
       # frappe:only tenant
       tenant @@TENANT@@ : @@TENANT_MODEL@@
       # frappe:end

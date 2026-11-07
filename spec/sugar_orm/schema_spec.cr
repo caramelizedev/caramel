@@ -106,6 +106,16 @@ describe SugarORM::Schema do
     table.indexes.should eq([index])
   end
 
+  it "defaults a UUID key to uuidv7() and types a foreign key after its target's key" do
+    SugarUnit::Badge.__sugar_table.columns.should eq([
+      Catalog::Column.new("id", "uuid", false, "uuidv7()", primary: true, identity: false),
+      Catalog::Column.new("label", "text", false, nil),
+      Catalog::Column.new("team_id", "bigint", false, nil),
+    ])
+    badge_id = Catalog::Column.new("badge_id", "uuid", false, nil)
+    SugarUnit::Award.__sugar_table.columns.last.should eq(badge_id)
+  end
+
   it "keeps an index name of up to 63 bytes and shortens a longer one with an FNV-1a hash" do
     names = SugarUnit::Bound.__sugar_table.indexes.map(&.name)
     names[0].should eq("index_unit_bounds_on_#{"a" * 41}")

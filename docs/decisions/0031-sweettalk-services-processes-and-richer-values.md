@@ -7,8 +7,9 @@ Decision 1 is amended by [ADR 0040](0040-sweettalk-closed-set-values.md),
 [ADR 0043](0043-sweettalk-calendar-days.md) and [ADR 0047](0047-sweettalk-decimal-and-json-values.md),
 decision 2 by [ADR 0039](0039-sweettalk-optional-attributes.md), decision 11 by
 [ADR 0033](0033-sweettalk-multi-tenancy.md), decisions 3 and 11 by
-[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), and decisions 5, 7,
-8 and 10 by [ADR 0046](0046-sweettalk-units.md).
+[ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md), decisions 5, 7,
+8 and 10 by [ADR 0046](0046-sweettalk-units.md), 3 by
+[ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -51,11 +52,11 @@ aggregates over days and undo their work when a step is refused.
    - `find`, `find?`, `all` and every query read one statement per table: the roots, then
      each list of entities, at every depth. `find(id, entities: false)` and `find?` read
      the root alone: a list of that aggregate raises `SweetTalk::Unloaded`, and a command
-     on it loads the lists under its lock. Entities come back by id, which is insertion
-     order; an in-memory reorder is not persisted: store a position attribute for an order
-     the domain owns. Saving writes the root and each entity only when a column changes,
-     and deletes the entities a list was loaded with and dropped, one statement per list
-     per level, none when none dropped.
+     on it loads the lists under its lock. Entities come back by id; an in-memory reorder
+     is not persisted: store a position attribute for an order the domain owns. Saving
+     writes the root and each entity only when a column changes, and deletes the entities
+     a list was loaded with and dropped, one statement per list per level, none when none
+     dropped.
    - `finds verb(args), where: {attribute: expression, state: :placed}` in an aggregate is a
      query: the aggregates whose columns equal the expressions (a list matches any member,
      a range its span), by id. A key that names no stored attribute, a list of entities, or

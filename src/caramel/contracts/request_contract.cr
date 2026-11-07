@@ -1,3 +1,4 @@
+require "uuid"
 require "../http/request_input"
 require "../wording"
 require "./field_value"
@@ -16,6 +17,7 @@ module Caramel
       "Time"    => {"String", "string"},
       "Int32"   => {"Number", "number"},
       "Int64"   => {"Number", "number"},
+      "UUID"    => {"String", "string"},
       "Float64" => {"Number", "number"},
       "Bool"    => {"Bool", "boolean"},
     }
@@ -27,6 +29,9 @@ module Caramel
       T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?
       (?:Z|[+-][0-9]{2}:[0-9]{2})
     \z/x
+
+    # The one UUID form that binds: lowercase and hyphenated, so a record has one URL.
+    CANONICAL_UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
     getter errors = {} of String => Array(String)
     # Submitted text for each declared field, kept to re-render forms.
@@ -68,6 +73,10 @@ module Caramel
 
     def self.convert(text : String, type : Int64.class) : Int64?
       text.matches?(/\A[+-]?[0-9]+\z/) ? text.to_i64? : nil
+    end
+
+    def self.convert(text : String, type : UUID.class) : UUID?
+      text.matches?(CANONICAL_UUID) ? UUID.new(text) : nil
     end
 
     def self.convert(text : String, type : Bool.class) : Bool?
@@ -114,7 +123,7 @@ module Caramel
       {% unsupported = "unsupported Caramel::RequestContract field type: " +
                        "#{decl.type}#{where.id}" %}
       {% type = decl.type.resolve %}
-      {% element_types = ["String", "Int32", "Int64", "Float64", "Bool", "Time"] %}
+      {% element_types = ["String", "Int32", "Int64", "UUID", "Float64", "Bool", "Time"] %}
       {% listed = !type.union? && type.name(generic_args: false).stringify == "Array" &&
                   type.type_vars.size == 1 %}
       {% item = listed ? type.type_vars.first : nil %}
@@ -141,14 +150,14 @@ module Caramel
       {% full = wire.id.stringify %}
       {% if bound && !element_types.includes?(full) %}
         {% decl.raise "#{scalar} includes Caramel::FieldValue(#{wire}), but a field value " +
-                      "binds from String, Int32, Int64, Float64, Bool or Time: " +
+                      "binds from String, Int32, Int64, UUID, Float64, Bool or Time: " +
                       "#{name}#{where.id}" %}
       {% end %}
       {% if bound && !scalar.class.has_method?("from_field") %}
         {% decl.raise "#{scalar} includes Caramel::FieldValue(#{wire}) but defines no " +
                       "self.from_field(raw : #{wire}, & : String ->): #{name}#{where.id}" %}
       {% end %}
-      {% supported = ["String", "Int32", "Int64", "Float64", "Bool", "Time",
+      {% supported = ["String", "Int32", "Int64", "UUID", "Float64", "Bool", "Time",
                       "Caramel::UploadedFile"] %}
       {% unless supported.includes?(full) && !(bound && full == "Caramel::UploadedFile") %}
         {% decl.raise unsupported %}
@@ -269,10 +278,10 @@ module Caramel
          end %}
       {% wire = bound ? bound.type_vars.first : element %}
       {% full = wire.id.stringify %}
-      {% element_types = ["String", "Int32", "Int64", "Float64", "Bool", "Time"] %}
+      {% element_types = ["String", "Int32", "Int64", "UUID", "Float64", "Bool", "Time"] %}
       {% if bound && !element_types.includes?(full) %}
         {% decl.raise "#{element} includes Caramel::FieldValue(#{wire}), but a field value " +
-                      "binds from String, Int32, Int64, Float64, Bool or Time: " +
+                      "binds from String, Int32, Int64, UUID, Float64, Bool or Time: " +
                       "#{name}#{where.id}" %}
       {% end %}
       {% if bound && !element.class.has_method?("from_field") %}

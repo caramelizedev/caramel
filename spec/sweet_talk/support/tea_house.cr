@@ -6,6 +6,7 @@ require "../../../src/caramel/sweet_talk"
 
 module TeaHouse
   include SweetTalk
+  ids Int64
 
   kernel Calendar, shared_by: [Money, Pricing, Billing],
     means: "the days the tea house counts in" do

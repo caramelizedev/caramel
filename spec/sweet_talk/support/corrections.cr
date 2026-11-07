@@ -5,6 +5,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Corrections
   include SweetTalk
+  ids Int64
 
   context Setup, event_log: true, means: "the rules a book is kept under" do
     aggregate Rules, means: "what one book is charged and called" do

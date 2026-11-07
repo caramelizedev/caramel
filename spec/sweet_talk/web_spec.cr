@@ -94,7 +94,7 @@ describe "SweetTalk at the web boundary" do
 
   it "answers 404 for an aggregate that find cannot find" do
     SweetTalkSpec.rolled_back do
-      response = WebSpec.get("/teas/#{Int64::MAX}/hold?tins=1", WebSpec.accepting("*/*"))
+      response = WebSpec.get("/teas/#{SugarORM.uuid7}/hold?tins=1", WebSpec.accepting("*/*"))
       response.status.should eq(404)
       response.body.should eq("Not found")
     end
@@ -105,7 +105,7 @@ describe "SweetTalk at the web boundary" do
       WebSpec::REPORTS.clear
       tea = WebSpec.tea
       WebSpec.get("/teas/#{tea.id.raw}/hold?tins=5", WebSpec.accepting("*/*")).status.should eq(422)
-      WebSpec.get("/teas/#{Int64::MAX}/hold?tins=1").status.should eq(404)
+      WebSpec.get("/teas/#{SugarORM.uuid7}/hold?tins=1").status.should eq(404)
       WebSpec::REPORTS.size.should eq(0)
       TeaShop::Catalogue::Tea.find(tea.id).held.raw.should eq(0)
       TeaShop::Catalogue::Tea.find(tea.id).stock.raw.should eq(3)
@@ -144,7 +144,8 @@ describe "SweetTalk at the web boundary" do
   end
 
   it "answers a value's refusal under its field" do
-    response = WebSpec.post("/orders/7/lines", "quantity=11", "application/json")
+    order = SugarORM.uuid7
+    response = WebSpec.post("/orders/#{order}/lines", "quantity=11", "application/json")
     response.status.should eq(422)
     response.body.should eq(%({"errors":{"quantity":["Quantity must be between 1 and 10"]}}))
   end
@@ -170,18 +171,21 @@ describe "SweetTalk at the web boundary" do
     end
   end
 
-  it "binds an aggregate's id from the route and 404s one that is not an Int64" do
-    response = WebSpec.post("/orders/7/lines", "quantity=3")
+  it "binds an aggregate's id from the route and 404s one that is not a UUID" do
+    order = SugarORM.uuid7
+    response = WebSpec.post("/orders/#{order}/lines", "quantity=3")
     response.status.should eq(200)
-    response.body.should eq("order=7 quantity=3")
+    response.body.should eq("order=#{order} quantity=3")
     WebSpec.post("/orders/abc/lines", "quantity=3").status.should eq(404)
+    WebSpec.post("/orders/7/lines", "quantity=3").status.should eq(404)
   end
 
   it "binds a nilable string value and an array of values" do
-    email = WebSpec.post("/orders/7/lines", "quantity=2&receipt_to=ada")
+    order = SugarORM.uuid7
+    email = WebSpec.post("/orders/#{order}/lines", "quantity=2&receipt_to=ada")
     email.status.should eq(422)
     email.body.should contain("FIELD receipt_to: Email must match /\\A[^@\\s]+@[^@\\s]+\\z/\n")
-    tags = WebSpec.post("/orders/7/lines", "quantity=2&tags=1&tags=11&tags=1")
+    tags = WebSpec.post("/orders/#{order}/lines", "quantity=2&tags=1&tags=11&tags=1")
     tags.status.should eq(422)
     tags.body.should contain("FIELD tags[1]: Quantity must be between 1 and 10\n")
     tags.body.should contain("FIELD tags[2]: repeats an earlier item\n")
@@ -189,7 +193,7 @@ describe "SweetTalk at the web boundary" do
 
   it "lists value fields with both types" do
     route = TeaShopWeb::AppRouter.routes.find! { |entry| entry.path == "/orders/:order/lines" }
-    route.contract.should eq("order:Order::Id(Int64) quantity:Ordering::Quantity(Int32) " \
+    route.contract.should eq("order:Order::Id(UUID) quantity:Ordering::Quantity(Int32) " \
                              "receipt_to:Ordering::Email(String)? " \
                              "tags:Array(Ordering::Quantity(Int32))(max=3)")
   end

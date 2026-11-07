@@ -5,7 +5,7 @@ module App::@@COLLECTION@@
 
     # frappe:end
     contract do
-      field id : Int64, min: 1
+      field id : @@ID_FIELD@@
     end
 
     def handle(contract : Contract)

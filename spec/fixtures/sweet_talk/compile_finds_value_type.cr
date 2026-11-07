@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Rules
   include SweetTalk
+  ids Int64
 
   context Shelf, means: "a shelf for trying the rules" do
     value Count, Int32, at_least: 0, means: "how many things are in a box"

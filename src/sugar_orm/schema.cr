@@ -5,7 +5,7 @@ module SugarORM
   #
   #     struct Team < SugarORM::Schema
   #       schema "teams" do
-  #         field id : Int64, primary: true
+  #         field id : UUID, primary: true
   #         field name : String
   #         field seats : Int32 = 5
   #         timestamps
@@ -24,7 +24,7 @@ module SugarORM
         \{% unless @type.abstract? || @type.has_constant?(:SUGAR_TABLE) %}
           \{% raise "#{@type} inherits SugarORM::Schema but never declares its table.\n" +
                     "Remediation: add `schema \"table_name\" do ... end` " +
-                    "with at least `field id : Int64, primary: true` to #{@type}." %}
+                    "with at least `field id : UUID, primary: true` to #{@type}." %}
         \{% end %}
       end
     end
@@ -75,7 +75,7 @@ module SugarORM
       {% unless block %}
         {% problem = "schema needs a block.\n" +
                      "Remediation: write `schema #{table} do\n" +
-                     "  field id : Int64, primary: true\nend`." %}
+                     "  field id : UUID, primary: true\nend`." %}
         {% table.raise problem + table_at %}
       {% end %}
       {% statements = [block.body] %}
@@ -91,6 +91,7 @@ module SugarORM
            "Bool"    => "boolean",
            "Float64" => "double precision",
            "Time"    => "timestamp with time zone",
+           "UUID"    => "uuid",
          } %}
       {% reserved = %w(
            db with update update! delete query create create! from_row to_json record
@@ -169,7 +170,7 @@ module SugarORM
           {% end %}
           {% unless (codec && scalar) || sql_types[scalar] %}
             {% problem = "Unsupported type `#{type}` for field '#{name.id}'.\n" +
-                         "Supported: String, Int32, Int64, Bool, Float64 and Time, " +
+                         "Supported: String, Int32, Int64, UUID, Bool, Float64 and Time, " +
                          "each optionally nilable (`String?`).\n" +
                          "Remediation: declare `field #{name.id} : String` " +
                          "(or another supported type), or store the type through a codec: " +
@@ -220,17 +221,19 @@ module SugarORM
             {% unless options["primary"].is_a?(BoolLiteral) %}
               {% problem = "primary: takes `true` or `false`.\n" +
                            "Remediation: write " +
-                           "`field #{name.id} : Int64, primary: true`." %}
+                           "`field #{name.id} : UUID, primary: true`." %}
               {% statement.raise problem + statement_at %}
             {% end %}
             {% is_primary = options["primary"] == true %}
           {% end %}
           {% if is_primary %}
-            {% unless scalar == "Int64" && !nullable && value.is_a?(Nop) && !codec %}
-              {% problem = "The primary key '#{name.id}' must be a non-nilable Int64 " +
-                           "without a default (it becomes an identity column).\n" +
+            {% unless (scalar == "Int64" || scalar == "UUID") && !nullable &&
+                        value.is_a?(Nop) && !codec %}
+              {% problem = "The primary key '#{name.id}' must be a non-nilable UUID or Int64 " +
+                           "without a default: SugarORM mints a UUID key before the insert, " +
+                           "and the database assigns an Int64 key as an identity column.\n" +
                            "Remediation: declare " +
-                           "`field #{name.id} : Int64, primary: true`." %}
+                           "`field #{name.id} : UUID, primary: true`." %}
               {% declaration.raise problem + declaration_at %}
             {% end %}
             {% unless primary.empty? %}
@@ -283,6 +286,9 @@ module SugarORM
           {% if resolved && resolved.has_constant?("ORDERABLE") %}
             {% orderable = resolved.constant("ORDERABLE").stringify == "true" %}
           {% end %}
+          {% if is_primary && scalar == "UUID" %}
+            {% default = "uuidv7()" %}
+          {% end %}
           {% columns << {
                node:         declaration,
                name:         name,
@@ -294,11 +300,13 @@ module SugarORM
                default:      default,
                literal:      literal,
                primary:      is_primary,
+               identity:     is_primary && scalar == "Int64",
                system:       is_primary,
                renamed_from: renamed,
                codec:        codec,
                orderable:    orderable,
                written:      written,
+               references:   nil,
              } %}
 
         {% elsif kind == "timestamps" %}
@@ -325,11 +333,13 @@ module SugarORM
                  default:      "CURRENT_TIMESTAMP",
                  literal:      nil,
                  primary:      false,
+                 identity:     false,
                  system:       true,
                  renamed_from: nil,
                  codec:        nil,
                  orderable:    false,
                  written:      nil,
+                 references:   nil,
                } %}
           {% end %}
 
@@ -415,22 +425,25 @@ module SugarORM
               {% statement.raise problem + statement_at %}
             {% end %}
             {% tenant_key = kind == "tenant" %}
+            {% alias_name = "#{@type}::SugarKey#{key.camelcase.id}" %}
             {% columns << {
                  node:         declaration,
                  name:         key,
-                 declared:     optional ? "Int64?" : "Int64",
-                 type:         optional ? "::Int64 | ::Nil" : "::Int64",
-                 scalar:       "Int64",
+                 declared:     optional ? "::#{alias_name.id}?" : "::#{alias_name.id}",
+                 type:         optional ? "::#{alias_name.id} | ::Nil" : "::#{alias_name.id}",
+                 scalar:       alias_name,
                  nullable:     optional,
-                 sql_type:     "bigint",
+                 sql_type:     nil,
                  default:      nil,
                  literal:      nil,
                  primary:      false,
+                 identity:     false,
                  system:       tenant_key,
                  renamed_from: nil,
                  codec:        nil,
                  orderable:    false,
                  written:      nil,
+                 references:   target,
                } %}
             {% foreign_keys << {
                  name:      "fk_#{table.id}_#{key.id}",
@@ -551,7 +564,7 @@ module SugarORM
 
       {% if primary.empty? %}
         {% problem = "#{@type} has no primary key.\n" +
-                     "Remediation: add `field id : Int64, primary: true` " +
+                     "Remediation: add `field id : UUID, primary: true` " +
                      "to the schema block of #{@type}." %}
         {% table.raise problem + table_at %}
       {% end %}
@@ -757,17 +770,33 @@ module SugarORM
         {% end %}
       {% end %}
       {% primary_key = primary[0] %}
+      {% key_column = columns.find { |column| column[:primary] } %}
 
       SUGAR_TABLE = {{ table }}
+
+      # The type of this schema's primary key: a UUID SugarORM mints, or an Int64 the
+      # database assigns.
+      alias PrimaryKey = ::{{ key_column[:scalar].id }}
+
+      # The primary key's type by name, "UUID" or "Int64", for macros.
+      SUGAR_KEY = {{ key_column[:scalar] }}
+
+      # :nodoc:
+      # The primary key's SQL type, which a foreign key to this schema takes.
+      def self.__sugar_primary_sql_type : String
+        {{ key_column[:sql_type] }}
+      end
 
       # Column metadata read at compile time by changeset params.
       SUGAR_FIELDS = {
         {% for column in columns %}
           {{ column[:name].id }}: {
-            type:     {{ column[:type] }},
-            declared: {{ column[:declared] }},
-            nullable: {{ column[:nullable] }},
-            system:   {{ column[:system] }},
+            type:       {{ column[:type] }},
+            declared:   {{ column[:declared] }},
+            nullable:   {{ column[:nullable] }},
+            system:     {{ column[:system] }},
+            primary:    {{ column[:primary] }},
+            references: {{ column[:references] ? true : false }},
           },
         {% end %}
       }
@@ -807,12 +836,12 @@ module SugarORM
 
         # The tenant id statements are scoped to; nil inside
         # Caramel::Tenancy.without.
-        def self.__sugar_tenant_scope : Int64?
+        def self.__sugar_tenant_scope : {{ tenant[:target] }}::PrimaryKey?
           ::SugarORM::Tenancy.scope({{ @type.stringify }})
         end
 
         # The tenant id a new row belongs to.
-        def self.__sugar_tenant_stamp : Int64
+        def self.__sugar_tenant_stamp : {{ tenant[:target] }}::PrimaryKey
           ::SugarORM::Tenancy.stamp({{ @type.stringify }})
         end
       {% end %}
@@ -844,6 +873,9 @@ module SugarORM
       {% for column in columns %}
         {% if column[:codec] %}
           alias SugarType{{ column[:name].camelcase.id }} = {{ column[:written] }}
+        {% end %}
+        {% if column[:references] %}
+          alias SugarKey{{ column[:name].camelcase.id }} = {{ column[:references] }}::PrimaryKey
         {% end %}
         getter {{ column[:name].id }} : {{ column[:type].id }}
       {% end %}
@@ -1014,7 +1046,7 @@ module SugarORM
         end
       end
 
-      def __sugar_primary_value : Int64
+      def __sugar_primary_value : PrimaryKey
         @{{ primary_key.id }}
       end
 
@@ -1029,13 +1061,17 @@ module SugarORM
                   sql_type: ::SugarORM::Codec.checked_sql_type({{ column[:codec] }}.sql_type),
                   nullable: {{ column[:nullable] }},
                   default: nil,
+                {% elsif column[:references] %}
+                  sql_type: {{ column[:references] }}.__sugar_primary_sql_type,
+                  nullable: {{ column[:nullable] }},
+                  default: nil,
                 {% else %}
                   sql_type: {{ column[:sql_type] }},
                   nullable: {{ column[:nullable] }},
                   default: {{ column[:default] }},
                 {% end %}
                 primary: {{ column[:primary] }},
-                identity: {{ column[:primary] }},
+                identity: {{ column[:identity] }},
                 renamed_from: {{ column[:renamed_from] }},
               ),
             {% end %}
@@ -1110,7 +1146,8 @@ module SugarORM
              closed = "Range(#{scalar.id}, #{scalar.id})"
              open_end = "Range(#{scalar.id}, ::Nil)"
              open_start = "Range(::Nil, #{scalar.id})"
-             ranged = %w(Int32 Int64 Float64 Time).includes?(column[:scalar])
+             ranged = %w(Int32 Int64 UUID Float64 Time).includes?(column[:scalar])
+             ranged = ranged || column[:references]
              ranges = ranged ? [closed, open_end, open_start] : [] of Nil
              nilable = column[:nullable] ? ["::Nil"] : [] of Nil
              accepted = [scalar, "Array(#{scalar.id})"] + ranges + nilable
@@ -1208,15 +1245,15 @@ module SugarORM
 
           def preload(association : Preload{{ camel.id }})
             {% if association[:kind] == "has_many" %}
-              {% loader = "::SugarORM::HasMany(#{model.id}, #{preloaded})" +
-                          ".new(#{foreign_key})" %}
+              {% loader = "::SugarORM::HasMany(#{model.id}, #{preloaded}, " +
+                          "#{model.id}::PrimaryKey).new(#{foreign_key})" %}
             {% elsif association[:kind] == "has_one" %}
-              {% loader = "::SugarORM::HasOne(#{model.id}, #{preloaded})" +
-                          ".new(#{foreign_key})" %}
+              {% loader = "::SugarORM::HasOne(#{model.id}, #{preloaded}, " +
+                          "#{model.id}::PrimaryKey).new(#{foreign_key})" %}
             {% else %}
               {% value = association[:optional] ? "#{preloaded}?" : "#{preloaded}" %}
-              {% loader = "::SugarORM::BelongsTo(#{model.id}, #{preloaded}, #{value.id})" +
-                          ".new(#{foreign_key}, &.#{foreign_key.id})" %}
+              {% loader = "::SugarORM::BelongsTo(#{model.id}, #{preloaded}, #{value.id}, " +
+                          "#{preloaded}::PrimaryKey).new(#{foreign_key}, &.#{foreign_key.id})" %}
             {% end %}
             QueryOf.new(
               @clauses,

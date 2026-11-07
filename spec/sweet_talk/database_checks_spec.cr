@@ -11,6 +11,7 @@ require "./support/app"
 # Two values with parts that differ by one part, to see how their checks are named.
 module DatabaseChecksProbe
   include SweetTalk
+  ids Int64
 
   context Probe, means: "values with parts, only to compare how their checks are named" do
     value Size, Int32, at_least: 0, means: "a measure"

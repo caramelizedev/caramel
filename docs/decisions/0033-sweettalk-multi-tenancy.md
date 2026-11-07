@@ -4,7 +4,8 @@ Date: 2026-10-11
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 1 and 6
 and [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md) decision 11, and
-applies [ADR 0025](0025-multi-tenancy.md) to SweetTalk.
+applies [ADR 0025](0025-multi-tenancy.md) to SweetTalk. Decisions 6 and 7 are amended by
+[ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -44,14 +45,15 @@ remains is which rows belong to a tenant, and which combinations would leak acro
    carries no tenant. A central context may follow a tenanted context's events; its
    handler runs in the event's tenant and writes shared rows.
 6. **Names fit PostgreSQL** (amends ADR 0030 decision 6 and ADR 0031 decision 11). In a
-   program that requires `caramel/tenancy`, a channel name over 42 characters does not
-   compile, which leaves 21 for the `t<id>:` prefix. A tenanted table's tenant index,
+   program that requires `caramel/tenancy`, a channel name over 63 characters less the
+   tenant's `t<id>:` prefix does not compile: 42 for an Int64 tenant (a 21-character
+   prefix) and 36 for a UUID tenant (a 27-character prefix). A tenanted table's tenant index,
    `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), is shortened
    by SugarORM over 63 bytes, as every index name is (ADR 0031 decision 11).
 7. **The tenant's column is reserved, and the aggregate names it.** A `has` or a composite
    part that would store `<model>_id` (`account_id` for `App::Account`), and an entity
    whose aggregate is named like the tenant model, do not compile. Every aggregate of a
-   tenanted context has `tenant_id : Int64`, its row's, or the bound tenant's before its
+   tenanted context has `tenant_id`, typed after the tenant's key (`UUID` or `Int64`), its row's, or the bound tenant's before its
    first save, and `tenant`, the tenant model's row, so rows read under
    `Caramel::Tenancy.without` still say whose they are; `has tenant` or `has tenant_id`
    on such an aggregate does not compile.
@@ -79,7 +81,8 @@ remains is which rows belong to a tenant, and which combinations would leak acro
   tenanted handler fails with `SugarORM::Tenancy::Missing`, or writes into whichever tenant
   the central command happened to run in. A refusal can be lifted later without breaking a
   program; one added after a release would break programs.
-- Tenant ids only grow, so the channel budget subtracts the longest prefix. PostgreSQL
+- The channel budget subtracts the longest prefix of the tenant's key type: an Int64 id
+  holds at most 19 digits and a UUID always takes 25 base-36 characters. PostgreSQL
   truncates an index name over 63 bytes, so SugarORM shortens one itself, keeping the
   `index_<table>_on_` prefix it owns, and the differ sees the name it declared.
 - A column named after the model matches the application's own tenanted tables, so SQL,

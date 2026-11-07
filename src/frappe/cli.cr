@@ -131,7 +131,7 @@ module Caramel::Frappe
         files = ResourceGenerator.new(@framework_root).generate(
           project, invocation["NAME"], invocation.list("FIELD:TYPE"),
           plural: invocation["--plural"]?, only: invocation["--only"]?,
-          central: invocation.flag?("--central"),
+          central: invocation.flag?("--central"), int64: invocation.flag?("--int64"),
         )
         files.each { |path| @output.puts("Generated #{path}") }
         @output.puts("\nRun frappe migrate to apply the new schema. " \
@@ -139,7 +139,7 @@ module Caramel::Frappe
       when "make locale"
         make_locale(invocation["CODE"])
       when "make tenancy"
-        make_tenancy(invocation["MODEL"])
+        make_tenancy(invocation["MODEL"], invocation.flag?("--int64"))
       when "make domain"
         make_domain(invocation)
       when "translations"
@@ -343,8 +343,8 @@ module Caramel::Frappe
                    "and run frappe translations to list what is missing.")
     end
 
-    private def make_tenancy(model : String) : Nil
-      files = TenancyGenerator.new(@framework_root).generate(Project.load, model)
+    private def make_tenancy(model : String, int64 : Bool) : Nil
+      files = TenancyGenerator.new(@framework_root).generate(Project.load, model, int64: int64)
       files.each { |path| @output.puts("Generated #{path}") }
       plural = ResourceGenerator.pluralize(model.underscore)
       next_step = "\nNext: run frappe migrate and open /#{plural}/new. " \

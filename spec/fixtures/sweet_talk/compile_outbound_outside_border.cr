@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Billing, means: "taking payment for orders" do
     aggregate Payment, means: "one charge for one order" do

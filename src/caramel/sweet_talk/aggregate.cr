@@ -8,7 +8,7 @@ module SweetTalk
     include Queried
     include Holding
 
-    @__sweettalk_id : Int64? = nil
+    @__sweettalk_id : ::SugarORM::Key? = nil
     @__sweettalk_removed_at : Time? = nil
     @__sweettalk_events = [] of ::SweetTalk::Event
     # False once found with `entities: false`: the lists are empty and may not be read.
@@ -21,10 +21,10 @@ module SweetTalk
     # actor. `carries: [member, total]` adds one field for each attribute or derived value
     # it names, of that attribute's type, which `emit` reads from the aggregate and a command
     # cannot give; the attribute is declared above the event. Its channel fits
-    # PostgreSQL's 63 characters, or 42 in a program that requires caramel/tenancy, which
-    # prefixes a tenant's `t<id>:`. `SWEETTALK_CARRIES` lists the names it carries.
-    # `older: {till: "front"}` gives the value a queued job or a logged row without that
-    # field reads.
+    # PostgreSQL's 63 characters less the `t<id>:` prefix a tenant adds in a program that
+    # requires caramel/tenancy: 42 for an Int64 tenant, 36 for a UUID one.
+    # `SWEETTALK_CARRIES` lists the names it carries. `older: {till: "front"}` gives the
+    # value a queued job or a logged row without that field reads.
     #
     # @word noun | Declares one of the aggregate's events, with the fields it records.
     # @usage event NAME[, FIELD : TYPE, ...][, carries: [ATTRIBUTE, ...]], means: TEXT
@@ -98,10 +98,14 @@ module SweetTalk
       {% aggregate = @type.constant("SWEETTALK_STORED") %}
       {% channel = "sweettalk.#{context.id}.#{aggregate.id}.#{stored.id}" %}
       {% pairs = carried.empty? ? "[] of Nil".id : carried %}
+      {% home = ::SweetTalk::BoundedContext.includers
+           .find { |candidate| @type.name.starts_with?("#{candidate.name}::") } %}
+      {% prefix = ::Caramel.has_constant?("Tenancy") ? 27 : 0 %}
+      {% prefix = home.constant("SWEETTALK_PREFIX") if home %}
       ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
         carried: {{ pairs }}, channel: {{ channel }}, means: {{ means }},
         renamed_from: {{ renamed_from }}, subject: ::{{ @type }}, tenanted: false,
-        older: {{ older }})
+        older: {{ older }}, prefix: {{ prefix }})
     end
 
     # `emit Placed, lines: lines` records an event; the command dispatches it when it
@@ -294,6 +298,9 @@ module SweetTalk
       {% home = ::SweetTalk::BoundedContext.includers
            .find { |context| @type.name.starts_with?("#{context.name}::") } %}
       {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+      {% ids = home ? home.constant("SWEETTALK_IDS") : "UUID" %}
+      {% prefix = ::Caramel.has_constant?("Tenancy") ? 27 : 0 %}
+      {% prefix = home.constant("SWEETTALK_PREFIX") if home %}
       {% positional = [] of Nil %}
       {% keywords = [] of Nil %}
       {% loads = [] of Nil %}
@@ -407,7 +414,7 @@ module SweetTalk
       {% if tenant %}
         # The id of the tenant this aggregate belongs to: its row's, or the bound tenant's
         # before it is first saved.
-        def tenant_id : Int64
+        def tenant_id : ::{{ tenant[0].id }}::PrimaryKey
           if row = @__sweettalk_row
             row.{{ tenant[1].id }}_id
           else
@@ -421,32 +428,41 @@ module SweetTalk
         end
       {% end %}
 
-      # This aggregate's typed id.
+      # This aggregate's typed id: a UUID it takes when it is built, or an Int64 its row
+      # takes when it is first saved, as its domain's `ids` say.
       struct Id < ::SweetTalk::Identity
-        include ::Caramel::FieldValue(Int64)
+        include ::Caramel::FieldValue(::{{ ids.id }})
 
-        getter raw : Int64
+        alias Raw = ::{{ ids.id }}
 
-        def initialize(@raw : Int64)
+        getter raw : Raw
+
+        def initialize(@raw : Raw)
         end
 
-        # Builds the id a contract field binds; any Int64 is one.
-        def self.from_field(raw : Int64, & : String ->) : self
+        # Builds the id a contract field binds; any {{ ids.id }} is one.
+        def self.from_field(raw : Raw, & : String ->) : self
           new(raw)
+        end
+
+        def self.__sweettalk_from_json(any : ::JSON::Any) : self
+          new(::SweetTalk.__sweettalk_raw(Raw, any))
         end
 
         def to_s(io : IO) : Nil
           io << raw
         end
 
-        # The table whose row this id names, and the lock of a batch of such rows, for
-        # `SweetTalk.lock` (ADR 0046).
+        # The table whose row this id names, and the lock of a batch of such ids, for
+        # `SweetTalk.lock` (ADR 0046): their raws, sorted and once each.
         def __sweettalk_table : String
           {{ table }}
         end
 
-        def __sweettalk_lock(raws : Array(Int64)) : Nil
+        def __sweettalk_lock(batch : Array(::SweetTalk::Identity)) : Array(::SugarORM::Key)
+          raws = batch.map(&.as(Id).raw).uniq!.sort!
           {{ @type }}.__sweettalk_lock(raws)
+          raws.map(&.as(::SugarORM::Key))
         end
       end
 
@@ -456,7 +472,7 @@ module SweetTalk
 
       # Locks the live rows of *raws* `FOR UPDATE`, by id, in one statement; an id with no
       # live row raises `Missing`.
-      def self.__sweettalk_lock(raws : Array(Int64)) : Nil
+      def self.__sweettalk_lock(raws : Array(Id::Raw)) : Nil
         held = {{ row }}.query.where(removed_at: nil).where(id: raws).order_by(:id, :asc).lock
         absent = raws - held.to_a.map(&.id)
         return if absent.empty?
@@ -464,14 +480,22 @@ module SweetTalk
       end
 
       def initialize({{ positional.join(", ").id }})
+        {% if ids == "UUID" %}
+          @__sweettalk_id = ::SugarORM.uuid7
+        {% end %}
         {% for attribute in referring %}
           @{{ attribute[4].id }} = ::SweetTalk.raw_id({{ attribute[0].id }})
         {% end %}
       end
 
+      # This aggregate's id: a UUID from when it is built, an Int64 once it is saved.
+      def __sweettalk_raw_id : Id::Raw
+        super.as(Id::Raw)
+      end
+
       {% for collection in collections %}
         # The ids of the rows this list was loaded with; a save deletes those it drops.
-        @__sweettalk_loaded_{{ collection[0].id }} = [] of Int64
+        @__sweettalk_loaded_{{ collection[0].id }} = [] of Id::Raw
       {% end %}
 
       def initialize(*, stored row : {{ row }}, entities : Bool = true{{ lists.join("").id }})
@@ -527,13 +551,12 @@ module SweetTalk
                         ["#{@type.constant("SWEETTALK_STORED").id}_id"] %}
           {% channel = "sweettalk.#{@type.constant("SWEETTALK_CONTEXT").id}." +
                        "#{@type.constant("SWEETTALK_STORED").id}.created" %}
-          {% tenancy = ::Caramel.has_constant?("Tenancy") %}
-          {% limit = tenancy ? 42 : 63 %}
+          {% limit = 63 - prefix %}
           {% if channel.size > limit %}
             {% budget = "longer than PostgreSQL's 63 characters" %}
-            {% if tenancy %}
-              {% budget = "longer than 42 characters: a tenant's t<id>: prefix adds up to " +
-                          "21 of PostgreSQL's 63" %}
+            {% if prefix > 0 %}
+              {% budget = "longer than #{limit} characters: a tenant's t<id>: prefix adds up " +
+                          "to #{prefix} of PostgreSQL's 63" %}
             {% end %}
             {% @type.raise "aggregate #{short.id}'s create announces Created on #{channel.id}, " +
                            "#{budget.id}: shorten the context or the aggregate name, or give " +
@@ -554,7 +577,8 @@ module SweetTalk
           {% pairs = carried.empty? ? "[] of Nil".id : carried %}
           ::SweetTalk.__sweettalk_event(Created,
             carried: {{ pairs }}, channel: {{ channel }}, means: {{ "#{short.id} was created" }},
-            renamed_from: nil, subject: ::{{ @type }}, tenanted: false, older: nil)
+            renamed_from: nil, subject: ::{{ @type }}, tenanted: false, older: nil,
+            prefix: {{ prefix }})
         {% end %}
         # Checks the invariants, inserts the root, then its entities, and announces `Created`
         # with every attribute, in one transaction, timed as a domain span named
@@ -584,7 +608,7 @@ module SweetTalk
         find?(id, entities: entities) || raise ::SweetTalk::Missing.new("{{ missing.id }}#{id}.")
       end
 
-      def self.__sweettalk_find?(raw : Int64, entities : Bool = true) : self?
+      def self.__sweettalk_find?(raw : Id::Raw, entities : Bool = true) : self?
         query = {{ row }}.query.where(removed_at: nil).where(id: raw)
         __sweettalk_rows(query, entities).first?
       end
@@ -660,10 +684,11 @@ module SweetTalk
             {{ child }}.__sweettalk_drop(mine.where(id: dropped))
           end
         {% end %}
+        {% inserted = ids == "UUID" ? ["id: __sweettalk_raw_id"] + columns : columns %}
         changeset = if row = @__sweettalk_row
                       {{ row }}::Changeset.new(row, {{ columns.join(", ").id }})
                     else
-                      {{ row }}::Changeset.new({{ columns.join(", ").id }})
+                      {{ row }}::Changeset.new({{ inserted.join(", ").id }})
                     end
         unless row && changeset.changes.empty? && changeset.valid?
           begin
@@ -678,8 +703,9 @@ module SweetTalk
           @__sweettalk_id = changeset.record.id
         end
         {% for collection in collections %}
-          @__sweettalk_loaded_{{ collection[0].id }} =
-            @{{ collection[0].id }}.map(&.__sweettalk_save({{ foreign }}: __sweettalk_raw_id))
+          @__sweettalk_loaded_{{ collection[0].id }} = @{{ collection[0].id }}.map do |entity|
+            entity.__sweettalk_save({{ foreign }}: __sweettalk_raw_id, fresh: row.nil?)
+          end
         {% end %}
       end
 
@@ -716,7 +742,7 @@ module SweetTalk
       def self.__sweettalk_pin(aggregate : self) : ::JSON::Any
         ::JSON.parse(::JSON.build do |json|
           json.object do
-            json.field("id") { json.number(aggregate.__sweettalk_raw_id) }
+            json.field("id") { aggregate.__sweettalk_raw_id.to_json(json) }
             {% if moves %}
               json.field("state") { json.string(aggregate.__sweettalk_state) }
             {% end %}
@@ -755,11 +781,12 @@ module SweetTalk
           end
         {% end %}
         aggregate = new({{ attributes.map(&.[0].id).splat }})
-        aggregate.__sweettalk_pinned(copy["id"].as_i64, copy["state"]?.try(&.as_s))
+        raw = ::SweetTalk.__sweettalk_raw(Id::Raw, copy["id"])
+        aggregate.__sweettalk_pinned(raw, copy["state"]?.try(&.as_s))
         aggregate
       end
 
-      def __sweettalk_pinned(id : Int64, state : String?) : Nil
+      def __sweettalk_pinned(id : Id::Raw, state : String?) : Nil
         @__sweettalk_id = id
         {% if moves %}
           @state = State.parse(state.not_nil!)
@@ -820,7 +847,7 @@ module SweetTalk
       {% end %}
     end
 
-    def __sweettalk_raw_id : Int64
+    def __sweettalk_raw_id : ::SugarORM::Key
       short = self.class.name.split("::").last
       @__sweettalk_id || raise NilAssertionError.new("#{short} has no id until it is created")
     end

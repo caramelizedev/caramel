@@ -125,4 +125,26 @@ describe SugarORM::Changeset do
     end
     changeset.check_constraint(:reserved_within_stock, on: :reserved)
   end
+
+  it "mints a UUID-keyed insert's id when it is built, and keeps an id param gives" do
+    minted = SugarUnit::Badge::DefaultChangeset.new(label: "gold", team_id: 7_i64)
+    minted.id.version.should eq(UUID::Version::V7)
+    minted.changes["id"].should eq(minted.id)
+    given = SugarORM.uuid7
+    SugarUnit::Badge::Grant.new(id: given, label: "gold", team_id: 7_i64).id.should eq(given)
+  end
+
+  it "refuses an update that changes the record's id" do
+    badge = SugarUnit::Badge.new(id: SugarORM.uuid7, label: "gold", team_id: 7_i64)
+    moved = SugarUnit::Badge::Grant.new(badge, id: SugarORM.uuid7)
+    moved.errors.should eq({"id" => ["cannot be changed"]})
+    SugarUnit::Badge::Grant.new(badge, id: badge.id).valid?.should be_true
+  end
+
+  it "has no id for an Int64-keyed insert, which the database numbers" do
+    expect_raises(SugarORM::Error, /the database assigns SugarUnit::Team's Int64 id/) do
+      Default.new(name: "Acme").id
+    end
+    Update.new(SugarUnit.team, seats: 3).id.should eq(7_i64)
+  end
 end

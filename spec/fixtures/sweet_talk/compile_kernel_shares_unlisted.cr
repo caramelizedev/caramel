@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   kernel Calendar, shared_by: [Catalogue, Ordering], means: "the days the shop counts in" do
     value Day, Date, means: "a calendar day"

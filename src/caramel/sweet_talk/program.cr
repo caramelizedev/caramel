@@ -352,8 +352,8 @@ module SweetTalk
     # The events grouped by the aggregate or context they belong to and its id, as
     # `{"Shop::Ordering::Order", 7}`, or `{"Shop::Ordering", nil}` for a context's event,
     # each group in the order of `events`.
-    def by_subject : Hash({String, Int64?}, Array(Event))
-      groups = {} of {String, Int64?} => Array(Event)
+    def by_subject : Hash({String, ::SugarORM::Key?}, Array(Event))
+      groups = {} of {String, ::SugarORM::Key?} => Array(Event)
       events.each do |event|
         key = {event.__sweettalk_subject_name, event.__sweettalk_subject_id}
         (groups[key] ||= [] of Event) << event

@@ -607,7 +607,7 @@ describe "SugarORM with PostgreSQL" do
 
       keys = [] of Int64
       SugarORM::Associations.first_children(
-        SugarSpec::Team, SugarSpec::Profile, "team_id", [acme, beta]
+        SugarSpec::Team, SugarSpec::Profile, Int64, "team_id", [acme, beta]
       ) { |key, _| keys << key }
       keys.sort!.should eq([acme.id, beta.id])
     end

@@ -197,8 +197,8 @@ module SweetTalk
     # Every aggregate instance a command loaded or saved, which reload after a dry run.
     getter instances = [] of Aggregate
     # {type, raw id} of each aggregate the run touched, its before-state, its latest instance
-    @touched = [] of {String, Int64, JSON::Any?, Aggregate}
-    @made = {} of {String, Int64} => String
+    @touched = [] of {String, ::SugarORM::Key, JSON::Any?, Aggregate}
+    @made = {} of {String, ::SugarORM::Key} => String
     @counts = Hash(String, Int32).new(0)
 
     def initialize(@dry : Bool)
@@ -207,7 +207,7 @@ module SweetTalk
     # Notes *aggregate*, just loaded under its lock by a command, as it is stored.
     def before(aggregate : Aggregate) : Nil
       remember(aggregate)
-      key = {aggregate.class.name, aggregate.__sweettalk_raw_id}
+      key = {aggregate.class.name, aggregate.__sweettalk_raw_id.as(::SugarORM::Key)}
       return if @touched.any? { |entry| {entry[0], entry[1]} == key }
       @touched << {key[0], key[1], canon(aggregate), aggregate}
     end
@@ -215,7 +215,7 @@ module SweetTalk
     # Notes *aggregate*, just saved: one with no before-state was made by this run.
     def saved(aggregate : Aggregate) : Nil
       remember(aggregate)
-      key = {aggregate.class.name, aggregate.__sweettalk_raw_id}
+      key = {aggregate.class.name, aggregate.__sweettalk_raw_id.as(::SugarORM::Key)}
       if index = @touched.index { |entry| {entry[0], entry[1]} == key }
         entry = @touched[index]
         @touched[index] = {entry[0], entry[1], entry[2], aggregate}
@@ -230,17 +230,18 @@ module SweetTalk
       made(entity.class.name, entity.__sweettalk_raw_id)
     end
 
-    # Writes *raw*, an id of *type*, as the placeholder the run gave it, or as its number.
-    def id(json : JSON::Builder, type : String, raw : Int64) : Nil
+    # Writes *raw*, an id of *type*, as the placeholder the run gave it, or as its number
+    # or UUID.
+    def id(json : JSON::Builder, type : String, raw : ::SugarORM::Key) : Nil
       if placeholder = @made[{type, raw}]?
         json.string(placeholder)
       else
-        json.number(raw)
+        raw.to_json(json)
       end
     end
 
     # A subject as a person reads it: `Tea 4`, or `new Receipt #1` for one the run made.
-    def subject(type : String, raw : Int64) : String
+    def subject(type : String, raw : ::SugarORM::Key) : String
       @made[{type, raw}]? || "#{type.split("::").last} #{raw}"
     end
 
@@ -264,7 +265,7 @@ module SweetTalk
       JSON.parse(JSON.build { |json| aggregate.__sweettalk_canon(json, self) })
     end
 
-    private def made(type : String, raw : Int64) : Nil
+    private def made(type : String, raw : ::SugarORM::Key) : Nil
       short = type.split("::").last
       @made[{type, raw}] ||= "new #{short} ##{@counts[type] += 1}"
     end

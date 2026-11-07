@@ -6,7 +6,7 @@ module SweetTalk
     include Guarded
     include Holding
 
-    @__sweettalk_id : Int64? = nil
+    @__sweettalk_id : ::SugarORM::Key? = nil
 
     # The constructors, facts, loading and saving, from the attributes declared so far; an
     # entity that holds entities loads, saves and drops them with its own (ADR 0050).
@@ -23,6 +23,9 @@ module SweetTalk
         {% raise "entity #{path[-2].id}::#{path[-1].id} would name its key to its parent " +
                  "#{fk.id}, longer than PostgreSQL's 63 bytes: shorten its name or its parent's" %}
       {% end %}
+      {% home = ::SweetTalk::BoundedContext.includers
+           .find { |context| @type.name.starts_with?("#{context.name}::") } %}
+      {% ids = home ? home.constant("SWEETTALK_IDS") : "UUID" %}
       {% positional = [] of Nil %}
       {% keywords = [] of Nil %}
       {% loads = [] of Nil %}
@@ -86,8 +89,10 @@ module SweetTalk
           {% columns << "#{attribute[4].id}: @#{attribute[4].id}" %}
         {% end %}
         {% if attribute[2] == "reference" || attribute[2] == "record" %}
-          {% read = nilable ? "as_i64?" : "as_i64" %}
-          {% facts << "@#{attribute[4].id} = fact[#{attribute[4]}].#{read.id}" %}
+          {% reader = nilable ? "__sweettalk_raw?" : "__sweettalk_raw" %}
+          {% raw_type = attribute[6].gsub(/\?\z/, "") %}
+          {% facts << "@#{attribute[4].id} = ::SweetTalk.#{reader.id}(#{raw_type.id}, " +
+                      "fact[#{attribute[4]}])" %}
           {% packs << "json.field(#{attribute[4]}, @#{attribute[4].id})" %}
         {% elsif attribute[2] == "entities" %}
           # A job queued before the entity held this list carries no key for it: empty.
@@ -119,6 +124,9 @@ module SweetTalk
       end
 
       def initialize({{ positional.join(", ").id }})
+        {% if ids == "UUID" %}
+          @__sweettalk_id = ::SugarORM.uuid7
+        {% end %}
         {% for attribute in referring %}
           @{{ attribute[4].id }} = ::SweetTalk.raw_id({{ attribute[0].id }})
         {% end %}
@@ -134,7 +142,7 @@ module SweetTalk
 
       {% for collection in collections %}
         # The ids of the rows this list was loaded with; a save deletes those it drops.
-        @__sweettalk_loaded_{{ collection[0].id }} = [] of Int64
+        @__sweettalk_loaded_{{ collection[0].id }} = [] of Id::Raw
       {% end %}
 
       def initialize(*, stored row : {{ row }}{{ lists.join("").id }})
@@ -186,18 +194,25 @@ module SweetTalk
         query.delete_all
       end
 
-      # This entity's typed id, once its aggregate is saved.
+      # This entity's typed id: a UUID it takes when it is built, or an Int64 its row takes
+      # once its aggregate is saved, as its domain's `ids` say.
       struct Id < ::SweetTalk::Identity
-        include ::Caramel::FieldValue(Int64)
+        include ::Caramel::FieldValue(::{{ ids.id }})
 
-        getter raw : Int64
+        alias Raw = ::{{ ids.id }}
 
-        def initialize(@raw : Int64)
+        getter raw : Raw
+
+        def initialize(@raw : Raw)
         end
 
-        # Builds the id a contract field binds; any Int64 is one.
-        def self.from_field(raw : Int64, & : String ->) : self
+        # Builds the id a contract field binds; any {{ ids.id }} is one.
+        def self.from_field(raw : Raw, & : String ->) : self
           new(raw)
+        end
+
+        def self.__sweettalk_from_json(any : ::JSON::Any) : self
+          new(::SweetTalk.__sweettalk_raw(Raw, any))
         end
 
         def to_s(io : IO) : Nil
@@ -209,10 +224,15 @@ module SweetTalk
         Id.new(__sweettalk_raw_id)
       end
 
+      # This entity's id: a UUID from when it is built, an Int64 once it is saved.
+      def __sweettalk_raw_id : Id::Raw
+        super.as(Id::Raw)
+      end
+
       # A detached copy rebuilt from an event's facts; it has no row. A job queued before
       # facts carried an id holds none: nil.
       def initialize(*, fact : JSON::Any)
-        @__sweettalk_id = fact["id"]?.try(&.as_i64?)
+        @__sweettalk_id = fact["id"]?.try { |held| ::SweetTalk.__sweettalk_raw?(Id::Raw, held) }
         {{ facts.join("\n").id }}
       end
 
@@ -243,12 +263,17 @@ module SweetTalk
 
       # Inserts or updates this entity's row under its parent; returns its id. A row
       # another parent holds, or one a rolled-back create or factory left behind, is not
-      # this parent's, so the entity is inserted again as a new row of its own. A row whose
+      # this parent's, so the entity is inserted again as a new row of its own; *fresh*
+      # says the parent was just inserted, so no row of its is stored yet. A row whose
       # columns all hold what the entity says is left as it is: no statement. The rows each
       # list loaded and dropped are deleted first, then each kept entity is saved in turn.
-      def __sweettalk_save(*, {{ foreign }} : Int64) : Int64
+      def __sweettalk_save(*, {{ foreign }} : Id::Raw, fresh : Bool = false) : Id::Raw
         row = @__sweettalk_row
-        row = nil if row && row.{{ foreign }} != {{ foreign }}
+        row = nil if fresh || (row && row.{{ foreign }} != {{ foreign }})
+        {% if ids == "UUID" %}
+          # A copy of an entity that had a row, or one a rollback left, takes an id of its own.
+          @__sweettalk_id = ::SugarORM.uuid7 if row.nil? && @__sweettalk_row
+        {% end %}
         {% for collection in collections %}
           if row
             held = @{{ collection[0].id }}.compact_map { |entity| entity.@__sweettalk_id }
@@ -260,10 +285,11 @@ module SweetTalk
             end
           end
         {% end %}
+        {% inserted = ids == "UUID" ? "id: __sweettalk_raw_id, #{arguments.id}" : arguments %}
         changeset = if row
                       {{ row }}::Changeset.new(row, {{ arguments.id }})
                     else
-                      {{ row }}::Changeset.new({{ arguments.id }})
+                      {{ row }}::Changeset.new({{ inserted.id }})
                     end
         id = if row && changeset.changes.empty? && changeset.valid?
                row.id
@@ -271,13 +297,14 @@ module SweetTalk
                __sweettalk_write(row, changeset)
              end
         {% for collection in collections %}
-          @__sweettalk_loaded_{{ collection[0].id }} =
-            @{{ collection[0].id }}.map(&.__sweettalk_save({{ own }}: id))
+          @__sweettalk_loaded_{{ collection[0].id }} = @{{ collection[0].id }}.map do |entity|
+            entity.__sweettalk_save({{ own }}: id, fresh: row.nil?)
+          end
         {% end %}
         id
       end
 
-      private def __sweettalk_write(row : {{ row }}?, changeset : {{ row }}::Changeset) : Int64
+      private def __sweettalk_write(row : {{ row }}?, changeset : {{ row }}::Changeset) : Id::Raw
         begin
           row ? ::SugarORM::Repo.update(changeset) : ::SugarORM::Repo.insert(changeset)
         rescue error : ::SugarORM::UniqueViolation | ::SugarORM::CheckViolation
@@ -308,7 +335,7 @@ module SweetTalk
       {% end %}
     end
 
-    def __sweettalk_raw_id : Int64
+    def __sweettalk_raw_id : ::SugarORM::Key
       short = self.class.name.split("::").last
       @__sweettalk_id ||
         raise NilAssertionError.new("#{short} has no id until its aggregate is saved")

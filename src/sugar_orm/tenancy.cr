@@ -33,7 +33,7 @@ module SugarORM::Tenancy
 
   # The tenant id *schema*'s statements are scoped to; nil inside
   # Caramel::Tenancy.without.
-  def self.scope(schema : String) : Int64?
+  def self.scope(schema : String) : ::SugarORM::Tenancy::Tenant::PrimaryKey?
     fiber = Fiber.current
     if tenant = fiber.__sugar_tenant
       return tenant.__sugar_primary_value
@@ -47,7 +47,7 @@ module SugarORM::Tenancy
   end
 
   # The tenant id a new *schema* row belongs to.
-  def self.stamp(schema : String) : Int64
+  def self.stamp(schema : String) : ::SugarORM::Tenancy::Tenant::PrimaryKey
     tenant = Fiber.current.__sugar_tenant || raise Missing.new(<<-TEXT)
       A new #{schema} row needs a tenant to belong to, and none is bound.
       Remediation: create it inside Caramel::Tenancy.with(tenant) { … }.

@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk/decimal"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Treasury, means: "the money we keep" do
     value Rate, Decimal(20, 8), at_least: "0", means: "a yearly rate"

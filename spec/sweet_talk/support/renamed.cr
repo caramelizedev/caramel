@@ -4,6 +4,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Renamed
   include SweetTalk
+  ids Int64
 
   context Pantry, renamed_from: Store, means: "the shop's stock" do
     value Tins, Int32, at_least: 0, means: "a count of tins"

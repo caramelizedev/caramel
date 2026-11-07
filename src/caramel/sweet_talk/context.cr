@@ -1416,7 +1416,7 @@ module SweetTalk
       ::SweetTalk.__sweettalk_event({{ name }}{% for field in fields %}, {{ field }}{% end %},
         carried: [] of Nil, channel: {{ channel }}, means: {{ means }},
         renamed_from: {{ renamed_from }}, subject: nil, tenanted: {{ tenanted }},
-        older: {{ older }})
+        older: {{ older }}, prefix: {{ @type.constant("SWEETTALK_PREFIX") }})
     end
 
     # `emit Renamed, name: name` in a service body records one of this context's events;
@@ -2063,7 +2063,8 @@ module SweetTalk
   # `tenant App::Account`, before the first context, names the tenant model of a program
   # that requires caramel/tenancy: the model the routes' `tenant` block names.
   # `SWEETTALK_TENANT` records {the model's path, the attribute named after its last
-  # segment}; every context copies it unless it says `central: true`.
+  # segment, its key type, "UUID" or "Int64"}; every context copies it unless it says
+  # `central: true`.
   #
   # @word setup | Names the tenant model of a program that requires caramel/tenancy.
   # @usage tenant MODEL
@@ -2071,7 +2072,7 @@ module SweetTalk
   # @example requires caramel/tenancy
   #   struct Account < SugarORM::Schema
   #     schema "accounts" do
-  #       field id : Int64, primary: true
+  #       field id : UUID, primary: true
   #       field slug : String
   #       index :slug, unique: true
   #     end
@@ -2118,8 +2119,66 @@ module SweetTalk
     {% unless resolved && resolved < ::SugarORM::Schema %}
       {% model.raise "tenant #{model} must name a SugarORM schema declared before it" %}
     {% end %}
-    {% entry = {resolved.name.stringify, resolved.name.split("::").last.underscore} %}
+    {% entry = {resolved.name.stringify, resolved.name.split("::").last.underscore,
+                resolved.constant(:SUGAR_KEY)} %}
     SWEETTALK_TENANT = {{ entry }}
+  end
+
+  # `ids Int64`, before the first context, keys this domain's aggregates and entities by an
+  # Int64 the database assigns instead of a UUID SweetTalk mints. Without it a domain's
+  # ids take its tenant's key type, or are UUIDs. `SWEETTALK_IDS` records "UUID" or
+  # "Int64".
+  #
+  # @word setup | Keys a domain's aggregates and entities by an Int64 instead of a UUID.
+  # @usage ids TYPE
+  # @guide c-sweettalk-aggregates
+  # @example
+  #   ids Int64
+  #
+  #   context Apiary, means: "honey gathered from the hives" do
+  #     aggregate Hive, means: "one hive and the honey it gave" do
+  #       has grams : Int32
+  #     end
+  #   end
+  macro ids(type)
+    {% named = type.is_a?(Path) ? type.stringify.gsub(/\A::/, "") : "" %}
+    {% unless %w[UUID Int64].includes?(named) %}
+      {% type.raise "ids takes UUID or Int64, not #{type}" %}
+    {% end %}
+    {% if @type.has_constant?("SWEETTALK_IDS") %}
+      {% type.raise "ids is named twice in #{@type}: keep one" %}
+    {% end %}
+    {% earlier = ::SweetTalk::BoundedContext.includers
+         .find(&.name.starts_with?("#{@type.name}::")) %}
+    {% if earlier %}
+      {% type.raise "ids comes after context #{earlier.name.split("::").last.id}: " +
+                    "name the ids before the contexts" %}
+    {% end %}
+    SWEETTALK_IDS = {{ named }}
+  end
+
+  # :nodoc:
+  # Inside a context's or a kernel's module, the constants that say how its domain keys
+  # rows: `SWEETTALK_IDS`, the domain's *declared* `ids` or else its *tenant*'s key type or
+  # UUID, and `SWEETTALK_PREFIX`, how many characters a tenant's `t<id>:` prefix adds to a
+  # channel name: none without caramel/tenancy, 21 for an Int64 tenant and 27 for a UUID
+  # one. A *domain* whose `ids` differ from its tenant's key type is refused at *name*.
+  macro __sweettalk_id_constants(name, domain, tenant, declared)
+    {% if tenant && declared && declared != tenant[2] %}
+      {% name.raise "#{domain.id} declares ids #{declared.id}, but its tenant #{tenant[0].id} " +
+                    "is keyed by #{tenant[2].id}: a context's events keep the tenant's id " +
+                    "where its aggregates' ids go; declare ids #{tenant[2].id}, or key " +
+                    "#{tenant[0].id} by #{declared.id}" %}
+    {% end %}
+    {% ids = declared || (tenant ? tenant[2] : "UUID") %}
+    {% prefix = 0 %}
+    {% if ::Caramel.has_constant?("Tenancy") %}
+      {% prefix = tenant && tenant[2] == "Int64" ? 21 : 27 %}
+    {% end %}
+    # The type this module's aggregates and entities are keyed by, "UUID" or "Int64"
+    SWEETTALK_IDS = {{ ids }}
+    # How many characters a tenant's t<id>: prefix adds to this module's channel names
+    SWEETTALK_PREFIX = {{ prefix }}
   end
 
   # `context Ordering, follows: Catalogue, means: "…" do … end` is a bounded context. Its
@@ -2195,6 +2254,9 @@ module SweetTalk
     {% end %}
     {% tenant = @type.has_constant?("SWEETTALK_TENANT") && !central &&
                 @type.constant("SWEETTALK_TENANT") %}
+    {% domain = @type == @top_level ? "the program" : @type.name.stringify %}
+    {% keyed_by = @type.has_constant?("SWEETTALK_TENANT") && @type.constant("SWEETTALK_TENANT") %}
+    {% declared_ids = @type.has_constant?("SWEETTALK_IDS") && @type.constant("SWEETTALK_IDS") %}
     __sweettalk_shared("context", {{ name }}, {{ shares }})
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
     {% body = block ? block.body : nil %}
@@ -2378,8 +2440,10 @@ module SweetTalk
       SWEETTALK_MEANS   = {{ means }}
       SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
       SWEETTALK_STORED  = {{ (renamed_from || name).stringify.underscore }}
-      # {tenant model, attribute} when this context's rows belong to one tenant
+      # {tenant model, attribute, key type} when this context's rows belong to one tenant
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
+      ::SweetTalk.__sweettalk_id_constants({{ name }}, {{ domain }}, {{ keyed_by }},
+        {{ declared_ids }})
       # The requirement ids the module that holds this context lists, or nil (ADR 0057)
       {% key = "SWEETTALK_REQUIREMENTS" %}
       SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}

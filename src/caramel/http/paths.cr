@@ -1,3 +1,4 @@
+require "uuid"
 require "../wording"
 
 module Caramel
@@ -8,7 +9,7 @@ module Caramel
   end
 
   # Include generated paths in the application's action base. IDs are
-  # explicit Int64 values; an unsaved record must be checked before linking it.
+  # explicit Int64 or UUID values; an unsaved record must be checked before linking it.
   # Each path passes through `Caramel.localize_path`, so with `caramel/i18n`
   # it carries the request's locale prefix, and through `Caramel.tenant_path`,
   # so with `caramel/tenancy` it carries the request tenant's.
@@ -29,6 +30,11 @@ module Caramel
       ::Caramel.tenant_path(path, of: {{ plural_name }})
     end
 
+    def {{ singular.id }}_path(id : UUID) : String
+      path = ::Caramel.localize_path({{ "/#{plural.id}/" }} + id.to_s)
+      ::Caramel.tenant_path(path, of: {{ plural_name }})
+    end
+
     def new_{{ singular.id }}_path : String
       path = ::Caramel.localize_path({{ "/#{plural.id}/new" }})
       ::Caramel.tenant_path(path, of: {{ plural_name }})
@@ -38,6 +44,11 @@ module Caramel
     # carries the prefixes.
     def edit_{{ singular.id }}_path(id : Int64) : String
       raise ArgumentError.new("record ID must be positive") unless id > 0
+      path = ::Caramel.localize_path({{ "/#{plural.id}/" }} + id.to_s + "/edit")
+      ::Caramel.tenant_path(path, of: {{ plural_name }})
+    end
+
+    def edit_{{ singular.id }}_path(id : UUID) : String
       path = ::Caramel.localize_path({{ "/#{plural.id}/" }} + id.to_s + "/edit")
       ::Caramel.tenant_path(path, of: {{ plural_name }})
     end

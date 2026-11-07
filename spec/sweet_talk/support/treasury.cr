@@ -8,6 +8,7 @@ require "../../../src/caramel/sweet_talk/decimal"
 
 module Treasury
   include SweetTalk
+  ids Int64
 
   # The figures a rate was set from.
   struct Snapshot

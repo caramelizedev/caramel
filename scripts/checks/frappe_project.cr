@@ -48,9 +48,9 @@ module Caramel::Checks
         command(make + link, chdir: @project)
         routes = command([@frappe, "routes"], chdir: @project, echo: false).stdout
         print routes
-        show = %w[GET /books/:id App::Books::Show id:Int64(min=1)]
+        show = %w[GET /books/:id App::Books::Show id:UUID]
         update = %w[
-          PATCH /people/:id App::People::Update id:Int64(min=1)
+          PATCH /people/:id App::People::Update id:UUID
           name:String age:Int32 total:Int64 active:Bool rating:Float64? joined_at:Time?
         ]
         create = %w[POST /links App::Links::Create title:String? original_url:String]
@@ -436,8 +436,8 @@ module Caramel::Checks
       assert_reported!(mismatch, <<-MRDP)
         ERR CONTRACT_MISMATCH:422 at app/actions/shelves/show.cr:3:5
         NODE: RequestContract
-        MISSING: id:Int64
-        PATCH: INSERT "field id : Int64" AT 4:7\n
+        MISSING: id:UUID
+        PATCH: INSERT "field id : UUID" AT 4:7\n
         MRDP
       apply(mismatch.stdout)
       repaired = command([@frappe, "check"], chdir: @project, echo: false)
@@ -582,14 +582,14 @@ module Caramel::Checks
       module App
         struct Shelf < SugarORM::Schema
           schema "shelves" do
-            field id : Int64, primary: true
+            field id : UUID, primary: true
             has_many volumes : Volume
           end
         end
 
         struct Volume < SugarORM::Schema
           schema "volumes" do
-            field id : Int64, primary: true
+            field id : UUID, primary: true
             field title : String
             belongs_to shelf : Shelf
           end

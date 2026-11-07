@@ -558,7 +558,7 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
     {% contract_where = contract_location ? "Contract: #{contract_location.id}\n" : "" %}
     {% for param in params %}
       {% t = param[0] %}
-      {% suggest = (t == "id" || t.ends_with?("_id")) ? "Int64" : "String" %}
+      {% suggest = (t == "id" || t.ends_with?("_id")) ? "UUID" : "String" %}
       {% field = contract.constant("CARAMEL_FIELD_#{t.upcase.id}") %}
       {% unless field %}
         {% raise "\n\n❌ ROUTE CONTRACT MISMATCH\n" +
@@ -569,18 +569,18 @@ macro __caramel_router_draw(locations, tenants, tenant, &block)
                  "to the contract block of #{action.id}.\n" %}
       {% end %}
       {% scalar = field[1] %}
-      {% unless ["String", "Int32", "Int64"].includes?(scalar) && !field[2] && !field[3] %}
+      {% unless ["String", "Int32", "Int64", "UUID"].includes?(scalar) && !field[2] && !field[3] %}
         {% declared = "#{t.id} : #{field[5].id}#{field[2] ? "?".id : "".id}" %}
-        {% valued = ["String", "Int32", "Int64"].includes?(scalar) && field[5] != scalar %}
+        {% valued = ["String", "Int32", "Int64", "UUID"].includes?(scalar) && field[5] != scalar %}
         {% suggest = valued ? field[5] : suggest %}
         {% raise "\n\n❌ ROUTE CONTRACT TYPE MISMATCH\n" +
                  "Route: '#{path.id}' parameter ':#{t.id}' binds to " +
                  "'#{action.id}::Contract' field '#{declared.id}'\n" +
-                 "Path parameters must be non-nilable String, Int32 or Int64 fields, " +
+                 "Path parameters must be non-nilable String, Int32, Int64 or UUID fields, " +
                  "or field values bound from one, without defaults\n" +
                  where + contract_where +
                  "Remediation: declare `field #{t.id} : #{suggest.id}` " +
-                 "(String, Int32 or Int64; no `?` and no `default:`).\n" %}
+                 "(String, Int32, Int64 or UUID; no `?` and no `default:`).\n" %}
       {% end %}
     {% end %}
     {% summaries = [] of Nil %}

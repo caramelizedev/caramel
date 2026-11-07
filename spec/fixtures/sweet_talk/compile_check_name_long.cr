@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Warehousing, means: "storing goods" do
     value Celsius, Int32, within: -40..40, means: "a temperature"

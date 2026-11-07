@@ -52,6 +52,7 @@ module SugarORM
       "boolean"                  => "Bool",
       "double precision"         => "Float64",
       "timestamp with time zone" => "Time",
+      "uuid"                     => "UUID",
     }
 
     # `--dev-override` turns an overridable halt into its operation.
@@ -521,8 +522,9 @@ module SugarORM
         message: "primary key or identity differs from the database " \
                  "(declared primary: #{column.primary}, identity: #{column.identity}; " \
                  "database primary: #{actual.primary}, identity: #{actual.identity}).",
-        remediation: "SugarORM does not rewrite primary keys; " \
-                     "create a new table and copy the rows deliberately.",
+        remediation: "SugarORM does not rewrite primary keys; declare the key type the " \
+                     "table has (`field id : Int64, primary: true`, or `ids Int64` in a " \
+                     "SweetTalk domain), or create a new table and copy the rows deliberately.",
         overridable: false,
       )
     end

@@ -42,19 +42,20 @@ module Caramel::Frappe
 
     # Writes the tenant *model* and wires caramel/tenancy into the
     # application. Returns the written paths.
-    def generate(project : Project, model : String, *, version : Int64? = nil) : Array(String)
+    def generate(project : Project, model : String, *,
+                 version : Int64? = nil, int64 : Bool = false) : Array(String)
       ResourceGenerator.validate_model(model)
       singular = model.underscore
       plural = ResourceGenerator.pluralize(singular)
       originals = originals(project.root)
-      files = templates(model, singular, plural)
+      files = templates(model, singular, plural, int64)
       files[CONFIG] = tenanted_config(originals[CONFIG])
       files[ROUTES] = tenanted_routes(originals[ROUTES], model, plural)
       files[PATHS] = originals[PATHS].sub(PATHS_MARKER, path_helpers(singular, plural))
       files[ACTION] = originals[ACTION].sub(PATHS_INCLUDE, member_check(singular, plural))
       files[SPEC_HELPER] = originals[SPEC_HELPER] + spec_helpers(model, singular, plural)
       tenanted_domains(project.root, model, files, originals)
-      migration = create_migration(project.root, plural, version)
+      migration = create_migration(project.root, plural, version, int64)
       migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
       files[migration_path] = SchemaDiff.source(migration)
       Publication.publish(project, files, originals)
@@ -168,13 +169,15 @@ module Caramel::Frappe
     end
 
     # The tenant model's files from templates/tenancy.
-    private def templates(model : String, singular : String, plural : String) : Hash(String, String)
+    private def templates(model : String, singular : String, plural : String,
+                          int64 : Bool) : Hash(String, String)
       tokens = {
         "@@MODEL@@"      => model,
         "@@SINGULAR@@"   => singular,
         "@@PLURAL@@"     => plural,
         "@@COLLECTION@@" => plural.camelcase,
         "@@LABEL@@"      => singular.tr("_", " "),
+        "@@ID@@"         => int64 ? "Int64" : "UUID",
       }
       root = File.join(@framework_root, "templates/tenancy")
       files = {} of String => String
@@ -194,9 +197,10 @@ module Caramel::Frappe
 
     private def create_migration(root : String,
                                  plural : String,
-                                 version : Int64?) : SugarORM::Migration
+                                 version : Int64?,
+                                 int64 : Bool) : SugarORM::Migration
       fields = ["name:string", "slug:string:unique"].map { |item| ResourceField.new(item) }
-      statements = ResourceGenerator.create_table(plural, fields)
+      statements = ResourceGenerator.create_table(plural, fields, int64: int64)
       chosen = ResourceGenerator.migration_version(root, version)
       SugarORM::Migration.new(chosen, "create_#{plural}", statements)
     end

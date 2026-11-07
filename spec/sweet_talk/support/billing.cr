@@ -7,6 +7,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Billing
   include SweetTalk
+  ids Int64
 
   context Invoicing, event_log: true, means: "raising and settling invoices" do
     value Cents, Int64, at_least: 0, means: "an amount in minor units"

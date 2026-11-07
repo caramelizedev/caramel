@@ -3,6 +3,7 @@ require "../../../src/caramel/sweet_talk/money"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Till, means: "the money a shop takes" do
     quote Rate, rounding: :half_up, means: "a dated rate"

@@ -6,6 +6,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Constrained
   include SweetTalk
+  ids Int64
 
   context Pantry, means: "a pantry whose rules PostgreSQL keeps too" do
     aggregate Crate, means: "a crate with a label and a code of its own" do

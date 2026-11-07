@@ -49,8 +49,8 @@ end
 private def tenant_notes_table : SugarORM::Catalog::Table
   zoned = "timestamp with time zone"
   columns = [
-    SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
-    SugarORM::Catalog::Column.new("account_id", "bigint", false, nil),
+    SugarORM::Catalog::Column.new("id", "uuid", false, "uuidv7()", primary: true, identity: false),
+    SugarORM::Catalog::Column.new("account_id", "uuid", false, nil),
     SugarORM::Catalog::Column.new("body", "text", false, nil),
     SugarORM::Catalog::Column.new("code", "text", false, nil),
     SugarORM::Catalog::Column.new("created_at", zoned, false, "CURRENT_TIMESTAMP"),
@@ -348,7 +348,8 @@ describe Caramel::Frappe::ResourceGenerator do
         SugarORM::Catalog::Column.new(name, zoned, false, "CURRENT_TIMESTAMP")
       end
       declared = SugarORM::Catalog::Table.new("people", [
-        SugarORM::Catalog::Column.new("id", "bigint", false, nil, primary: true, identity: true),
+        SugarORM::Catalog::Column.new("id", "uuid", false, "uuidv7()",
+          primary: true, identity: false),
         column.call("name", "text", false),
         column.call("age", "integer", false),
         column.call("total", "bigint", false),
@@ -364,6 +365,34 @@ describe Caramel::Frappe::ResourceGenerator do
       expected = Caramel::Frappe::SchemaDiff.source(migration)
       generated = File.join(project.root, "db/migrations/20260919000003_create_people.cr")
       File.read(generated).should eq(expected)
+    end
+  end
+
+  it "keys a resource by a UUID, or by an Int64 identity with --int64" do
+    resource_project do |project, package|
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Book", ["title:string"], version: 20260919000004_i64)
+      read(project, "app/models/book.cr").should contain("      field id : UUID, primary: true\n")
+      read(project, "app/actions/books/show.cr").should contain("      field id : UUID\n")
+      edit = read(project, "app/views/books/edit.cr")
+      edit.should contain("def initialize(@id : UUID, @form : Form)")
+      form = read(project, "app/actions/books.cr")
+      form.should contain("Caramel::RequestContract.convert(text, UUID)")
+      books = read(project, "db/migrations/20260919000004_create_books.cr")
+      books.should contain(%("id" uuid NOT NULL DEFAULT uuidv7() PRIMARY KEY))
+
+      generator.generate(project, "Shelf", ["name:string"],
+        plural: "shelves", version: 20260919000005_i64, int64: true)
+      model = read(project, "app/models/shelf.cr")
+      model.should contain("      field id : Int64, primary: true\n")
+      show = read(project, "app/actions/shelves/show.cr")
+      show.should contain("      field id : Int64, min: 1\n")
+      edit = read(project, "app/views/shelves/edit.cr")
+      edit.should contain("def initialize(@id : Int64, @form : Form)")
+      form = read(project, "app/actions/shelves.cr")
+      form.should contain("Caramel::RequestContract.convert(text, Int64)")
+      shelves = read(project, "db/migrations/20260919000005_create_shelves.cr")
+      shelves.should contain(%("id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY))
     end
   end
 
@@ -435,7 +464,7 @@ describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
   it "declares the tenant in the model" do
     tenant_project do |project, generator|
       generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
-      expected = "      field id : Int64, primary: true\n" \
+      expected = "      field id : UUID, primary: true\n" \
                  "      tenant account : Account\n" \
                  "      field body : String\n"
       read(project, "app/models/note.cr").should contain(expected)
@@ -589,6 +618,28 @@ describe "Caramel::Frappe::ResourceGenerator in a multi-tenant application" do
       expect_raises(Caramel::Frappe::Error, message) do
         generator.generate(project, "Note", ["body:string"])
       end
+    end
+  end
+
+  it "refuses a tenant model that declares no key type" do
+    tenant_project do |project, generator|
+      path = File.join(project.root, "app/models/account.cr")
+      File.write(path, File.read(path).sub("field id : UUID, primary: true", ""))
+      message = "app/models/account.cr must declare `field id : UUID, primary: true`"
+      expect_raises(Caramel::Frappe::Error, message) do
+        generator.generate(project, "Note", ["body:string"])
+      end
+    end
+  end
+
+  it "types the tenant column after an Int64 tenant's key" do
+    resource_project do |project, package|
+      tenancy = Caramel::Frappe::TenancyGenerator.new(package)
+      tenancy.generate(project, "Account", version: 20260919000010_i64, int64: true)
+      generator = Caramel::Frappe::ResourceGenerator.new(package)
+      generator.generate(project, "Note", ["body:string"], version: 20260919000011_i64)
+      migration = read(project, "db/migrations/20260919000011_create_notes.cr")
+      migration.should contain(%("account_id" bigint NOT NULL))
     end
   end
 

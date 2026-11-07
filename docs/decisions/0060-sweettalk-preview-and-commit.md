@@ -5,7 +5,8 @@ Date: 2026-11-07
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6,
 [ADR 0034](0034-sweettalk-at-the-web-boundary.md) decision 2,
 [ADR 0036](0036-sweettalk-strategic-design.md) decision 4 and
-[ADR 0046](0046-sweettalk-units.md) decision 2.
+[ADR 0046](0046-sweettalk-units.md) decision 2. Decision 3 is amended by
+[ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -34,9 +35,9 @@ could drift from the real one, and nothing proved they agreed.
    its subject and its fields. A row is its class, its subject, its state, whether it is
    removed and every attribute. An id of a row the run made, an aggregate's or an
    entity's, reads as `new Receipt #1`, numbered per type in the order the run made them;
-   any other id is its number. A `Time` reads as `"time"`. Event ids, `occurred_at`, the
-   actor, the cause, the flow and row timestamps are left out. The event, aggregate and
-   entity macros generate each packer from the declared types.
+   any other id is its number or its UUID. A `Time` reads as `"time"`. Event ids,
+   `occurred_at`, the actor, the cause, the flow and row timestamps are left out. The
+   event, aggregate and entity macros generate each packer from the declared types.
 4. **The fingerprint covers events, rows, warnings and the refusal.** It is SHA-256 over
    the canonical events, the after-state of every row the run touched, the warnings and
    the refusal. `SweetTalk::Fingerprint` is a contract field value of `String`

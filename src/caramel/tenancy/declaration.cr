@@ -46,7 +46,7 @@ module Caramel::Tenancy
       end
 
       # :nodoc:
-      def self.find(id : Int64) : ::SugarORM::Tenancy::Tenant?
+      def self.find(id : ::{{ resolved }}::PrimaryKey) : ::SugarORM::Tenancy::Tenant?
         ::SugarORM::Tenancy::Tenant.query.find(id)
       end
 

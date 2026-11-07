@@ -2,14 +2,15 @@
 module SweetTalk
   # Declares *name* as an event of the caller with its typed *fields* and the *carried*
   # {name, type} pairs an aggregate's `emit` reads. *channel* is its notification channel,
-  # which fits PostgreSQL's 63 characters, or 42 in a program that requires
-  # caramel/tenancy, which prefixes a tenant's `t<id>:`. *subject* is the aggregate it
-  # belongs to, or nil for a context's event, whose subject is the bound tenant's id when
-  # *tenanted*, and absent otherwise. A field named like the metadata, or like the
-  # subject's id, is refused. `older: {till: "front"}` gives a required field the value a
-  # stored event without it reads (ADR 0051); an optional field already reads nil.
+  # which fits PostgreSQL's 63 characters less *prefix*, the characters a tenant's
+  # `t<id>:` prefix adds in a program that requires caramel/tenancy: 21 for an Int64
+  # tenant, 27 for a UUID one, so 42 or 36. *subject* is the aggregate it belongs to, or
+  # nil for a context's event, whose subject is the bound tenant's id when *tenanted*,
+  # and absent otherwise. A field named like the metadata, or like the subject's id, is
+  # refused. `older: {till: "front"}` gives a required field the value a stored event
+  # without it reads (ADR 0051); an optional field already reads nil.
   macro __sweettalk_event(name, *fields, carried, channel, means, renamed_from, subject,
-                          tenanted, older)
+                          tenanted, older, prefix)
     {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                   "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
@@ -56,10 +57,11 @@ module SweetTalk
     {% end %}
     {% older_fields = olders.map(&.[0]) %}
     {% parts = subject ? "context, aggregate or event" : "context or event" %}
-    {% if ::Caramel.has_constant?("Tenancy") && channel.size > 42 %}
-      {% name.raise "event #{name}'s channel #{channel.id} is longer than 42 characters: a " +
-                    "tenant's t<id>: prefix adds up to 21 of PostgreSQL's 63; shorten the " +
-                    "#{parts.id} name" %}
+    {% budget = 63 - prefix %}
+    {% if prefix > 0 && channel.size > budget %}
+      {% name.raise "event #{name}'s channel #{channel.id} is longer than #{budget} characters: " +
+                    "a tenant's t<id>: prefix adds up to #{prefix} of PostgreSQL's 63; shorten " +
+                    "the #{parts.id} name" %}
     {% elsif channel.size > 63 %}
       {% name.raise "event #{name}'s channel #{channel.id} is longer than PostgreSQL's 63 " +
                     "characters: shorten the #{parts.id} name" %}
@@ -107,7 +109,8 @@ module SweetTalk
         end
 
         def {{ owner.id }}_id : {{ subject }}::Id
-          {{ subject }}::Id.new(@__sweettalk_subject_id || __sweettalk_subject.__sweettalk_raw_id)
+          raw = @__sweettalk_subject_id || __sweettalk_subject.__sweettalk_raw_id
+          {{ subject }}::Id.new(raw.as({{ subject }}::Id::Raw))
         end
       {% else %}
         def initialize({{ names.empty? ? "".id : "*, #{given.id}".id }})
@@ -119,7 +122,7 @@ module SweetTalk
         end
       {% end %}
 
-      def initialize(*, subject_id : Int64?, fields_json : String,
+      def initialize(*, subject_id : ::SugarORM::Key?, fields_json : String,
                      meta_json : String{{ after_meta.id }})
         @__sweettalk_subject_id = subject_id
         @__sweettalk_fields = fields_json
@@ -170,7 +173,7 @@ module SweetTalk
       {% listed = names.empty? ? "[] of String".id : names %}
       ::SweetTalk.__sweettalk_canonical_event({{ subject }}, {{ listed }})
 
-      def self.__sweettalk_load(subject : Int64?, fields : String, meta : String) : self
+      def self.__sweettalk_load(subject : ::SugarORM::Key?, fields : String, meta : String) : self
         {% if names.empty? %}
           new(subject_id: subject, fields_json: fields, meta_json: meta)
         {% else %}

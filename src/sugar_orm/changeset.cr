@@ -58,7 +58,7 @@ module SugarORM
     @stale = false
 
     # Declares a permitted param; it must name a non-system field of `T` with a
-    # compatible type.
+    # compatible type, or `id` when `T` is keyed by UUID.
     macro param(declaration)
       {% location = "\n  --> #{declaration.filename.id}:" +
                     "#{declaration.line_number}:#{declaration.column_number}" %}
@@ -89,22 +89,18 @@ module SugarORM
                              "or add `field #{name.id} : Type` " +
                              "to #{schema}'s schema block." + location %}
       {% end %}
-      {% if field[:system] %}
+      {% if field[:system] && !(field[:primary] && field[:declared] == "UUID") %}
+        {% if field[:primary] %}
+          {% declaration.raise "param '#{name.id}' names #{schema}'s Int64 primary key, " +
+                               "which the database assigns.\n" +
+                               "Remediation: remove `param #{name.id}`, or key #{schema} " +
+                               "by UUID so a changeset may supply it." + location %}
+        {% end %}
         {% declaration.raise "param '#{name.id}' names #{schema}'s " +
                              "system-managed column '#{name.id}' " +
                              "(primary key, timestamp or tenant), " +
                              "which changesets never write.\n" +
                              "Remediation: remove `param #{name.id}`." + location %}
-      {% end %}
-      {% declared = declaration.type.resolve %}
-      {% column = parse_type(field[:type]).resolve %}
-      {% unless declared <= column %}
-        {% hint = field[:nullable] ? " (or its non-nil form)" : "" %}
-        {% declaration.raise "param '#{name.id} : #{declaration.type}' " +
-                             "does not match #{schema} field '#{name.id} : #{column}'.\n" +
-                             "Remediation: declare " +
-                             "`param #{name.id} : #{field[:declared].id}`#{hint.id}." +
-                             location %}
       {% end %}
       {% constant = "SUGAR_PARAM_#{name.upcase.id}".id %}
       {% if @type.has_constant?(constant) %}
@@ -112,7 +108,40 @@ module SugarORM
                              "Remediation: remove the duplicate `param #{name.id}`." +
                              location %}
       {% end %}
-      {% accepted = declared.union_types.map { |member| "::#{member}" }.join(" | ") %}
+      {% hint = field[:nullable] ? " (or its non-nil form)" : "" %}
+      {% if field[:references] %}
+        # A foreign key's type is its target's key type, which may be declared later, so
+        # the param is checked once every type is known.
+        {% accepted = declaration.type.stringify %}
+        {% suffix = field[:nullable] ? "?" : "" %}
+        {% head = "param '#{name.id} : #{declaration.type}' " +
+                  "does not match #{schema} field '#{name.id} : " %}
+        {% middle = "#{suffix.id}'.\nRemediation: declare `param #{name.id} : " %}
+        {% tail = "#{suffix.id}`#{hint.id}." + location %}
+        macro finished
+          \{% column = parse_type({{ field[:type] }}).resolve %}
+          \{% unless parse_type({{ accepted }}).resolve <= column %}
+            \{% key = column.union_types.reject(&.nilable?)[0] %}
+            \{% raise {{ head }} + "#{key}" + {{ middle }} + "#{key}" + {{ tail }} %}
+          \{% end %}
+        end
+      {% else %}
+        {% declared = declaration.type.resolve %}
+        {% column = parse_type(field[:type]).resolve %}
+        {% unless declared <= column %}
+          {% declaration.raise "param '#{name.id} : #{declaration.type}' " +
+                               "does not match #{schema} field '#{name.id} : #{column}'.\n" +
+                               "Remediation: declare " +
+                               "`param #{name.id} : #{field[:declared].id}`#{hint.id}." +
+                               location %}
+        {% end %}
+        {% accepted = declared.union_types.map { |member| "::#{member}" }.join(" | ") %}
+      {% end %}
+      {% if field[:primary] %}
+        private def __sugar_key_given? : Bool
+          true
+        end
+      {% end %}
       # {name, accepted value type}
       {{ constant }} = { {{ name }}, {{ accepted }} }
     end
@@ -289,9 +318,25 @@ module SugarORM
     end
 
     # The fields this changeset writes; for an update only those that differ
-    # from the record.
+    # from the record. An insert into a UUID-keyed schema lists its id.
     def changes : Hash(String, Value)
       @changes.dup
+    end
+
+    # The primary key this changeset writes or wrote: the record's for an update; for an
+    # insert into a UUID-keyed schema, the id given to `param id` or minted when the
+    # changeset was built.
+    def id : T::PrimaryKey
+      if stored = @record || @original
+        return stored.__sugar_primary_value
+      end
+      {% if T.constant(:SUGAR_KEY) == "UUID" %}
+        @changes[T.__sugar_primary_key].as(::UUID)
+      {% else %}
+        raise Error.new(
+          "#{self.class} has not been inserted, and the database assigns #{T}'s Int64 id"
+        )
+      {% end %}
     end
 
     # The stored row after a save; for an update the original before it.
@@ -484,9 +529,13 @@ module SugarORM
       @changes[column] = value
     end
 
-    # NOT NULL checks (an insert must supply every column without a default),
-    # then the user's `validate(cs)`.
+    # Mints an insert's id, then NOT NULL checks (an insert must supply every column
+    # without a default), then the user's `validate(cs)`. A given id may already be
+    # taken; an update cannot change its record's id.
     private def __sugar_prepare : Nil
+      key = T.__sugar_primary_key
+      __sugar_mint_key if insert?
+      add_error(key, Wording.key_kept) if !insert? && @changes.has_key?(key)
       T.__sugar_not_null_columns.each do |column|
         missing = if @changes.has_key?(column)
                     @changes[column].nil?
@@ -497,6 +546,20 @@ module SugarORM
       end
       require_upsert_keys
       validate(self)
+      @unique_constraints << {key, Wording.taken} if insert? && __sugar_key_given?
+    end
+
+    # A UUID-keyed insert takes its id when it is built, unless `param id` gave one.
+    private def __sugar_mint_key : Nil
+      {% if T.constant(:SUGAR_KEY) == "UUID" %}
+        key = T.__sugar_primary_key
+        @changes[key] = ::SugarORM.uuid7 if @changes[key]?.nil?
+      {% end %}
+    end
+
+    # Whether the changeset declares `param id`; that param's macro overrides it.
+    private def __sugar_key_given? : Bool
+      false
     end
 
     # An upsert's key is its conflict target, so an insert must supply every key column.

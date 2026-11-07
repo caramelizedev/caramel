@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Pantry, means: "the shop's stock" do
     aggregate Blend, means: "one tea we sell" do

@@ -438,9 +438,10 @@ module SweetTalk
 
     # `groups priced_by_tea(member : Account), of: Line.price, by: Line.tea, where: {member:
     # member, state: :placed}` is `sums` once per value of `by:`, an attribute of the same
-    # model as `of:` with a one-column key: text, a whole number, a Bool, a day, a decimal,
-    # an aggregate it refers to, or `:state`. Each row is `{by: key, total: sum}`, ordered by
-    # the stored key, nil (an optional attribute's) last; a key no row has is absent.
+    # model as `of:` with a one-column key: text, a whole number, a UUID, a Bool, a day, a
+    # decimal, an aggregate it refers to, or `:state`. Each row is `{by: key, total: sum}`,
+    # ordered by the stored key, nil (an optional attribute's) last; a key no row has is
+    # absent.
     #
     # @word query | Sums one attribute per value of another and returns a row of key and total
     #   for each.
@@ -608,7 +609,7 @@ module SweetTalk
         {% key_type = key[10] %}
         {% optional = key[9] %}
         {% texts = {"String" => "text", "Int32" => "text.to_i32", "Int64" => "text.to_i64",
-                    "Bool" => "text == \"true\""} %}
+                    "UUID" => "UUID.new(text)", "Bool" => "text == \"true\""} %}
         {% if key[2] == "column" %}
           {% inner = texts[key[10].gsub(/\A::/, "")] %}
         {% elsif key[2] == "value" %}
@@ -623,13 +624,14 @@ module SweetTalk
           {% end %}
         {% elsif key[2] == "reference" %}
           {% key_type = "#{key[10].id}::Id" %}
-          {% inner = "#{key[10].id}::Id.new(text.to_i64)" %}
+          {% inner = "#{key[10].id}::Id.new(::SweetTalk.__sweettalk_raw(" +
+                     "#{key[10].id}::Id::Raw, text))" %}
         {% end %}
       {% end %}
       {% unless inner %}
         {% by.raise "groups #{verb} groups by #{by}, which has no one-column key: group by " +
-                    "text, a whole number, a Bool, a day, a decimal, an aggregate it refers " +
-                    "to, or state" %}
+                    "text, a whole number, a UUID, a Bool, a day, a decimal, an aggregate it " +
+                    "refers to, or state" %}
       {% end %}
       {% key_type = "#{key_type.id}?" if optional %}
       {% keys = where.is_a?(NilLiteral) ? [] of String : where.keys.map(&.stringify) %}

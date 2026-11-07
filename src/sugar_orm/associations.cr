@@ -19,14 +19,14 @@ module SugarORM
     forward_missing_to @record
   end
 
-  # Loads `T` rows whose `foreign_key` references each owner's primary key.
-  struct HasMany(O, T)
+  # Loads `T` rows whose `foreign_key` references each owner's primary key, of type `K`.
+  struct HasMany(O, T, K)
     def initialize(@foreign_key : String)
     end
 
     def load(owners : Array(O)) : Array(Array(T))
-      grouped = {} of Int64 => Array(T)
-      Associations.children(O, T, @foreign_key, owners) do |key, record|
+      grouped = {} of K => Array(T)
+      Associations.children(O, T, K, @foreign_key, owners) do |key, record|
         (grouped[key] ||= [] of T) << record
       end
       owners.map { |owner| grouped[owner.__sugar_primary_value]? || [] of T }
@@ -35,13 +35,13 @@ module SugarORM
 
   # Loads the first `T` row (by primary key) whose `foreign_key` references each owner.
   # One row per owner comes back, not every child.
-  struct HasOne(O, T)
+  struct HasOne(O, T, K)
     def initialize(@foreign_key : String)
     end
 
     def load(owners : Array(O)) : Array(T?)
-      found = {} of Int64 => T
-      Associations.first_children(O, T, @foreign_key, owners) do |key, record|
+      found = {} of K => T
+      Associations.first_children(O, T, K, @foreign_key, owners) do |key, record|
         found[key] = record
       end
       owners.map { |owner| found[owner.__sugar_primary_value]? }
@@ -49,14 +49,14 @@ module SugarORM
   end
 
   # Loads the `T` row each owner references through its `column`. `V` is `T`
-  # for a NOT NULL reference and `T?` for a nullable one.
-  struct BelongsTo(O, T, V)
-    def initialize(@column : String, &@key : O -> Int64?)
+  # for a NOT NULL reference and `T?` for a nullable one; `K` is `T`'s key type.
+  struct BelongsTo(O, T, V, K)
+    def initialize(@column : String, &@key : O -> K?)
     end
 
     def load(owners : Array(O)) : Array(V)
       ids = owners.compact_map { |owner| @key.call(owner) }.uniq!
-      found = {} of Int64 => T
+      found = {} of K => T
       unless ids.empty?
         args = [ids] of Value
         sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
@@ -86,9 +86,10 @@ module SugarORM
     # One query for every child of `owners`, yielding `{foreign key, child}`.
     def self.children(owner : O.class,
                       target : T.class,
+                      key_type : K.class,
                       foreign_key : String,
                       owners : Array(O),
-                      & : Int64, T ->) : Nil forall O, T
+                      & : K, T ->) : Nil forall O, T, K
       ids = owners.map(&.__sugar_primary_value).uniq!
       return if ids.empty?
       args = [ids] of Value
@@ -98,7 +99,7 @@ module SugarORM
             "ORDER BY \"#{T.__sugar_primary_key}\""
       Repo.query(sql, args) do |rows|
         rows.each do
-          key = rows.read(Int64?)
+          key = rows.read(K?)
           record = T.from_row(rows)
           yield key, record if key
         end
@@ -109,9 +110,10 @@ module SugarORM
     # `{foreign key, child}`: `DISTINCT ON` keeps one row per owner.
     def self.first_children(owner : O.class,
                             target : T.class,
+                            key_type : K.class,
                             foreign_key : String,
                             owners : Array(O),
-                            & : Int64, T ->) : Nil forall O, T
+                            & : K, T ->) : Nil forall O, T, K
       ids = owners.map(&.__sugar_primary_value).uniq!
       return if ids.empty?
       args = [ids] of Value
@@ -121,7 +123,7 @@ module SugarORM
             "ORDER BY \"#{foreign_key}\", \"#{T.__sugar_primary_key}\""
       Repo.query(sql, args) do |rows|
         rows.each do
-          key = rows.read(Int64?)
+          key = rows.read(K?)
           record = T.from_row(rows)
           yield key, record if key
         end

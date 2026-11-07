@@ -1,6 +1,6 @@
 module App::Views::@@COLLECTION@@
   class Edit < App::ApplicationView
-    def initialize(@id : Int64, @form : Form)
+    def initialize(@id : @@ID@@, @form : Form)
     end
 
     private def blueprint

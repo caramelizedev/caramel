@@ -11,6 +11,7 @@ end
 
 module PreviewShop
   include SweetTalk
+  ids Int64
 
   context Till, event_log: true, means: "selling tins over the counter" do
     value Tins, Int32, means: "a count of tins"

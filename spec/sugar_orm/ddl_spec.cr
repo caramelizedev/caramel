@@ -33,6 +33,19 @@ describe SugarORM::DDL do
       SQL
   end
 
+  it "renders a UUID key with its uuidv7() default and a uuid foreign key column" do
+    table = Catalog::Table.new("badges", [
+      Catalog::Column.new("id", "uuid", false, "uuidv7()", primary: true, identity: false),
+      Catalog::Column.new("team_id", "uuid", false, nil),
+    ])
+    DDL.create_table(table).should eq(<<-SQL)
+      CREATE TABLE "badges" (
+        "id" uuid NOT NULL DEFAULT uuidv7() PRIMARY KEY,
+        "team_id" uuid NOT NULL
+      )
+      SQL
+  end
+
   it "declares a composite primary key as a table constraint" do
     table = Catalog::Table.new("memberships", [
       Catalog::Column.new("team_id", "bigint", false, nil, primary: true),
