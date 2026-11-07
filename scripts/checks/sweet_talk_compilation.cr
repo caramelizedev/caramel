@@ -1,8 +1,8 @@
 require "./support/harness"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0051). Each
-# declaration mistake fails to compile with a fixed problem text, naming its file where the
-# mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
+# caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051 and 0053 to
+# 0063). Each declaration mistake fails to compile with a fixed problem text, naming its file
+# where the mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
 # application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
 # holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
 # scripts/check integration runs them.
