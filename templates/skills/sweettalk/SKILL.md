@@ -12,6 +12,10 @@ line below ends with the section that states it; where they differ, the guide is
 Read first the map of Domain-Driven Design patterns to SweetTalk words:
 https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-ddd
 
+Before you guess a word's options, run `frappe words WORD`: it prints the usage, each option and
+an example that compiles, read from the macros of this release, and `frappe words` lists them.
+https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-words
+
 ## Rules agents most often break
 
 - Give every context, kernel, value, aggregate, entity, event, projection, specification, service, unit, calculation and process `means:`. https://caramelize.dev/docs/VERSION/sweettalk/index.md#c-sweettalk-meaning
