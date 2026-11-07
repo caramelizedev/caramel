@@ -214,6 +214,8 @@ module SweetTalk
           {% end %}
           {% if listed %}
             SWEETTALK_ONE_OF = {{ members }}
+
+            __sweettalk_members({{ methods }})
           {% end %}
 
           getter raw : String

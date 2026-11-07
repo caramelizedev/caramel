@@ -330,6 +330,7 @@ const compileRows = {
   'A value that wraps anything but Int32, Int64, String, Date, Decimal(P, S) or Json(T), or has no parts': ['value_type', 'composite_without_parts'],
   'A value that takes an option its raw type does not, such as matches: on an integer or at_least: on a string, database_check: true, or database_check: false on a value with parts': ['value_string_bounds', 'value_int_matches', 'value_int_one_of', 'database_check_true', 'composite_database_check'],
   'A one_of: that is not a literal list of words, lists a word twice or one that is not a word, takes matches: or length:, or lists a word that names a method the value or every object already has, or a Crystal keyword': ['one_of_not_list', 'one_of_with_matches', 'one_of_word', 'one_of_duplicate', 'one_of_reserved', 'one_of_class_method', 'one_of_object_method', 'one_of_keyword'],
+  'A case … in over a closed-set value’s member that misses one': ['member_case_missing'],
   'A Date value that takes a bound, a pattern, a length, a list or database_check:': ['date_option', 'date_database_check'],
   'Day.today, a day added to a day, or a query that gives text where a day is wanted': ['day_today', 'day_plus_day', 'day_query_text'],
   'A bound that is not an integer literal, unless the value takes database_check: false': ['bound_not_literal', 'length_not_literal'],

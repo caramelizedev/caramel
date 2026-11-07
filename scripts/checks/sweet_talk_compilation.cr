@@ -85,6 +85,8 @@ PROBLEMS = [
   {"one_of_keyword",
    "value Roast lists end in one_of:, which would define Roast.end and Roast#end?, names " \
    "Roast already has: choose another word"},
+  {"member_case_missing",
+   "case is not exhaustive for enum Shop::Ordering::Roast::Member.\n\nMissing members:\n - Dark"},
   {"key_optional", "key tea cannot be optional: every row has its key"},
   {"stray_reference_write",
    "choose assigns @tea, but tea is a reference stored as tea_id: use self.tea = ..., which " \

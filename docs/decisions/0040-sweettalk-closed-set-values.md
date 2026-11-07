@@ -3,7 +3,8 @@
 Date: 2026-10-24
 
 Status: accepted. Amends [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md)
-decision 1.
+decision 1. Amended: decision 4 and the rejection of an enum by
+[ADR 0058](0058-sweettalk-closed-sets-on-the-screen.md).
 
 ## Context
 
@@ -34,7 +35,8 @@ The copies drift, and the regular expression was only checked in Crystal.
    `kind.receipt?` asks. A word that names a method the value already has, such as `all`, a
    method every class or object has, such as `name`, `hash`, `class`, `inspect`, `to_s`,
    `nil` or `tap`, or a Crystal keyword, does not compile. Words with capitals map to
-   `underscore`d names, so `USD` gives `usd?`.
+   `underscore`d names, so `USD` gives `usd?`. `kind.member` returns the word as a member
+   of the enum `Kind::Member`, and `Kind.new(member)` builds the value back (ADR 0058).
 5. **The list is a constant.** `Kind::SWEETTALK_ONE_OF` holds the words, for tools that
    read the model; domain code reads `Kind.all`.
 
@@ -65,5 +67,6 @@ Rejected:
 
 - **Groups of words, as in `trade: %w[receipt vendor_payment]`.** A subset is a rule over
   the value, so it belongs to a method or a specification on the aggregate that holds it.
-- **A Crystal `enum`.** It would store numbers or need its own column mapping, and the
-  words in existing data would not map.
+- **A Crystal `enum` as the stored type.** It would store numbers or need its own column
+  mapping, and the words in existing data would not map. An enum that mirrors the words in
+  memory, `Kind::Member`, keeps the text in the column (ADR 0058).

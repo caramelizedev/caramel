@@ -228,6 +228,15 @@ struct AddLine < Caramel::Action
   end
 end
 
+# A case over a closed-set value's members that names every one (ADR 0058).
+def roast_label(roast : Shop::Ordering::Roast) : String
+  case roast.member
+  in .light?  then "Light"
+  in .medium? then "Medium"
+  in .dark?   then "Dark"
+  end
+end
+
 module Shop
   Caramel::Router.draw do
     post "/orders/:order/lines", AddLine
@@ -243,5 +252,6 @@ Shop::Ordering::Order.all.each do |order|
   Shop::Ordering::Order.shipped_between(Shop::Ordering::Day.of(Time.utc),
     Shop::Ordering::Day.new("2026-12-31"))
   order.unwrap_gift
+  order.roast.try { |roast| roast_label(roast) }
 end
 Shop::Ordering::Bell.create.ring
