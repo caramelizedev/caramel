@@ -1917,6 +1917,7 @@ require "caramel/sweet_talk"`)+
     # values, aggregates and projections
   end
 end`)+
+    '<p>A word that brings a dependency, serves one family of domains or adds a check some domains would refuse lives in a module with a require of its own (<a href="https://github.com/caramelizedev/caramel/blob/main/docs/decisions/0061-sweettalk-modules.md" target="_blank" rel="noopener noreferrer">ADR 0061 ↗</a>). <code>caramel/sweet_talk/decimal</code> is one: it adds <code>Decimal(P, S)</code> values and links GMP (<a href="#c-sweettalk-values">Name the values</a>). A module requires the core itself, so its require may replace <code>require "caramel/sweet_talk"</code>. A module’s word without its require fails compilation and names the require, and a program without the require holds none of the module’s code. A module adds words and never changes what a core word means.</p>'+
     '<h2 id="c-sweettalk-ddd">Find the Domain-Driven Design patterns</h2><p>22 of the 25 patterns below have a SweetTalk word. The table names the word and the section that states its rules. A pattern SweetTalk lacks says so.</p>'+
     '<table class="c-map"><thead><tr><th>Pattern</th><th>In SweetTalk</th><th>Rules</th></tr></thead><tbody>'+
     '<tr><td>Bounded context</td><td><code>context</code>, a module with its own vocabulary.</td><td><a href="#c-sweettalk-contexts">Draw the contexts</a></td></tr>'+

@@ -20,11 +20,11 @@ or a policy, and nothing stops one context from reaching into another's types.
 
 ## Decision
 
-1. **`require "caramel/sweet_talk"` is the only way in, and `include SweetTalk` scopes the
-   words.** The code lives in `src/caramel/sweet_talk/`. A module that includes `SweetTalk`
-   may use `context`, and a context's body the other words. No word is a top-level macro.
-   `frappe make domain NAME CONTEXT --means=TEXT` starts one in `app/domain/`, required
-   after the models.
+1. **`require "caramel/sweet_talk"` is the way in, a module's words come by its own
+   require (ADR 0061), and `include SweetTalk` scopes the words.** A module that includes
+   `SweetTalk` may use `context`, and a context's body the other words. No word is a
+   top-level macro. `frappe make domain NAME CONTEXT --means=TEXT` starts one in
+   `app/domain/`, required after the models.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
      a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
@@ -133,9 +133,8 @@ or a policy, and nothing stops one context from reaching into another's types.
 - A compiled glossary and a checked context map turn the drift Domain-Driven Design warns
   about into compile errors, with macros and no reflection. Contexts are modules in one
   binary, so one machine stays enough.
-- `require` keeps SweetTalk out of an application that does not ask for it, as in
-  ADRs 0024 and 0025;
-  `include` keeps the words out of every other module.
+- `require` keeps SweetTalk out of an application that does not ask for it; `include` keeps
+  the words out of every other module.
 - Expanding into SugarORM and Cold Brew keeps state in PostgreSQL and one way to migrate.
   Enqueueing in the command's transaction is the outbox: an event is never lost or sent
   for a rolled-back change.

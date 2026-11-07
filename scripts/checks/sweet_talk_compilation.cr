@@ -3,14 +3,20 @@ require "./support/harness"
 # caramel/sweet_talk (ADRs 0030, 0031, 0033, 0034 to 0036, 0039 to 0041 and 0043 to 0051). Each
 # declaration mistake fails to compile with a fixed problem text, naming its file where the
 # mistake has a line; a valid domain compiles, with and without caramel/tenancy; and an
-# application that does not require caramel/sweet_talk holds none of its code. spec/sweet_talk
-# and spec/sweet_talk_tenancy need PostgreSQL, so scripts/check integration runs them.
+# application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
+# holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
+# scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
 ABSENT   = "SweetTalk code must be absent from an application that does not require " \
            "caramel/sweet_talk"
 # A string only SweetTalk's boundary holds.
 MARKER = "a command changes one aggregate"
+# Each module of caramel/sweet_talk (ADR 0061) with a string only its own code holds; the
+# application spec/fixtures/sweet_talk/<module>.cr requires it.
+MODULES = {
+  "decimal" => "must be a decimal written with digits and a point",
+}
 
 # Each fixture's problem text, by the fixture's name after `compile_`.
 PROBLEMS = [
@@ -667,21 +673,28 @@ cases.each_with_index do |(name, problem), index|
   puts "PASS: #{name}"
 end
 
-# The same application without and with caramel/sweet_talk: only the second holds
-# its code, and both run alike.
+# The same application without and with caramel/sweet_talk, and with each of its modules
+# (ADR 0061): only an application that requires a module holds its code, and all run alike.
 root = Caramel::Checks.private_temp("caramel-sweet-talk-")
 at_exit { FileUtils.rm_rf(root) }
-{"plain", "sweet"}.each do |name|
+(["plain", "sweet"] + MODULES.keys).each do |name|
   binary = File.join(root, name)
   build = Caramel::Checks.crystal(["build", "#{FIXTURES}/#{name}.cr", "-o", binary],
     timeout: 1.hour)
   Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
-  present = File.read(binary).includes?(MARKER)
-  Caramel::Checks.fail(ABSENT) unless present == (name == "sweet")
+  held = File.read(binary)
+  if {"plain", "sweet"}.includes?(name) && held.includes?(MARKER) != (name == "sweet")
+    Caramel::Checks.fail(ABSENT)
+  end
+  MODULES.each do |required, marker|
+    next if held.includes?(marker) == (name == required)
+    Caramel::Checks.fail("#{name}: caramel/sweet_talk/#{required} code must be present " \
+                         "exactly when the application requires it")
+  end
   ran = Caramel::Checks.run([binary], timeout: 1.minute)
   unless ran.success? && ran.stdout == "#{name}\n"
     Caramel::Checks.fail("#{name} printed:\n#{ran.stdout}#{ran.stderr}")
   end
 end
-puts "PASS: an application without caramel/sweet_talk holds none of its code, " \
-     "and both run alike"
+puts "PASS: an application without caramel/sweet_talk, or without one of its modules, " \
+     "holds none of its code, and all run alike"
