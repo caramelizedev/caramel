@@ -92,6 +92,12 @@ module SweetTalk
       {% too_long = "moves would check #{owner}'s states as @name, longer than PostgreSQL's 63 " +
                     "bytes: shorten the context or the #{owner} name\n  --> #{at.id}" %}
       SWEETTALK_MOVES = [{{ states.splat }}]
+      # The states no move leaves (ADR 0060)
+      {% leaving = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% leaving = leaving + predecessors %}
+      {% end %}
+      SWEETTALK_FINAL = [{{ states.reject { |state| leaving.includes?(state) }.splat }}] of String
       # {constraint suffix, expression} of the check that keeps `state` to these states
       ::SweetTalk.__sweettalk_hashed(SWEETTALK_STATE_CHECK,
         {"state_@digest", {{ "\"state\" IN (#{listed.id})" }}}, {{ states.sort.join(",") }},

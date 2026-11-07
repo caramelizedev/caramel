@@ -286,7 +286,11 @@ module SweetTalk
         raise ::SweetTalk::Refusal.new(changeset.error_messages.join("; ")) unless changeset.saved?
         @__sweettalk_row = changeset.record
         @__sweettalk_id = changeset.record.id
+        ::Fiber.current.__sweettalk_run.try &.made(self) unless row
+        changeset.record.id
       end
+
+      __sweettalk_canonical
     end
 
     # Runs every `never` and `always` of this entity, then of each entity in its lists.

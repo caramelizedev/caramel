@@ -5,6 +5,8 @@ abstract struct Caramel::Action
   def __caramel_answer(contract : Caramel::RequestContract,
                        & : -> Caramel::Response) : Caramel::Response
     yield
+  rescue error : ::SweetTalk::Stale
+    render_stale(contract, error)
   rescue error : ::SweetTalk::Refusal
     render_refusal(contract, error)
   rescue ::SweetTalk::Missing
@@ -23,5 +25,15 @@ abstract struct Caramel::Action
     return json({errors: contract.errors}, 422) if @context.wants_json?
     return contract_failure_page(contract) if @context.browser?
     Egress.text(422, Egress.errors_text(contract.errors, 422, @context.method, request.path))
+  end
+
+  # Answers a `SweetTalk::Stale` that `handle` did not rescue with 422, as a refusal, and
+  # gives a JSON client the fresh preview under `preview` too (ADR 0060). Override it to
+  # render the form again with `stale.preview` and its fingerprint.
+  def render_stale(contract : Caramel::RequestContract,
+                   stale : ::SweetTalk::Stale) : Caramel::Response
+    return render_refusal(contract, stale) unless @context.wants_json?
+    contract.add_error("_base", stale.message || "")
+    json({errors: contract.errors, preview: stale.preview}, 422)
   end
 end

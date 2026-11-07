@@ -104,6 +104,7 @@ describe "SweetTalk's database checks" do
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
         check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8
         check_shelf_tabs_state_d74ee900 check_store_teas_stock
+        check_till_receipts_state_0d631dad
       ])
     end
   end

@@ -167,6 +167,9 @@ module SweetTalk
         end
       end
 
+      {% listed = names.empty? ? "[] of String".id : names %}
+      ::SweetTalk.__sweettalk_canonical_event({{ subject }}, {{ listed }})
+
       def self.__sweettalk_load(subject : Int64?, fields : String, meta : String) : self
         {% if names.empty? %}
           new(subject_id: subject, fields_json: fields, meta_json: meta)

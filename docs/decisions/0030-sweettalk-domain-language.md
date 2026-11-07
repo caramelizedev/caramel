@@ -101,8 +101,8 @@ or a policy, and nothing stops one context from reaching into another's types.
      them in that order and finishes them in any, so no handler assumes another's work
      saved unless it says `after: Owner`, which the owner's job enqueues in its
      transaction (ADR 0048). For specs, `SweetTalk.emitted { … }` returns the events
-     `dispatch` saw on the fiber, in order; `SweetTalk.emitted(Order::Placed) { … }` one
-     class, typed.
+     `dispatch` saw, in order, `emitted(Order::Placed)` one class typed; ADR 0060 adds
+     `preview`.
    - **Job names.** A job is named after its owner (a context and its border, or a
      projection) and the event's path as written; when a rename changes that name, the job
      declares Cold Brew's `renamed_from` with the old one, so queued jobs still run. An old
