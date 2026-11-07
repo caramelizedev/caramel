@@ -6,6 +6,17 @@ module SweetTalk
     include Queried
 
     # `key tea : Catalogue::Tea` names the attribute that picks a row.
+    #
+    # @word attribute | Names the attribute that picks a row of a projection, and declares it.
+    # @usage key NAME : TYPE
+    # @guide c-sweettalk-projections
+    # @example
+    #   context Lighthouse, means: "ships a lighthouse has seen" do
+    #     projection Sightings, means: "ships seen, one row per ship" do
+    #       key ship : Int64
+    #       has seen : Int32 = 0
+    #     end
+    #   end
     macro key(decl)
       SWEETTALK_KEY = {{ decl.var.stringify }}
 
@@ -16,6 +27,42 @@ module SweetTalk
     # event, as a job, or one job per element of the event's list; `attempts:`,
     # `backoff:` and `base:` set the job's retry rule, and `after: Owner` runs the job
     # once the named owner's handler of the same event has committed.
+    #
+    # @word behaviour | Updates the rows of a projection from an event, in a background job.
+    # @usage whenever EVENT[, each: LIST][, attempts: N][, backoff: KIND][, base: SPAN]
+    #   [, after: OWNER] do |EVENT_VAR| ... end
+    # @internal border
+    # @option each | symbol naming an Array field of the event | - | Runs one job per element of
+    #   the list; the block takes the element as a second argument.
+    # @option attempts | integer literal | Cold Brew's default rule | How many runs the job gets,
+    #   the first included, for an error other than a refusal.
+    # @option backoff | :exponential or :linear | Cold Brew's default rule | How the wait between
+    #   runs grows.
+    # @option base | a span, as 2.seconds | Cold Brew's default rule | The wait the backoff starts
+    #   from.
+    # @option after | name of a projection, process or context | - | Runs the job once that
+    #   owner's handler of the same event has committed.
+    # @guide c-sweettalk-projections
+    # @example
+    #   context Beacon, means: "ships that reach a beacon" do
+    #     aggregate Ship, means: "a vessel that passes the beacon" do
+    #       has name : String
+    #       event Passed, means: "a ship passed the beacon"
+    #
+    #       factory pass(name : String) do
+    #         emit Passed
+    #       end
+    #     end
+    #
+    #     projection Passings, means: "how many times each ship passed" do
+    #       key ship : Int64
+    #       has count : Int32 = 0
+    #
+    #       whenever Ship::Passed, attempts: 3 do |passed|
+    #         Passings[passed.ship_id.raw].count += 1
+    #       end
+    #     end
+    #   end
     macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
                    after = nil, &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, nil, "projection", nil,

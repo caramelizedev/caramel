@@ -60,6 +60,37 @@ module SweetTalk
     # records `SWEETTALK_BOUNDS = {least, most}`, each its source text or nil.
     # `SWEETTALK_WRAPS` is the raw type's name and `SWEETTALK_CODEC` the codec that stores
     # it, or nil for a type a column holds as it is.
+    #
+    # @word noun | A value object: a bounded number, string, day, decimal or JSON, or parts.
+    # @usage value NAME, TYPE[, at_least: N][, at_most: N][, within: RANGE][, times: TYPE]
+    #   [, matches: REGEXP][, length: RANGE][, one_of: LIST][, database_check: false]
+    #   [, otherwise: TEXT], means: TEXT
+    # @guide c-sweettalk-values
+    # @option wraps positional | Int32, Int64, String, Date, Decimal(P, S) or Json(T) | - | The
+    #   type the value wraps. Leave it out and give a block of `part` lines for a value with parts.
+    # @option at_least | integer literal; decimal text for a Decimal | - | The smallest number
+    #   the value takes. PostgreSQL checks it too.
+    # @option at_most | integer literal; decimal text for a Decimal | - | The largest number the
+    #   value takes. PostgreSQL checks it too.
+    # @option within | range of integer literals, as 1..10 | - | Both bounds at once; 1...10
+    #   leaves the end out.
+    # @option times | a value type, or a list of them | - | A type `*` takes as its factor, as
+    #   `Quantity` lets a price multiply by a quantity. Whole-number values only.
+    # @option matches | a regular expression literal | - | The pattern a string must match.
+    #   Checked in Crystal only, because PostgreSQL reads patterns differently.
+    # @option length | range of integer literals, as 3..254 | - | How many characters a string
+    #   holds. PostgreSQL checks it too.
+    # @option one_of | list of words, as %w[payment receipt] | - | The closed list a string is one
+    #   of. Each word starts with a letter. The value takes neither matches: nor length:.
+    # @option database_check | false | checked in PostgreSQL | false keeps bounds, lengths and
+    #   lists in Crystal only.
+    # @option otherwise | text | the generated sentence | The sentence a value outside its
+    #   bounds, length, pattern or list is refused with. Needs one of them.
+    # @option means | text | - | What the value is, in a line the glossary shows. Required.
+    # @example
+    #   context Shelf, means: "the teas we keep" do
+    #     value Tins, Int32, at_least: 0, means: "a count of tins on the shelf"
+    #   end
     macro value(name, wraps = nil, at_least = nil, at_most = nil, within = nil, times = nil,
                 matches = nil, length = nil, one_of = nil, database_check = nil,
                 otherwise = nil, means = nil, &block)
@@ -802,6 +833,19 @@ module SweetTalk
 
     # `aggregate Tea, means: "…" do … end` is an aggregate root, its table and its
     # repository. `renamed_from: Old` keeps the table and channels of its old name.
+    #
+    # @word noun | Declares an aggregate: a root with an id, attributes, commands and events.
+    # @usage aggregate NAME, means: TEXT[, renamed_from: OLD] do ... end
+    # @guide c-sweettalk-aggregates
+    # @option means | text | - | What the aggregate is, in a line the glossary shows. Required.
+    # @option renamed_from | the old name, as a constant | - | Keeps the table and channels of the
+    #   old name, so no data moves. Naming the aggregate itself is refused.
+    # @example
+    #   context Quayside, means: "where ships tie up" do
+    #     aggregate Berth, means: "one place a ship can tie up" do
+    #       has metres : Int32
+    #     end
+    #   end
     macro aggregate(name, means = nil, renamed_from = nil, &block)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -827,6 +871,35 @@ module SweetTalk
 
     # `projection Sales, means: "…" do key …; has …; whenever … end` is a read model:
     # a table with one row per key.
+    #
+    # @word noun | Declares a projection: a read model with one table row per key.
+    # @usage projection NAME, means: TEXT[, renamed_from: OLD] do ... end
+    # @in in a context
+    # @guide c-sweettalk-projections
+    # @option means | text | - | What the projection shows, in a line the glossary shows. Required.
+    # @option renamed_from | the old name, as a constant | - | Keeps the table and channels of the
+    #   old name, so no data moves. Naming the projection itself is refused.
+    # @example
+    #   context Dockyard, means: "ships built and launched" do
+    #     aggregate Ship, means: "one ship on the slip" do
+    #       has name : String
+    #       event Launched, means: "a ship left the slip"
+    #
+    #       to launch do
+    #         emit Launched
+    #       end
+    #     end
+    #
+    #     projection Launches, means: "how many times one ship left the slip" do
+    #       key ship : Ship
+    #       has total : Int32 = 0
+    #
+    #       whenever Ship::Launched do |launched|
+    #         row = Launches[launched.ship_id]
+    #         row.total += 1
+    #       end
+    #     end
+    #   end
     macro projection(name, means = nil, renamed_from = nil, &block)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -856,6 +929,36 @@ module SweetTalk
     # `process Hold, means: "…" do key …; has …; moves …; whenever …; compensate …;
     # deadline … end` is a process manager: a table with one row per key, which follows
     # events, runs commands and keeps deadlines.
+    #
+    # @word noun | Declares a process: a row per key that follows events and keeps deadlines.
+    # @usage process NAME, means: TEXT[, renamed_from: OLD] do ... end
+    # @in in a context
+    # @guide c-sweettalk-processes
+    # @option means | text | - | What the process is, in a line the glossary shows. Required.
+    # @option renamed_from | the old name, as a constant | - | Keeps the table and channels of the
+    #   old name, so no data moves. Naming the process itself is refused.
+    # @example
+    #   context Granary, means: "grain waiting for the mill" do
+    #     aggregate Sack, means: "one sack of grain" do
+    #       has kilos : Int32
+    #       event Filled, means: "a sack was filled"
+    #
+    #       factory fill(kilos : Int32) do
+    #         emit Filled
+    #       end
+    #     end
+    #
+    #     process Wait, means: "the wait of one filled sack for the mill" do
+    #       key sack : Int64
+    #       has days : Int32 = 0
+    #       moves waiting >> milling
+    #
+    #       whenever Sack::Filled, key: filled.sack_id.raw do |filled|
+    #         @days = 1
+    #         milling!
+    #       end
+    #     end
+    #   end
     macro process(name, means = nil, renamed_from = nil, &block)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
@@ -886,6 +989,23 @@ module SweetTalk
     # domain service: an operation that belongs to no one aggregate. It runs in one
     # transaction and may change one aggregate, timed as a domain span named
     # `Ordering.requote`.
+    #
+    # @word noun | Declares a domain service: an operation that belongs to no one aggregate.
+    # @usage service VERB[(ARG : TYPE, ...)][, returns: TYPE], means: TEXT do ... end
+    # @in in a context
+    # @guide c-sweettalk-services
+    # @option returns | a type | Nil | What the service answers, its body's last expression.
+    # @option means | text | - | What the service does, in a line the glossary shows. Required.
+    # @example
+    #   context Pantry, means: "what the kitchen keeps" do
+    #     aggregate Jar, means: "one jar on the shelf" do
+    #       has label : String
+    #     end
+    #
+    #     service label_of(jar : Jar::Id), returns: String, means: "the label a jar carries" do
+    #       Jar.find(jar).label
+    #     end
+    #   end
     macro service(call, returns = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -951,6 +1071,75 @@ module SweetTalk
     # and what it returned in the context's `<context>_operations` table; a repeat with the
     # same arguments answers the first outcome without running, and one with other
     # arguments is refused with `otherwise:` (ADR 0055).
+    #
+    # @word noun | Declares a unit: one transaction that changes several aggregates, their rows
+    #   locked first.
+    # @usage unit VERB(ARG : TYPE, ...), changes: [AGGREGATE, ...][, locks: [ARG, ...]]
+    #   [, returns: TYPE][, once_by: ARG][, otherwise: TEXT][, assures: IDS], means: TEXT do ... end
+    # @in in a context
+    # @guide c-sweettalk-units
+    # @option changes | list of aggregates, as [Journal, Position] | - | The aggregates its
+    #   commands may change, declared before the unit. Required.
+    # @option locks | an argument name, or a list of them | - | The arguments whose rows are
+    #   locked before the body runs: ids, aggregates, or arrays of either. A command on an
+    #   existing row it does not lock raises SweetTalk::Boundary.
+    # @option returns | a type | Nil | What the unit answers.
+    # @option once_by | name of a String argument, or of one that wraps String | - | Runs the unit
+    #   once per key. Its other arguments and returns: take ids, not aggregates.
+    # @option otherwise | text | the generated sentence | The sentence a key used again with
+    #   other arguments is refused with. Needs once_by:.
+    # @option assures | requirement id or list of ids, as "AC-12" | - | The requirement ids the
+    #   unit answers, which the module lists in requirements.
+    # @option means | text | - | What the unit does, in a line the glossary shows. Required.
+    # @example
+    #   context Bakehouse, means: "loaves baked and racked" do
+    #     value Loaves, Int32, means: "a count of loaves"
+    #
+    #     aggregate Rack, means: "one rack of loaves" do
+    #       has loaves : Loaves
+    #
+    #       to take(count : Loaves) do
+    #         refuse "The rack holds fewer loaves." if count > loaves
+    #         @loaves -= count
+    #       end
+    #
+    #       to add(count : Loaves) do
+    #         @loaves += count
+    #       end
+    #     end
+    #
+    #     unit move(source : Rack, target : Rack, count : Loaves), changes: [Rack],
+    #       locks: [source, target], means: "moves loaves from one rack to another" do
+    #       source.take count
+    #       target.add count
+    #       never "A rack holds at most 90 loaves." { target.loaves.raw > 90 }
+    #     end
+    #   end
+    #
+    # @word warn rule | Refuses a plain call of the unit with a sentence a person can confirm.
+    # @usage warn MESSAGE { CONDITION }
+    # @in in a unit
+    # @guide c-sweettalk-preview
+    # @example
+    #   context Tollgate, means: "the price of crossing the gate" do
+    #     value Cents, Int64, means: "an amount of money"
+    #
+    #     aggregate Toll, means: "what one crossing costs" do
+    #       has price : Cents
+    #
+    #       to reprice(price : Cents) do
+    #         @price = price
+    #       end
+    #     end
+    #
+    #     unit discount(toll : Toll::Id, price : Cents), changes: [Toll], locks: [toll],
+    #       means: "lowers the price of one crossing" do
+    #       found = Toll.find(toll)
+    #       was = found.price
+    #       found.reprice price
+    #       warn "The new price is less than half the old one." { price.raw * 2 < was.raw }
+    #     end
+    #   end
     macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
                assures = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
@@ -1194,6 +1383,26 @@ module SweetTalk
     # `sweettalk.<context>.<event>`, within the limits an aggregate's event keeps.
     # `older: {till: "front"}` gives the value a queued job or a logged row without that
     # field reads.
+    #
+    # @word noun | Declares an event the context records itself, with the fields it carries.
+    # @usage event NAME[, FIELD : TYPE ...], means: TEXT[, renamed_from: OLD]
+    #   [, older: {FIELD: VALUE}]
+    # @in in a context
+    # @internal carries
+    # @guide c-sweettalk-events
+    # @option means | text | - | What happened, in a line the glossary shows. Required.
+    # @option renamed_from | the old name, as a constant | - | Keeps the channel and the job names
+    #   of the old name, so no data moves.
+    # @option older | named tuple of field to value, as {total: Cents.new(0)} | - | What a queued
+    #   job or a logged row written before a required field existed reads for it.
+    # @example
+    #   context Parlour, means: "the shop front" do
+    #     event Renamed, name : String, means: "the parlour was given a new name"
+    #
+    #     service rename(name : String), means: "gives the parlour a new name" do
+    #       emit Renamed, name: name
+    #     end
+    #   end
     macro event(name, *fields, carries = nil, means = nil, renamed_from = nil, older = nil)
       {% short = @type.name.split("::").last %}
       {% unless carries.is_a?(NilLiteral) %}
@@ -1212,6 +1421,19 @@ module SweetTalk
 
     # `emit Renamed, name: name` in a service body records one of this context's events;
     # the service dispatches it when its transaction commits.
+    #
+    # @word behaviour | Records an event of the context from a service, dispatched on commit.
+    # @usage emit EVENT[, FIELD: VALUE ...]
+    # @in in the body of a service of a context
+    # @guide c-sweettalk-services
+    # @example
+    #   context Dairy, means: "milk and its bottling" do
+    #     event Opened, branch : String, means: "the dairy opened a new branch"
+    #
+    #     service open_branch(branch : String), means: "opens a branch and records it" do
+    #       emit Opened, branch: branch
+    #     end
+    #   end
     macro emit(event, **fields)
       {% short = @type.name.split("::").last %}
       {% service = @def.is_a?(Def) && @def.name.stringify %}
@@ -1238,6 +1460,28 @@ module SweetTalk
     # condition, read by PostgreSQL in `Order.all(satisfying: Dispatchable)` and in
     # `finds …, satisfying: Dispatchable`. `!` reads as `IS NOT TRUE`, so a NULL column
     # fails a rule and passes its negation in both readings.
+    #
+    # @word noun | Names a rule an aggregate satisfies or not, read in Crystal and in PostgreSQL.
+    # @usage specification NAME, on: AGGREGATE, where: CONDITION[, assures: IDS], means: TEXT
+    # @in in a context
+    # @guide c-sweettalk-specifications
+    # @option on | an aggregate of this context | - | The aggregate the rule is about, declared
+    #   before the specification. Required.
+    # @option where | a hash as finds takes, or specifications combined as and, or, not | - | The
+    #   rule. Adds `NAME?` to the aggregate and a condition for `satisfying:`. Required.
+    # @option means | text | - | What the rule says, in a line the glossary shows. Required.
+    # @option assures | requirement id or list of ids, as "AC-12" | - | The requirement ids the
+    #   specification answers, which the module lists in requirements.
+    # @example
+    #   context Cellar, means: "bottles laid down" do
+    #     aggregate Bottle, means: "one bottle in the cellar" do
+    #       has vintage : Int32
+    #       moves laid >> opened
+    #     end
+    #
+    #     specification Drunk, on: Bottle, where: {state: :opened},
+    #       means: "a bottle that has been opened"
+    #   end
     macro specification(name, on = nil, where = nil, means = nil, assures = nil, &block)
       {% context = @type.name.split("::").last %}
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
@@ -1508,6 +1752,45 @@ module SweetTalk
     # program, a module `Cards` in this context: the only code that may name
     # `Caramel::Outbound` or `HTTP::Client`, a check on the text as written, and that turns
     # its answers into this context's values.
+    #
+    # @word boundary | Marks the one place where a context names another context or an outside
+    #   system.
+    # @usage border NAME[, outside: TEXT] do ... end
+    # @in in a context
+    # @guide c-sweettalk-contexts
+    # @option outside | text | - | Says what an outside system is to this context, and makes the
+    #   border a module that may name Caramel::Outbound and HTTP::Client. Without it, NAME is a
+    #   context and the border holds the whenever and compensate lines that react to its events.
+    # @example
+    #   context Orchard, means: "the fruit we pick" do
+    #     aggregate Crate, means: "one crate of fruit" do
+    #       has fruit : String
+    #       event Packed, means: "a crate was packed"
+    #
+    #       factory pack(fruit : String) do
+    #         emit Packed
+    #       end
+    #     end
+    #   end
+    #
+    #   context Cidery, means: "pressing fruit into cider" do
+    #     aggregate Batch, means: "one pressing" do
+    #       has crates : Int32
+    #     end
+    #
+    #     border Orchard do
+    #       whenever Orchard::Crate::Packed do |packed|
+    #         Batch.create(crates: 1)
+    #       end
+    #     end
+    #
+    #     border Courier, outside: "the courier we ship cider with" do
+    #       def self.book(batch : Int64) : Int32
+    #         url = "https://courier.example/v1/bookings"
+    #         Caramel::Outbound.post(url, HTTP::Headers.new, batch.to_s).status_code
+    #       end
+    #     end
+    #   end
     macro border(other, outside = nil, &block)
       {% body = block.body %}
       {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
@@ -1560,6 +1843,43 @@ module SweetTalk
     # command that emitted the event commits. `attempts:`, `backoff:` and `base:` set its
     # retry rule for errors other than a refusal. `after: Sales` runs it once the named
     # projection's, process's or context's handler of the same event has committed.
+    #
+    # @word behaviour | Runs a block as a job after the command that emitted an event commits.
+    # @usage whenever EVENT[, each: LIST][, attempts: N][, backoff: KIND][, base: SPAN]
+    #   [, after: OWNER] do |EVENT_VAR| ... end
+    # @in in a context or in a border of a context
+    # @internal border
+    # @guide c-sweettalk-events
+    # @option each | symbol naming an Array field of the event | - | Runs one job per element of
+    #   the list; the block takes the element as a second argument.
+    # @option attempts | integer literal | Cold Brew's default rule | How many runs the job gets,
+    #   the first included, for an error other than a refusal.
+    # @option backoff | :exponential or :linear | Cold Brew's default rule | How the wait between
+    #   runs grows.
+    # @option base | a span, as 2.seconds | Cold Brew's default rule | The wait the backoff starts
+    #   from.
+    # @option after | name of a projection, process or context | - | Runs the job once that
+    #   owner's handler of the same event has committed.
+    # @example
+    #   context Bistro, means: "tables in a dining room" do
+    #     aggregate Table, means: "one table and its guests" do
+    #       has party : Int32
+    #       has greetings : Int32 = 0
+    #       event Seated, means: "a party sat down"
+    #
+    #       factory seat(party : Int32) do
+    #         emit Seated
+    #       end
+    #
+    #       to greet do
+    #         @greetings += 1
+    #       end
+    #     end
+    #
+    #     whenever Table::Seated, attempts: 3, backoff: :linear, base: 2.seconds do |seated|
+    #       Table.find(seated.table_id).greet
+    #     end
+    #   end
     macro whenever(event, border = nil, each = nil, attempts = nil, backoff = nil, base = nil,
                    after = nil, &block)
       ::SweetTalk.__sweettalk_policy({{ @type }}, {{ event }}, {{ each }}, {{ border }}, "context",
@@ -1570,6 +1890,39 @@ module SweetTalk
 
     # `compensate Event do |event, refusal| … end` runs when the `whenever` before it for
     # the same event is refused.
+    #
+    # @word behaviour | Undoes the work of a context's policy when the handler is refused.
+    # @usage compensate EVENT do |EVENT_VAR, REFUSAL_VAR| ... end
+    # @in in a context or in a border of a context
+    # @guide c-sweettalk-events
+    # @example
+    #   context Hatchery, means: "eggs and their hatching" do
+    #     aggregate Clutch, means: "one clutch of eggs" do
+    #       has eggs : Int32
+    #       moves laid >> hatched, laid >> lost
+    #       event Laid, means: "a clutch was laid"
+    #
+    #       factory lay(eggs : Int32) do
+    #         emit Laid
+    #       end
+    #
+    #       to hatch do
+    #         hatched!
+    #       end
+    #
+    #       to lose do
+    #         lost!
+    #       end
+    #     end
+    #
+    #     whenever Clutch::Laid do |laid|
+    #       Clutch.find(laid.clutch_id).hatch
+    #     end
+    #
+    #     compensate Clutch::Laid do |laid, refusal|
+    #       Clutch.find(laid.clutch_id).lose
+    #     end
+    #   end
     macro compensate(event, &block)
       ::SweetTalk.__sweettalk_compensation({{ @type }}, {{ event }}, nil, "context",
         {{ block.args.splat }}) do
@@ -1586,6 +1939,23 @@ module SweetTalk
     # types, services, units and calculations another context may name. Once a context
     # publishes, every other context names only those, and the events it reacts to.
     # `context` reads the list; this checks that each name is declared before it.
+    #
+    # @word boundary | Lists the types, services, units and calculations other contexts may name.
+    # @usage publishes NAME[, NAME ...]
+    # @in in a context
+    # @guide c-sweettalk-published
+    # @example
+    #   context Greenhouse, means: "plants and their prices" do
+    #     aggregate Plant, means: "one plant we grow" do
+    #       has price : Int32
+    #     end
+    #
+    #     service price_of(plant : Plant::Id), returns: Int32, means: "what one plant costs" do
+    #       Plant.find(plant).price
+    #     end
+    #
+    #     publishes Plant::Id, price_of
+    #   end
     macro publishes(*names)
       {% short = @type.name.split("::").last %}
       {% for name in names %}
@@ -1612,6 +1982,19 @@ module SweetTalk
   # `requirements "AC-01", "AC-02"`, before the first context, lists the requirement ids this
   # domain module answers to (ADR 0057). `SWEETTALK_REQUIREMENTS` records them; every
   # context and kernel copies the list, or nil, as it copies `SWEETTALK_TENANT`.
+  #
+  # @word setup | Lists the requirement ids a domain module answers to, before its first context.
+  # @usage requirements ID[, ID ...]
+  # @guide c-sweettalk-requirements
+  # @example
+  #   requirements "AC-21", "AC-22"
+  #
+  #   context Mintage, means: "coins struck at the mint" do
+  #     aggregate Coin, means: "one coin struck" do
+  #       has weight : Int32
+  #       never "A coin has a weight.", assures: "AC-21" { weight <= 0 }
+  #     end
+  #   end
   macro requirements(*ids)
     {% if ids.empty? %}
       {% raise "requirements takes at least one requirement id, as in requirements \"AC-01\"" %}
@@ -1681,6 +2064,43 @@ module SweetTalk
   # that requires caramel/tenancy: the model the routes' `tenant` block names.
   # `SWEETTALK_TENANT` records {the model's path, the attribute named after its last
   # segment}; every context copies it unless it says `central: true`.
+  #
+  # @word setup | Names the tenant model of a program that requires caramel/tenancy.
+  # @usage tenant MODEL
+  # @guide c-sweettalk-tenancy
+  # @example requires caramel/tenancy
+  #   struct Account < SugarORM::Schema
+  #     schema "accounts" do
+  #       field id : Int64, primary: true
+  #       field slug : String
+  #       index :slug, unique: true
+  #     end
+  #   end
+  #
+  #   struct Home < Caramel::Action
+  #     ingress open: true
+  #
+  #     contract do
+  #     end
+  #
+  #     def handle(contract : Contract)
+  #       page "Home", "<p>Home</p>"
+  #     end
+  #   end
+  #
+  #   Caramel::Router.draw do
+  #     tenant Account, by: :slug do
+  #       get "/", Home
+  #     end
+  #   end
+  #
+  #   tenant Account
+  #
+  #   context Greengrocer, means: "produce each tenant sells" do
+  #     aggregate Crate, means: "one crate of produce on a tenant's shelf" do
+  #       has fruit : String
+  #     end
+  #   end
   macro tenant(model)
     {% unless ::Caramel.has_constant?("Tenancy") %}
       {% model.raise "tenant #{model} needs require \"caramel/tenancy\" before this domain" %}
@@ -1714,6 +2134,33 @@ module SweetTalk
   # keeps every event of the context, and of the kernels it shares, in `<context>_events`.
   # `event_log: 90.days` keeps an event that many days, pruned hourly by Cold Brew's
   # scheduler.
+  #
+  # @word noun | Declares a bounded context: a module with its own vocabulary, its aggregates and
+  #   its rules.
+  # @usage context NAME[, follows: CONTEXT][, shares: KERNEL][, central: true]
+  #   [, subdomain: KIND][, event_log: LOG][, renamed_from: OLD], means: TEXT do ... end
+  # @guide c-sweettalk-contexts
+  # @option follows | a context name, or a tuple of them, as {Catalogue, Pricing} | - | Adopts
+  #   the types of the named contexts as they are. Each must be named outside a border.
+  # @option shares | a kernel name, or a list of them | - | The kernels this context shares,
+  #   declared before it and listing it in their shared_by:.
+  # @option means | text | - | What the context is, in a line the glossary shows. Required.
+  # @option renamed_from | the old name, as a constant | - | Keeps the tables and channels of the
+  #   old name, so no data moves. Naming the context itself is refused.
+  # @option central | true | the rows belong to the tenant | Shares the context's rows between
+  #   every tenant. Only in a program that requires caramel/tenancy.
+  # @option subdomain | :core, :supporting or :generic | - | Which part of the business the
+  #   context serves, shown on every glossary term. It changes no rule.
+  # @option event_log | true, or a number of days or weeks, as 90.days | no log | Keeps every
+  #   event of the context, and of the kernels it shares, in `<context>_events`; a number of
+  #   days or weeks prunes the rows older than that.
+  # @example
+  #   context Fishmonger, subdomain: :core, event_log: true,
+  #     means: "fish sold at the counter" do
+  #     aggregate Catch, means: "one catch landed on the quay" do
+  #       has species : String
+  #     end
+  #   end
   macro context(name, follows = nil, shares = nil, means = nil, renamed_from = nil,
                 central = nil, subdomain = nil, event_log = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}

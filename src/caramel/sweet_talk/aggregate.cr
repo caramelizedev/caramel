@@ -25,6 +25,30 @@ module SweetTalk
     # prefixes a tenant's `t<id>:`. `SWEETTALK_CARRIES` lists the names it carries.
     # `older: {till: "front"}` gives the value a queued job or a logged row without that
     # field reads.
+    #
+    # @word noun | Declares one of the aggregate's events, with the fields it records.
+    # @usage event NAME[, FIELD : TYPE, ...][, carries: [ATTRIBUTE, ...]], means: TEXT
+    #   [, renamed_from: OLD][, older: {FIELD: VALUE}]
+    # @guide c-sweettalk-events
+    # @option carries | a list of attribute or derived-value names | - | Adds one field for each
+    #   name, of its type, which `emit` reads from the aggregate. Declare each name above the event.
+    # @option means | text | - | What the event records, in a line the glossary shows. Required.
+    # @option renamed_from | the event's former name | - | Keeps the channel and job names the
+    #   old name used, so no data moves.
+    # @option older | a hash of field to value | - | The value a stored event without a required
+    #   field reads for it. The field must not be optional.
+    # @example
+    #   context Foundry, means: "metal cast into ingots" do
+    #     aggregate Ingot, means: "one cast ingot" do
+    #       has grade : String
+    #       event Cast, kilos : Int32, carries: [grade], older: {kilos: 0},
+    #         means: "an ingot was cast, and how heavy it was"
+    #
+    #       to cast(kilos : Int32) do
+    #         emit Cast, kilos: kilos
+    #       end
+    #     end
+    #   end
     macro event(name, *fields, carries = nil, means = nil, renamed_from = nil, older = nil)
       {% subject = @type.name.split("::").last.underscore.id %}
       {% reserved = %w[event_id occurred_at actor cause_id flow_id] + ["#{subject}_id"] %}
@@ -83,6 +107,22 @@ module SweetTalk
     # `emit Placed, lines: lines` records an event; the command dispatches it when it
     # commits. A field the event carries is read from the aggregate as it is now, and a
     # command cannot give it.
+    #
+    # @word behaviour | Queues one of the aggregate's events for dispatch when the command commits.
+    # @usage emit EVENT[, FIELD: VALUE, ...]
+    # @guide c-sweettalk-events
+    # @example
+    #   context Smithy, means: "iron worked into tools" do
+    #     aggregate Blade, means: "one forged blade" do
+    #       has sharpness : Int32 = 0
+    #       event Sharpened, grit : Int32, means: "a blade was given a new edge"
+    #
+    #       to sharpen(grit : Int32) do
+    #         @sharpness = grit
+    #         emit Sharpened, grit: grit
+    #       end
+    #     end
+    #   end
     macro emit(event, **fields)
       {% own = event.is_a?(Path) && event.names.size == 1 &&
                @type.has_constant?(event.names[0].stringify) %}
@@ -107,6 +147,23 @@ module SweetTalk
 
     # `to restock(tins : Tins) do … end` is a command, timed as a domain span named
     # `Catalogue::Tea#restock`.
+    #
+    # @word behaviour | Declares a command that changes the aggregate in one transaction.
+    # @usage to VERB[(ARG : TYPE, ...)] do ... end
+    # @guide c-sweettalk-commands
+    # @example
+    #   context Cannery, means: "tins of food packed for sale" do
+    #     aggregate Shelf, means: "one shelf of tins" do
+    #       has tins : Int32 = 0
+    #       event Restocked, count : Int32, means: "tins were added to the shelf"
+    #
+    #       to restock(count : Int32) do
+    #         refuse "Restock at least one tin.", on: :tins if count < 1
+    #         @tins += count
+    #         emit Restocked, count: count
+    #       end
+    #     end
+    #   end
     macro to(call, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -144,6 +201,21 @@ module SweetTalk
     # as its first change, in one transaction: the body may emit, and the events are
     # dispatched once the aggregate is saved and has an id. An aggregate with a factory
     # has no `create`. It is timed as a domain span named `Ordering::Order.open`.
+    #
+    # @word behaviour | Makes the aggregate from its arguments and emits its first events.
+    # @usage factory VERB[(ARG : TYPE, ...)] do ... end
+    # @guide c-sweettalk-factories
+    # @example
+    #   context Bakery, means: "bread baked each morning" do
+    #     aggregate Loaf, means: "one baked loaf" do
+    #       has flavour : String
+    #       event Baked, carries: [flavour], means: "a loaf came out of the oven"
+    #
+    #       factory bake(flavour : String) do
+    #         emit Baked
+    #       end
+    #     end
+    #   end
     macro factory(call, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -821,6 +893,22 @@ module SweetTalk
 
     # Marks this aggregate removed: its row stays, and `find`, `find?`, `all` and every
     # `finds` skip it. Only a command calls it.
+    #
+    # @word behaviour | Marks the aggregate removed, so find, all and every query skip it.
+    # @usage remove
+    # @in in a command of an aggregate
+    # @guide c-sweettalk-queries
+    # @example
+    #   context Attic, means: "things kept upstairs" do
+    #     aggregate Trunk, means: "one packed trunk" do
+    #       has contents : Int32 = 0
+    #
+    #       to forget do
+    #         refuse "Only an empty trunk can be forgotten." if contents > 0
+    #         remove
+    #       end
+    #     end
+    #   end
     private def remove : Nil
       @__sweettalk_removed_at ||= Time.utc
     end

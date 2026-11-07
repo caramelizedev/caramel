@@ -215,6 +215,35 @@ module SweetTalk
   # bound tenant's rows from the bound tenant's log. A projection whose context keeps no
   # log or keeps it a number of days, or that follows an event the log does not keep, does
   # not compile (ADR 0051).
+  #
+  # @word behaviour | Empties a projection and replays its events from the context's event log.
+  # @usage SweetTalk.rebuild(PROJECTION)
+  # @in in application code, as SweetTalk.rebuild(PROJECTION)
+  # @guide c-sweettalk-event-log
+  # @example
+  #   context Harbour, event_log: true, means: "ships that call at the quay" do
+  #     aggregate Ship, means: "one ship at the quay" do
+  #       has call_sign : String
+  #       event Docked, carries: [call_sign], means: "a ship docked"
+  #
+  #       factory dock(call_sign : String) do
+  #         emit Docked
+  #       end
+  #     end
+  #
+  #     projection Berths, means: "how often each ship docked" do
+  #       key call_sign : String
+  #       has visits : Int32 = 0
+  #
+  #       whenever Ship::Docked do |docked|
+  #         Berths[docked.call_sign].visits += 1
+  #       end
+  #     end
+  #   end
+  #
+  #   def self.refresh_berths
+  #     SweetTalk.rebuild(Harbour::Berths)
+  #   end
   macro rebuild(projection)
     {% type = projection.resolve? %}
     {% unless type && type < ::SweetTalk::Projection %}

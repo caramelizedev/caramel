@@ -48,6 +48,26 @@ module SweetTalk
     # a broken one raises `SweetTalk::Broken`. `SWEETTALK_CALCULATION_<NAME>` records {name,
     # means, line, [{argument, type}], returns, [{"never" or "always", sentence}]}, each type
     # its full name, for `SweetTalk.calculations` and `Corretto.property`.
+    #
+    # @word noun | Declares a typed function of a context that changes nothing.
+    # @usage calculation VERB(ARG : TYPE, ...), returns: TYPE, means: TEXT do ... end
+    # @in in a context
+    # @guide c-sweettalk-calculations
+    # @option returns | a type declared before it | - | The type of the result. Required.
+    # @option means | text | - | What the calculation computes, in a line the glossary shows.
+    #   Required.
+    # @example
+    #   context Mill, means: "grain milled into flour" do
+    #     value Kilos, Int32, at_least: 0, means: "a weight in kilos"
+    #
+    #     calculation flour_from(grain : Kilos, percent : Int32), returns: Kilos,
+    #       means: "the flour a weight of grain yields at a milling rate" do
+    #       always "Flour weighs no more than the grain." do
+    #         result.raw <= grain.raw
+    #       end
+    #       Kilos.new(grain.raw * percent // 100)
+    #     end
+    #   end
     macro calculation(call, returns = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}

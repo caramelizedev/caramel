@@ -168,6 +168,53 @@ module SweetTalk
     # a code outside it, or one it marks N.A., takes `exponent: {XAU: 4}`. `same(a, b) { |x,
     # y| … }` runs the block on two amounts of one currency or refuses, and `by_currency`
     # totals amounts per currency.
+    #
+    # @word noun | Declares the closed set of currencies a domain holds and the amounts in them.
+    # @usage currencies CODES[, exponent: {CODE: DIGITS}], means: TEXT
+    # @option exponent | hash of code to digits, as {XAU: 4} | ISO 4217's minor units | The
+    #   minor-unit digits, 0 to 9, of a code ISO 4217 lists none for. Refused for a code it lists.
+    # @option means | text | - | What a currency is, in a line the glossary shows. Required.
+    # @guide c-sweettalk-money
+    # @example requires caramel/sweet_talk/money
+    #   kernel Mint, shared_by: [Strongbox, Salon], means: "how the mint counts money" do
+    #     currencies %w[USD EUR XAU], exponent: {XAU: 4}, means: "a currency the mint holds"
+    #   end
+    #
+    #   context Strongbox, shares: Mint, means: "what the mint keeps" do
+    #     aggregate Purse, means: "money kept in one currency" do
+    #       has held : Mint::Amount
+    #     end
+    #   end
+    #
+    #   context Salon, shares: Mint, means: "what the mint sells" do
+    #     aggregate Sale, means: "one coin sold" do
+    #       has price : Mint::Amount
+    #     end
+    #   end
+    #
+    # @word same behaviour | Runs a block on two amounts of one currency; two currencies refuse.
+    # @usage same(FIRST, SECOND) { |X, Y| ... }
+    # @in in code of a context that declares or shares currencies, as KERNEL.same from outside
+    # @option block positional | block of two arguments | - | The block receives both amounts as one
+    #   currency's `Minor`; what it returns is what `same` returns.
+    # @guide c-sweettalk-money
+    # @example requires caramel/sweet_talk/money
+    #   kernel Reckoning, shared_by: [Abacus, Slate], means: "how the abacus counts money" do
+    #     currencies %w[USD EUR], means: "a currency the abacus counts"
+    #   end
+    #
+    #   context Abacus, shares: Reckoning, means: "sums of money" do
+    #     calculation add(first : Reckoning::Amount, second : Reckoning::Amount),
+    #       returns: Reckoning::Amount, means: "the sum of two amounts of one currency" do
+    #       Reckoning.same(first, second) { |x, y| (x + y).as(Reckoning::Amount) }
+    #     end
+    #   end
+    #
+    #   context Slate, shares: Reckoning, means: "notes on the slate" do
+    #     aggregate Note, means: "a total written on the slate" do
+    #       has total : Reckoning::Amount
+    #     end
+    #   end
     macro currencies(codes, exponent = nil, means = nil)
       {% here = "#{@type.name.id}" %}
       {% shape = "currencies takes a list of ISO 4217 codes, as in currencies %w[USD EUR], " +
@@ -470,6 +517,30 @@ module SweetTalk
     # rounded as `rounding:` says (`half_up`, `half_even`, `down` or `up`), and `inverse`
     # and `through` give exact cross rates. A day's window, a fallback and an override are
     # the application's.
+    #
+    # @word noun | A rate of exchange between two of the currencies, dated and from a source.
+    # @usage quote NAME, rounding: MODE, means: TEXT
+    # @option rounding | :half_up, :half_even, :down or :up | - | How a converted amount becomes
+    #   whole minor units. Required.
+    # @option means | text | - | What the rate is, in a line the glossary shows. Required.
+    # @guide c-sweettalk-money
+    # @example requires caramel/sweet_talk/money
+    #   kernel Bourse, shared_by: [Rostrum, Pit], means: "how the exchange counts money" do
+    #     currencies %w[USD EUR], means: "a currency the exchange holds"
+    #     quote Rate, rounding: :half_up, means: "one dated rate from a named source"
+    #   end
+    #
+    #   context Rostrum, shares: Bourse, means: "rates the rostrum calls" do
+    #     aggregate Quotation, means: "one rate called for a customer" do
+    #       has rate : Bourse::Rate?
+    #     end
+    #   end
+    #
+    #   context Pit, shares: Bourse, means: "trades in the pit" do
+    #     aggregate Trade, means: "one trade struck at a rate" do
+    #       has struck : Bourse::Rate
+    #     end
+    #   end
     macro quote(name, rounding = nil, means = nil)
       {% unless name.is_a?(Path) && name.names.size == 1 %}
         {% name.raise "quote takes the name of a rate, as in quote Rate, rounding: :half_up, " +

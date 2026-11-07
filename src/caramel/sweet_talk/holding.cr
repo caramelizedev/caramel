@@ -5,6 +5,24 @@ module SweetTalk
     # `entity Line, means: "…" do … end` is an entity inside this aggregate or entity,
     # stored in a child table named after its parent, keyed by the parent's row, at any
     # depth. In a tenanted context the parent's key column may not be the tenant's.
+    #
+    # @word noun | Declares an entity that lives inside an aggregate or an entity.
+    # @usage entity NAME[, renamed_from: OLD], means: TEXT do ... end
+    # @guide c-sweettalk-aggregates
+    # @option means | text | - | What the entity is, in a line the glossary shows. Required.
+    # @option renamed_from | the entity's former name | - | Keeps the table the old name used,
+    #   so no data moves.
+    # @example
+    #   context Chandlery, means: "candles sold in hampers" do
+    #     aggregate Hamper, means: "a basket of candles" do
+    #       has lines : Array(Line)
+    #
+    #       entity Line, means: "one scent of candle in a hamper" do
+    #         has scent : String
+    #         has count : Int32
+    #       end
+    #     end
+    #   end
     macro entity(name, means = nil, renamed_from = nil, &block)
       {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
                     "the line its glossary entry shows" if means.is_a?(NilLiteral) %}
