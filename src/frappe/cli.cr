@@ -21,6 +21,7 @@ require "./editor_tools"
 require "./traces"
 require "./expand_fallback"
 require "./glossary"
+require "./words"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -145,6 +146,8 @@ module Caramel::Frappe
         return translations
       when "requirements"
         return requirements(invocation["ID"]?)
+      when "words"
+        return words(invocation["WORD"]?, invocation.flag?("--json"))
       when "glossary"
         glossary = Glossary.load(Project.load, Tools.new(@framework_root, @output, @error))
         @output.puts(invocation.flag?("--json") ? glossary.document.to_json : glossary.to_markdown)
@@ -377,6 +380,29 @@ module Caramel::Frappe
       status, report = tools.capture(binary, ["translations"], project.root, development)
       @output.print(report)
       status.success? ? 0 : 1
+    end
+
+    # Prints SweetTalk's words, or one word, from the macros of this Frappé's own release.
+    private def words(word : String?, json : Bool) : Int32
+      vocabulary = Words.load(@framework_root)
+      if word && !vocabulary.word?(word)
+        nearest = vocabulary.nearest(word)
+        message = "unknown word #{word}"
+        message += "; nearest: #{nearest.join(", ")}" unless nearest.empty?
+        raise Commands::Usage.new(message, "frappe words", Commands.matching(["words"]),
+          nearest.first?)
+      end
+      @output.puts(json ? words_json(vocabulary, word) : words_text(vocabulary, word))
+      0
+    end
+
+    private def words_text(vocabulary : Words, word : String?) : String
+      (word ? vocabulary.to_text(word) : vocabulary.to_text).chomp
+    end
+
+    private def words_json(vocabulary : Words, word : String?) : String
+      return vocabulary.to_json unless word
+      JSON.build { |builder| vocabulary.word_json(builder, word) }
     end
 
     # Prints the application's requirement ids and what assures each, or one id's, and

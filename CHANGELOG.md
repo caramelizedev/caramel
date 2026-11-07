@@ -4,6 +4,7 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- Frappé: `frappe words [WORD] [--json]` prints SweetTalk's vocabulary without an application: every word with its kind and a one-line summary, or one word's usage, each option with the forms it takes, its default and what it does, an example that compiles and its guide section. An unknown word exits 1 naming the nearest. It reads the doc comments and parameters of the macros of the release you run, so it cannot name an option a macro lacks, and `scripts/check` fails when a macro has no entry, an example does not compile, or the guide or the skill writes an option no word takes ([ADR 0013](docs/decisions/0013-frappe-cli-check-mrdp.md)).
 - SweetTalk: the skill `frappe make domain` writes no longer says never to add up with `SugarORM.sql`. It says to prefer `sums` and `groups`, and to use `SugarORM.sql` only for what they cannot state, such as an average, a `Float64` or `Time` key or several keys, with the tenant predicate written out ([ADR 0049](docs/decisions/0049-sweettalk-sums-and-groups.md)). Refresh an application's copy with `cp lib/caramel/templates/skills/sweettalk/SKILL.md .claude/skills/sweettalk/`.
 
 ## 0.22.0 - 2026-11-07
