@@ -55,7 +55,8 @@ describe "SweetTalk's database checks" do
         SQL
       checks.map(&.[:name]).should eq(%w[
         check_billing_bills_amount check_billing_bills_state_16e92b19
-        check_books_journals_state_c588884a check_catalogue_teas_held
+        check_books_journals_state_c588884a check_carrying_lots_total
+        check_catalogue_teas_held
         check_catalogue_teas_price check_catalogue_teas_roast_one_of_59746504
         check_catalogue_teas_stock check_counter_batches_opened_by_length_2_20
         check_counter_entries_amount

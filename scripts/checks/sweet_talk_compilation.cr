@@ -341,11 +341,11 @@ PROBLEMS = [
   {"published_after_use",
    "Shop::Reporting names Catalogue::Tea, which Catalogue does not publish"},
   {"publishes_unknown",
-   "Catalogue publishes Teas, which it does not declare: declare a type, a service or a unit " \
-   "of that name before publishes"},
+   "Catalogue publishes Teas, which it does not declare: declare a type, a service, a unit or " \
+   "a calculation of that name before publishes"},
   {"publishes_expression",
-   "publishes takes the context's types, services and units, as in publishes Cents, Tea::Id, " \
-   "price_of, not price_of(1)"},
+   "publishes takes the context's types, services, units and calculations, as in publishes " \
+   "Cents, Tea::Id, price_of, not price_of(1)"},
   {"call_outside_border",
    "Shop::Reporting calls Catalogue.teas_on_shelf outside a border: move that call into " \
    "border Catalogue do … end, or declare follows: Catalogue"},
@@ -639,6 +639,40 @@ PROBLEMS = [
   {"assures_unit_rule_unknown",
    "never in unit Ordering.annotate assures AC-9, which Shop does not list in requirements; " \
    "it lists AC-1: add AC-9 there, or correct the id"},
+  {"assures_calculation_rule_unknown",
+   "never in calculation Billing.share assures AC-9, which Shop does not list in " \
+   "requirements; it lists AC-1: add AC-9 there, or correct the id"},
+  {"calculation_untyped",
+   "calculation takes a verb and typed arguments, as in calculation share(total : Cents, " \
+   "parts : Int32), returns: Array(Cents) do … end"},
+  {"calculation_without_means",
+   "Shop::Billing.share needs a meaning: add means: \"…\", the line its glossary entry shows"},
+  {"calculation_without_returns",
+   "calculation Billing.share needs returns:, the type of its result, as in returns: Cents"},
+  {"calculation_argument_result",
+   "calculation Billing.share takes an argument named result, the name its rules read its " \
+   "result by: rename the argument"},
+  {"calculation_unknown_type",
+   "calculation Billing.share takes total : Centz, which is no type declared before it: " \
+   "declare it above the calculation"},
+  {"calculation_takes_aggregate",
+   "calculation Billing.share takes invoice : Invoice, which holds the aggregate " \
+   "Shop::Billing::Invoice: a calculation computes from values, so take what it needs from " \
+   "it, or its id, and let the caller load it"},
+  {"calculation_emits",
+   "calculation Billing.share emits an event: a calculation records nothing; emit from the " \
+   "command or the service that calls it"},
+  {"calculation_reaches_repo",
+   "calculation Billing.share reaches SugarORM: a calculation computes from its arguments " \
+   "alone, with no repository or transaction; let the caller load what it needs and pass " \
+   "it in"},
+  {"calculation_finds",
+   "calculation Billing.share calls Invoice.find, on the aggregate Shop::Billing::Invoice: a " \
+   "calculation computes from its arguments alone, with no repository or transaction"},
+  {"calculation_calls_service",
+   "calculation Billing.share calls service Billing.requote: a calculation changes nothing; " \
+   "let the caller run the service and pass its answer in"},
+  {"calculation_in_aggregate", "calculation belongs in a context, not in aggregate Invoice"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

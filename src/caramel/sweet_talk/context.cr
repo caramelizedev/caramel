@@ -1582,9 +1582,9 @@ module SweetTalk
     end
 
     # `publishes Cents, Tea::Id, price_of` is this context's published language: the
-    # types, services and units another context may name. Once a context publishes, every
-    # other context names only those, and the events it reacts to. `context` reads the
-    # list; this checks that each name is declared before it.
+    # types, services, units and calculations another context may name. Once a context
+    # publishes, every other context names only those, and the events it reacts to.
+    # `context` reads the list; this checks that each name is declared before it.
     macro publishes(*names)
       {% short = @type.name.split("::").last %}
       {% for name in names %}
@@ -1592,15 +1592,17 @@ module SweetTalk
           {% found = name.resolve? %}
           {% declared = found && found.name.starts_with?("#{@type.name}::") %}
         {% elsif name.is_a?(Call) && name.receiver.is_a?(Nop) && name.args.empty? %}
-          {% declared = @type.has_constant?("SWEETTALK_SERVICE_#{name.name.upcase}") ||
-                        @type.has_constant?("SWEETTALK_UNIT_#{name.name.upcase}") %}
+          {% declared = %w[SERVICE UNIT CALCULATION].any? do |kind|
+               @type.has_constant?("SWEETTALK_#{kind.id}_#{name.name.upcase}")
+             end %}
         {% else %}
-          {% name.raise "publishes takes the context's types, services and units, as in " +
-                        "publishes Cents, Tea::Id, price_of, not #{name}" %}
+          {% name.raise "publishes takes the context's types, services, units and " +
+                        "calculations, as in publishes Cents, Tea::Id, price_of, not #{name}" %}
         {% end %}
         {% unless declared %}
           {% name.raise "#{short.id} publishes #{name}, which it does not declare: declare " +
-                        "a type, a service or a unit of that name before publishes" %}
+                        "a type, a service, a unit or a calculation of that name before " +
+                        "publishes" %}
         {% end %}
       {% end %}
     end

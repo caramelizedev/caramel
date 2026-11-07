@@ -42,7 +42,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      mover per later state that refuses unless the current state precedes it in a chain,
      and `moves_from` to read the graph (ADR 0058). `never "…" { condition }` refuses
      a command leaving it true, and `always` one leaving it false; an entity's run after
-     its aggregate's. Both take `assures:` (ADR 0057).
+     its aggregate's, a `calculation`'s on `result`. Both take `assures:` (ADR 0057).
    - **Commands and events.** `to verb(arg : Type)` is a command (decision 5); `refuse
      "message"` ends it. `event Name, field : Type` declares an aggregate's or a context's
      event; `emit Name, field: value` queues it from a command or a service, its own only.

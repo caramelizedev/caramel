@@ -347,7 +347,7 @@ const compileRows = {
   'A unit that runs once by something that is not a text argument, keeps an aggregate in its other arguments or result, takes otherwise: wrongly, or whose operations table is taken': ['once_by_unknown', 'once_by_type', 'once_by_aggregate_argument', 'once_by_returns_aggregate', 'otherwise_without_once_by', 'unit_otherwise_not_text', 'operations_table_taken'],
   'A pinned_at: that is not a state, is outside an aggregate or on anything but a reference, or names a state the moves do not enter': ['pinned_not_symbol', 'pinned_outside_aggregate', 'pinned_not_reference', 'pinned_unknown_state', 'pinned_initial_state'],
   'A requirements that lists no id, an id that is not text or has an odd shape, an id twice, a second requirements in one module, or a requirements after a context': ['requirements_empty', 'requirements_not_text', 'requirements_id_shape', 'requirements_duplicate', 'requirements_twice', 'requirements_after_context'],
-  'An assures: that is not an id or a list of ids, in a module with no requirements, or naming an id its module does not list': ['assures_not_text', 'assures_without_requirements', 'assures_unknown', 'assures_unit_rule_unknown'],
+  'An assures: that is not an id or a list of ids, in a module with no requirements, or naming an id its module does not list': ['assures_not_text', 'assures_without_requirements', 'assures_unknown', 'assures_unit_rule_unknown', 'assures_calculation_rule_unknown'],
   'Two declarations whose names give one table': ['table_taken'],
   'A context that names Rows, or code outside the domain that reads an aggregate’s rows': ['rows_named', 'finds_block_rows', 'loader_outside'],
   'A projection or a process without key, a process step without key:, or a process attribute without a default its column takes': ['projection_without_key', 'process_without_key', 'process_whenever_without_key', 'process_attribute_default'],
@@ -401,6 +401,9 @@ const compileRows = {
   'An older: that is not a named tuple, gives a field the event does not have or an optional one, or a value of another type': ['older_not_tuple', 'older_unknown', 'older_optional', 'older_type'],
   'An event_log: true context declaring an aggregate, projection or process whose table would be CONTEXT_events': ['event_log_table_taken'],
   'An otherwise: that is not text, on a value without a bound, or on a value with parts': ['value_otherwise_not_text', 'value_otherwise_without_bound', 'composite_otherwise'],
+  'A calculation without means: or returns:, with an untyped argument, an argument named result, a type not declared before it, or an argument or a result that holds an aggregate': ['calculation_untyped', 'calculation_without_means', 'calculation_without_returns', 'calculation_argument_result', 'calculation_unknown_type', 'calculation_takes_aggregate'],
+  'A calculation whose body or rule names SugarORM, Repo, Rows or SweetTalk.lock, emits, calls a method on an aggregate’s class, or calls a service or a unit': ['calculation_emits', 'calculation_reaches_repo', 'calculation_finds', 'calculation_calls_service'],
+  'A calculation in an aggregate, an entity, a projection, a process or a kernel': ['calculation_in_aggregate'],
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));

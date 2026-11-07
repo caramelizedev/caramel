@@ -134,6 +134,15 @@ describe "SweetTalk at the web boundary" do
     end
   end
 
+  it "answers a calculation's broken rule with 500 and reports it (ADR 0062)" do
+    WebSpec::REPORTS.clear
+    response = WebSpec.get("/lots/split?total=100&units=3", WebSpec.accepting("text/plain"))
+    response.status.should eq(500)
+    response.body.should start_with("Something went wrong. Reference: ")
+    WebSpec::REPORTS.size.should eq(1)
+    WebSpec::REPORTS.first.error_class.should eq("SweetTalk::Broken")
+  end
+
   it "answers a value's refusal under its field" do
     response = WebSpec.post("/orders/7/lines", "quantity=11", "application/json")
     response.status.should eq(422)

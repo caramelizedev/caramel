@@ -158,6 +158,20 @@ module TeaShopWeb
     end
   end
 
+  # Splits a lot of single units with a calculation whose rule breaks.
+  struct Split < PageAction
+    contract do
+      field total : Int64
+      field units : Int32
+    end
+
+    def handle(contract : Contract) : Caramel::Response
+      shares = Array.new(contract.units) { Lots::Carrying::Units.new(1) }
+      Lots::Carrying.consume_carelessly(Lots::Carrying::Cents.new(contract.total), shares)
+      Caramel::Response.new(200, "split")
+    end
+  end
+
   Caramel::Router.draw do
     get "/teas/:tea/hold", Hold
     get "/teas/:tea/form", HoldForm
@@ -168,5 +182,6 @@ module TeaShopWeb
     post "/orders/:order/lines", AddLine
     post "/loans/lend", Lend
     post "/loans/price", Price
+    get "/lots/split", Split
   end
 end

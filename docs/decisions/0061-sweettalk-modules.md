@@ -21,8 +21,8 @@ gets a require of its own.
    family of domains; or it adds a check some domains would reject, attached to its own
    words.
 2. **M2. The core model is never a module:** contexts, kernels, values, aggregates,
-   entities, events, commands, services, units, `never`, `always`, the context map and the
-   glossary.
+   entities, events, commands, services, units, calculations, `never`, `always`, the
+   context map and the glossary.
 3. **M3. A module requires its dependencies and the core.** It has no flag or
    configuration: the require is the whole opt-in.
 4. **M4. A module's word used without its require fails compilation and names the
