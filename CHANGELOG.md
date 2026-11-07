@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- SweetTalk: `Billing.logged(…, before: moment)` reads a context's event log as it stood at a moment, on the typed, all-classes and `subject:` forms: the events whose `occurred_at` is earlier than `moment`, the bound left out, beside `since:`, which keeps it. It reads when an event was emitted, so what was known then; a log kept a number of days answers with what remains. The SweetTalk guide's "Read what was known at a time" shows the pattern for corrections: keep the result in effect on the aggregate, set by the command that finalises the correction, and read what was known before it from the log. Nothing changes for an application that does not pass `before:` ([ADR 0048](docs/decisions/0048-sweettalk-event-log.md) decision 3).
+
 ## 0.21.0 - 2026-11-07
 
 ### Upgrade notes

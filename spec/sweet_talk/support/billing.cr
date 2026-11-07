@@ -1,7 +1,8 @@
 # A billing desk that keeps its event log (ADR 0048, 0051): invoices whose commands and a
-# service's event are logged in `invoicing_events`, a projection rebuilt from the log, a
-# policy and a second projection, Nudges, that run after that projection's handler of the
-# same event, and a receipts context whose log keeps an event for a month.
+# service's event are logged in `invoicing_events`, a correction that keeps the total in
+# effect on the row while the log keeps what was known before it, a projection rebuilt from
+# the log, a policy and a second projection, Nudges, that run after that projection's
+# handler of the same event, and a receipts context whose log keeps an event for a month.
 require "../../../src/caramel/sweet_talk"
 
 module Billing
@@ -17,6 +18,8 @@ module Billing
 
       event Raised, carries: [customer, total], means: "an invoice was raised"
       event Settled, carries: [customer, total], means: "an invoice was paid in full"
+      event Corrected, was : Cents, carries: [customer, total],
+        means: "an invoice's total was corrected"
 
       factory raise_for(customer : String, total : Cents) do
         emit Raised
@@ -26,6 +29,13 @@ module Billing
         refuse "An invoice is settled by its total." unless paid == total
         settled!
         emit Settled
+      end
+
+      to correct(amount : Cents) do
+        refuse "A settled invoice keeps its total." if settled?
+        was = total
+        @total = amount
+        emit Corrected, was: was
       end
     end
 

@@ -163,18 +163,20 @@ module SweetTalk
           fields: JSON.parse(event.__sweettalk_fields), created_at: Time.utc)
       end
 
-      # `{{ short.id }}.logged(Order::Placed, subject: id, since: t, limit: 100)`: the
-      # logged events of one class, oldest first and newest last, the first *limit* of
-      # them; `subject:` keeps one aggregate's, `since:` those that occurred at or after
-      # a time. A class this log does not keep raises ArgumentError.
+      # `{{ short.id }}.logged(Order::Placed, subject: id, since: t, before: u, limit: 100)`:
+      # the logged events of one class, oldest first and newest last, the first *limit* of
+      # them; `subject:` keeps one aggregate's, `since:` those that occurred at or after a
+      # time and `before:` those that occurred before one, so the log reads as it stood
+      # then. A class this log does not keep raises ArgumentError.
       def self.logged(kind : E.class, *, subject : ::SweetTalk::Identity | Int64 | Nil = nil,
-                      since : Time? = nil, limit : Int32 = 100) : Array(E) forall E
+                      since : Time? = nil, before : Time? = nil,
+                      limit : Int32 = 100) : Array(E) forall E
         unless SWEETTALK_LOGS.includes?(E.__sweettalk_home)
           raise ArgumentError.new("#{E.name} is not logged in {{ table.id }}: " +
                                   "{{ short.id }} logs the events of #{SWEETTALK_LOGS.join(", ")}")
         end
         aggregate, name = E.__sweettalk_logged_as(SWEETTALK_STORED)
-        __sweettalk_logged_rows(aggregate, name, subject, since, limit).map do |row|
+        __sweettalk_logged_rows(aggregate, name, subject, since, before, limit).map do |row|
           E.__sweettalk_load(row.subject_id, row.fields.to_json, __sweettalk_logged_meta(row))
         end
       end
@@ -182,8 +184,9 @@ module SweetTalk
       # `{{ short.id }}.logged(subject: id)`: the logged events of every class, as
       # `SweetTalk::Event`, under the same keywords.
       def self.logged(*, subject : ::SweetTalk::Identity | Int64 | Nil = nil,
-                      since : Time? = nil, limit : Int32 = 100) : Array(::SweetTalk::Event)
-        __sweettalk_logged_rows(nil, nil, subject, since, limit).map do |row|
+                      since : Time? = nil, before : Time? = nil,
+                      limit : Int32 = 100) : Array(::SweetTalk::Event)
+        __sweettalk_logged_rows(nil, nil, subject, since, before, limit).map do |row|
           __sweettalk_logged_event(row)
         end
       end
@@ -212,7 +215,7 @@ module SweetTalk
       end
 
       protected def self.__sweettalk_logged_rows(aggregate : String?, name : String?,
-                                                 subject, since : Time?,
+                                                 subject, since : Time?, before : Time?,
                                                  limit : Int32) : Array(Rows::Events)
         query = Rows::Events.query
         query = query.where(aggregate: aggregate) if aggregate
@@ -220,6 +223,7 @@ module SweetTalk
         id = subject.is_a?(::SweetTalk::Identity) ? subject.raw : subject
         query = query.where(subject_id: id) if id
         query = query.where("occurred_at >= ?", since) if since
+        query = query.where("occurred_at < ?", before) if before
         query.order_by(:id, :asc).limit(limit).to_a
       end
 

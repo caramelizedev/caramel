@@ -58,6 +58,16 @@ module EventLogSpec
     invoice.settle(invoice.total)
   end
 
+  # The guide's reader: the invoice's total as the log knew it before *moment*.
+  def self.total_known_at(invoice : Invoicing::Invoice, moment : Time) : Invoicing::Cents?
+    Invoicing.logged(subject: invoice.id, before: moment).reverse_each do |event|
+      case event
+      when Invoicing::Invoice::Corrected, Invoicing::Invoice::Raised then return event.total
+      end
+    end
+    nil
+  end
+
   def self.drain(connection) : Int32
     Caramel::ColdBrew.drain_queue!(connection)
   end
@@ -130,6 +140,49 @@ describe "SweetTalk event log" do
     end
   end
 
+  it "reads the log as it stood before a moment, an event at that moment left out" do
+    SweetTalkSpec.rolled_back do
+      ada, bob = EventLogSpec.invoice("ada", 900), EventLogSpec.invoice("bob", 300)
+      sleep 2.milliseconds
+      EventLogSpec.settle(ada)
+      sleep 2.milliseconds
+      EventLogSpec.settle(bob)
+      first, last = Invoicing.logged(Invoicing::Invoice::Settled).map(&.occurred_at)
+
+      Invoicing.logged(Invoicing::Invoice::Settled, before: last).map(&.customer)
+        .should eq(["ada"])
+      Invoicing.logged(Invoicing::Invoice::Settled, since: last).map(&.customer)
+        .should eq(["bob"])
+      Invoicing.logged(since: first, before: last).map(&.class.name)
+        .should eq(["Billing::Invoicing::Invoice::Settled"])
+      Invoicing.logged(subject: bob.id, before: last).map(&.class.name)
+        .should eq(["Billing::Invoicing::Invoice::Raised"])
+      Invoicing.logged(before: last, limit: 2).map(&.class.name).should eq([
+        "Billing::Invoicing::Invoice::Raised", "Billing::Invoicing::Invoice::Raised",
+      ])
+      Invoicing.logged(before: Invoicing.logged.first.occurred_at).should be_empty
+    end
+  end
+
+  it "keeps the corrected total on the row and the total known before it in the log" do
+    SweetTalkSpec.rolled_back do
+      invoice = EventLogSpec.invoice("ada", 900)
+      sleep 2.milliseconds
+      reminded_at = Time.utc
+      sleep 2.milliseconds
+      invoice.correct(Invoicing::Cents.new(700))
+
+      Invoicing::Invoice.find(invoice.id).total.raw.should eq(700)
+      EventLogSpec.total_known_at(invoice, reminded_at).try(&.raw).should eq(900)
+      EventLogSpec.total_known_at(invoice, Time.utc).try(&.raw).should eq(700)
+      Invoicing.logged(Invoicing::Invoice::Corrected).map(&.was.raw).should eq([900])
+      EventLogSpec.settle(invoice)
+      expect_raises(SweetTalk::Refusal, "A settled invoice keeps its total.") do
+        invoice.correct(Invoicing::Cents.new(1))
+      end
+    end
+  end
+
   it "reads an event with the metadata it was logged with" do
     SweetTalkSpec.rolled_back do
       SweetTalk.acting("clerk:1") { Invoicing.close("2026-10") }
@@ -157,6 +210,7 @@ describe "SweetTalk event log" do
                         "'31 days' WHERE fields->>'number' <> '3'")
       schedule.block.call
       Receipts.logged(Receipts::Printed).map(&.number).should eq(["3"])
+      Receipts.logged(Receipts::Printed, before: 20.days.ago).should be_empty
     end
   end
 
