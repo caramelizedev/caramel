@@ -865,12 +865,12 @@ module SweetTalk
     end
 
     macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
-               means = nil, &block)
+               assures = nil, means = nil, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% call.raise "unit belongs in a context, not in #{owner.id}" %}
     end
 
-    macro specification(name, on = nil, where = nil, means = nil, &block)
+    macro specification(name, on = nil, where = nil, means = nil, assures = nil, &block)
       {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
       {% name.raise "specification belongs in a context, after its aggregate, not in #{owner.id}" %}
     end

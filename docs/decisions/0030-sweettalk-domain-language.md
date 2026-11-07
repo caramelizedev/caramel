@@ -42,7 +42,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      state and a private mover per later state, which refuses unless the current state
      precedes it in a chain. `never "message" { condition }` refuses a command that
      leaves the condition true, and `always` one that leaves it false; an entity's run
-     after its aggregate's.
+     after its aggregate's. Both take `assures: "AC-12"` (ADR 0057).
    - **Commands and events.** `to verb(arg : Type)` is a command (decision 5); `refuse
      "message"` ends it. `event Name, field : Type` declares an aggregate's or a context's
      event; `emit Name, field: value` queues it from a command or a service, its own only.
@@ -74,7 +74,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      ([ADR 0050](0050-sweettalk-nested-entities.md)); no `Array` of scalars.
 
    `has` options and the words `unique`, `index` and `check` declare database constraints
-   ([ADR 0045](0045-sweettalk-database-constraints.md)); `parts:` and `pinned_at:` tie
+   (ADR 0045); `parts:` and `pinned_at:` tie
    attributes to a closed-set value's members and pin a reference (ADRs 0054, 0056). Any
    other type, or a
    name the tenant's or the parent's column takes, does not compile. An entity another

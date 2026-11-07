@@ -14,6 +14,8 @@ module Rules
 
   TALLEST = 3
 
+  requirements "SHELF-1", "SHELF-2", "SHELF-3", "SHELF-4"
+
   context Shelf, means: "a shelf for trying the rules" do
     value Count, Int32, at_least: 0, means: "how many things are in a box"
     value Price, Int64, at_least: 0, times: Count, means: "what one thing costs"
@@ -152,7 +154,7 @@ module Rules
       has sealed : Bool = false
       has note : String? = nil
       moves on_shelf >> sold_out, on_shelf >> scrapped
-      never "A jar on sale needs a label." { on_sale? && label.blank? }
+      never "A jar on sale needs a label.", assures: "SHELF-1" { on_sale? && label.blank? }
 
       finds on_sale_labelled(label : String), where: {label: label}, satisfying: OnSale
       finds sold_out_jars, where: {state: :sold_out}
@@ -196,7 +198,8 @@ module Rules
 
     specification OnSale, on: Jar, where: {state: :on_shelf, sealed: true},
       means: "a sealed jar still on the shelf"
-    specification Full, on: Jar, where: {count: Count.new(5)..}, means: "a jar of five or more"
+    specification Full, on: Jar, where: {count: Count.new(5)..}, means: "a jar of five or more",
+      assures: "SHELF-2"
     specification Gift, on: Jar, where: {note: "gift"}, means: "a jar set aside as a gift"
     specification Plain, on: Jar, where: !Gift, means: "a jar not set aside as a gift"
     specification Wide, on: Jar, where: {size: Size.new(width: Count.new(2), depth: Count.new(2))},
@@ -314,13 +317,15 @@ module Rules
     # the arguments come; a count of 13 raises after the second fill, and a box left with
     # more than nine things is refused by the set's rule.
     unit fill_both(first : Box, second : Box, by : Int32, pause : Int32 = 0),
-      changes: [Box], locks: [first, second],
+      changes: [Box], locks: [first, second], assures: "SHELF-3",
       means: "fills two boxes by one count in one transaction" do
       first.fill Count.new(by)
       sleep pause.milliseconds unless pause.zero?
       second.fill Count.new(by)
       raise "the shelf fell over" if by == 13
-      never "A box holds at most nine things." { first.count.raw > 9 || second.count.raw > 9 }
+      never "A box holds at most nine things.", assures: "SHELF-3" do
+        first.count.raw > 9 || second.count.raw > 9
+      end
     end
 
     # Fills two boxes once per key, whichever way many requests carry it, and answers the

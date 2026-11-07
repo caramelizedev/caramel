@@ -591,6 +591,30 @@ PROBLEMS = [
   {"pinned_initial_state",
    "has terms is pinned at :open, the state Order starts in, which no mover enters: pin it " \
    "at a later state"},
+  {"requirements_empty",
+   "requirements takes at least one requirement id, as in requirements \"AC-01\""},
+  {"requirements_not_text",
+   "requirements takes requirement ids as text, as in requirements \"AC-01\", \"AC-02\", " \
+   "not :AC1"},
+  {"requirements_id_shape",
+   "requirements takes ids of letters, digits, '.', '_' and '-', starting with a letter or a " \
+   "digit, not \"AC 1\""},
+  {"requirements_duplicate", "requirements lists AC-1 twice"},
+  {"requirements_twice", "requirements is declared twice in Shop: keep one"},
+  {"requirements_after_context",
+   "requirements comes after context Ordering: list the requirements before the contexts"},
+  {"assures_not_text",
+   "never in Order takes assures: a requirement id or a list of them, as in assures: " \
+   "\"AC-12\" or assures: [\"AC-12\", \"D04\"], not 5"},
+  {"assures_without_requirements",
+   "never in Order assures AC-1, but Shop declares no requirements: add requirements " \
+   "\"AC-1\" before its first context"},
+  {"assures_unknown",
+   "never in Order assures AC-2, which Shop does not list in requirements; it lists AC-1: " \
+   "add AC-2 there, or correct the id"},
+  {"assures_unit_rule_unknown",
+   "never in unit Ordering.annotate assures AC-9, which Shop does not list in requirements; " \
+   "it lists AC-1: add AC-9 there, or correct the id"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

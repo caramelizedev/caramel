@@ -18,7 +18,8 @@ and a two-word state was written without its underscore, so `finds state:` misse
 
 1. **Specifications** (amends ADR 0030 decision 2). `specification OnSale, on: Jar,
    where: {state: :on_shelf, sealed: true}, means: "…"`, in a context after the aggregate
-   it names, is a rule and a glossary entry of kind `specification`.
+   it names, is a rule and a glossary entry of kind `specification`. It takes `assures:
+   "AC-12"`, the requirement ids it answers ([ADR 0057](0057-sweettalk-requirements.md)).
    - `where:` takes what `finds` takes: attributes, `state:`, values, ids, aggregates,
      records, lists, ranges, `nil` and composite values, evaluated when the rule is asked.
      Instead it may join earlier specifications on the same aggregate with `&`, `|`, `!`

@@ -448,6 +448,7 @@ module SweetTalk
   def self.boot : Nil
     context_map
     glossary
+    declared_requirements
     __sweettalk_touch
   end
 
@@ -737,6 +738,48 @@ module SweetTalk
     {% end %}
     {% end %}
     terms
+  end
+
+  # The requirement ids the domain declares with `requirements`, in declaration order across
+  # every module that includes SweetTalk and merged when two list one id, each with the
+  # `never`, `always`, `specification` and `unit` lines that name it in `assures:`, found in
+  # the contexts, aggregates, entities and values (ADR 0057). It is read when the program
+  # compiles, as `glossary` is.
+  # `requirements` is the macro that declares them, so this is `declared_requirements`.
+  def self.declared_requirements : Array(Requirement)
+    found = [] of Requirement
+    {% begin %}
+    {% ids = [] of Nil %}
+    {% for domain in ::SweetTalk.includers %}
+      {% if domain.has_constant?("SWEETTALK_REQUIREMENTS") %}
+        {% for id in domain.constant("SWEETTALK_REQUIREMENTS") %}
+          {% ids << id unless ids.includes?(id) %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% holders = ::SweetTalk::BoundedContext.includers + ::SweetTalk::Aggregate.all_subclasses +
+                 ::SweetTalk::Entity.all_subclasses + ::SweetTalk::Composite.all_subclasses %}
+    {% assured = {} of Nil => Nil %}
+    {% for id in ids %}
+      {% assured[id] = [] of Nil %}
+    {% end %}
+    {% for holder in holders %}
+      {% for constant in holder.constants.select(&.starts_with?("SWEETTALK_ASSURES_")) %}
+        {% entry = holder.constant(constant) %}
+        {% for id in entry[2] %}
+          {% assured[id] << {entry[0], entry[1], entry[3]} if assured[id] %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% for id in ids %}
+      found << ::SweetTalk::Requirement.new({{ id }}, [
+        {% for entry in assured[id] %}
+          ::SweetTalk::Assurance.new({{ entry[0] }}, {{ entry[1] }}, {{ entry[2] }}),
+        {% end %}
+      ] of ::SweetTalk::Assurance)
+    {% end %}
+    {% end %}
+    found
   end
 end
 

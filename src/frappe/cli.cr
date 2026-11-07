@@ -142,6 +142,8 @@ module Caramel::Frappe
         make_domain(invocation)
       when "translations"
         return translations
+      when "requirements"
+        return requirements(invocation["ID"]?)
       when "migrate"
         return migrate(invocation)
       when "seed"
@@ -155,7 +157,7 @@ module Caramel::Frappe
         paths = invocation.list("SPEC_PATHS")
         concurrency = invocation["--concurrency"]?.try(&.to_i) || 1
         runner = CorrettoRunner.new(@framework_root, Project.load, @output, @error)
-        runner.run(paths.empty? ? ["spec"] : paths, concurrency)
+        runner.run(paths.empty? ? ["spec"] : paths, concurrency, full: paths.empty?)
       when "db dump", "db restore"
         backup(invocation["FILE"]?)
       when "db diagnose"
@@ -368,6 +370,26 @@ module Caramel::Frappe
       status, report = tools.capture(binary, ["translations"], project.root, development)
       @output.print(report)
       status.success? ? 0 : 1
+    end
+
+    # Prints the application's requirement ids and what assures each, or one id's, and
+    # returns the application's exit status. An application that does not require
+    # caramel/sweet_talk has no such command, and answers with its usage and status 2.
+    private def requirements(id : String?) : Int32
+      project = Project.load
+      tools = Tools.new(@framework_root, @output, @error)
+      binary = tools.compile(project)
+      errors = IO::Memory.new
+      arguments = id ? ["requirements", id] : ["requirements"]
+      development = {"CARAMEL_ENV" => "development"}
+      status, listing = tools.capture(binary, arguments, project.root, development, errors)
+      if status.exit_code == 2 && errors.to_s.starts_with?("Usage:")
+        raise Error.new("This application declares no requirements: " \
+                        "it does not require caramel/sweet_talk")
+      end
+      @output.print(listing)
+      @error.print(errors.to_s)
+      status.success? ? 0 : status.exit_code
     end
 
     # `crystal tool expand` sees macro calls in method bodies and in the files
