@@ -579,6 +579,18 @@ PROBLEMS = [
   {"operations_table_taken",
    "context Ordering keeps its units' operations in ordering_operations, the table " \
    "aggregate Operation stores its rows in: rename one of them"},
+  {"pinned_not_symbol",
+   "has terms : Terms takes pinned_at: a state, as in pinned_at: :finalized, not \"placed\""},
+  {"pinned_outside_aggregate",
+   "has terms : Terms takes pinned_at: only in an aggregate, whose moves enter the state"},
+  {"pinned_not_reference",
+   "has rate : Int64 takes pinned_at: only as a reference to another aggregate, which it " \
+   "copies when the state is entered"},
+  {"pinned_unknown_state",
+   "has terms is pinned at :shipped, which Order's moves do not list; it lists open, placed"},
+  {"pinned_initial_state",
+   "has terms is pinned at :open, the state Order starts in, which no mover enters: pin it " \
+   "at a later state"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

@@ -74,10 +74,12 @@ or a policy, and nothing stops one context from reaching into another's types.
      ([ADR 0050](0050-sweettalk-nested-entities.md)); no `Array` of scalars.
 
    `has` options and the words `unique`, `index` and `check` declare database constraints
-   ([ADR 0045](0045-sweettalk-database-constraints.md)). Any other type, or a name the
-   tenant's or the parent's column takes, does not compile. An entity another parent
-   holds is inserted anew. Stored types come first. A projection's key is uniquely
-   indexed. `frappe db diff` derives migrations ([ADR 0008](0008-branch-and-diff-migrations.md)).
+   ([ADR 0045](0045-sweettalk-database-constraints.md)); `parts:` and `pinned_at:` tie
+   attributes to a closed-set value's members and pin a reference (ADRs 0054, 0056). Any
+   other type, or a
+   name the tenant's or the parent's column takes, does not compile. An entity another
+   parent holds is inserted anew. A projection's key is uniquely indexed. `frappe db diff`
+   derives migrations (ADR 0008).
 5. **A command is one transaction on one aggregate.** `to` runs in
    `SugarORM::Repo.transaction`: it locks the root's row and loads the aggregate, runs
    the body, checks every `never` and `always`, saves the root, then its entities, and
@@ -132,7 +134,7 @@ or a policy, and nothing stops one context from reaching into another's types.
   about into compile errors, with macros and no reflection. Contexts are modules in one
   binary, so one machine stays enough.
 - `require` keeps SweetTalk out of an application that does not ask for it, as in
-  [ADR 0024](0024-internationalization.md) and [ADR 0025](0025-multi-tenancy.md);
+  ADRs 0024 and 0025;
   `include` keeps the words out of every other module.
 - Expanding into SugarORM and Cold Brew keeps state in PostgreSQL and one way to migrate.
   Enqueueing in the command's transaction is the outbox: an event is never lost or sent

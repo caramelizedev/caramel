@@ -317,6 +317,51 @@ module SweetTalk
   # the log holds occurred, nil for an empty log.
   record Rebuilt, replayed : Int64, deferred : Int64, oldest : Time?
 
+  # What `Context.reached(event)` found (ADR 0056): *events*, every event that followed from
+  # the one asked about, oldest first, the one asked about excluded.
+  record Reached, events : Array(Event) do
+    # The events grouped by the aggregate or context they belong to and its id, as
+    # `{"Shop::Ordering::Order", 7}`, or `{"Shop::Ordering", nil}` for a context's event,
+    # each group in the order of `events`.
+    def by_subject : Hash({String, Int64?}, Array(Event))
+      groups = {} of {String, Int64?} => Array(Event)
+      events.each do |event|
+        key = {event.__sweettalk_subject_name, event.__sweettalk_subject_id}
+        (groups[key] ||= [] of Event) << event
+      end
+      groups
+    end
+  end
+
+  # Walks the logs forward by `cause_id`, breadth first: the events caused by *start*, then
+  # those caused by those, until a round finds none new. Every context that keeps a log is
+  # asked each round; an event is kept once, though a kernel's is logged by each sharer. A
+  # tenanted log reads the bound tenant's rows only. An event no log keeps ends its chain.
+  def self.__sweettalk_reached(start : String) : Reached
+    seen = Set{start}
+    frontier = [start]
+    found = [] of {Time, String, Int64, Event}
+    until frontier.empty?
+      round = [] of {Time, String, Int64, Event}
+      {% for context in ::SweetTalk::BoundedContext.includers %}
+        {% logged = context.has_constant?("SWEETTALK_EVENT_LOG") &&
+                    context.constant("SWEETTALK_EVENT_LOG") %}
+        {% if logged %}
+          round.concat(::{{ context }}.__sweettalk_caused(frontier))
+        {% end %}
+      {% end %}
+      frontier = [] of String
+      round.each do |entry|
+        id = entry[3].event_id
+        next unless seen.add?(id)
+        found << entry
+        frontier << id
+      end
+    end
+    found.sort_by! { |entry| {entry[0], entry[1], entry[2]} }
+    Reached.new(found.map(&.[3]))
+  end
+
   # Taken by a projection's job before its handler runs, in the job's transaction, so no
   # handler of a projection runs while it rebuilds and a rebuild waits for those that run.
   def self.__sweettalk_rebuild_shared(table : String) : Nil

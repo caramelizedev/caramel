@@ -63,6 +63,9 @@ module SweetTalk
           param {{ attribute[4].id }} : {{ attribute[6].id }}
         {% end %}
       {% end %}
+      {% for constant in type.constants.select(&.starts_with?("SWEETTALK_PINNED_")) %}
+        param {{ type.constant(constant)[0].id }}_pinned : JSON::Any?
+      {% end %}
       {% if moves %}
         param state : String
       {% end %}
@@ -183,6 +186,29 @@ module SweetTalk
         __sweettalk_logged_rows(nil, nil, subject, since, limit).map do |row|
           __sweettalk_logged_event(row)
         end
+      end
+
+      # `{{ short.id }}.reached(event)`: every event that followed from *event*, across every
+      # context's log, as a `SweetTalk::Reached` (ADR 0056). *event* is one this log keeps.
+      def self.reached(event : ::SweetTalk::Event) : ::SweetTalk::Reached
+        unless SWEETTALK_LOGS.includes?(event.__sweettalk_home)
+          raise ArgumentError.new("#{event.class.name} is not logged in {{ table.id }}: " +
+                                  "{{ short.id }} logs the events of #{SWEETTALK_LOGS.join(", ")}")
+        end
+        ::SweetTalk.__sweettalk_reached(event.event_id)
+      end
+
+      # The events of this log whose cause is one of *causes*, with when they occurred,
+      # this context's stored name and the log row's id, which order them.
+      def self.__sweettalk_caused(
+        causes : Array(String)
+      ) : Array({Time, String, Int64, ::SweetTalk::Event})
+        caused = [] of {Time, String, Int64, ::SweetTalk::Event}
+        Rows::Events.query.where(cause_id: causes).to_a.each do |row|
+          event = __sweettalk_logged_event(row)
+          caused << {row.occurred_at, SWEETTALK_STORED, row.id, event}
+        end
+        caused
       end
 
       protected def self.__sweettalk_logged_rows(aggregate : String?, name : String?,

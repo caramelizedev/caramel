@@ -47,6 +47,8 @@ be said (#248, split from #168).
    1000)` deletes the rows that occurred before `t`, `chunk` rows a statement until one
    comes back short, across every tenant, and returns the count; a context without the
    keyword does not compile. A `Caramel::ColdBrew.every` block is its retention.
+   `Billing.reached(event)` walks every context's log forward by `cause_id`
+   ([ADR 0056](0056-sweettalk-reached-events-and-pinned-references.md)).
 4. **`SweetTalk.rebuild(Billing::Sales)` replays the log through the projection's own
    handlers.** In one transaction it takes `pg_advisory_xact_lock(LOCK_NAMESPACE,
    hashtext(table))` in Cold Brew's two-key namespace, counts `caramel_jobs` rows of the

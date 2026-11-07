@@ -153,6 +153,10 @@ module SweetTalk
         SWEETTALK_HOME
       end
 
+      def __sweettalk_subject_name : String
+        self.class.name.rpartition("::").first
+      end
+
       private def __sweettalk_record : String
         JSON.build do |json|
           json.object do

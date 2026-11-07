@@ -13,6 +13,8 @@ module SweetTalk
     @__sweettalk_events = [] of ::SweetTalk::Event
     # False once found with `entities: false`: the lists are empty and may not be read.
     @__sweettalk_entities = true
+    # True for a copy a `pinned_at:` reference holds: read only, so no command runs on it.
+    @__sweettalk_pinned = false
 
     # `event Placed, lines : Array(Line), means: "…"` is one of this aggregate's events. It
     # records its subject and its fields when it is emitted, with an id, the time and the
@@ -285,6 +287,25 @@ module SweetTalk
           {% columns << "#{attribute[4].id}: @#{attribute[4].id}" %}
           {% copies << "@#{attribute[4].id} = fresh.@#{attribute[4].id}" %}
         {% end %}
+      {% end %}
+      {% pins = @type.constants.select(&.starts_with?("SWEETTALK_PINNED_"))
+           .map { |constant| @type.constant(constant) } %}
+      {% states = moves ? @type.constant("SWEETTALK_MOVES") : [] of Nil %}
+      {% for pin in pins %}
+        {% at = "\n  --> #{pin[3].id}" %}
+        {% if !moves %}
+          {% raise "has #{pin[0].id} is pinned at :#{pin[1].id}, which #{short.id} cannot " +
+                   "enter: it declares no moves#{at.id}" %}
+        {% elsif !states.includes?(pin[1]) %}
+          {% raise "has #{pin[0].id} is pinned at :#{pin[1].id}, which #{short.id}'s moves " +
+                   "do not list; it lists #{states.join(", ").id}#{at.id}" %}
+        {% elsif states[0] == pin[1] %}
+          {% raise "has #{pin[0].id} is pinned at :#{pin[1].id}, the state #{short.id} " +
+                   "starts in, which no mover enters: pin it at a later state#{at.id}" %}
+        {% end %}
+        {% loads << "@#{pin[0].id}_pinned = row.#{pin[0].id}_pinned" %}
+        {% columns << "#{pin[0].id}_pinned: @#{pin[0].id}_pinned" %}
+        {% copies << "@#{pin[0].id}_pinned = fresh.@#{pin[0].id}_pinned" %}
       {% end %}
       {% columns << "state: __sweettalk_state" if moves %}
       {% columns << "removed_at: @__sweettalk_removed_at" %}
@@ -605,6 +626,75 @@ module SweetTalk
         {% end %}
       end
 
+      {% unless pins.empty? %}
+        # Copies each reference pinned at the state just entered, as it is now.
+        private def __sweettalk_entered(state : State) : Nil
+          {% for pin in pins %}
+            if state == State::{{ pin[1].camelcase.id }}
+              @{{ pin[0].id }}_pinned = @{{ pin[0].id }}_id.try do |raw|
+                {{ pin[2].id }}.__sweettalk_pin({{ pin[2].id }}.find({{ pin[2].id }}::Id.new(raw)))
+              end
+            end
+          {% end %}
+        end
+      {% end %}
+
+      # *aggregate* as JSON: its id, its state when it has moves, and every attribute, the
+      # lists of entities included; a `pinned_at:` reference stores this copy.
+      def self.__sweettalk_pin(aggregate : self) : ::JSON::Any
+        ::JSON.parse(::JSON.build do |json|
+          json.object do
+            json.field("id") { json.number(aggregate.__sweettalk_raw_id) }
+            {% if moves %}
+              json.field("state") { json.string(aggregate.__sweettalk_state) }
+            {% end %}
+            {% for attribute in attributes %}
+              json.field({{ attribute[0] }}) do
+                ::SweetTalk.pack(json, aggregate.{{ attribute[0].id }})
+              end
+            {% end %}
+          end
+        end)
+      end
+
+      # The read-only aggregate a pin holds. An attribute the pin lacks is nil when optional,
+      # its default when it has one, and otherwise refused.
+      def self.__sweettalk_unpin(copy : ::JSON::Any) : self
+        {% for attribute in attributes %}
+          {% type = attribute[3] %}
+          {% optional = attribute[9] ? "?" : "" %}
+          {% type = "#{attribute[10].id}::Id#{optional.id}" if attribute[2] == "reference" %}
+          {% if attribute[2] == "record" %}
+            {% type = "::SweetTalk::RecordId(#{attribute[10].id})#{optional.id}" %}
+          {% end %}
+          {% fallback = attribute[8] %}
+          {% fallback = "[] of #{attribute[3][6..-2].id}" if attribute[2] == "entities" %}
+          {{ attribute[0].id }} = if (__found = copy[{{ attribute[0] }}]?)
+            ::SweetTalk.unpack({{ type.id }}, __found)
+          {% if fallback %}
+          else
+            {{ fallback.id }}
+          {% else %}
+          else
+            raise ArgumentError.new(
+              "{{ short.id }} was pinned before it had {{ attribute[0].id }}: " +
+              "make {{ attribute[0].id }} optional or give it a default")
+          {% end %}
+          end
+        {% end %}
+        aggregate = new({{ attributes.map(&.[0].id).splat }})
+        aggregate.__sweettalk_pinned(copy["id"].as_i64, copy["state"]?.try(&.as_s))
+        aggregate
+      end
+
+      def __sweettalk_pinned(id : Int64, state : String?) : Nil
+        @__sweettalk_id = id
+        {% if moves %}
+          @state = State.parse(state.not_nil!)
+        {% end %}
+        @__sweettalk_pinned = true
+      end
+
       # Takes what is stored again, after a rolled-back change, and drops the events the
       # change queued; an aggregate whose row is gone keeps what it has.
       def __sweettalk_reload : Nil
@@ -619,6 +709,11 @@ module SweetTalk
       # transaction on this aggregate alone. A refusal rolls it back and reloads what is
       # stored.
       private def __sweettalk_command(&) : Nil
+        if @__sweettalk_pinned
+          raise ::SweetTalk::Boundary.new(
+            "{{ short.id }} #{__sweettalk_raw_id} is a pinned copy, read only: " \
+            "find {{ short.id }} #{__sweettalk_raw_id} to change it")
+        end
         if ::SweetTalk.__sweettalk_enter(self)
           yield
           return

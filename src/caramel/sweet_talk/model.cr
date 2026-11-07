@@ -129,8 +129,14 @@ module SweetTalk
               "{{ owner }} cannot become {{ state.id }} while #{__sweettalk_state}")
           end
           @state = State::{{ state.camelcase.id }}
+          __sweettalk_entered(State::{{ state.camelcase.id }})
         end
       {% end %}
+    end
+
+    # Called when a mover enters a state; an aggregate that pins a reference at a state
+    # replaces it, and a process does nothing.
+    private def __sweettalk_entered(state) : Nil
     end
   end
 
@@ -163,8 +169,9 @@ module SweetTalk
     # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
     # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
     # as a named tuple (ADR 0054).
-    macro has(decl, unique = nil, index = nil, check = nil, parts = nil)
+    macro has(decl, unique = nil, index = nil, check = nil, parts = nil, pinned_at = nil)
       {% member_parts = parts %}
+      {% pin = pinned_at %}
       {% unless decl.is_a?(TypeDeclaration) %}
         {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
       {% end %}
@@ -386,9 +393,40 @@ module SweetTalk
                         "keep the reference in a tenanted context" %}
         {% end %}
       {% end %}
+      {% unless pin.is_a?(NilLiteral) %}
+        {% unless pin.is_a?(SymbolLiteral) %}
+          {% decl.raise "has #{decl} takes pinned_at: a state, as in pinned_at: :finalized, " +
+                        "not #{pin}" %}
+        {% end %}
+        {% unless @type < ::SweetTalk::Aggregate %}
+          {% decl.raise "has #{decl} takes pinned_at: only in an aggregate, whose moves " +
+                        "enter the state" %}
+        {% end %}
+        {% unless kind == "reference" %}
+          {% decl.raise "has #{decl} takes pinned_at: only as a reference to another " +
+                        "aggregate, which it copies when the state is entered" %}
+        {% end %}
+        {% lines = "#{lines.id}\nfield #{name}_pinned : JSON::Any?, " +
+                   "codec: ::SugarORM::JSONB(JSON::Any)" %}
+      {% end %}
       {% attribute = {name.stringify, decl.line_number, kind, type.stringify, column, lines, raw,
                       parts, nilable && !default ? "nil" : default, nilable, base, codec} %}
       SWEETTALK_HAS_{{ name.upcase }} = {{ attribute }}
+
+      {% unless pin.is_a?(NilLiteral) %}
+        # {name, state, the pinned aggregate, where it was declared}
+        {% at = "#{decl.filename.id}:#{decl.line_number}:#{decl.column_number}" %}
+        SWEETTALK_PINNED_{{ name.upcase }} = {
+          {{ name.stringify }}, {{ pin.id.stringify }}, {{ "::#{members[0].name}" }}, {{ at }}
+        }
+        @{{ name }}_pinned : ::JSON::Any? = nil
+
+        # A copy of the {{ name }} as it was when {{ @type.name.split("::").last.id }} entered
+        # :{{ pin.id }}, read only; nil before that.
+        def pinned_{{ name }} : {{ "::#{members[0].name}".id }}?
+          @{{ name }}_pinned.try { |copy| {{ "::#{members[0].name}".id }}.__sweettalk_unpin(copy) }
+        end
+      {% end %}
 
       {% unless unique.is_a?(NilLiteral) && index.is_a?(NilLiteral) && check.is_a?(NilLiteral) %}
         {% if kind == "entities" %}
