@@ -1853,6 +1853,41 @@ module SweetTalk
                           "reaches, as in border Cards, outside: \"…\" do … end" %}
       {% end %}
     {% end %}
+    # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
+    # an outside system cannot be taken back, so none names an outside border (ADR 0060).
+    {% systems = outsides.map(&.args[0].names.last.stringify) %}
+    {% bodies = [] of Nil %}
+    {% for node in (systems.empty? ? [] of Nil : expressions) %}
+      {% if node.is_a?(Call) && node.name == "unit" && !node.block.is_a?(Nop) &&
+              node.args[0].is_a?(Call) %}
+        {% bodies << {"unit #{name}.#{node.args[0].name}", node.block.body} %}
+      {% elsif node.is_a?(Call) && node.name == "aggregate" && !node.block.is_a?(Nop) %}
+        {% inner = node.block.body %}
+        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+          {% if step.is_a?(Call) && %w[to factory].includes?(step.name.stringify) &&
+                  !step.block.is_a?(Nop) && step.args[0].is_a?(Call) %}
+            {% joint = step.name == "to" ? "#" : "." %}
+            {% what = step.name == "to" ? "command" : "factory" %}
+            {% bodies << {"#{what.id} #{node.args[0]}#{joint.id}#{step.args[0].name}",
+                          step.block.body} %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    {% for checked in bodies %}
+      {% inner = checked[1] %}
+      {% for statement in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+        {% padded = " " + statement.stringify.gsub(/[^\w:.]/, " ") %}
+        {% for system in systems %}
+          {% if padded.includes?(" #{system.id}.") || padded.includes?(" #{system.id}::") %}
+            {% statement.raise "#{checked[0].id} names #{system.id}, a border with an outside " +
+                               "system: a preview runs it and rolls back, and a call outside " +
+                               "cannot be taken back; call #{system.id} from a whenever on its " +
+                               "event, or before the change" %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
     {% kinds = %w[value aggregate projection process] %}
     {% own = expressions.select do |node|
          node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?

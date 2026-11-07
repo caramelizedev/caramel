@@ -1,8 +1,8 @@
 # SweetTalk's preview and commit (ADR 0060): a preview runs the body and rolls it back,
 # leaving no receipt, job or log row; two previews of the same change agree, though the
 # clock and the id sequence moved; a commit against that fingerprint keeps the change, and
-# one against a world that moved raises Stale and writes nothing; and a warn line refuses a
-# plain call and is confirmed by a fingerprint.
+# one against a world that moved raises Stale and writes nothing; a warn line refuses a
+# plain call and is confirmed by a fingerprint; and a preview refuses Caramel::Outbound.
 require "./support/app"
 require "./support/preview_web"
 
@@ -209,6 +209,18 @@ describe "SweetTalk's preview and commit" do
       end
       stale.preview.warnings.size.should eq(1)
       PreviewShop::Till::Tea.find(tea.id).price.raw.should eq(300)
+    end
+  end
+
+  it "refuses Caramel::Outbound while a preview runs" do
+    SweetTalkSpec.rolled_back do
+      tea = PreviewSpec.tea(5)
+      expect_raises(Caramel::Outbound::Refused, SweetTalk::OUTSIDE_IN_PREVIEW) do
+        SweetTalk.preview do
+          PreviewShop::Till.sell_and_ask(tea.id, PreviewShop::Till::Tins.new(2))
+        end
+      end
+      PreviewSpec.stock(tea).should eq(5)
     end
   end
 

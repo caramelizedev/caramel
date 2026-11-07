@@ -4,7 +4,8 @@ Date: 2026-10-13
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2 and 3. Its
 rejection of a shared kernel word is reversed by
-[ADR 0044](0044-sweettalk-shared-kernels.md).
+[ADR 0044](0044-sweettalk-shared-kernels.md). Amended: decision 4 by
+[ADR 0060](0060-sweettalk-preview-and-commit.md).
 
 ## Context
 
@@ -44,6 +45,8 @@ that neither follows Catalogue nor sits in its border compiles, and draws no edg
    method defined outside the context, is not caught. The border holds no `whenever` or
    `compensate`, because an outside system emits no events; a webhook arrives through an
    action, which runs a command. An outside border named like a context does not compile.
+   A command, a factory or a unit body that names the border's module does not compile,
+   and `Caramel::Outbound` refuses while a preview runs ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
 5. **Checks.** Each refusal above has a fixture in `sweet-talk-compilation`, and
    `spec/sweet_talk` runs a domain that uses all four decisions against PostgreSQL, with
    the outside system faked by `Corretto.stub_wire`.

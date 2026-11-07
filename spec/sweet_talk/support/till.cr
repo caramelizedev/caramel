@@ -1,6 +1,14 @@
 # A till that sells tins of tea and writes receipts, to preview a change before it commits
 # and to commit it against that preview (ADR 0060).
 
+# A system outside the program, reached from a module the context does not hold, so the
+# context's check on the code as written cannot see it; a preview refuses it at run time.
+module PreviewGateway
+  def self.ask : Nil
+    Caramel::Outbound.get("https://gateway.example/v1/ping")
+  end
+end
+
 module PreviewShop
   include SweetTalk
 
@@ -86,6 +94,13 @@ module PreviewShop
       was = found.price
       found.reprice price
       warn "The new price is less than half the old one." { price.raw * 2 < was.raw }
+    end
+
+    unit sell_and_ask(tea : Tea::Id, tins : Tins), changes: [Tea, Receipt], locks: [tea],
+      means: "sells tins and asks the gateway, which a unit must not do" do
+      found = Tea.find(tea)
+      found.sell tins
+      PreviewGateway.ask
     end
   end
 end

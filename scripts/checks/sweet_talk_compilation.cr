@@ -345,6 +345,11 @@ PROBLEMS = [
    "border Catalogue do … end, or declare follows: Catalogue"},
   {"outbound_outside_border",
    "Shop::Billing reaches Caramel::Outbound outside a border with an outside system"},
+  {"unit_names_outside",
+   "unit Billing.charge names Cards, a border with an outside system: a preview runs it and " \
+   "rolls back, and a call outside cannot be taken back; call Cards from a whenever on its " \
+   "event, or before the change"},
+  {"command_names_outside", "command Payment#charge names Cards, a border with an outside system"},
   {"warn_assures",
    "warn in unit Ordering.annotate takes no assures:: a warning that a person confirms lets " \
    "the change through, so it assures nothing; make it a never to assure the requirement"},

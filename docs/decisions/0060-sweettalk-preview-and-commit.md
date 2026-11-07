@@ -3,7 +3,8 @@
 Date: 2026-11-07
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6,
-[ADR 0034](0034-sweettalk-at-the-web-boundary.md) decision 2 and
+[ADR 0034](0034-sweettalk-at-the-web-boundary.md) decision 2,
+[ADR 0036](0036-sweettalk-strategic-design.md) decision 4 and
 [ADR 0046](0046-sweettalk-units.md) decision 2.
 
 ## Context
@@ -60,6 +61,11 @@ could drift from the real one, and nothing proved they agreed.
    and `always` lines. When its block is true, a preview or commit keeps the sentence, which
    enters the fingerprint, and a plain call is refused with it. `assures:` on a `warn` does
    not compile.
+10. **Outside systems stay out of a dry-runnable body** (amends ADR 0036 decision 4). A
+   command, a factory or a unit body that names a module declared by `border …, outside:`
+   does not compile, at the line that names it. While a preview runs,
+   `Caramel::Outbound` raises `Caramel::Outbound::Refused`, which catches an alias or a
+   method defined outside the context.
 
 ## Reasons
 
@@ -76,6 +82,8 @@ could drift from the real one, and nothing proved they agreed.
   it back.
 - A refusal is the domain's answer to a valid request, so `Stale` answers 422 as ADR 0034
   answers refusals; one status keeps a client's handling to one shape.
+- A call to an outside system cannot be rolled back, and it would hold the row locks while
+  it waits. The text check names the line; the run-time refusal catches what text misses.
 - Packers generated from declared types need no run-time reflection.
 
 Rejected:

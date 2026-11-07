@@ -274,8 +274,13 @@ module SweetTalk
     end
   end
 
-  # Runs the block dry: in a transaction that always rolls back, with the commit's locks.
-  # Returns what it would record; a refusal returns a
+  # Why `Caramel::Outbound` refuses inside a preview's body.
+  OUTSIDE_IN_PREVIEW = "Caramel::Outbound is refused while SweetTalk.preview runs: the " \
+                       "preview rolls back, and a call outside cannot be taken back; call " \
+                       "the outside system before the change, or from a whenever on its event"
+
+  # Runs the block dry: in a transaction that always rolls back, with the commit's locks,
+  # and `Caramel::Outbound` refused. Returns what it would record; a refusal returns a
   # preview with only its sentence. Every aggregate instance a command loaded or saved
   # reloads what is stored afterwards.
   def self.preview(&) : Preview
@@ -336,7 +341,11 @@ module SweetTalk
     outcome = nil
     begin
       run.events.concat(emitted do
-        outcome = {yield}
+        outcome = if run.dry?
+                    {::Caramel::Outbound.refusing(OUTSIDE_IN_PREVIEW) { yield }}
+                  else
+                    {yield}
+                  end
       end)
     ensure
       fiber.__sweettalk_run = nil

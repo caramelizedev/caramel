@@ -388,6 +388,7 @@ const compileRows = {
   'A unit without means:, or whose changes: names another context’s aggregate without follows:': ['unit_without_meaning', 'unit_changes_foreign'],
   'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
   'A warn line with assures:': ['warn_assures'],
+  'A command, a factory or a unit body that names an outside border’s module': ['unit_names_outside', 'command_names_outside'],
   'A Decimal(P, S) value without require "caramel/sweet_talk/decimal"': ['decimal_without_require'],
   'A decimal bound that is not decimal text, such as at_least: 0, or one written past S decimals': ['decimal_bound_not_text', 'decimal_bound_scale'],
   'A Json value with at_least: or any other option': ['json_option'],
