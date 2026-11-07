@@ -1,9 +1,10 @@
-# ADR 0059: SweetTalk refuses unused edges
+# ADR 0059: SweetTalk refuses unused edges and reports its domain
 
 Date: 2026-11-07
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 3 and
-[ADR 0044](0044-sweettalk-shared-kernels.md) decision 2.
+[ADR 0044](0044-sweettalk-shared-kernels.md) decision 2, and adds `frappe glossary` and `frappe contexts` to
+[ADR 0013](0013-frappe-cli-check-mrdp.md) decision 1.
 
 ## Context
 
@@ -23,7 +24,21 @@ and each still counted in the cycle check.
    when its text or one of its borders names `K::`. Otherwise the context map refuses it at
    its line, saying to remove K from `shares:` and the sharer from K's `shared_by:`. The
    rule sits beside the count of each kernel word's sharers, which runs first.
-3. **`follows:` and `locks:` stay declared.** Nothing infers them.
+3. **`follows:` and `locks:` stay declared.** Nothing infers them, and neither does
+   `changes:`: ADR 0046's run-time `Boundary` stays the check.
+4. **`SweetTalk.report` is the detailed glossary.** It returns each glossary term, in the
+   glossary's order, as a `SweetTalk::Entry` with the facts its declaration holds: a
+   context's `follows` and `shares`, a kernel's `shared_by`, a value's `wraps`, `at_least`,
+   `at_most` and `one_of`, an aggregate's or process's `states` and `moves`, an event's
+   `handlers` in the order they run, and a unit's `changes`, `locks` and `once_by`.
+   `SweetTalk.glossary` is unchanged.
+5. **The application answers `glossary`** with the report and the context map as one JSON
+   document, as it answers `schema` (ADR 0008) and `requirements` (ADR 0057).
+6. **`frappe glossary [--json]` and `frappe contexts [--mermaid]` print them.** Frappé
+   compiles the application, runs `glossary` and keeps the document in
+   `.caramel/glossary.json` with the source signature it read; an unchanged source answers
+   from it. `glossary` prints Markdown, `--json` the document; `contexts` prints each
+   context with its edges, `--mermaid` a flowchart.
 
 ## Reasons
 
@@ -33,6 +48,11 @@ and each still counted in the cycle check.
   no tool.
 - `follows:` is a strategic choice that ADR 0036 builds on; a declared edge stays in the
   context's head, where a reader looks.
+
+- A report derived on demand is correct by construction; a committed copy would drift.
+- A typed checker over the compiler's call graph was measured and not adopted: its walk is
+  path-insensitive, so a branch a run-time flag never takes adds an aggregate the unit does
+  not change. Inferring `changes:` waits for a front-end.
 
 Rejected:
 

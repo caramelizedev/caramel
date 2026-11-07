@@ -98,6 +98,14 @@ module SweetTalk
         {% leaving = leaving + predecessors %}
       {% end %}
       SWEETTALK_FINAL = [{{ states.reject { |state| leaving.includes?(state) }.splat }}] of String
+      # Each move as `moves` allows it, "open >> placed", for the report (ADR 0059)
+      {% steps = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% for predecessor in predecessors %}
+          {% steps << "#{predecessor.id} >> #{state.id}" %}
+        {% end %}
+      {% end %}
+      SWEETTALK_STEPS = [{{ steps.splat }}] of String
       # {constraint suffix, expression} of the check that keeps `state` to these states
       ::SweetTalk.__sweettalk_hashed(SWEETTALK_STATE_CHECK,
         {"state_@digest", {{ "\"state\" IN (#{listed.id})" }}}, {{ states.sort.join(",") }},

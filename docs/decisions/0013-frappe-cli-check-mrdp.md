@@ -11,7 +11,7 @@ The CLI must serve humans and agents: a fast Tier-1 type-check loop, diagnostics
 ## Decision
 
 1. **The binary is `frappe`.** `caramel` names the framework shard that applications depend on. The commands are:
-   - `frappe check`, `frappe routes [FILTER]`, `frappe db branch create|list|delete`, `frappe db diff --name`, `frappe corretto` and `frappe agent-manifest`;
+   - `frappe check`, `frappe routes [FILTER]`, `frappe db branch create|list|delete`, `frappe db diff --name`, `frappe corretto`, `frappe glossary`, `frappe contexts` and `frappe agent-manifest`;
    - `frappe corretto --concurrency`.
 2. **One command table** (`src/frappe/commands.cr`) is the single source for `help`, `COMMAND --help`, argument validation, pinned-release dispatch and `frappe agent-manifest`. Unknown commands and malformed arguments exit **1** with the command's exact one-line syntax and a "Did you mean" suggestion.
 3. **Stateless commands.** Every Frappé command is a one-shot process with no session state. Latte's daemon is a service supervisor (ADR 0012), not a JSON-RPC agent protocol. Frappé calls it only to start services, provision sites, branches and test databases, and register upstreams.

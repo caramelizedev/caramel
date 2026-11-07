@@ -1077,7 +1077,8 @@ module SweetTalk
       {% work = steps.reject { |step| rules.includes?(step) } %}
       {% what = "unit #{short.id}.#{call.name}" %}
       {% span = "#{short.id}.#{call.name}" %}
-      {% unit = {call.name.stringify, means, call.line_number, once} %}
+      {% unit = {call.name.stringify, means, call.line_number, once,
+                 named.map(&.stringify).join(", "), held.map(&.stringify).join(", ")} %}
       {% kinds = allowed.map { |name| "::#{name.id}" }.join(", ") %}
       {% refusal = "#{short.id}.#{call.name} already ran under this key with other arguments" %}
       {% refusal = otherwise unless otherwise.is_a?(NilLiteral) %}
@@ -1946,9 +1947,9 @@ module SweetTalk
       # The contexts and kernels that share this module when it is a kernel; nil for a context
       SWEETTALK_SHARED_BY = nil
       SWEETTALK_TEXT    = {{ pieces.join("\n") }}
-      # {first segment, path} of each event of another context a process follows
       # Where the context is declared, for the context map's refusals
       SWEETTALK_AT      = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
+      # {first segment, path} of each event of another context a process follows
       SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
       # The names other contexts may use, or nil when every name is open to a follower
       SWEETTALK_PUBLISHES = {{ offering.id }}
