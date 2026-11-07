@@ -944,12 +944,13 @@ module SweetTalk
     # is a unit (ADR 0046): one transaction whose commands change the aggregates named in
     # `changes:`, each existing row locked first through `SweetTalk.lock` on the arguments
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
-    # rule over the set, checked after the body. It is a glossary entry, timed as a domain
-    # span named `Ledger.post`. `once_by: key` makes it run once per operation key: the first
-    # run keeps the key, a fingerprint of the other arguments and what it returned in the
-    # context's `<context>_operations` table; a repeat with the same arguments answers the
-    # first outcome without running, and one with other arguments is refused with
-    # `otherwise:` (ADR 0055).
+    # rule over the set, checked after the body; a `warn "…" { … }` line, checked with them,
+    # refuses a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
+    # entry, timed as a domain span named `Ledger.post`. `once_by: key` makes it run once
+    # per operation key: the first run keeps the key, a fingerprint of the other arguments
+    # and what it returned in the context's `<context>_operations` table; a repeat with the
+    # same arguments answers the first outcome without running, and one with other
+    # arguments is refused with `otherwise:` (ADR 0055).
     macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
                assures = nil, means = nil, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
@@ -1070,7 +1071,7 @@ module SweetTalk
       {% body = block.body %}
       {% steps = body.is_a?(Expressions) ? body.expressions : [body] %}
       {% rules = steps.select do |step|
-           step.is_a?(Call) && %w[never always].includes?(step.name.stringify) &&
+           step.is_a?(Call) && %w[never always warn].includes?(step.name.stringify) &&
              step.args.size == 1 && step.args[0].is_a?(StringLiteral) && !step.block.is_a?(Nop)
          end %}
       {% work = steps.reject { |step| rules.includes?(step) } %}
@@ -1089,6 +1090,11 @@ module SweetTalk
         {% field = (rule.named_args || [] of Nil).find { |arg| arg.name.stringify == "on" } %}
         {% if field %}
           ::SweetTalk.__sweettalk_refusal_field({{ rule.name.stringify }}, {{ field.value }})
+        {% end %}
+        {% if said && rule.name == "warn" %}
+          {% said.raise "warn in unit #{short.id}.#{call.name} takes no assures:: a warning " +
+                        "that a person confirms lets the change through, so it assures nothing; " +
+                        "make it a never to assure the requirement" %}
         {% end %}
         {% if said %}
           ::SweetTalk.__sweettalk_assures({{ rule.name.stringify }},
@@ -1153,6 +1159,8 @@ module SweetTalk
                 if ({{ rule.block.body }})
                   raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
                 end
+              {% elsif rule.name == "warn" %}
+                ::SweetTalk.__sweettalk_warn({{ rule.args[0] }}) if ({{ rule.block.body }})
               {% else %}
                 unless ({{ rule.block.body }})
                   raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})

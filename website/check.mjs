@@ -387,6 +387,7 @@ const compileRows = {
   'A unit in an aggregate, an entity, a projection, a process or a kernel': ['unit_in_aggregate', 'kernel_holds_unit'],
   'A unit without means:, or whose changes: names another context’s aggregate without follows:': ['unit_without_meaning', 'unit_changes_foreign'],
   'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
+  'A warn line with assures:': ['warn_assures'],
   'A Decimal(P, S) value without require "caramel/sweet_talk/decimal"': ['decimal_without_require'],
   'A decimal bound that is not decimal text, such as at_least: 0, or one written past S decimals': ['decimal_bound_not_text', 'decimal_bound_scale'],
   'A Json value with at_least: or any other option': ['json_option'],

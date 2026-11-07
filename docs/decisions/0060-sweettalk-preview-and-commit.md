@@ -56,6 +56,10 @@ could drift from the real one, and nothing proved they agreed.
    fresh preview's fingerprint.
 8. **Approvals stay in applications.** An application that needs a second person stores
    that person's fingerprint on its own aggregate.
+9. **`warn "…" { … }` in a unit confirms.** It runs after the body with the unit's `never`
+   and `always` lines. When its block is true, a preview or commit keeps the sentence, which
+   enters the fingerprint, and a plain call is refused with it. `assures:` on a `warn` does
+   not compile.
 
 ## Reasons
 
@@ -68,6 +72,8 @@ could drift from the real one, and nothing proved they agreed.
   revision counter that every write would bump.
 - Instants and new ids differ on every run; left in, two previews of one change would
   never agree. Placeholders keep the ids a run made off the client and leave no gaps.
+- The warning's sentence in the fingerprint is the confirmation: a person who saw it sent
+  it back.
 - A refusal is the domain's answer to a valid request, so `Stale` answers 422 as ADR 0034
   answers refusals; one status keeps a client's handling to one shape.
 - Packers generated from declared types need no run-time reflection.
@@ -81,6 +87,7 @@ Rejected:
   leave a gap for every abandoned preview.
 - **Refusing to preview an unknown, or deferring it.** The domain already models a value
   not yet known as state.
+- **`warn` as advice only.** An application's confirmations block until a person agrees.
 - **A preview that skips `FOR UPDATE`.** Two paths again.
 - **409 for `Stale`.** It is a refusal of a valid request.
 - **A framework `approval` word.** One application needs it; a second will say what it

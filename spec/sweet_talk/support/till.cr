@@ -79,5 +79,13 @@ module PreviewShop
       found.sell tins
       Receipt.write(found, found.price * tins.to_i).id
     end
+
+    unit discount(tea : Tea::Id, price : Cents), changes: [Tea], locks: [tea],
+      means: "lowers the price of one tea" do
+      found = Tea.find(tea)
+      was = found.price
+      found.reprice price
+      warn "The new price is less than half the old one." { price.raw * 2 < was.raw }
+    end
   end
 end

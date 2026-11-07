@@ -299,7 +299,8 @@ module SweetTalk
 
   # Runs the block, compares what it recorded with *expected*, a preview's fingerprint,
   # before the transaction ends, and keeps it only when they agree. A difference raises
-  # `Stale` with the fresh preview, and nothing is written. Returns the block's value.
+  # `Stale` with the fresh preview, and nothing is written. A `warn` line that holds is
+  # confirmed by the fingerprint. Returns the block's value.
   def self.commit(expected : Fingerprint, &)
     run = Run.new(dry: false)
     # The block's value in a tuple, so a block that returns nil is told from no value.
@@ -315,6 +316,14 @@ module SweetTalk
       raise error
     end
     (outcome || raise NilAssertionError.new("SweetTalk.commit finished without a value"))[0]
+  end
+
+  # A unit's `warn` line that held: a run keeps its sentence, and a plain call is refused
+  # with it.
+  def self.__sweettalk_warn(sentence : String) : Nil
+    run = ::Fiber.current.__sweettalk_run
+    raise Refusal.new(sentence) unless run
+    run.warnings << sentence unless run.warnings.includes?(sentence)
   end
 
   private def self.__sweettalk_running(run : Run, &)

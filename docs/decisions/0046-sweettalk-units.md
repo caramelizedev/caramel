@@ -40,7 +40,8 @@ aggregate first.
    today; the unit pins one flow for them. A refusal, a boundary or any other error rolls
    the whole unit back, every aggregate instance its commands touched reloads what is
    stored, and the error goes on. Inside `SweetTalk.preview` it runs dry: the same locks,
-   body and lines, then the preview always rolls back and every instance reloads ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
+   body and lines, then the preview always rolls back and every instance reloads; a
+   `warn` line runs with them ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
 3. **`SweetTalk.lock` is the ordered lock.** `SweetTalk.lock(*ids)` takes ids, aggregates
    and arrays of either, groups them by table and locks each table's rows in one statement,
    `WHERE removed_at IS NULL AND id = ANY($1) ORDER BY id FOR UPDATE`, through the

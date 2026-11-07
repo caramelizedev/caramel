@@ -345,6 +345,9 @@ PROBLEMS = [
    "border Catalogue do … end, or declare follows: Catalogue"},
   {"outbound_outside_border",
    "Shop::Billing reaches Caramel::Outbound outside a border with an outside system"},
+  {"warn_assures",
+   "warn in unit Ordering.annotate takes no assures:: a warning that a person confirms lets " \
+   "the change through, so it assures nothing; make it a never to assure the requirement"},
   {"client_in_context_border",
    "Shop::Billing reaches HTTP::Client outside a border with an outside system"},
   {"outside_is_a_context",

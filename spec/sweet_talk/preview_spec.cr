@@ -1,7 +1,8 @@
 # SweetTalk's preview and commit (ADR 0060): a preview runs the body and rolls it back,
 # leaving no receipt, job or log row; two previews of the same change agree, though the
 # clock and the id sequence moved; a commit against that fingerprint keeps the change, and
-# one against a world that moved raises Stale and writes nothing.
+# one against a world that moved raises Stale and writes nothing; and a warn line refuses a
+# plain call and is confirmed by a fingerprint.
 require "./support/app"
 require "./support/preview_web"
 
@@ -177,6 +178,37 @@ describe "SweetTalk's preview and commit" do
         .should eq([{"Tea", "removed", true}, {"Receipt", "moved to voided", true},
                     {"Tea", "Restocked", false}])
       JSON.parse(preview.to_json)["summary"].size.should eq(3)
+    end
+  end
+
+  it "refuses a plain call whose warn line holds, and lists it in a preview" do
+    SweetTalkSpec.rolled_back do
+      tea = PreviewSpec.tea(5)
+      cheap = PreviewShop::Till::Cents.new(100)
+      expect_raises(SweetTalk::Refusal, "The new price is less than half the old one.") do
+        PreviewShop::Till.discount(tea.id, cheap)
+      end
+      preview = SweetTalk.preview { PreviewShop::Till.discount(tea.id, cheap) }
+      preview.warnings.should eq(["The new price is less than half the old one."])
+      SweetTalk.commit(preview.fingerprint) { PreviewShop::Till.discount(tea.id, cheap) }
+      PreviewShop::Till::Tea.find(tea.id).price.raw.should eq(100)
+    end
+  end
+
+  it "takes a fingerprint without the warning as stale once the warning holds" do
+    SweetTalkSpec.rolled_back do
+      tea = PreviewSpec.tea(5)
+      preview = SweetTalk.preview do
+        PreviewShop::Till.discount(tea.id, PreviewShop::Till::Cents.new(200))
+      end
+      preview.warnings.should be_empty
+      stale = expect_raises(SweetTalk::Stale) do
+        SweetTalk.commit(preview.fingerprint) do
+          PreviewShop::Till.discount(tea.id, PreviewShop::Till::Cents.new(100))
+        end
+      end
+      stale.preview.warnings.size.should eq(1)
+      PreviewShop::Till::Tea.find(tea.id).price.raw.should eq(300)
     end
   end
 
