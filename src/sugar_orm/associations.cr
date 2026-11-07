@@ -34,14 +34,15 @@ module SugarORM
   end
 
   # Loads the first `T` row (by primary key) whose `foreign_key` references each owner.
+  # One row per owner comes back, not every child.
   struct HasOne(O, T)
     def initialize(@foreign_key : String)
     end
 
     def load(owners : Array(O)) : Array(T?)
       found = {} of Int64 => T
-      Associations.children(O, T, @foreign_key, owners) do |key, record|
-        found[key] = record unless found.has_key?(key)
+      Associations.first_children(O, T, @foreign_key, owners) do |key, record|
+        found[key] = record
       end
       owners.map { |owner| found[owner.__sugar_primary_value]? }
     end
@@ -95,6 +96,29 @@ module SugarORM
             "FROM #{T.__sugar_quoted_table} " \
             "WHERE \"#{foreign_key}\" = ANY($1)#{SugarORM.tenant_filter(T, args)} " \
             "ORDER BY \"#{T.__sugar_primary_key}\""
+      Repo.query(sql, args) do |rows|
+        rows.each do
+          key = rows.read(Int64?)
+          record = T.from_row(rows)
+          yield key, record if key
+        end
+      end
+    end
+
+    # One query for the lowest-keyed child of each of `owners`, yielding
+    # `{foreign key, child}`: `DISTINCT ON` keeps one row per owner.
+    def self.first_children(owner : O.class,
+                            target : T.class,
+                            foreign_key : String,
+                            owners : Array(O),
+                            & : Int64, T ->) : Nil forall O, T
+      ids = owners.map(&.__sugar_primary_value).uniq!
+      return if ids.empty?
+      args = [ids] of Value
+      sql = "SELECT DISTINCT ON (\"#{foreign_key}\") \"#{foreign_key}\", " \
+            "#{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
+            "WHERE \"#{foreign_key}\" = ANY($1)#{SugarORM.tenant_filter(T, args)} " \
+            "ORDER BY \"#{foreign_key}\", \"#{T.__sugar_primary_key}\""
       Repo.query(sql, args) do |rows|
         rows.each do
           key = rows.read(Int64?)

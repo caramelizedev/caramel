@@ -62,6 +62,19 @@ describe "A tenanted schema" do
     end
   end
 
+  it "joins a parent inside the bound tenant, and keeps the scope on both tables" do
+    acme, _ = two_tenants
+    TenancySpec.book(acme, TenancySpec.author(acme, "Zed"), "Acme Second", "333")
+    Tenancy.with(acme) do
+      zeds = Author.query.where(name: "Zed")
+      Book.query.joins(:author, zeds).to_a.map(&.title).should eq(["Acme Second"])
+      by_author = Book.query.joins(:author).order_by_joined(:author, :name, :desc)
+      by_author.to_a.map(&.title).should eq(["Acme Second", "Acme Atlas"])
+      by_author.binds.should eq([acme.id, acme.id])
+    end
+    Tenancy.without { Book.query.joins(:author).count }.should eq(3)
+  end
+
   it "preloads the tenant itself" do
     acme, _ = two_tenants
     book = Tenancy.with(acme) { Book.query.preload(:account).first! }
@@ -181,7 +194,7 @@ describe "A foreign key between tenanted schemas" do
   it "refuses a changeset that references another tenant's row" do
     acme, globex = two_tenants
     stranger = TenancySpec.author(globex, "Stranger")
-    expect_raises(PQ::PQError, "fk_books_author_id") do
+    expect_raises(SugarORM::ForeignKeyViolation, "fk_books_author_id") do
       SugarORM::Repo.transaction do
         Tenancy.with(acme) { Book.create(title: "Cross", isbn: "333", author_id: stranger.id) }
       end
@@ -192,7 +205,7 @@ describe "A foreign key between tenanted schemas" do
     acme, globex = two_tenants
     stranger = TenancySpec.author(globex, "Stranger")
     insert = "INSERT INTO books (account_id, title, isbn, author_id) VALUES ($1, $2, $3, $4)"
-    expect_raises(PQ::PQError, "fk_books_author_id") do
+    expect_raises(SugarORM::ForeignKeyViolation, "fk_books_author_id") do
       SugarORM::Repo.transaction do
         SugarORM.sql_exec(insert, acme.id, "Cross", "333", stranger.id)
       end

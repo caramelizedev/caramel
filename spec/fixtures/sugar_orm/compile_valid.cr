@@ -35,6 +35,15 @@ def exercise(db : DB::Database)
   end
   User.query.preload(:team).find!(1).team.name
   Team.query.preload(:users).find(team.id).try(&.users.size)
+  User.query.joins(:team, Team.query.active).order_by_joined(:team, :name, :desc).to_a
+  User.query.joins(:team).count(db)
+  Team.query.min_text(:seats)
+  Team.query.max_text(db, :seats)
+  Team.query.avg_text(:seats)
+  Team.query.group_count(:archived)
+  User.query.each_batch(100) { |batch| batch.map(&.email) }
+  User.query.page(10, after: 5_i64, direction: :desc).records.map(&.email)
+  SugarORM::Repo.transaction(retries: 2) { SugarORM::Repo.exec("SELECT 1") }
 
   SugarORM::Repo.transaction do
     SugarORM.sql("SELECT team_id, count(*) AS total FROM users GROUP BY team_id", as: {team_id: Int64, total: Int64}).first?.try(&.[:total])

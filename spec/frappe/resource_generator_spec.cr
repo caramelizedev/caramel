@@ -381,6 +381,7 @@ describe Caramel::Frappe::ResourceGenerator do
       generator.generate(project, "Book", ["title:string"], version: 20260919000009_i64)
       expected = <<-CRYSTAL
             not_found:          "Book not found",
+            in_use:             "Book is still in use",
             fields:             {
               title: "Title",
             },

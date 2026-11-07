@@ -84,6 +84,10 @@ module Caramel
       "Not found"
     end
 
+    def conflict : String
+      "This record is still in use"
+    end
+
     def expired_form : String
       "This form has expired or came from another site. Reload the page and try again."
     end

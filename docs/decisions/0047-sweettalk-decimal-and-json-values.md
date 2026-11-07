@@ -63,7 +63,7 @@ its base to `value` without another change to `has` (#247).
    `where: {evidence: nil}` in `finds`, `counts` and `specification` compare the whole
    document; a Range fails compilation at SugarORM's typed `where`, and `order:` on one is
    refused by the context, because a document has no order. Querying inside the document
-   (`@>`, GIN) waits on #133.
+   (`@>`, GIN) waits on #280.
 9. **`has` stores both through the one bridge** of ADR 0043 decision 2: `field rate :
    ::BigDecimal, codec: ::SugarORM::DecimalCodec(20, 8)` and `field evidence :
    ::Snapshot, codec: ::SugarORM::JSONB(::Snapshot)`, `?` after the type for an optional

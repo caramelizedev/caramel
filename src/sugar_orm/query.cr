@@ -48,12 +48,37 @@ module SugarORM
     {% end %}
   end
 
+  # One INNER JOIN a query holds: a derived table over a parent query, whose columns carry
+  # the prefix `sugar_<name>__`. Its `?` binds are numbered with the query's.
+  record Join, name : String, sql : String, values : Array(Value)
+
   record Clauses,
     conditions : Array(Condition) = [] of Condition,
     orders : Array(String) = [] of String,
     limit : Int32? = nil,
     offset : Int32? = nil,
-    lock : Bool = false
+    lock : Bool = false,
+    joins : Array(Join) = [] of Join
+
+  # Numbers the `?` of each fragment `$1`, `$2`, … in the order the fragments are written.
+  class PlaceholderCounter
+    def initialize
+      @count = 0
+    end
+
+    def number(sql : String) : String
+      sql.gsub("?") { "$#{@count += 1}" }
+    end
+  end
+
+  # One page of a keyset read: `after` is the cursor for the next page, nil on the last.
+  struct Page(R)
+    getter records : Array(R)
+    getter after : Int64?
+
+    def initialize(@records : Array(R), @after : Int64?)
+    end
+  end
 
   # An immutable query over schema `T`; `P` is the NamedTuple of preload
   # loaders. Every clause returns a new query. Each schema generates
@@ -120,20 +145,21 @@ module SugarORM
     # The SELECT this query runs (before preloads), for inspection.
     def to_sql : String
       String.build do |io|
-        io << "SELECT " << T.__sugar_select_list << " FROM " << T.__sugar_quoted_table
-        write_filters(io, order: true)
+        io << "SELECT " << T.__sugar_select_list << " FROM "
+        write_source(io, order: true)
         io << " FOR UPDATE" if @clauses.lock
       end
     end
 
-    # The bind values for `to_sql`, in `$n` order.
+    # The bind values for `to_sql`, in `$n` order: the joins' first, then the conditions'.
     def binds : Array(::SugarORM::Value)
-      conditions.flat_map(&.values)
+      @clauses.joins.flat_map(&.values) + conditions.flat_map(&.values)
     end
 
     # All matching records: `Array(T)`, or `Array(Loaded(T, L))` once preloaded.
     # Each preloaded association costs exactly one extra query.
     def to_a
+      refuse_lock_with_joins
       refuse_lock_outside_transaction
       records = ::SugarORM::Repo.query_all(to_sql, binds) { |rows| T.from_row(rows) }
       {% if P.keys.empty? %}
@@ -179,18 +205,17 @@ module SugarORM
 
     def count : Int64
       refuse_lock("count")
-      table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
-              "SELECT count(*) FROM (SELECT 1 FROM #{table}#{filters}) AS sugar_count"
+              "SELECT count(*) FROM (SELECT 1 FROM #{source}) AS sugar_count"
             else
-              "SELECT count(*) FROM #{table}#{filters(order: false)}"
+              "SELECT count(*) FROM #{source(order: false)}"
             end
       ::SugarORM::Repo.query_one?(sql, binds, &.read(Int64)) || 0_i64
     end
 
     def exists? : Bool
       refuse_lock("exists?")
-      sql = "SELECT EXISTS (SELECT 1 FROM #{T.__sugar_quoted_table}#{filters})"
+      sql = "SELECT EXISTS (SELECT 1 FROM #{source})"
       ::SugarORM::Repo.query_one?(sql, binds, &.read(Bool)) || false
     end
 
@@ -199,16 +224,31 @@ module SugarORM
     # precision sum exact without a Crystal type per column; the caller builds its type.
     def sum_text(field : T::Field) : String
       refuse_lock("sum_text")
-      table = T.__sugar_quoted_table
       column = %("#{T.__sugar_column(field)}")
       sql = if @clauses.limit || @clauses.offset
-              inner = "SELECT #{column} FROM #{table}#{filters}"
+              inner = "SELECT #{column} FROM #{source}"
               "SELECT coalesce(sum(#{column}), 0)::text FROM (#{inner}) AS sugar_sum"
             else
-              "SELECT coalesce(sum(#{column}), 0)::text FROM #{table}#{filters(order: false)}"
+              "SELECT coalesce(sum(#{column}), 0)::text FROM #{source(order: false)}"
             end
       ::SugarORM::Repo.query_one?(sql, binds, &.read(String)) || "0"
     end
+
+    {% for name in %w[min max avg] %}
+      # The {{ name.id }} of *field* over the matching rows as PostgreSQL's exact text, or nil
+      # when no row matches or every value is NULL. Like `sum_text`, the caller builds its type.
+      def {{ name.id }}_text(field : T::Field) : String?
+        refuse_lock({{ "#{name.id}_text" }})
+        column = %("#{T.__sugar_column(field)}")
+        sql = if @clauses.limit || @clauses.offset
+                inner = "SELECT #{column} FROM #{source}"
+                "SELECT {{ name.id }}(#{column})::text FROM (#{inner}) AS sugar_{{ name.id }}"
+              else
+                "SELECT {{ name.id }}(#{column})::text FROM #{source(order: false)}"
+              end
+        ::SugarORM::Repo.query_one?(sql, binds, &.read(String?))
+      end
+    {% end %}
 
     # Each value of *by* among the matching rows, as text (nil for NULL), with the sum of
     # *of* over its rows as exact text, ordered by *by* (NULL last).
@@ -227,9 +267,60 @@ module SugarORM
       key = %("#{T.__sugar_column(by)}")
       column = %("#{T.__sugar_column(of)}")
       sql = "SELECT #{key}::text, coalesce(sum(#{column}), 0)::text " \
-            "FROM #{T.__sugar_quoted_table}#{filters(order: false)} " \
-            "GROUP BY #{key} ORDER BY #{key}"
+            "FROM #{source(order: false)} GROUP BY #{key} ORDER BY #{key}"
       ::SugarORM::Repo.query_all(sql, binds) { |rows| {rows.read(String?), rows.read(String)} }
+    end
+
+    # Each value of *by* among the matching rows, as text (nil for NULL), with how many rows
+    # hold it, ordered by *by* (NULL last).
+    def group_count(by : T::Field) : Array({String?, Int64})
+      refuse_lock("group_count")
+      unless @clauses.orders.empty?
+        raise ArgumentError.new(
+          "group_count orders by its key; remove order_by from this query"
+        )
+      end
+      if @clauses.limit || @clauses.offset
+        raise ArgumentError.new(
+          "group_count groups every matching row; remove limit and offset from this query"
+        )
+      end
+      key = %("#{T.__sugar_column(by)}")
+      sql = "SELECT #{key}::text, count(*) FROM #{source(order: false)} " \
+            "GROUP BY #{key} ORDER BY #{key}"
+      ::SugarORM::Repo.query_all(sql, binds) { |rows| {rows.read(String?), rows.read(Int64)} }
+    end
+
+    # Reads every matching row in batches of *size*, in primary-key order, one statement per
+    # batch, and yields each batch as `to_a` returns its rows. A short batch is the last.
+    # The query sets its own order and limit, so it takes neither.
+    def each_batch(size : Int32 = 1000, &)
+      refuse_keyset("each_batch", size)
+      raise ArgumentError.new(
+        "each_batch reads in several statements; remove .lock from this query"
+      ) if @clauses.lock
+      cursor = nil.as(Int64?)
+      loop do
+        records = keyset(cursor, :asc, size).to_a
+        break if records.empty?
+        yield records
+        break if records.size < size
+        cursor = records.last.__sugar_primary_value
+      end
+    end
+
+    # One page of *size* rows in primary-key order, after the row *after* names (the cursor
+    # a page returned), ascending or `direction: :desc`. `after` of the result is the cursor
+    # of the next page, nil on the last.
+    def page(size : Int32, after : Int64? = nil, direction : Symbol = :asc)
+      refuse_keyset("page", size)
+      unless direction.in?(:asc, :desc)
+        raise ArgumentError.new("page direction must be :asc or :desc, not #{direction.inspect}")
+      end
+      records = keyset(after, direction, size + 1).to_a
+      more = records.size > size
+      records = records.first(size)
+      ::SugarORM::Page.new(records, more ? records.last.__sugar_primary_value : nil)
     end
 
     # Narrows to the rows whose *field* holds the key of a row *parent* matches:
@@ -242,26 +333,75 @@ module SugarORM
     # The condition `where_in` adds to a query over another schema; public for that call only.
     def __sugar_in_condition(column : String) : ::SugarORM::Condition
       refuse_lock("where_in")
+      unless @clauses.joins.empty?
+        raise ArgumentError.new("where_in takes a parent query without joins")
+      end
       predicates = conditions
       sql = String.build do |io|
         io << "\"#{column}\" IN (SELECT \"#{T.__sugar_primary_key}\" FROM "
-        io << T.__sugar_quoted_table
-        write_filters(io, order: true, numbered: false)
+        write_source(io, order: true, numbered: false)
         io << ")"
       end
       ::SugarORM::Condition.new(sql, predicates.flat_map(&.values))
     end
 
+    # The join `joins` adds to a query over another schema; public for that call only. The
+    # parent's rows become a derived table whose columns are prefixed `sugar_<name>__`, so
+    # the base query's unqualified columns stay unambiguous.
+    def __sugar_join_condition(name : String, owner : String, column : String) : ::SugarORM::Join
+      refuse_lock("joins")
+      unless @clauses.joins.empty?
+        raise ArgumentError.new("joins takes a parent query without joins")
+      end
+      table = "sugar_#{name}"
+      selected = T.__sugar_column_names.map do |each|
+        %("#{each}" AS "#{table}__#{each}")
+      end
+      key = %("#{table}"."#{table}__#{T.__sugar_primary_key}")
+      sql = String.build do |io|
+        io << "INNER JOIN (SELECT " << selected.join(", ") << " FROM "
+        write_source(io, order: true, numbered: false)
+        io << ") AS \"" << table << "\" ON " << key << " = " << owner << %(."#{column}")
+      end
+      ::SugarORM::Join.new(name, sql, conditions.flat_map(&.values))
+    end
+
+    # Adds the INNER JOIN of the association *name*, keeping the rows whose *column* holds
+    # the key of a row *parent* matches. Each association is joined once.
+    protected def __sugar_join(name : String,
+                               column : String,
+                               parent : ::SugarORM::Query(U, Q)) : self forall U, Q
+      if @clauses.joins.any? { |join| join.name == name }
+        raise ArgumentError.new("joins(:#{name}) is given twice; pass one parent query")
+      end
+      join = parent.__sugar_join_condition(name, T.__sugar_quoted_table, column)
+      self.class.new(@clauses.copy_with(joins: @clauses.joins + [join]), @preloads)
+    end
+
+    # Orders by *column* of the association *name*, which `joins` must have joined first.
+    protected def __sugar_order_by_joined(name : String, column : String, direction : Symbol) : self
+      unless @clauses.joins.any? { |join| join.name == name }
+        raise ArgumentError.new("order_by_joined(:#{name}, …) needs joins(:#{name}) first")
+      end
+      order = %("sugar_#{name}__#{column}" #{direction_sql(direction)})
+      self.class.new(@clauses.copy_with(orders: @clauses.orders + [order]), @preloads)
+    end
+
     # Deletes every matching row and returns how many were deleted.
     def delete_all : Int64
       refuse_lock("delete_all")
+      unless @clauses.joins.empty?
+        raise ArgumentError.new(
+          "delete_all deletes from one table; narrow with where_in instead of joins"
+        )
+      end
       table = T.__sugar_quoted_table
       sql = if @clauses.limit || @clauses.offset
               primary_key = %("#{T.__sugar_primary_key}")
-              matching = "SELECT #{primary_key} FROM #{table}#{filters}"
+              matching = "SELECT #{primary_key} FROM #{source}"
               "DELETE FROM #{table} WHERE #{primary_key} IN (#{matching})"
             else
-              "DELETE FROM #{table}#{filters(order: false)}"
+              "DELETE FROM #{source(order: false)}"
             end
       ::SugarORM::Repo.exec(sql, binds).rows_affected
     end
@@ -296,6 +436,23 @@ module SugarORM
       ::SugarORM::Repo.using(db) { group_sum_text(by, of) }
     end
 
+    {% for name in %w[min_text max_text avg_text group_count] %}
+      def {{ name.id }}(db : ::SugarORM::Handle, field : T::Field)
+        ::SugarORM::Repo.using(db) { {{ name.id }}(field) }
+      end
+    {% end %}
+
+    def each_batch(db : ::SugarORM::Handle, size : Int32 = 1000, &)
+      ::SugarORM::Repo.using(db) { each_batch(size) { |batch| yield batch } }
+    end
+
+    def page(db : ::SugarORM::Handle,
+             size : Int32,
+             after : Int64? = nil,
+             direction : Symbol = :asc)
+      ::SugarORM::Repo.using(db) { page(size, after, direction) }
+    end
+
     # `Team::Query.where(...)` and friends start from an empty query.
     def self.where(fragment : String, *args)
       new.where(fragment, *args)
@@ -311,6 +468,35 @@ module SugarORM
 
     def self.group_sum_text(by : T::Field, of : T::Field)
       new.group_sum_text(by, of)
+    end
+
+    {% for name in %w[min_text max_text avg_text group_count] %}
+      def self.{{ name.id }}(field : T::Field)
+        new.{{ name.id }}(field)
+      end
+
+      def self.{{ name.id }}(db : ::SugarORM::Handle, field : T::Field)
+        new.{{ name.id }}(db, field)
+      end
+    {% end %}
+
+    def self.each_batch(size : Int32 = 1000, &)
+      new.each_batch(size) { |batch| yield batch }
+    end
+
+    def self.each_batch(db : ::SugarORM::Handle, size : Int32 = 1000, &)
+      new.each_batch(db, size) { |batch| yield batch }
+    end
+
+    def self.page(size : Int32, after : Int64? = nil, direction : Symbol = :asc)
+      new.page(size, after, direction)
+    end
+
+    def self.page(db : ::SugarORM::Handle,
+                  size : Int32,
+                  after : Int64? = nil,
+                  direction : Symbol = :asc)
+      new.page(db, size, after, direction)
     end
 
     def self.where_in(field : T::Field, parent : ::SugarORM::Query(U, Q)) forall U, Q
@@ -384,6 +570,39 @@ module SugarORM
       raise ArgumentError.new("#{terminal} does not lock rows; remove .lock from this query")
     end
 
+    private def refuse_lock_with_joins : Nil
+      return if @clauses.joins.empty? || !@clauses.lock
+      raise ArgumentError.new(
+        "a query with joins does not lock rows; narrow with where_in to lock them"
+      )
+    end
+
+    # What `each_batch` and `page` refuse: a query that already orders or limits, and a size
+    # that reads no row.
+    private def refuse_keyset(terminal : String, size : Int32) : Nil
+      unless @clauses.orders.empty? && @clauses.limit.nil? && @clauses.offset.nil?
+        raise ArgumentError.new(
+          "#{terminal} orders by the primary key and sets its own limit; " \
+          "remove order_by, limit and offset from this query"
+        )
+      end
+      raise ArgumentError.new("#{terminal} takes a size of at least 1") if size < 1
+    end
+
+    # This query past the cursor *after* (`>` ascending, `<` descending) in primary-key order,
+    # limited to *count* rows.
+    private def keyset(after : Int64?, direction : Symbol, count : Int32) : self
+      key = %("#{T.__sugar_primary_key}")
+      conditions = @clauses.conditions
+      if after
+        operator = direction == :asc ? ">" : "<"
+        conditions += [::SugarORM::Condition.new("#{key} #{operator} ?", [after] of Value)]
+      end
+      order = "#{key} #{direction_sql(direction)}"
+      clauses = @clauses.copy_with(conditions: conditions, orders: [order], limit: count)
+      self.class.new(clauses, @preloads)
+    end
+
     private def refuse_lock_outside_transaction : Nil
       return unless @clauses.lock
       return if ::SugarORM::Repo.in_transaction?
@@ -394,8 +613,8 @@ module SugarORM
       )
     end
 
-    private def filters(order : Bool = true) : String
-      String.build { |io| write_filters(io, order) }
+    private def source(order : Bool = true) : String
+      String.build { |io| write_source(io, order) }
     end
 
     # The query's conditions, led by its tenant's when `T` is tenanted. The
@@ -410,16 +629,27 @@ module SugarORM
       @clauses.conditions
     end
 
-    # With *numbered* false each condition keeps its `?` binds, for a subquery whose
+    # The FROM list, joins included, then the filters, numbering the `?` of both in one
+    # sequence. With *numbered* false each fragment keeps its `?` binds, for a subquery whose
     # binds the enclosing query numbers in sequence with its own.
-    private def write_filters(io : IO, order : Bool, numbered : Bool = true) : Nil
+    private def write_source(io : IO, order : Bool, numbered : Bool = true) : Nil
+      numbers = ::SugarORM::PlaceholderCounter.new
+      io << T.__sugar_quoted_table
+      @clauses.joins.each do |join|
+        io << ' ' << (numbered ? numbers.number(join.sql) : join.sql)
+      end
+      write_filters(io, order, numbered, numbers)
+    end
+
+    private def write_filters(io : IO,
+                              order : Bool,
+                              numbered : Bool,
+                              numbers : ::SugarORM::PlaceholderCounter) : Nil
       predicates = conditions
       unless predicates.empty?
-        index = 0
         io << " WHERE "
         predicates.join(io, " AND ") do |condition, inner|
-          next inner << condition.sql unless numbered
-          inner << condition.sql.gsub("?") { index += 1; "$#{index}" }
+          inner << (numbered ? numbers.number(condition.sql) : condition.sql)
         end
       end
       io << " ORDER BY " << @clauses.orders.join(", ") if order && !@clauses.orders.empty?

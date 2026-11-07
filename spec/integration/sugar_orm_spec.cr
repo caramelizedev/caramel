@@ -286,6 +286,39 @@ module SugarSpec
   def self.backend_pid : Int32
     SugarORM.sql("SELECT pg_backend_pid() AS pid", as: {pid: Int32}).first[:pid]
   end
+
+  # Locks team *a* then updates *b* on one connection, and the reverse on another, once each
+  # holds its first row, so PostgreSQL finds a deadlock and aborts one. Each runs under
+  # `Repo.transaction(retries:)`; the first attempt alone takes part in the rendezvous.
+  # Returns each side's error and how many attempts it ran.
+  def self.cross_update(a : Int64, b : Int64, retries : Int32) : Array({Exception?, Int32})
+    holding = Channel(Nil).new(2)
+    proceed = Channel(Nil).new(2)
+    finished = Channel({Exception?, Int32}).new(2)
+    [{a, b}, {b, a}].each do |held, wanted|
+      spawn do
+        attempts = 0
+        error = nil
+        begin
+          SugarORM::Repo.transaction(retries: retries) do
+            attempts += 1
+            Team.query.lock.find!(held)
+            if attempts == 1
+              holding.send(nil)
+              proceed.receive
+            end
+            Team.query.lock.find!(wanted).update!(seats: 7)
+          end
+        rescue ex
+          error = ex
+        end
+        finished.send({error, attempts})
+      end
+    end
+    2.times { holding.receive }
+    2.times { proceed.send(nil) }
+    [finished.receive, finished.receive]
+  end
 end
 
 # The names of the teams `query` returns, in its order.
@@ -500,6 +533,226 @@ describe "SugarORM with PostgreSQL" do
       teams.group_sum_text(:archived, :seats).should eq([{"false", "7"}, {"true", "5"}])
       active = SugarSpec::User.query.where_in(:team_id, teams.where(archived: false))
       active.sum_text(:score).should eq("1.5")
+    end
+  end
+
+  it "maps a foreign-key violation to ForeignKeyViolation, naming its constraint" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      team = SugarSpec::Team.create!(name: "Acme")
+      SugarSpec::User.create!(email: "ann@acme.dev", team_id: team.id)
+      error = expect_raises(SugarORM::ForeignKeyViolation) do
+        SugarSpec::Team.query.where(id: team.id).delete_all
+      end
+      error.constraint.should eq("sugar_users_team_id_fkey")
+      error.cause.should be_a(PQ::PQError)
+    end
+  end
+
+  it "maps a deadlock to DeadlockDetected, and retries it only when asked to" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      a = SugarSpec::Team.create!(name: "A")
+      b = SugarSpec::Team.create!(name: "B")
+      plain = SugarSpec.cross_update(a.id, b.id, 0)
+      plain.map(&.[0].class).sort_by!(&.name).should eq([Nil, SugarORM::DeadlockDetected])
+      plain.map(&.[1]).should eq([1, 1])
+
+      retried = SugarSpec.cross_update(a.id, b.id, 1)
+      retried.map(&.[0]).should eq([nil, nil])
+      retried.map(&.[1]).sort!.should eq([1, 2])
+      SugarSpec::Team.query.where(seats: 7).count.should eq(2)
+    end
+  end
+
+  it "gives up when a conflict outlasts its retries, and re-raises the last one" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      attempts = 0
+      expect_raises(SugarORM::SerializationFailure) do
+        SugarORM::Repo.transaction(retries: 2) do
+          attempts += 1
+          raise SugarORM::SerializationFailure.new("could not serialize")
+        end
+      end
+      attempts.should eq(3)
+    end
+  end
+
+  it "refuses retries inside a transaction, and a negative number" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      SugarORM::Repo.transaction do
+        message = "Repo.transaction(retries:) runs only outside a transaction: " \
+                  "a savepoint cannot retry what its transaction already did"
+        expect_raises(ArgumentError, message) { SugarORM::Repo.transaction(retries: 1) { } }
+        SugarORM::Repo.transaction(retries: 0) { }
+      end
+      expect_raises(ArgumentError, "retries must not be negative") do
+        SugarORM::Repo.transaction(retries: -1) { }
+      end
+    end
+  end
+
+  it "preloads the lowest-keyed has_one child with one row per owner" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      acme = SugarSpec::Team.create!(name: "Acme")
+      beta = SugarSpec::Team.create!(name: "Beta")
+      profile = "INSERT INTO sugar_profiles (bio, team_id) VALUES ($1, $2)"
+      SugarORM.sql_exec(profile, "first", acme.id)
+      SugarORM.sql_exec(profile, "second", acme.id)
+      SugarORM.sql_exec(profile, "only", beta.id)
+
+      loaded = [] of SugarORM::Loaded(SugarSpec::Team, NamedTuple(profile: SugarSpec::Profile?))
+      SugarSpec.statements do
+        loaded = SugarSpec::Team.query.order_by(:name).preload(:profile).to_a
+      end.should eq(2)
+      loaded.map(&.profile.try(&.bio)).should eq(["first", "only"])
+
+      keys = [] of Int64
+      SugarORM::Associations.first_children(
+        SugarSpec::Team, SugarSpec::Profile, "team_id", [acme, beta]
+      ) { |key, _| keys << key }
+      keys.sort!.should eq([acme.id, beta.id])
+    end
+  end
+
+  it "takes the min, max and average of a column as exact text, nil when no row has one" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      SugarSpec::Team.create!(name: "Small", seats: 2)
+      SugarSpec::Team.create!(name: "Medium", seats: 4)
+      SugarSpec::Team.create!(name: "Large", seats: 9, archived: true)
+
+      teams = SugarSpec::Team.query
+      teams.min_text(:seats).should eq("2")
+      teams.max_text(:seats).should eq("9")
+      teams.avg_text(:seats).not_nil!.should start_with("5")
+      teams.order_by(:seats).limit(2).max_text(:seats).should eq("4")
+      none = teams.where(name: "Nobody")
+      bounds = {none.min_text(:seats), none.max_text(:seats), none.avg_text(:seats)}
+      bounds.should eq({nil, nil, nil})
+      teams.where(billing_email: nil).min_text(:billing_email).should be_nil
+      teams.group_count(:archived).should eq([{"false", 2_i64}, {"true", 1_i64}])
+      expect_raises(ArgumentError, "group_count orders by its key") do
+        teams.order_by(:seats).group_count(:archived)
+      end
+      expect_raises(ArgumentError, "group_count groups every matching row") do
+        teams.limit(1).group_count(:archived)
+      end
+    end
+  end
+
+  it "joins a belongs_to parent, filters and orders by it, and numbers its binds" do
+    SugarSpec.with_tables(owner_url, runtime_url) do |owner|
+      first = SugarSpec::Team.create!(name: "First")
+      second = SugarSpec::Team.create!(name: "Second")
+      archived = SugarSpec::Team.create!(name: "Archived", archived: true)
+      ann = SugarSpec::User.create!(email: "ann@first.dev", team_id: first.id)
+      SugarSpec::User.create!(email: "bob@second.dev", team_id: second.id)
+      SugarSpec::User.create!(email: "cy@archived.dev", team_id: archived.id)
+      owner.exec("UPDATE sugar_users SET score = 1.5 WHERE id = $1", ann.id)
+
+      users = SugarSpec::User.query
+      active = SugarSpec::Team.query.where(archived: false)
+      joined = users.joins(:team, active).order_by_joined(:team, :name, :desc)
+      joined.to_a.map(&.email).should eq(["bob@second.dev", "ann@first.dev"])
+      users.joins(:team, active).count.should eq(2)
+      users.joins(:team).count.should eq(3)
+      scored = users.joins(:team, active).where("score > ?", 1.0).order_by(:id)
+      scored.to_a.map(&.email).should eq(["ann@first.dev"])
+      scored.to_sql.should contain("INNER JOIN (SELECT \"id\" AS \"sugar_team__id\", ")
+      scored.to_sql.should contain(%("archived" = $1))
+      scored.to_sql.should contain("score > $2")
+      scored.binds.should eq([false, 1.0])
+
+      expect_raises(ArgumentError, "joins(:team) is given twice; pass one parent query") do
+        users.joins(:team).joins(:team, active)
+      end
+      expect_raises(ArgumentError, "order_by_joined(:team, …) needs joins(:team) first") do
+        users.order_by_joined(:team, :name)
+      end
+      expect_raises(ArgumentError, "delete_all deletes from one table") do
+        users.joins(:team).delete_all
+      end
+      expect_raises(ArgumentError, "where_in takes a parent query without joins") do
+        SugarSpec::Team.query.where_in(:owner_id, users.joins(:team))
+      end
+      SugarORM::Repo.transaction do
+        expect_raises(ArgumentError, "a query with joins does not lock rows") do
+          users.joins(:team).lock.to_a
+        end
+      end
+    end
+  end
+
+  it "reads every row in batches of a given size, in primary-key order" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      team = SugarSpec::Team.create!(name: "Acme")
+      emails = (1..5).map { |number| "user#{number}@acme.dev" }
+      emails.each { |email| SugarSpec::User.create!(email: email, team_id: team.id) }
+
+      sizes = [] of Int32
+      seen = [] of String
+      statements = SugarSpec.statements do
+        SugarSpec::User.query.each_batch(2) do |batch|
+          sizes << batch.size
+          seen.concat(batch.map(&.email))
+        end
+      end
+      sizes.should eq([2, 2, 1])
+      seen.should eq(emails)
+      statements.should eq(3)
+
+      sizes.clear
+      first_four = SugarSpec::User.query.where(email: emails.first(4))
+      first_four.each_batch(2) { |batch| sizes << batch.size }
+      sizes.should eq([2, 2])
+      loaded = [] of Int32
+      SugarSpec::User.query.preload(:team).each_batch(3) do |batch|
+        loaded << batch.count { |user| user.team.name == "Acme" }
+      end
+      loaded.should eq([3, 2])
+    end
+  end
+
+  it "pages by primary key, ascending and descending, with a cursor" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      team = SugarSpec::Team.create!(name: "Acme")
+      emails = (1..5).map { |number| "user#{number}@acme.dev" }
+      emails.each { |email| SugarSpec::User.create!(email: email, team_id: team.id) }
+
+      users = SugarSpec::User.query
+      first = users.page(2)
+      second = users.page(2, after: first.after)
+      third = users.page(2, after: second.after)
+      pages = [first, second, third].map(&.records.map(&.email))
+      pages.should eq([emails[0, 2], emails[2, 2], emails[4, 1]])
+      third.after.should be_nil
+      first.after.should eq(first.records.last.id)
+
+      newest = users.page(3, direction: :desc)
+      newest.records.map(&.email).should eq(emails.reverse.first(3))
+      users.page(3, after: newest.after, direction: :desc).records.map(&.email)
+        .should eq(emails.reverse.last(2))
+      users.page(5).after.should be_nil
+    end
+  end
+
+  it "refuses batches and pages of a query that orders, limits or locks, and bad sizes" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      users = SugarSpec::User.query
+      ordered = "orders by the primary key and sets its own limit; " \
+                "remove order_by, limit and offset from this query"
+      expect_raises(ArgumentError, "each_batch #{ordered}") do
+        users.order_by(:email).each_batch { }
+      end
+      expect_raises(ArgumentError, "page #{ordered}") { users.limit(1).page(2) }
+      expect_raises(ArgumentError, "page #{ordered}") { users.offset(1).page(2) }
+      expect_raises(ArgumentError, "each_batch takes a size of at least 1") do
+        users.each_batch(0) { }
+      end
+      expect_raises(ArgumentError, "page takes a size of at least 1") { users.page(0) }
+      expect_raises(ArgumentError, "page direction must be :asc or :desc, not :sideways") do
+        users.page(2, direction: :sideways)
+      end
+      message = "each_batch reads in several statements; remove .lock from this query"
+      expect_raises(ArgumentError, message) { users.lock.each_batch { } }
     end
   end
 

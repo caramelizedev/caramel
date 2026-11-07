@@ -79,6 +79,45 @@ module SugarORM
     end
   end
 
+  # PostgreSQL SQLSTATE 23503 raised by any Repo statement: a row refers to a
+  # missing one, or a row still referred to was deleted.
+  class ForeignKeyViolation < Error
+    getter table : String?
+    getter constraint : String?
+
+    def initialize(message : String?,
+                   @table : String?,
+                   @constraint : String?,
+                   cause : Exception? = nil)
+      super(message, cause)
+    end
+
+    def self.from(error : PQ::PQError) : self
+      table = error.field_message(:table_name)
+      constraint = error.field_message(:constraint_name)
+      new(error.message, table, constraint, error)
+    end
+  end
+
+  # A transaction PostgreSQL rolled back because it conflicted with another:
+  # running it again can succeed. `Repo.transaction(retries:)` does so.
+  abstract class TransactionConflict < Error
+  end
+
+  # PostgreSQL SQLSTATE 40001, raised by a statement or by COMMIT.
+  class SerializationFailure < TransactionConflict
+    def self.from(error : PQ::PQError) : self
+      new(error.message, error)
+    end
+  end
+
+  # PostgreSQL SQLSTATE 40P01: this transaction was the deadlock's victim.
+  class DeadlockDetected < TransactionConflict
+    def self.from(error : PQ::PQError) : self
+      new(error.message, error)
+    end
+  end
+
   # Unset keyword arguments in generated signatures.
   struct Unset
   end
@@ -147,16 +186,42 @@ module SugarORM
 
     # Runs the block in a transaction; a nested call opens a savepoint. Raising
     # rolls back and re-raises, except `Repo.rollback`, which returns nil.
-    def self.transaction(&)
+    #
+    # `retries:` opts in to running the block again, on a fresh connection and
+    # transaction, when PostgreSQL rolls it back for a conflict
+    # (`TransactionConflict`: a serialization failure or a deadlock). It runs at
+    # most `retries` more times and re-raises the last conflict. The block must
+    # be safe to run again: whatever it did outside the database is not undone.
+    def self.transaction(retries : Int32 = 0, &)
+      raise ArgumentError.new("retries must not be negative") if retries < 0
       if current = Fiber.current.__sugar_transaction
+        if retries > 0
+          raise ArgumentError.new(
+            "Repo.transaction(retries:) runs only outside a transaction: " \
+            "a savepoint cannot retry what its transaction already did")
+        end
         current.transaction { |nested| within(nested.connection, nested) { yield } }
       else
-        connection do |connection|
-          connection.transaction do |transaction|
-            within(connection, transaction) { yield }
-          end
+        attempts = 0
+        loop do
+          break outermost { yield }
+        rescue error : TransactionConflict
+          attempts += 1
+          raise error if attempts > retries
         end
       end
+    end
+
+    # The outermost transaction. COMMIT can fail on its own (SQLSTATE 40001), so
+    # an error the block did not raise is mapped here.
+    private def self.outermost(&)
+      connection do |connection|
+        connection.transaction do |transaction|
+          within(connection, transaction) { yield }
+        end
+      end
+    rescue error : PQ::PQError
+      raise mapped(error)
     end
 
     def self.rollback : NoReturn
@@ -249,10 +314,17 @@ module SugarORM
       @@statements_executed += 1
       yield
     rescue error : PQ::PQError
+      raise mapped(error)
+    end
+
+    private def self.mapped(error : PQ::PQError) : Exception
       case error.field_message(:code)
-      when "23505" then raise UniqueViolation.from(error)
-      when "23514" then raise CheckViolation.from(error)
-      else              raise error
+      when "23503" then ForeignKeyViolation.from(error)
+      when "23505" then UniqueViolation.from(error)
+      when "23514" then CheckViolation.from(error)
+      when "40001" then SerializationFailure.from(error)
+      when "40P01" then DeadlockDetected.from(error)
+      else              error
       end
     end
 

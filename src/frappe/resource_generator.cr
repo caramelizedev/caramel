@@ -457,6 +457,7 @@ module Caramel::Frappe
         {"delete_record", "Delete #{label}", "destroy"},
         {"save_record", "Save #{label}", "new"},
         {"not_found", "#{model} not found", nil},
+        {"in_use", "#{model} is still in use", "destroy"},
       ]
       messages = {} of String => String
       candidates.each do |key, text, action|

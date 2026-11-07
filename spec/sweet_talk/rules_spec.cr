@@ -314,7 +314,7 @@ describe "SweetTalk's rules" do
       box = RulesSpec.box("held")
       held = Rules::Shelf::Rack::Slot.new(box)
       missing = Rules::Shelf::Rack::Slot.new(Rules::Shelf::Box::Id.new(999_999))
-      expect_raises(PQ::PQError, "fk_shelf_rack_slots_box_id") do
+      expect_raises(SugarORM::ForeignKeyViolation, "fk_shelf_rack_slots_box_id") do
         Rules::Shelf::Rack.create(slots: [held, missing])
       end
       rack = Rules::Shelf::Rack.create(slots: [held])

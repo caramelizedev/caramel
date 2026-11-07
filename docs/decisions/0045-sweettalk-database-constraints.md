@@ -55,7 +55,7 @@ surfaced as a raw `SugarORM::UniqueViolation` rather than a refusal (#166).
    its unique index is theirs; `unique`, `index`, `check` and the `has` options there do
    not compile.
 7. **Limits.** A soft-removed aggregate keeps its row, so a unique value stays reserved
-   until a partial index can exclude it (#133). A new unique index over rows that already
+   until a partial index can exclude it (#274). A new unique index over rows that already
    hold duplicates fails `CREATE INDEX CONCURRENTLY`, leaving an INVALID index that halts
    the next `frappe db diff` until it is dropped, and a new check stops `frappe migrate` on
    the rows that break it (ADR 0039 decision 8); find duplicates first with `SELECT
@@ -99,6 +99,6 @@ Rejected:
 - **Deferrable unique indexes.** A violation at commit would surface after the command's
   rescue, as a raw error, and an upsert cannot target a deferrable index.
 - **A partial unique index for soft-removed rows.** It needs `where:` on an index, which
-  SugarORM does not declare yet (#133); the limit is named instead of worked around.
+  SugarORM does not declare yet (#274); the limit is named instead of worked around.
 - **A sentence per attribute for a value's bound.** A value's refusal is the value's,
   shared by every attribute of that type, so the sentence is declared once on the value.

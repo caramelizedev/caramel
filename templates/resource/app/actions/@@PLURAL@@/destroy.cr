@@ -16,6 +16,12 @@ module App::@@COLLECTION@@
       return not_found("@@MODEL@@ not found") unless record && record.delete
       # frappe:end
       {id: contract.id}
+    rescue SugarORM::ForeignKeyViolation
+      # frappe:only locales
+      conflict(t.@@PLURAL@@.in_use)
+      # frappe:else
+      conflict("@@MODEL@@ is still in use")
+      # frappe:end
     end
 
     def render(result)
