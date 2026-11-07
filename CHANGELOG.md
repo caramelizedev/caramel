@@ -4,6 +4,10 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+## 0.21.0 - 2026-11-07
+
+### Upgrade notes
+
 - SweetTalk: a `whenever`, service, compensation or deadline may run any number of commands on the one aggregate it changes, and a `create` or a factory followed by a command on the new aggregate counts as one change; a command on a second aggregate still raises `SweetTalk::Boundary`. Two commands on two aggregates called in turn inside one `SugarORM::Repo.transaction` commit and roll back together: that seam is now documented and tested as supported.
 - SweetTalk: a command named `finalize` no longer compiles (it would replace the garbage collector's `finalize`); name it for what it does, as in `to wind_up`. `has x : Array(String)` or of any scalar, an attribute named like the tenant association (`has account : …`) or, in an entity, like its parent or `<parent>_id`, and `has tenant`/`has tenant_id` on a tenanted aggregate all fail compilation with a refusal that names the fix.
 - SweetTalk: an entity holds entities of its own, at any depth: `entity Mark, means: "…" do … end` inside `entity Slip` with `has marks : Array(Mark)` stores them in `<context>_<aggregate>_<slip>_marks` keyed by `slip_id` (composite with the tenant column in a tenanted context). They load one statement per list per level, save only when a column changed, are deleted children first in one `DELETE` per list per level when dropped, are checked with the aggregate's invariants, and ride in events with their ids. A table name or an entity's `fk_<table>_<parent>_id` over PostgreSQL's 63 bytes fails compilation instead of being truncated silently ([ADR 0050](docs/decisions/0050-sweettalk-nested-entities.md)).
@@ -32,6 +36,31 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 - SweetTalk: `unit post(key : String, …), once_by: key, otherwise: "…"` runs once per operation key: the first run keeps the key, a fingerprint of the other arguments and its result in `<context>_operations` (a new table `frappe db diff` creates, tenanted like the context's rows, kept forever), a repeat with the same arguments answers the first result without running, a repeat with other arguments is refused with the `otherwise:` sentence, and an error rolls the claim back so a retry runs again. An aggregate in the other arguments or in `returns:`, an `otherwise:` without `once_by:`, or a key that is not text fails compilation ([ADR 0055](docs/decisions/0055-sweettalk-units-that-run-once.md)).
 - SweetTalk: `Books.reached(event)` returns the events that followed from an event, read from every context's log by `cause_id`, oldest first, as `SweetTalk::Reached` (`events`, and `by_subject` grouping by aggregate and id); the walk passes only through logged events and raises `ArgumentError` for an event its log does not keep. `has rules : Setup::Rules, pinned_at: :finalized` copies the referenced aggregate as JSON into a new column `rules_pinned` when a mover enters the state, read through `pinned_rules` as a read-only copy that raises `SweetTalk::Boundary` for a command; the column is added by `frappe db diff` ([ADR 0056](docs/decisions/0056-sweettalk-reached-events-and-pinned-references.md)).
 - SweetTalk: `requirements "AC-01", "AC-02"`, in the domain module before its first context, lists requirement ids, and `assures: "AC-12"` (or a list) on a `never`, an `always`, a `specification`, a `unit` and a unit's own `never`/`always` says which ids a line answers; an id the module does not list fails compilation. `SweetTalk.declared_requirements` returns each id with what assures it, `frappe requirements [ID]` lists them (the application answers `requirements [ID|--ids]`), and a `frappe corretto` run with no paths now fails when every worker passed but an id appears in no example's full description, as in `it "refuses an unbalanced entry (AC-12)"`; each worker writes the descriptions it ran to `.caramel/corretto/w<N>.examples`. An application that declares no requirements is not checked ([ADR 0057](docs/decisions/0057-sweettalk-requirements.md)).
+
+### Breaking changes
+
+- **sugar_orm:** typed conflicts, transaction retries, joins, aggregates and keyset reads (9745800)
+- **sweet_talk:** create announces Created (9eea27d)
+
+### Features
+
+- **sweet_talk:** wave A of the SweetTalk issues (e3269f7)
+- **sugar_orm:** shorten a generated index name over 63 bytes deterministically (373023d)
+- **sweet_talk:** wave B of the SweetTalk issues (812e0d3)
+- **sweet_talk:** database constraints (ADR 0045) and units (ADR 0046) (a7561c0)
+- **sweet_talk:** decimal and JSON values (ADR 0047) and the event log (ADR 0048) (8e60b1f)
+- **sweettalk:** declared sums and groups (91f24d6)
+- **sweettalk:** entities hold entities at any depth (1a0b236)
+- **sweettalk:** otherwise: on a value's bounds (2f8f91b)
+- **sweet_talk:** exact rebuilds, declared log retention and older: (ADR 0051) (5372461)
+- **sweet_talk:** kinds with parts (ae7f7a4)
+- **sweet_talk:** units that run once (c13a0dc)
+- **sweet_talk:** reached events and pinned references (4703a23)
+- **sweet_talk:** requirements and assures (8203391)
+
+### Fixes
+
+- **frappe:** one frappe corretto run per project at a time (aecae82)
 
 ## 0.20.0 - 2026-10-28
 
