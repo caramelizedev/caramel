@@ -275,6 +275,7 @@ describe "SweetTalk with tenancy" do
                                                        name: String, subject: Int64?})
       logged.map(&.values).should eq([
         {acme.id, "order", "placed", order.id.raw}, {globex.id, "order", "placed", other.id.raw},
+        {acme.id, "stock_crate", "created", crate.raw},
         {acme.id, "stock_crate", "filled", crate.raw},
       ])
       Caramel::Tenancy.with(acme) do

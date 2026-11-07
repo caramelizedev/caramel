@@ -87,6 +87,8 @@ module SweetTalk
       SWEETTALK_WAS     = {{ renamed_from ? renamed_from.stringify : nil }}
       SWEETTALK_CHANNEL = {{ channel }}
       SWEETTALK_CARRIES = [{{ carried.map(&.[0]).splat }}] of String
+      # The fields the declaration gave, not the attributes it carries.
+      SWEETTALK_GIVEN   = [{{ fields.map(&.var.stringify).splat }}] of String
       # The stored names an event log keeps: the context or kernel, the aggregate (nil for
       # a context's event) and the event, as the channel says them.
       SWEETTALK_HOME      = {{ parts[1] }}

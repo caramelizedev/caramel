@@ -124,6 +124,17 @@ describe "SweetTalk's rules" do
     end
   end
 
+  it "announces the declared Created of an aggregate with no factory, with what it carries" do
+    SweetTalkSpec.rolled_back do
+      made = SweetTalk.emitted(Rules::Shelf::Tab::Created) do
+        Rules::Shelf::Tab.create(label: "a")
+      end
+      made.map(&.label).should eq(["a"])
+      made.first.__sweettalk_channel.should eq("sweettalk.shelf.tab.created")
+      Rules::Shelf::Tab::Created::SWEETTALK_CARRIES.should eq(["label"])
+    end
+  end
+
   it "refuses a service that changes a second aggregate, and rolls both back" do
     SweetTalkSpec.rolled_back do
       first, second = RulesSpec.box("first"), RulesSpec.box("second")

@@ -88,6 +88,8 @@ Rejected:
 - **`emit Settled, from: self` with fields chosen at the call.** Each command would say
   again which fields the event has, and two commands could say differently.
 - **Carrying every attribute by default.** An event is a fact about one change; what it
-  holds should be listed, and `carries:` lists it once.
+  holds should be listed, and `carries:` lists it once. `Created` is the one event that
+  carries every attribute, because creation is the change that makes them all true
+  ([ADR 0053](0053-sweettalk-create-announces-created.md)).
 - **Reading the aggregate in a handler.** ADR 0030 refuses it: a handler would read what
   is true now, not what happened.

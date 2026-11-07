@@ -130,6 +130,8 @@ module Rules
 
     aggregate Tab, means: "money owed for one box" do
       has label : String
+
+      event Created, carries: [label], means: "a tab was opened"
       moves awaiting_payment >> paid
 
       finds awaiting, where: {state: :awaiting_payment}

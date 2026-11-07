@@ -521,6 +521,15 @@ PROBLEMS = [
    "event Placed gives note in older:, an optional field, which reads nil from a stored " \
    "Placed without it: take note out of older:"},
   {"older_type", "type must be String, not Int32"},
+  {"created_with_fields",
+   "event Created in Crate declares label, but create announces Created with what Crate " \
+   "holds: declare it with carries: alone, as in event Created, carries: [reading], or give " \
+   "Crate a factory"},
+  {"created_channel_long",
+   "aggregate RefrigeratedShippingContainerForTransport's create announces Created on " \
+   "sweettalk.warehousing.refrigerated_shipping_container_for_transport.created, longer than " \
+   "PostgreSQL's 63 characters: shorten the context or the aggregate name, or give " \
+   "RefrigeratedShippingContainerForTransport a factory, which replaces create and Created"},
 ]
 # These problems come from whole-program checks, so they name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot

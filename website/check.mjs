@@ -340,6 +340,7 @@ const compileRows = {
   'A command, factory, step, compensation or deadline that assigns @name for a reference attribute, which stores @name_id': ['stray_reference_write', 'stray_reference_write_factory', 'stray_reference_write_process', 'stray_reference_write_multiple'],
   'A finds, counts or specification that asks nil of an attribute that is not optional': ['where_nil_required_scalar', 'where_nil_required_composite', 'where_nil_required_specification'],
   'An event whose channel would pass PostgreSQL’s 63 characters': ['channel_long'],
+  'A create whose declared Created has fields, or whose Created channel would pass PostgreSQL’s limit': ['created_with_fields', 'created_channel_long'],
   'Two declarations whose names give one table': ['table_taken'],
   'A context that names Rows, or code outside the domain that reads an aggregate’s rows': ['rows_named', 'finds_block_rows', 'loader_outside'],
   'A projection or a process without key, a process step without key:, or a process attribute without a default its column takes': ['projection_without_key', 'process_without_key', 'process_whenever_without_key', 'process_attribute_default'],

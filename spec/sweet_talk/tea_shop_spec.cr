@@ -113,6 +113,34 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "announces Created from create, carrying every attribute" do
+    SweetTalkSpec.rolled_back do
+      created = SweetTalk.emitted(Catalogue::Tea::Created) { TeaShopSpec.tea("Sencha", 5) }
+      created.size.should eq(1)
+      event = created.first
+      tea = Catalogue::Tea.all.first
+      event.tea_id.should eq(tea.id)
+      carried = {event.name, event.price, event.stock, event.held, event.roast}
+      carried.should eq({tea.name, tea.price, tea.stock, tea.held, tea.roast})
+      event.__sweettalk_channel.should eq("sweettalk.catalogue.tea.created")
+      event.class.__sweettalk_logged_as("catalogue").should eq({"tea", "created"})
+    end
+  end
+
+  it "announces nothing when a never refuses the create" do
+    SweetTalkSpec.rolled_back do
+      price, tins = Catalogue::Cents.new(900), Catalogue::Tins.new(1)
+      events = SweetTalk.emitted do
+        expect_raises(SweetTalk::Refusal, "A tea cannot hold more tins than it has.") do
+          Catalogue::Tea.create(name: "Sencha", price: price, stock: tins,
+            held: Catalogue::Tins.new(3))
+        end
+      end
+      events.should be_empty
+      SweetTalkSpec.count("catalogue_teas").should eq(0)
+    end
+  end
+
   it "commits a command" do
     SweetTalkSpec.rolled_back do
       tea = TeaShopSpec.tea("Sencha")
@@ -468,7 +496,7 @@ describe "The tea shop on PostgreSQL" do
       {"Catalogue", "a count of tins on the shelf"},
       {"Fulfilment", "tins of one tea packed in a parcel"},
     ])
-    glossary.size.should eq(30)
+    glossary.size.should eq(31)
     terms = glossary.map { |term| {term.kind, term.name, term.context} }
     terms.should contain({"service", "requote", "Ordering"})
     terms.should contain({"process", "Hold", "Ordering"})

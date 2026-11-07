@@ -420,19 +420,63 @@ module SweetTalk
 
       {% if factories.empty? %}
         {% span = "#{@type.name.split("::")[-2].id}::#{short.id}.create" %}
-        # Checks the invariants and inserts the root, then its entities, in one transaction,
-        # timed as a domain span named `Catalogue::Tea.create`.
+        {% if @type.has_constant?("Created") %}
+          {% declared = @type.constant("Created").constant("SWEETTALK_GIVEN") %}
+          {% unless declared.empty? %}
+            {% first = attributes.empty? ? "name" : attributes[0][0] %}
+            {% @type.raise "event Created in #{short.id} declares #{declared[0].id}, but " +
+                           "create announces Created with what #{short.id} holds: declare it " +
+                           "with carries: alone, as in event Created, carries: [#{first.id}], " +
+                           "or give #{short.id} a factory" %}
+          {% end %}
+        {% else %}
+          {% reserved = %w[event_id occurred_at actor cause_id flow_id] +
+                        ["#{@type.constant("SWEETTALK_STORED").id}_id"] %}
+          {% channel = "sweettalk.#{@type.constant("SWEETTALK_CONTEXT").id}." +
+                       "#{@type.constant("SWEETTALK_STORED").id}.created" %}
+          {% tenancy = ::Caramel.has_constant?("Tenancy") %}
+          {% limit = tenancy ? 42 : 63 %}
+          {% if channel.size > limit %}
+            {% budget = "longer than PostgreSQL's 63 characters" %}
+            {% if tenancy %}
+              {% budget = "longer than 42 characters: a tenant's t<id>: prefix adds up to " +
+                          "21 of PostgreSQL's 63" %}
+            {% end %}
+            {% @type.raise "aggregate #{short.id}'s create announces Created on #{channel.id}, " +
+                           "#{budget.id}: shorten the context or the aggregate name, or give " +
+                           "#{short.id} a factory, which replaces create and Created" %}
+          {% end %}
+          {% carried = [] of Nil %}
+          {% for attribute in attributes %}
+            {% unless reserved.includes?(attribute[0]) %}
+              {% type = attribute[3] %}
+              {% optional = attribute[9] ? "?" : "" %}
+              {% type = "#{attribute[10].id}::Id#{optional.id}" if attribute[2] == "reference" %}
+              {% if attribute[2] == "record" %}
+                {% type = "::SweetTalk::RecordId(#{attribute[10].id})#{optional.id}" %}
+              {% end %}
+              {% carried << {attribute[0], type} %}
+            {% end %}
+          {% end %}
+          {% pairs = carried.empty? ? "[] of Nil".id : carried %}
+          ::SweetTalk.__sweettalk_event(Created,
+            carried: {{ pairs }}, channel: {{ channel }}, means: {{ "#{short.id} was created" }},
+            renamed_from: nil, subject: ::{{ @type }}, tenanted: false, older: nil)
+        {% end %}
+        # Checks the invariants, inserts the root, then its entities, and announces `Created`
+        # with every attribute, in one transaction, timed as a domain span named
+        # `Catalogue::Tea.create`.
         def self.create({{ named.id }}) : self
           ::Caramel::Crema.measure(::Caramel::Crema::SpanKind::Domain, {{ span }}) do
             ::SweetTalk.__sweettalk_enter(self)
             aggregate = new({{ attributes.map(&.[0].id).splat }})
-            ::SugarORM::Repo.transaction do
-              aggregate.__sweettalk_check
-              aggregate.__sweettalk_save
-            end
-            ::SweetTalk.__sweettalk_created(aggregate)
+            aggregate.__sweettalk_make_created
             aggregate
           end
+        end
+
+        def __sweettalk_make_created : Nil
+          __sweettalk_making { emit Created }
         end
       {% end %}
 
