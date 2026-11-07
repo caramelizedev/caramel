@@ -149,6 +149,12 @@ module Caramel::Frappe
       Command.new("contexts [--mermaid]",
         "Print the SweetTalk context map: each context and kernel with what it depends on, " \
         "reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart."),
+      Command.new("words [WORD] [--json]",
+        "Print SweetTalk's vocabulary as its macros state it, with no application needed: " \
+        "every word with its kind and summary, or WORD's usage, options, one example " \
+        "that compiles and its guide section; an unknown WORD names the nearest; " \
+        "--json prints the same as JSON.",
+        project: false),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
         "where none expands, the call whose block encloses it, such as " \

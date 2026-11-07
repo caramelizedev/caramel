@@ -41,6 +41,17 @@ module SweetTalk
     # `cancelled!`, private so only a command or a step moves it, refuses unless the
     # current state comes just before it in a chain. `moves_from` and `may_become?` read
     # the graph (`__sweettalk_graph`).
+    #
+    # @word attribute | Declares the states of the lifecycle and which state may follow which.
+    # @usage moves STATE >> STATE[ >> STATE...][, STATE >> STATE...]
+    # @guide c-sweettalk-lifecycle
+    # @example
+    #   context Kiln, means: "firing pots" do
+    #     aggregate Pot, means: "one pot in the kiln" do
+    #       has glaze : String
+    #       moves raw >> fired >> glazed, raw >> broken
+    #     end
+    #   end
     macro moves(*chains)
       {% states = [] of Nil %}
       {% nodes = {} of Nil => Nil %}
@@ -186,6 +197,41 @@ module SweetTalk
     # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
     # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
     # as a named tuple (ADR 0054).
+    #
+    # @word attribute | Declares an attribute a noun stores, with a default and constraints.
+    # @usage has NAME : TYPE[ = DEFAULT][, unique: TRUE_OR_SENTENCE][, index: true]
+    #   [, check: {SQL, SENTENCE}][, parts: {MEMBER: [ATTRIBUTE, ...]}][, pinned_at: :STATE]
+    # @option unique | true, or a string literal | - | Keeps the attribute unique across rows. A
+    #   string is the sentence a duplicate is refused with. Not in a projection or a process.
+    # @option index | true | - | Adds a database index over the attribute's columns. Not in a
+    #   projection or a process.
+    # @option check | a tuple of two string literals, {SQL, SENTENCE} | - | Keeps the SQL true of
+    #   every row, written against the stored columns, and refuses a row that breaks it with
+    #   the sentence. Not in a projection or a process.
+    # @option parts | a named tuple of member: [attribute, ...] | - | On a required value declared
+    #   with one_of:, lists the optional attributes, declared above, that each member holds;
+    #   the others stay unset. A database check and a refusal before save keep to it, and
+    #   as_MEMBER reads the parts as a named tuple. Not in a projection or a process.
+    # @option pinned_at | a symbol naming a state | - | On a reference to another aggregate in
+    #   an aggregate, copies the referenced aggregate as JSON when a move enters the state.
+    #   pinned_NAME reads the read-only copy, nil before then.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Warehouse, means: "crates and where they stand" do
+    #     value Kind, String, one_of: %w[trade cash], means: "how a crate is paid for"
+    #     aggregate Terms, means: "what a crate is sold under" do
+    #       has rate : Int64
+    #     end
+    #     aggregate Crate, means: "one crate" do
+    #       has code : String, unique: "A crate with this code already exists."
+    #       has bay : String, index: true
+    #       has quantity : Int32 = 0, check: {"quantity >= 0", "A crate cannot hold less."}
+    #       has payee : String?
+    #       has kind : Kind, parts: {trade: [payee]}
+    #       has terms : Terms, pinned_at: :sold
+    #       moves stored >> sold
+    #     end
+    #   end
     macro has(decl, unique = nil, index = nil, check = nil, parts = nil, pinned_at = nil)
       {% member_parts = parts %}
       {% pin = pinned_at %}
@@ -736,6 +782,22 @@ module SweetTalk
     # those attributes (ADR 0045); in an entity it is unique within the aggregate, so the
     # parent's column leads it. `otherwise:` is the sentence a duplicate is refused with;
     # without it, `Adjustment source_key and bundle must be unique`.
+    #
+    # @word rule | Keeps the combination of attributes unique across rows and refuses a
+    #   duplicate with a sentence.
+    # @usage unique ATTRIBUTE[, ATTRIBUTE...][, otherwise: SENTENCE]
+    # @in in an aggregate or an entity
+    # @option otherwise | a string literal | the sentence "<Owner> <attributes> must be unique"
+    #   | The sentence a duplicate is refused with.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Anchorage, means: "ships and their berths" do
+    #     aggregate Mooring, means: "one ship tied at one berth" do
+    #       has ship : String
+    #       has berth : String
+    #       unique :ship, :berth, otherwise: "That ship is already moored at that berth."
+    #     end
+    #   end
     macro unique(*names, otherwise = nil)
       {% unless otherwise.is_a?(NilLiteral) || otherwise.is_a?(StringLiteral) %}
         {% otherwise.raise "unique takes otherwise: the sentence a duplicate is refused " +
@@ -751,6 +813,20 @@ module SweetTalk
 
     # `index :owner, :state` is a plain index over the columns of those attributes, for
     # the reads that look rows up by them (ADR 0045).
+    #
+    # @word rule | Adds a database index over one or more attributes for the reads that look
+    #   rows up by them.
+    # @usage index ATTRIBUTE[, ATTRIBUTE...]
+    # @in in an aggregate or an entity
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Larder, means: "what is stored where" do
+    #     aggregate Jar, means: "one jar on a shelf" do
+    #       has shelf : String
+    #       moves filled >> opened
+    #       index :shelf, :state
+    #     end
+    #   end
     macro index(*names)
       {% if names.empty? %}
         {% raise "index takes the attributes to index together, as in index :owner, :state" %}
@@ -763,6 +839,23 @@ module SweetTalk
     # CHECK every row keeps, written against the stored columns, named by its name and the
     # hash of its SQL (ADR 0045); `otherwise:` is the sentence a row that breaks it is
     # refused with.
+    #
+    # @word rule | Keeps a SQL condition true of every row and refuses with a sentence when a
+    #   row breaks it.
+    # @usage check NAME, SQL, otherwise: SENTENCE
+    # @in in an aggregate or an entity
+    # @option otherwise | a string literal | - | The sentence a row that breaks the check is
+    #   refused with. It is required.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Ledger, means: "money in and out" do
+    #     aggregate Posting, means: "one line of the ledger" do
+    #       has debit : Int32 = 0
+    #       has credit : Int32 = 0
+    #       check :one_side, "debit = 0 OR credit = 0",
+    #         otherwise: "A posting is a debit or a credit, not both."
+    #     end
+    #   end
     macro check(name, sql, otherwise = nil)
       {% unless name.is_a?(SymbolLiteral) && sql.is_a?(StringLiteral) %}
         {% raise "check takes a name and the SQL every row keeps, as in check " +
@@ -855,6 +948,19 @@ module SweetTalk
     end
 
     # `the total : Cents = expression` is a derived value, never stored.
+    #
+    # @word attribute | Declares a value the aggregate computes from its other attributes and
+    #   never stores.
+    # @usage the NAME : TYPE = EXPRESSION
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Smelter, means: "metal poured into ingots" do
+    #     aggregate Ingot, means: "one poured bar" do
+    #       has weight : Int32
+    #       has bars : Int32 = 1
+    #       the total_weight : Int32 = weight * bars
+    #     end
+    #   end
     macro the(decl)
       {% if decl.is_a?(TypeDeclaration) && !decl.value.is_a?(Nop) %}
         {% derived = {decl.var.stringify, decl.line_number, decl.type.stringify} %}
@@ -929,6 +1035,26 @@ module SweetTalk
     end
 
     # Ends the command with a refusal; `on: :quantity` names the field it is about.
+    #
+    # @word behaviour | Stops a command, a factory or a step with a sentence the caller sees.
+    # @usage refuse MESSAGE[, on: FIELD]
+    # @in in a command, a factory, a policy or a process step
+    # @guide c-sweettalk-commands
+    # @option on | a symbol naming an attribute | - | The field the refusal is about, so a form
+    #   shows the sentence beside its input.
+    # @example
+    #   context Orders, means: "what people ask for" do
+    #     aggregate Request, means: "one thing asked for" do
+    #       has quantity : Int32
+    #       event Made, means: "a request was made"
+    #
+    #       to ask(count : Int32) do
+    #         refuse "Ask for at least one.", on: :quantity if count < 1
+    #         @quantity = count
+    #         emit Made
+    #       end
+    #     end
+    #   end
     def refuse(message : String, on : Symbol? = nil) : NoReturn
       raise ::SweetTalk::Refusal.new(message, on: on)
     end

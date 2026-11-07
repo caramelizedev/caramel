@@ -77,6 +77,23 @@ module SweetTalk
     # `never "message" { condition }` refuses any change that leaves the condition true.
     # `assures: "AC-12"` names the requirement ids it answers (ADR 0057), and `on: :stock`
     # the field the refusal is about (ADR 0058).
+    #
+    # @word rule | Refuses any change that leaves its condition true.
+    # @usage never MESSAGE[, assures: IDS][, on: FIELD] do CONDITION end
+    # @guide c-sweettalk-lifecycle
+    # @option assures | a requirement id string, or a list of them | - | The requirement ids this
+    #   rule answers. Each id must be listed in `requirements`.
+    # @option on | a symbol naming an attribute | - | The field the refusal is about, so a form
+    #   shows the sentence beside its input.
+    # @example
+    #   context Grove, means: "the fruit we pick" do
+    #     aggregate Crate, means: "one crate of apples" do
+    #       has apples : Int32
+    #       never "A crate holds no fewer than zero apples.", on: :apples do
+    #         apples < 0
+    #       end
+    #     end
+    #   end
     macro never(message, assures = nil, on = nil, &block)
       ::SweetTalk.__sweettalk_refusal_field("never", {{ on }})
       ::SweetTalk.__sweettalk_assures("never", {{ "never in #{@type.name.split("::").last.id}" }},
@@ -88,6 +105,23 @@ module SweetTalk
     end
 
     # `always "message" { condition }` refuses any change that leaves it false.
+    #
+    # @word rule | Refuses any change that leaves its condition false.
+    # @usage always MESSAGE[, assures: IDS][, on: FIELD] do CONDITION end
+    # @guide c-sweettalk-lifecycle
+    # @option assures | a requirement id string, or a list of them | - | The requirement ids this
+    #   rule answers. Each id must be listed in `requirements`.
+    # @option on | a symbol naming an attribute | - | The field the refusal is about, so a form
+    #   shows the sentence beside its input.
+    # @example
+    #   context Barn, means: "grain in store" do
+    #     aggregate Sack, means: "one sack of grain" do
+    #       has kilos : Int32
+    #       always "A sack weighs something.", on: :kilos do
+    #         kilos > 0
+    #       end
+    #     end
+    #   end
     macro always(message, assures = nil, on = nil, &block)
       ::SweetTalk.__sweettalk_refusal_field("always", {{ on }})
       ::SweetTalk.__sweettalk_assures("always", {{ "always in #{@type.name.split("::").last.id}" }},
@@ -109,6 +143,20 @@ module SweetTalk
     # `SWEETTALK_PART_<NAME>` records {name, line, part type, raw column type, kind,
     # check, codec}, where check and codec are the wrapped value's `SWEETTALK_CHECK` and
     # `SWEETTALK_CODEC`.
+    #
+    # @word attribute | Declares one stored part of a value with parts.
+    # @usage part NAME : TYPE
+    # @guide c-sweettalk-richer-values
+    # @example
+    #   context Cobbler, means: "shoes made to measure" do
+    #     value Workshop, means: "where a pair is made" do
+    #       part street : String
+    #       part city : String
+    #       never "A workshop needs a street and a city." do
+    #         street.blank? || city.blank?
+    #       end
+    #     end
+    #   end
     macro part(decl)
       {% unless decl.is_a?(TypeDeclaration) && decl.value.is_a?(Nop) %}
         {% decl.raise "part takes a name and a type, as in part street : String" %}

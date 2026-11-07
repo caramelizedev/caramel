@@ -30,6 +30,31 @@ module SweetTalk
   # the kernels declared before it that it shares. Only its sharers name it, it names no
   # context, and each of its words that no other of its words uses is named by two or
   # more sharers (ADR 0044).
+  #
+  # @word noun | Declares a part of the model that two or more contexts own together.
+  # @usage kernel NAME, shared_by: [SHARER, SHARER, ...][, shares: KERNELS], means: TEXT do ... end
+  # @guide c-sweettalk-kernel
+  # @option shared_by | a list of two or more context or kernel names | - | The contexts and
+  #   kernels that share it. Each says `shares:` with the kernel's name.
+  # @option shares | a kernel name, or a list of them | - | The kernels declared before this one
+  #   that it shares in turn.
+  # @option means | text | - | What the kernel is, in a line the glossary shows. Required.
+  # @example
+  #   kernel Alloy, shared_by: [Assayer, Treasury], means: "the metal both contexts weigh" do
+  #     value Grams, Int64, at_least: 0, means: "a weight of metal"
+  #   end
+  #
+  #   context Assayer, shares: Alloy, means: "weighing metal that comes in" do
+  #     aggregate Sample, means: "one weighed sample" do
+  #       has weight : Alloy::Grams
+  #     end
+  #   end
+  #
+  #   context Treasury, shares: Alloy, means: "metal kept in store" do
+  #     aggregate Bar, means: "one bar in store" do
+  #       has weight : Alloy::Grams
+  #     end
+  #   end
   macro kernel(name, shared_by = nil, shares = nil, means = nil, &block)
     {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
     {% name.raise "#{prefix.id}#{name} needs a meaning: add means: \"…\", " +

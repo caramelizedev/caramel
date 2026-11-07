@@ -141,6 +141,40 @@ module SweetTalk
     # ceiling of its share (or its floor, but the one the remainder goes to), and a key of
     # weight zero gets nothing; a block adds rules of its own. Neither the types nor the
     # block may hold a `Float64`, `to_f` or a float literal.
+    #
+    # @word noun | Declares a calculation that splits an amount by weights, exact to the minor unit.
+    # @usage allocation VERB, of: TYPE, by: TYPE, remainder: MODE[, ties: :key][, per: TYPE],
+    #   means: TEXT [do ... end]
+    # @in in a context
+    # @option of | an amount type, as Money::Amount | - | The amount the calculation splits.
+    #   Required; it holds no Float64.
+    # @option by | a whole-number type or a Decimal(P, S) value | - | The weight of each key.
+    #   Required; a weight is not negative, and the weights add up to more than zero.
+    # @option remainder | :largest_fraction, :first, :last or :to | - | Where the units the
+    #   floors leave go: one each to the largest fractions, all to the first or last key with a
+    #   weight, or all to a key passed as a third argument with :to. Required.
+    # @option ties | :key | by key, the smaller first | How a tie between fractions breaks.
+    #   :key is the only form.
+    # @option means | text | - | What the calculation does, in a line the glossary shows.
+    #   Required.
+    # @option per | a type | Int64 | The type that keys the weights and the parts.
+    # @guide c-sweettalk-money
+    # @example requires caramel/sweet_talk/money
+    #   kernel Payroll, shared_by: [Wages, Stub], means: "how payroll counts money" do
+    #     currencies %w[USD EUR], means: "a currency payroll pays in"
+    #   end
+    #
+    #   context Wages, shares: Payroll, means: "sharing a pay pot between staff" do
+    #     value Weight, Decimal(9, 6), at_least: "0", at_most: "100", means: "a member's percent"
+    #     allocation split, of: Payroll::Amount, by: Weight, remainder: :largest_fraction,
+    #       ties: :key, means: "a pot split by percent, the odd units to the largest fractions"
+    #   end
+    #
+    #   context Stub, shares: Payroll, means: "what a pay stub shows" do
+    #     aggregate Slip, means: "one pay stub" do
+    #       has pay : Payroll::Amount
+    #     end
+    #   end
     macro allocation(name, of = nil, by = nil, remainder = nil, ties = nil, means = nil,
                      per = nil, &block)
       {% what = "allocation #{name}" %}

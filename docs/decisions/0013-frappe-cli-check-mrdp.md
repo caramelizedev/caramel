@@ -11,7 +11,7 @@ The CLI must serve humans and agents: a fast Tier-1 type-check loop, diagnostics
 ## Decision
 
 1. **The binary is `frappe`.** `caramel` names the framework shard that applications depend on. The commands are:
-   - `frappe check`, `frappe routes [FILTER]`, `frappe db branch create|list|delete`, `frappe db diff --name`, `frappe corretto`, `frappe glossary`, `frappe contexts` and `frappe agent-manifest`;
+   - `frappe check`, `frappe routes [FILTER]`, `frappe db branch create|list|delete`, `frappe db diff --name`, `frappe corretto`, `frappe glossary`, `frappe contexts`, `frappe words [WORD]` and `frappe agent-manifest`;
    - `frappe corretto --concurrency`.
 2. **One command table** (`src/frappe/commands.cr`) is the single source for `help`, `COMMAND --help`, argument validation, pinned-release dispatch and `frappe agent-manifest`. Unknown commands and malformed arguments exit **1** with the command's exact one-line syntax and a "Did you mean" suggestion.
 3. **Stateless commands.** Every Frappé command is a one-shot process with no session state. Latte's daemon is a service supervisor (ADR 0012), not a JSON-RPC agent protocol. Frappé calls it only to start services, provision sites, branches and test databases, and register upstreams.
@@ -26,6 +26,10 @@ The CLI must serve humans and agents: a fast Tier-1 type-check loop, diagnostics
    - Commands share the development build. A command reuses a build of the same inputs: the source signature `frappe dev` hashes, the toolchain, the framework version and the development flags. It takes `frappe dev`'s build, hard-linked into `.caramel/application` so the session's cleanup cannot delete it, or else the previous command's, and builds into `.caramel/application` only when neither matches. `.caramel/build.lock` serializes the application's builds: a command waits while `frappe dev` or another command builds, and `frappe dev` waits for a command's build, so no two builds write the program's compiler cache at once.
 6. **`frappe expand FILE:LINE:COL`** prints the plain Crystal that a macro call expands to.
    - A macro call written inside another macro's block, such as `field` inside `contract do … end`, is never expanded itself. `frappe expand` then tries the calls whose blocks enclose the position, innermost first, prints the first that expands with the steps up to the one that expands the requested call, and names that call. A position on a call that no enclosing call expands exits 1, naming the enclosing calls it tried.
+7. **`frappe words [WORD] [--json]`** prints SweetTalk's vocabulary from the macros that define it, and works outside an application.
+   - Every SweetTalk macro, and each method an author calls as a word, carries a block of tags in its doc comment: `@word KIND | summary`, `@usage`, one `@option NAME | forms | default | what it does` for each parameter with a default or `@internal` for one authors never write, `@guide` and a compiling `@example`. A refusing macro, whose body only raises, has none. Frappé reads the block and the macro's parameters with Crystal's parser, from the sources of its own release.
+   - No word is listed apart from its macro. `spec/frappe/words_spec.cr` fails when a macro has no block, an option and a parameter differ, a usage line writes another keyword or an example does not use its word. `scripts/check sweet-talk-compilation` compiles every example. `scripts/check website` fails when the guide or the skill writes an option no word takes, the guide names no word or option, or a `@guide` is no section of it.
+   - An unknown WORD exits 1 naming the nearest words.
 
 ## Reasons
 
@@ -33,3 +37,5 @@ The CLI must serve humans and agents: a fast Tier-1 type-check loop, diagnostics
 - A single table cannot drift from help, validation or the manifest. An agent that reads the manifest gets exactly what the parser accepts.
 - PATCH lines that apply mechanically turn a compile error into a one-step repair for an agent.
 - Rejected: Crystal's interpreter for Tier 2, because it is missing from the official macOS build and, where present, is slower than a warm build and fails under a request loop.
+- A vocabulary reference kept beside the macros, in the guide or the skill, drifts from them. Reading the parameters and the doc comment of the macro itself leaves one place to edit and a check that fails when it is not edited.
+- Rejected: a list of words in Frappé, which would be a second copy of what each macro states; and generating the guide's tables from the macros, because the guide teaches and the reference lists.

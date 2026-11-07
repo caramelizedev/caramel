@@ -18,6 +18,31 @@ module SweetTalk
     # results are built from what it returns. The context checks every query when it
     # closes (`__sweettalk_check_queries`), so a wrong one does not compile even if
     # nothing calls it.
+    #
+    # @word query | Finds the aggregates, or a projection's or process's rows, that match the
+    #   conditions you give.
+    # @usage finds NAME[(ARG : TYPE, ...)][, where: CONDITIONS][, satisfying: SPECIFICATION]
+    #   [, order: {ATTRIBUTE: DIRECTION}][, first: COUNT]
+    #   finds NAME(ARG : TYPE, ...) do |rows| ... end
+    # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
+    #   the expressions; a list matches any member and a range its span. state: inside it
+    #   takes a state or a list of states.
+    # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
+    #   specification. Only in an aggregate, not in a projection or a process.
+    # @option order | a hash of attribute: :asc or :desc | - | Sorts by id or by attributes
+    #   stored in one column, id breaking ties.
+    # @option first | an expression | - | Returns at most that many rows.
+    # @guide c-sweettalk-queries
+    # @example
+    #   context Library, means: "books on loan" do
+    #     aggregate Book, means: "one copy of a book" do
+    #       has title : String
+    #       has year : Int32
+    #       moves shelved >> lent
+    #       finds shelved_by(title : String), where: {title: title, state: :shelved}
+    #       finds newest(count : Int32), order: {year: :desc}, first: count
+    #     end
+    #   end
     macro finds(call, where = nil, satisfying = nil, order = nil, first = nil, **unknown,
                 &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
@@ -171,6 +196,23 @@ module SweetTalk
     # `counts placed_count_for(member : Account), where: {member: member, state: :placed}`
     # is how many live aggregates (or projection rows) `finds` with the same where: and
     # satisfying: would return, read in one statement; with neither, every live one.
+    #
+    # @word query | Counts the matching rows.
+    # @usage counts NAME[(ARG : TYPE, ...)][, where: CONDITIONS][, satisfying: SPECIFICATION]
+    # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
+    #   the expressions, as in finds. state: inside it takes a state or a list of states.
+    # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
+    #   specification. Only in an aggregate, not in a projection or a process.
+    # @guide c-sweettalk-queries
+    # @example
+    #   context Winery, means: "fruit picked and sold" do
+    #     aggregate Crate, means: "one crate of apples" do
+    #       has variety : String
+    #       moves picked >> sold
+    #       counts picked_count, where: {state: :picked}
+    #       counts picked_of(kind : String), where: {variety: kind, state: :picked}
+    #     end
+    #   end
     macro counts(call, where = nil, satisfying = nil, **unknown, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -242,6 +284,25 @@ module SweetTalk
     # its entities as `Line.price`; it is an Int32, Int64 or Float64 column, or a value that
     # wraps a whole number or a decimal, takes 0 and has no upper bound. The sum comes back
     # as that type, zero when nothing matches.
+    #
+    # @word query | Adds up one number attribute over the matching rows and returns the total.
+    # @usage sums NAME[(ARG : TYPE, ...)], of: ATTRIBUTE[, where: CONDITIONS]
+    #   [, satisfying: SPECIFICATION]
+    # @option of | an attribute symbol, or Entity.attribute | - | The attribute to add up: an
+    #   Int32, Int64 or Float64, or a value that wraps a number. It is required.
+    # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
+    #   the expressions, as in finds. state: inside it takes a state or a list of states.
+    # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
+    #   specification. Only in an aggregate, not in a projection or a process.
+    # @guide c-sweettalk-queries
+    # @example
+    #   context Brewery, means: "beer in vats" do
+    #     aggregate Vat, means: "one vat of beer" do
+    #       has litres : Int32
+    #       moves brewing >> bottled
+    #       sums litres_brewing, of: :litres, where: {state: :brewing}
+    #     end
+    #   end
     macro sums(call, of = nil, where = nil, satisfying = nil, **unknown, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
@@ -380,6 +441,28 @@ module SweetTalk
     # model as `of:` with a one-column key: text, a whole number, a Bool, a day, a decimal,
     # an aggregate it refers to, or `:state`. Each row is `{by: key, total: sum}`, ordered by
     # the stored key, nil (an optional attribute's) last; a key no row has is absent.
+    #
+    # @word query | Sums one attribute per value of another and returns a row of key and total
+    #   for each.
+    # @usage groups NAME[(ARG : TYPE, ...)], of: ATTRIBUTE, by: ATTRIBUTE[, where: CONDITIONS]
+    #   [, satisfying: SPECIFICATION]
+    # @option of | an attribute symbol, or Entity.attribute | - | The number to add up, as in sums.
+    #   It is required.
+    # @option by | an attribute symbol, :state, or Entity.attribute | - | The attribute that
+    #   splits the rows into groups, of the same model as of:. It is required.
+    # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
+    #   the expressions, as in finds. state: inside it takes a state or a list of states.
+    # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
+    #   specification. Only in an aggregate, not in a projection or a process.
+    # @guide c-sweettalk-queries
+    # @example
+    #   context Vault, means: "wine laid down and drunk" do
+    #     aggregate Cask, means: "one cask of wine" do
+    #       has litres : Int32
+    #       moves full >> empty
+    #       groups litres_by_state, of: :litres, by: :state
+    #     end
+    #   end
     macro groups(call, of = nil, by = nil, where = nil, satisfying = nil, **unknown, &block)
       {% typed = call.is_a?(Call) && call.receiver.is_a?(Nop) &&
                  call.args.all?(&.is_a?(TypeDeclaration)) %}
