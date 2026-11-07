@@ -197,6 +197,7 @@ module SweetTalk
       {% codec = nil %}
       {% parts = nil %}
       {% nilable = false %}
+      {% optional_check = nil %}
       {% base = type.stringify %}
       {% if type.is_a?(Generic) && type.name.stringify == "Array" %}
         {% kind = "entities" %}
@@ -228,6 +229,11 @@ module SweetTalk
         {% nilable = resolved.nilable? %}
         {% members = [resolved] %}
         {% members = resolved.union_types.reject { |member| member == Nil } if resolved.union? %}
+        # An alias of a union, such as `Money::Amount?`, nests it in the union with Nil.
+        {% flat = [] of Nil %}
+        {% for member in members %}
+          {% flat = flat + (member.union? ? member.union_types : [member]) %}
+        {% end %}
         {% single = members.size == 1 && (!resolved.union? || nilable) %}
         {% base = "::#{members[0].name}" if single && nilable %}
         {% optional = nilable ? "?" : "" %}
@@ -262,6 +268,25 @@ module SweetTalk
           {% raw = "Int64#{optional.id}" %}
           {% column = "#{name}_id" %}
           {% lines = "belongs_to #{name} : ::#{members[0]}#{optional.id}" %}
+        {% elsif flat.all? do |member|
+                   marker = member.type_vars.size == 1 && member.type_vars[0]
+                   marker.is_a?(TypeNode) && marker.has_constant?("SWEETTALK_LOADER")
+                 end %}
+          # An amount (caramel/sweet_talk/money, ADR 0063): its currency in `<name>_currency`
+          # under the currencies' CHECK, its minor units in `<name>`, rebuilt by the loader
+          # its currency marker names.
+          {% kind = "composite" %}
+          {% column = nil %}
+          {% loader = flat[0].type_vars[0].constant("SWEETTALK_LOADER") %}
+          {% currency = parse_type(loader[1]).resolve %}
+          {% base = flat.size == 1 ? "::#{flat[0]}" : loader[0] %}
+          {% optional_check = {"all_or_none"} %}
+          {% listed = currency.constant("SWEETTALK_CHECK") %}
+          {% parts = [{"currency", "#{name}_currency", "String#{optional.id}", loader[1], "value",
+                       listed, nil},
+                      {"raw", name.stringify, "Int64#{optional.id}", "Int64", "column", nil,
+                       nil}] %}
+          {% lines = parts.map { |part| "field #{part[1].id} : #{part[2].id}" }.join("\n") %}
         {% elsif members.size == 1 && columns.includes?(members[0].stringify) %}
           {% kind = "column" %}
           {% raw = type.stringify %}
@@ -350,7 +375,7 @@ module SweetTalk
         {% lines = "#{lines.id}\n#{line.id}" %}
       {% end %}
       {% if kind == "composite" && nilable && parts.size > 1 %}
-        {% digest = composite.constant("SWEETTALK_OPTIONAL_CHECK")[0] %}
+        {% digest = (optional_check || composite.constant("SWEETTALK_OPTIONAL_CHECK"))[0] %}
         {% suffix = "#{name}_#{digest.id}" %}
         {% listed = parts.map { |part| "\"#{part[1].id}\"" }.join(", ") %}
         {% sql = "num_nonnulls(#{listed.id}) IN (0, #{parts.size})" %}

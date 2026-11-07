@@ -183,8 +183,9 @@ describe "SweetTalk shared kernels" do
   it "draws kernel edges and lists the kernels in the glossary" do
     SweetTalk.context_map.select(&.[2].==("kernel")).sort!.should eq([
       {"Billing", "Calendar", "kernel"}, {"Billing", "Money", "kernel"},
-      {"Money", "Calendar", "kernel"}, {"Pricing", "Calendar", "kernel"},
-      {"Pricing", "Money", "kernel"},
+      {"Money", "Calendar", "kernel"}, {"Payments", "Cash", "kernel"},
+      {"Pricing", "Calendar", "kernel"}, {"Pricing", "Money", "kernel"},
+      {"Rates", "Cash", "kernel"},
     ])
     terms = SweetTalk.glossary.select { |term| {"Money", "Calendar"}.includes?(term.context) }
       .map { |term| {term.kind, term.name, term.context} }

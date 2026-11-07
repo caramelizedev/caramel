@@ -4,7 +4,8 @@ Date: 2026-10-24
 
 Status: accepted. Amends [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md)
 decision 1. Amended: decision 4 and the rejection of an enum by
-[ADR 0058](0058-sweettalk-closed-sets-on-the-screen.md).
+[ADR 0058](0058-sweettalk-closed-sets-on-the-screen.md), and decision 4 by
+[ADR 0063](0063-sweettalk-money.md).
 
 ## Context
 
@@ -37,6 +38,9 @@ The copies drift, and the regular expression was only checked in Crystal.
    `nil` or `tap`, or a Crystal keyword, does not compile. Words with capitals map to
    `underscore`d names, so `USD` gives `usd?`. `kind.member` returns the word as a member
    of the enum `Kind::Member`, and `Kind.new(member)` builds the value back (ADR 0058).
+   `currencies` ([ADR 0063](0063-sweettalk-money.md)) also declares a marker type per
+   code, `Currency::USD`, and gives a code whose methods would be taken, such as TRY,
+   none, since ISO 4217 chose the codes.
 5. **The list is a constant.** `Kind::SWEETTALK_ONE_OF` holds the words, for tools that
    read the model; domain code reads `Kind.all`.
 

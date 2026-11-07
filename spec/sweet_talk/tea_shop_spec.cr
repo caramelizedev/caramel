@@ -514,8 +514,10 @@ describe "The tea shop on PostgreSQL" do
       {"Money", "Calendar", "kernel"},
       {"Ordering", "Catalogue", "dependency"},
       {"Ordering", "Fulfilment", "event"},
+      {"Payments", "Cash", "kernel"},
       {"Pricing", "Calendar", "kernel"},
       {"Pricing", "Money", "kernel"},
+      {"Rates", "Cash", "kernel"},
       {"Signage", "Shelf", "event"},
     ])
   end

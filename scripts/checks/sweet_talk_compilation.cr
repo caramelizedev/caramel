@@ -12,10 +12,11 @@ ABSENT   = "SweetTalk code must be absent from an application that does not requ
            "caramel/sweet_talk"
 # A string only SweetTalk's boundary holds.
 MARKER = "a command changes one aggregate"
-# Each module of caramel/sweet_talk (ADR 0061) with a string only its own code holds; the
-# application spec/fixtures/sweet_talk/<module>.cr requires it.
+# Each module of caramel/sweet_talk (ADR 0061) with a string only its own code holds, and
+# the modules it requires; the application spec/fixtures/sweet_talk/<module>.cr requires it.
 MODULES = {
-  "decimal" => "must be a decimal written with digits and a point",
+  "decimal" => {"must be a decimal written with digits and a point", [] of String},
+  "money"   => {" decimals, not ", ["decimal"]},
 }
 
 # Each fixture's problem text, by the fixture's name after `compile_`.
@@ -483,6 +484,34 @@ PROBLEMS = [
    "has lines : Array(Line) takes no unique:, index: or check:: what makes Line unique, or " \
    "what it keeps, is declared inside entity Line"},
   {"unique_twice", "Crate declares unique :label twice"},
+  {"money_without_require",
+   "currencies needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "declares no currency holds none of its code"},
+  {"money_currency_shape",
+   "currencies takes a list of ISO 4217 codes, as in currencies %w[USD EUR], not"},
+  {"money_currency_unknown",
+   "currencies lists XAU, but ISO 4217 marks XAU N.A., with no minor unit: give its " \
+   "minor-unit digits, as in exponent: {XAU: 2}"},
+  {"money_currency_not_iso",
+   "currencies lists ABC, but ISO 4217 does not list ABC: give its minor-unit digits, as in " \
+   "exponent: {ABC: 2}"},
+  {"money_exponent_listed",
+   "currencies gives exponent: for EUR, which ISO 4217 counts in 2 minor-unit digits: drop its " \
+   "exponent"},
+  {"money_excess_decimals",
+   "currencies gives XAU 12 minor-unit digits: give a whole number from 0 to 9"},
+  {"money_quote_without_currencies",
+   "quote Rate converts between currencies: declare currencies %w[…] before it in Shop::Till"},
+  {"money_quote_rounding",
+   "quote Rate takes rounding: :half_up, :half_even, :down or :up, how a converted amount " \
+   "becomes whole minor units, not :nearest"},
+  {"money_mix",
+   "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::USD)#+' to be " \
+   "Shop::Till::Minor(Shop::Till::Currency::USD), not " \
+   "Shop::Till::Minor(Shop::Till::Currency::EUR)"},
+  {"money_amounts_added",
+   "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::EUR)#+' to be " \
+   "Shop::Till::Minor(Shop::Till::Currency::EUR), not (Shop::Till::Minor"},
   {"decimal_without_require",
    "value Rate wraps Decimal, which needs require \"caramel/sweet_talk/decimal\" before this " \
    "domain: a program that declares no decimal value never links GMP"},
@@ -726,8 +755,9 @@ at_exit { FileUtils.rm_rf(root) }
   if {"plain", "sweet"}.includes?(name) && held.includes?(MARKER) != (name == "sweet")
     Caramel::Checks.fail(ABSENT)
   end
-  MODULES.each do |required, marker|
-    next if held.includes?(marker) == (name == required)
+  MODULES.each do |required, (marker, _)|
+    holds = name == required || MODULES[name]?.try(&.[1].includes?(required)) || false
+    next if held.includes?(marker) == holds
     Caramel::Checks.fail("#{name}: caramel/sweet_talk/#{required} code must be present " \
                          "exactly when the application requires it")
   end

@@ -389,6 +389,8 @@ const compileRows = {
   'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
   'A warn line with assures:': ['warn_assures'],
   'A command, a factory or a unit body that names an outside border’s module': ['unit_names_outside', 'command_names_outside'],
+  'A money word without require "caramel/sweet_talk/money", a currencies that is not a list of three-capital codes, a code without its minor units, an exponent: for a code ISO 4217 lists or out of 0 to 9, or a quote without currencies before it or with another rounding:': ['money_without_require', 'money_currency_shape', 'money_currency_unknown', 'money_currency_not_iso', 'money_exponent_listed', 'money_excess_decimals', 'money_quote_without_currencies', 'money_quote_rounding'],
+  'An amount added to another currency’s, or two amounts whose currency is data added': ['money_mix', 'money_amounts_added'],
   'A Decimal(P, S) value without require "caramel/sweet_talk/decimal"': ['decimal_without_require'],
   'A decimal bound that is not decimal text, such as at_least: 0, or one written past S decimals': ['decimal_bound_not_text', 'decimal_bound_scale'],
   'A Json value with at_least: or any other option': ['json_option'],

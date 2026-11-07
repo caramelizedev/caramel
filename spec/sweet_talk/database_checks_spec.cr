@@ -100,7 +100,17 @@ describe "SweetTalk's database checks" do
         check_ordering_orders_receipt_to_length_3_254
         check_ordering_orders_state_ef9524ce check_ordering_sales_takings
         check_pantry_adjustments_pending_is_zero_0f316047 check_pantry_adjustments_state_ec1638eb
-        check_pantry_crates_quantity_69784f25 check_pricing_teas_price
+        check_pantry_crates_quantity_69784f25 check_payments_entries_fee_all_or_none
+        check_payments_entries_fee_currency_one_of_8931cfef
+        check_payments_entries_original_currency_one_of_8931cfef
+        check_payments_entries_rate_all_or_none_f890cf76
+        check_payments_entries_rate_from_one_of_8931cfef
+        check_payments_entries_rate_to_one_of_8931cfef check_payments_entries_reported_all_or_none
+        check_payments_entries_reported_currency_one_of_8931cfef
+        check_payments_entry_lines_share_currency_one_of_8931cfef
+        check_payments_totals_reported_all_or_none
+        check_payments_totals_reported_currency_one_of_8931cfef check_pricing_teas_price
+        check_rates_quotes_rate_from_one_of_8931cfef check_rates_quotes_rate_to_one_of_8931cfef
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count
         check_shelf_jars_size_depth check_shelf_jars_size_width check_shelf_jars_state_d37e3be8

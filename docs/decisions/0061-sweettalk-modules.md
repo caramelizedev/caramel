@@ -43,6 +43,9 @@ gets a require of its own.
 9. **The modules.**
    - `caramel/sweet_talk/decimal` ([ADR 0047](0047-sweettalk-decimal-and-json-values.md)):
      `Decimal(P, S)` values. Its dependency is GMP, through `big`.
+   - `caramel/sweet_talk/money` ([ADR 0063](0063-sweettalk-money.md)): currencies,
+     amounts, quotes and allocations, the vocabulary of domains that keep books. It
+     requires `caramel/sweet_talk/decimal`.
 
 ## Reasons
 

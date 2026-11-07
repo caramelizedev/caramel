@@ -80,7 +80,7 @@ module SweetTalk
                read = "row.#{part[1].id}"
                "#{part[0].id}: " + (part[4] == "value" ? "#{part[3].id}.new(#{read.id})" : read)
              end %}
-          {% loads << "@#{name} = #{attribute[3].id}.new(#{parts.join(", ").id})" %}
+          {% loads << "@#{name} = #{base}.new(#{parts.join(", ").id})" %}
           {% for part in attribute[7] %}
             {% raw = part[4] == "value" ? ".raw" : "" %}
             {% unless attribute == key %}
