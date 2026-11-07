@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- SweetTalk: the skill `frappe make domain` writes no longer says never to add up with `SugarORM.sql`. It says to prefer `sums` and `groups`, and to use `SugarORM.sql` only for what they cannot state, such as an average, a `Float64` or `Time` key or several keys, with the tenant predicate written out ([ADR 0049](docs/decisions/0049-sweettalk-sums-and-groups.md)). Refresh an application's copy with `cp lib/caramel/templates/skills/sweettalk/SKILL.md .claude/skills/sweettalk/`.
+
 ## 0.22.0 - 2026-11-07
 
 ### Upgrade notes
