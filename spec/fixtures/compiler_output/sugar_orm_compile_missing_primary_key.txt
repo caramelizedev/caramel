@@ -6,5 +6,5 @@ In spec/fixtures/sugar_orm/compile_missing_primary_key.cr:3:8
             ^
 Error: Keyless has no primary key.
 
-Remediation: add `field id : Int64, primary: true` to the schema block of Keyless.
+Remediation: add `field id : UUID, primary: true` to the schema block of Keyless.
   --> @@ROOT@@/spec/fixtures/sugar_orm/compile_missing_primary_key.cr:4:10

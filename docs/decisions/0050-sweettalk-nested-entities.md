@@ -4,7 +4,8 @@ Date: 2026-10-31
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 4,
 [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md) decision 3 and
-[ADR 0045](0045-sweettalk-database-constraints.md) decision 5.
+[ADR 0045](0045-sweettalk-database-constraints.md) decision 5. Decisions 2 and 4 are amended
+by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -24,7 +25,8 @@ number by hand, which an aggregate's invariants and events could not see as one 
 2. **Loading is one statement per list per level.** `find`, `find?`, `all` and every query
    read the roots, then each list of entities, then each list under those for every row
    of the level at once, by the parent's id, and none for an empty level; entities come
-   back by id. `entities: false` loads no level.
+   back by id, which is creation order for a UUID id and insertion order for an Int64 id.
+   `entities: false` loads no level.
 3. **Saving and dropping go children first.** A save deletes the rows each list was loaded
    with and no longer holds before it writes, the rows under them first, one `DELETE` per
    list per level through `IN (SELECT …)` on the dropped rows; then it writes the parent
@@ -32,7 +34,8 @@ number by hand, which an aggregate's invariants and events could not see as one 
    another parent is inserted anew with its own entities.
 4. **Checks and facts recurse.** A command checks every `never` and `always` of the
    aggregate, then of each entity at every depth, before it saves; an event that carries
-   an entity carries its lists, each entity with the id its row got.
+   an entity carries its lists, each entity with its id: the UUID it was built with, or
+   the Int64 its row got.
 5. **`unique` holds within the parent.** An entity's unique index leads with its parent's
    column, so two slips may each hold a mark with the same note.
 6. **Names PostgreSQL would truncate do not compile.** A table name or an entity's key

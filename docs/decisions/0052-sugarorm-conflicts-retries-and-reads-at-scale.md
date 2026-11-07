@@ -46,11 +46,12 @@ record. The other gaps #133 named are issues of their own, listed in #282.
    passed to `joins` or to `where_in`. Selecting or grouping by a joined column is #281.
 6. **Batches and pages by primary key.** `each_batch(size = 1000)` yields `Array`s of what
    `to_a` returns, one statement per batch, and stops after a short batch.
-   `page(size, after: nil, direction: :asc)` returns `SugarORM::Page(R)` with `records` and
-   `after`, the cursor for the next page, nil on the last. Both set their own order and
-   limit, so they refuse a query with `order_by`, limit or offset, and a size below 1;
-   `each_batch` refuses `lock`, and `page` a direction other than `:asc` and `:desc`. A
-   cursor over another column is #279.
+   `page(size, after: nil, direction: :asc)` returns `SugarORM::Page(R, K)` with `records`
+   and `after`, the cursor for the next page, nil on the last; `K` and the cursor are the
+   schema's key type, `UUID` or `Int64`. Both set their own order and limit, so they refuse
+   a query with `order_by`, limit or offset, and a size below 1; `each_batch` refuses
+   `lock`, and `page` a direction other than `:asc` and `:desc`. A cursor over another
+   column is #279.
 7. **A generated Destroy answers 409.** `Caramel::Action#conflict(message)` answers 409,
    and the Destroy `frappe make resource` generates rescues `ForeignKeyViolation` with
    "<Model> is still in use", a locale key `in_use` when the app has locales.
@@ -67,9 +68,9 @@ record. The other gaps #133 named are issues of their own, listed in #282.
   The base query's `where`, `order_by` and aggregates write unqualified column names, so a
   second table with the same names would make every one ambiguous; the prefix keeps them
   unambiguous without rewriting them to be qualified.
-- Keyset by primary key needs no encoding: the cursor is the last row's `Int64` key, typed,
-  and a page costs one indexed range read where `offset` reads and discards every earlier
-  row.
+- Keyset by primary key needs no encoding: the cursor is the last row's key, typed, an
+  `Int64` or a UUIDv7, whose leading time keeps it in creation order, and a page costs one
+  indexed range read where `offset` reads and discards every earlier row.
 - `DISTINCT ON` returns the one row per owner in the statement itself; a has_one that loaded
   every child held them all in memory to keep one.
 

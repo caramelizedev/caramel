@@ -202,14 +202,17 @@ module Caramel::Frappe
     TENANT_BLOCK = /^    tenant App::([A-Z][A-Za-z0-9]*), by: :[a-z][a-z0-9_]* do$/m
     # The table the tenant model's schema declares.
     TENANT_SCHEMA = /schema "([a-z][a-z0-9_]*)"/
+    # The tenant model's primary key, whose type its resources' tenant column takes.
+    TENANT_KEY = /^\s*field id : (UUID|Int64), primary: true$/m
     # Where the tenant block takes a tenant resource's routes.
     TENANT_ROUTES = "      # Frappé tenant routes"
     # The address a generated request spec signs into.
     SPEC_TENANT = "/acme"
 
     # The model a tenant resource belongs to: its class, singular name,
-    # column on the resource and table.
-    record Tenant, model : String, name : String, column : String, table : String
+    # column on the resource, table and key's SQL type (uuid or bigint).
+    record Tenant, model : String, name : String, column : String, table : String,
+      key : String
 
     @localized = false
     @plural = ""
@@ -222,7 +225,8 @@ module Caramel::Frappe
                  plural : String? = nil,
                  version : Int64? = nil,
                  only : String? = nil,
-                 central : Bool = false) : Array(String)
+                 central : Bool = false,
+                 int64 : Bool = false) : Array(String)
       ResourceGenerator.validate_model(name)
       singular = name.underscore
       collection = plural || ResourceGenerator.pluralize(singular)
@@ -295,6 +299,8 @@ module Caramel::Frappe
         "@@TENANT_MODEL@@"      => tenant.try(&.model) || "",
         "@@ROOT@@"              => tenant ? SPEC_TENANT : "",
         "@@HOME@@"              => tenant ? SPEC_TENANT : "/",
+        "@@ID@@"                => int64 ? "Int64" : "UUID",
+        "@@ID_FIELD@@"          => int64 ? "Int64, min: 1" : "UUID",
       }
       flags = actions.dup
       flags << "locales" if @localized
@@ -314,7 +320,7 @@ module Caramel::Frappe
         files[relative] = content
       end
       raise Error.new("Resource templates are missing") if files.empty?
-      ddl = ResourceGenerator.create_table(collection, fields, tenant)
+      ddl = ResourceGenerator.create_table(collection, fields, tenant, int64: int64)
       migration = SugarORM::Migration.new(migration_version, "create_#{collection}", ddl)
       migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
       files[migration_path] = SchemaDiff.source(migration)
@@ -375,7 +381,20 @@ module Caramel::Frappe
       model = routes.match(TENANT_BLOCK).try(&.[1])
       raise Error.new("config/routes.cr has no tenant App::Model, by: :field do line") unless model
       Tenant.new(model: model, name: model.underscore,
-        column: "#{model.underscore}_id", table: tenant_table(root, model))
+        column: "#{model.underscore}_id", table: tenant_table(root, model),
+        key: tenant_key_type(root, model))
+    end
+
+    # The SQL type of the tenant model's primary key: uuid or bigint.
+    private def tenant_key_type(root : String, model : String) : String
+      file = "#{model.underscore}.cr"
+      path = File.join(root, "app/models", file)
+      declared = File.read(path).match(TENANT_KEY).try(&.[1]) if File.file?(path)
+      return declared == "UUID" ? "uuid" : "bigint" if declared
+
+      raise Error.new("app/models/#{file} must declare `field id : UUID, primary: true` " \
+                      "or `field id : Int64, primary: true`: " \
+                      "frappe make resource reads the tenant's key type there")
     end
 
     # The table the tenant model's schema declares.
@@ -691,14 +710,15 @@ module Caramel::Frappe
     end
 
     # Diffs the generated schema's table against an empty database, exactly as
-    # `frappe db diff --name create_<plural>` would: id identity key, the
+    # `frappe db diff --name create_<plural>` would: the id key, the
     # tenant column, the fields in order, the timestamps, then the tenant's
     # index, the unique indexes and the tenant's foreign key.
     def self.create_table(table : String,
                           fields : Array(ResourceField),
-                          tenant : Tenant? = nil) : Array(String)
-      columns = [identity_column]
-      columns << tenant_column(tenant.column) if tenant
+                          tenant : Tenant? = nil, *,
+                          int64 : Bool = false) : Array(String)
+      columns = [identity_column(int64)]
+      columns << tenant_column(tenant.column, tenant.key) if tenant
       columns.concat(fields.map(&.column))
       columns.concat(%w[created_at updated_at].map { |stamp| timestamp_column(stamp) })
       indexes = [] of SugarORM::Catalog::Index
@@ -716,7 +736,17 @@ module Caramel::Frappe
       SugarORM::DDL.statements(plan.transactional)
     end
 
-    private def self.identity_column : SugarORM::Catalog::Column
+    # A UUID key the database defaults to uuidv7(), or an Int64 identity key.
+    private def self.identity_column(int64 : Bool) : SugarORM::Catalog::Column
+      unless int64
+        return SugarORM::Catalog::Column.new(
+          name: "id",
+          sql_type: "uuid",
+          nullable: false,
+          default: "uuidv7()",
+          primary: true,
+          identity: false)
+      end
       SugarORM::Catalog::Column.new(
         name: "id",
         sql_type: "bigint",
@@ -734,8 +764,8 @@ module Caramel::Frappe
         default: "CURRENT_TIMESTAMP")
     end
 
-    private def self.tenant_column(name : String) : SugarORM::Catalog::Column
-      SugarORM::Catalog::Column.new(name: name, sql_type: "bigint", nullable: false, default: nil)
+    private def self.tenant_column(name : String, sql_type : String) : SugarORM::Catalog::Column
+      SugarORM::Catalog::Column.new(name: name, sql_type: sql_type, nullable: false, default: nil)
     end
 
     # The unique (tenant, id) index SugarORM gives every tenanted table.

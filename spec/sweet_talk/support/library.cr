@@ -6,6 +6,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Library
   include SweetTalk
+  ids Int64
 
   context Lending, means: "a library that lends books to readers" do
     value Day, Date, means: "a calendar day"

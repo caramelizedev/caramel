@@ -3,6 +3,7 @@ require "../../../src/caramel/tenancy"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   struct Account < SugarORM::Schema
     schema "accounts" do

@@ -5,7 +5,8 @@ Date: 2026-10-28
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 6 and
 [ADR 0041](0041-sweettalk-events-that-carry-attributes.md) decision 3. Decisions 1, 3 and 4
 are amended by [ADR 0051](0051-sweettalk-event-log-replay-and-retention.md). Decision 3
-gained `before:` on 2026-11-07.
+gained `before:` on 2026-11-07. Decisions 2 and 3 are amended by
+[ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -31,7 +32,8 @@ be said (#248, split from #168).
    schema, so `frappe db diff` creates it and the spec harnesses migrate it. Columns: `id`
    bigint identity, `event_id` text unique, `aggregate` text (the aggregate's stored name,
    or the context's own for a service's event), `name` text (the stored event name, the
-   `renamed_from:` original as the channel says it), `subject_id` bigint null, `occurred_at`
+   `renamed_from:` original as the channel says it), `subject_id` null and typed after the
+   context's ids (uuid or bigint), `occurred_at`
    timestamptz, `actor` text null, `cause_id` text null, `flow_id` text, `fields` jsonb
    through `SugarORM::JSONB(JSON::Any)`, and `created_at` alone: a row is never updated.
    Indexes: `(flow_id)`, `(cause_id)`, `(aggregate, subject_id, id)` and `(occurred_at)`.
@@ -42,7 +44,7 @@ be said (#248, split from #168).
    before: u, limit: 100)` returns `Array(Invoiced)` built through the event's
    `__sweettalk_load` from the row's fields and metadata, oldest first and newest last, the
    first `limit` rows whose `occurred_at` is at or after `since:` and before `before:`;
-   `subject:` takes an id or an `Int64`. `before:` reads the log as it stood at a moment:
+   `subject:` takes an id or a raw id of the context's id type (`UUID` or `Int64`). `before:` reads the log as it stood at a moment:
    what the program knew then, by when each event was emitted, not when what it records
    took effect. A log kept a number of days (ADR 0051) answers with the rows it still
    holds, none older than its window. `Billing.logged(subject: id)` returns every class as

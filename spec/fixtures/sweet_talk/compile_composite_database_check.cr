@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Store, means: "the shelves" do
     value Size, database_check: false, means: "a size" do

@@ -183,6 +183,26 @@ describe Caramel::Frappe::TenancyGenerator do
     end
   end
 
+  it "keys the tenant by a UUID the database defaults to uuidv7()" do
+    tenancy_project do |project, generator|
+      generator.generate(project, "Account", version: VERSION)
+      model = read(project, "app/models/account.cr")
+      model.should contain("      field id : UUID, primary: true\n")
+      migration = read(project, "db/migrations/20261003000001_create_accounts.cr")
+      migration.should contain(%("id" uuid NOT NULL DEFAULT uuidv7() PRIMARY KEY))
+    end
+  end
+
+  it "keys the tenant by an Int64 identity with --int64" do
+    tenancy_project do |project, generator|
+      generator.generate(project, "Account", version: VERSION, int64: true)
+      model = read(project, "app/models/account.cr")
+      model.should contain("      field id : Int64, primary: true\n")
+      migration = read(project, "db/migrations/20261003000001_create_accounts.cr")
+      migration.should contain(%("id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY))
+    end
+  end
+
   it "validates the slug in the tenant's changeset" do
     tenancy_project do |project, generator|
       generator.generate(project, "Account", version: VERSION)

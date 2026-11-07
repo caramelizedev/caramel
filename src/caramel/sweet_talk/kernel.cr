@@ -111,6 +111,8 @@ module SweetTalk
       {% end %}
     {% end %}
     {% tenant = @type.has_constant?("SWEETTALK_TENANT") && @type.constant("SWEETTALK_TENANT") %}
+    {% domain = @type == @top_level ? "the program" : @type.name.stringify %}
+    {% declared_ids = @type.has_constant?("SWEETTALK_IDS") && @type.constant("SWEETTALK_IDS") %}
     {% shared = [] of Nil %}
     {% shared = [shares] unless shares.is_a?(NilLiteral) %}
     {% shared = shares if shares.is_a?(ArrayLiteral) %}
@@ -123,6 +125,8 @@ module SweetTalk
       SWEETTALK_WAS       = nil
       SWEETTALK_STORED    = {{ name.stringify.underscore }}
       SWEETTALK_TENANT    = {{ tenant ? tenant : nil }}
+      ::SweetTalk.__sweettalk_id_constants({{ name }}, {{ domain }}, {{ tenant ? tenant : nil }},
+        {{ declared_ids }})
       {% key = "SWEETTALK_REQUIREMENTS" %}
       SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}
       SWEETTALK_CENTRAL   = false

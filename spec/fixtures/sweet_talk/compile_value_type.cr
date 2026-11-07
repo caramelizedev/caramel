@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Kitchen, means: "where the tea is brewed" do
     value Grams, Float64, means: "grams of leaves"

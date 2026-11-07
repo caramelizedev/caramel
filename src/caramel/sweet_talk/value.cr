@@ -36,11 +36,11 @@ module SweetTalk
     end
   end
 
-  # An aggregate's typed id, `Name::Id`, an entity's, or a record's, `RecordId(Account)`.
-  # `SweetTalk.lock` locks an aggregate's rows through its id; an entity's or a record's
-  # id names no row it may lock.
+  # An aggregate's typed id, `Name::Id`, an entity's, or a record's, `RecordId(Account)`:
+  # a UUID or an Int64, as its domain or its schema keys rows. `SweetTalk.lock` locks an
+  # aggregate's rows through its id; an entity's or a record's id names no row it may lock.
   abstract struct Identity
-    abstract def raw : Int64
+    abstract def raw
 
     # The table whose row this id names, for `SweetTalk.lock`.
     def __sweettalk_table : String
@@ -48,18 +48,29 @@ module SweetTalk
                               "#{self.class.name} is not an aggregate's id")
     end
 
-    # Locks the live rows of *raws* in this id's table, by id, in one statement.
-    def __sweettalk_lock(raws : Array(Int64)) : Nil
+    # Locks the live rows of the ids in *batch*, all of this id's type, in this id's table,
+    # by id, in one statement; returns their raws, sorted and once each.
+    def __sweettalk_lock(batch : Array(Identity)) : Array(::SugarORM::Key)
       __sweettalk_table
+      [] of ::SugarORM::Key
     end
   end
 
   # The id of a record of an application's own SugarORM schema, such as `Account`, that
   # an aggregate refers to with `has member : Account`.
   struct RecordId(T) < Identity
-    getter raw : Int64
+    @raw : ::SugarORM::Key
 
-    def initialize(@raw : Int64)
+    def initialize(raw : T::PrimaryKey)
+      @raw = raw
+    end
+
+    def raw : T::PrimaryKey
+      @raw.as(T::PrimaryKey)
+    end
+
+    def self.__sweettalk_from_json(any : JSON::Any) : self
+      new(::SweetTalk.__sweettalk_raw(T::PrimaryKey, any))
     end
 
     # Reads the record.
@@ -162,7 +173,8 @@ module SweetTalk
         {% decl.raise "part takes a name and a type, as in part street : String" %}
       {% end %}
       {% resolved = decl.type.resolve? %}
-      {% if resolved && %w[String Int32 Int64 Bool Float64 Time].includes?(resolved.stringify) %}
+      {% columns = %w[String Int32 Int64 UUID Bool Float64 Time] %}
+      {% if resolved && columns.includes?(resolved.stringify) %}
         {% part = {decl.var.stringify, decl.line_number, resolved.stringify, resolved.stringify,
                    "column", nil, nil} %}
       {% elsif resolved && resolved < ::SweetTalk::Value %}
@@ -170,8 +182,8 @@ module SweetTalk
                    resolved.constant("SWEETTALK_WRAPS"), "value",
                    resolved.constant("SWEETTALK_CHECK"), resolved.constant("SWEETTALK_CODEC")} %}
       {% else %}
-        {% decl.raise "part #{decl} cannot be stored: a part is String, Int32, Int64, Bool, " +
-                      "Float64, Time or a value that wraps one" %}
+        {% decl.raise "part #{decl} cannot be stored: a part is String, Int32, Int64, UUID, " +
+                      "Bool, Float64, Time or a value that wraps one" %}
       {% end %}
       SWEETTALK_PART_{{ decl.var.id.upcase }} = {{ part }}
 

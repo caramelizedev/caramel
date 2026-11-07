@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Fulfilment, means: "packing and dispatching parcels" do
     aggregate Parcel, means: "the box we dispatch for one order" do

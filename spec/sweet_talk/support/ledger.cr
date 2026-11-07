@@ -9,6 +9,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Ledger
   include SweetTalk
+  ids Int64
 
   # The application's own accounts, a plain SugarORM schema.
   struct Account < SugarORM::Schema

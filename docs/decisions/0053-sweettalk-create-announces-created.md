@@ -5,7 +5,7 @@ Date: 2026-11-07
 Status: accepted. Amends [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md)
 decision 4, [ADR 0041](0041-sweettalk-events-that-carry-attributes.md) (the rejected
 "Carrying every attribute by default") and [ADR 0048](0048-sweettalk-event-log.md)
-decision 1.
+decision 1. Decision 4 is amended by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -29,9 +29,10 @@ its table (#265).
 3. **A declared `Created` is the one `create` emits.** `event Created, carries: [member],
    means: "…"` carries those attributes only. A declared `Created` with fields of its own
    fails compilation: `create` has nothing to give them.
-4. **The channel is checked.** A `Created` channel past PostgreSQL's 63 characters, or 42
-   with `caramel/tenancy`, fails compilation and names the choice: a shorter name, or a
-   factory, which replaces `create` and `Created`.
+4. **The channel is checked.** A `Created` channel past PostgreSQL's 63 characters, or with
+   `caramel/tenancy` past 42 under an Int64 tenant and 36 under a UUID one, fails
+   compilation and names the choice: a shorter name, or a factory, which replaces `create`
+   and `Created`.
 5. **A factory is unchanged.** An aggregate with a factory has no `create` and no
    generated `Created`.
 

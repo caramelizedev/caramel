@@ -144,6 +144,28 @@ module SugarUnit
     end
   end
 
+  # Keyed by UUID, and referenced from an Int64-keyed schema that comes first.
+  struct Award < SugarORM::Schema
+    schema "unit_awards" do
+      field id : Int64, primary: true
+      belongs_to badge : Badge
+    end
+  end
+
+  struct Badge < SugarORM::Schema
+    schema "unit_badges" do
+      field id : UUID, primary: true
+      field label : String
+      belongs_to team : Team
+    end
+  end
+
+  class Badge::Grant < SugarORM::Changeset(Badge)
+    param id : UUID
+    param label : String
+    param team_id : Int64
+  end
+
   class Ticket::GradeChangeset < SugarORM::Changeset(Ticket)
     param grade : Grade
 

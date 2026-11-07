@@ -49,6 +49,7 @@ module Caramel::I18n
     {"errors.invalid_format", "::SugarORM::Wording", "invalid_format", %w[]},
     {"errors.invalid", "::SugarORM::Wording", "invalid", %w[]},
     {"errors.taken", "::SugarORM::Wording", "taken", %w[]},
+    {"errors.key_kept", "::SugarORM::Wording", "key_kept", %w[]},
     {"errors.record_gone", "::SugarORM::Wording", "record_gone", %w[]},
     {"errors.record_stale", "::SugarORM::Wording", "record_stale", %w[]},
     {"pages.check_request", "::Caramel::Wording", "check_request", %w[]},

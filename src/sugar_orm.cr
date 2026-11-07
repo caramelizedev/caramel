@@ -1,3 +1,6 @@
+require "uuid"
+require "uuid/json"
+require "./sugar_orm/uuid7"
 require "./sugar_orm/catalog"
 require "./sugar_orm/repo"
 require "./sugar_orm/associations"

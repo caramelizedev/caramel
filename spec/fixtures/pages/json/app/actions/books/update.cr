@@ -3,7 +3,7 @@ module App::Books
     include Form
 
     contract do
-      field id : Int64, min: 1
+      field id : UUID
       field title : String
       field author : String
     end

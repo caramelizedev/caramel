@@ -3,6 +3,9 @@ require "./support/page_fixture"
 module Caramel::Checks
   # Follows the Box Office path (website page boxoffice) step by step.
   class PageBoxoffice < PageFixture
+    # What the seed prints when it schedules the show, with the show's address.
+    SCHEDULED = %r{Scheduled The Tempest with 120 seats at (/shows/[0-9a-f-]{36})\.}
+
     def initialize
       super("boxoffice", "boxoffice")
     end
@@ -48,21 +51,22 @@ module Caramel::Checks
             "app/actions/holds/show.cr", "app/actions/holds/sell.cr",
             "app/actions/waitlists/join.cr"])
       routes("shows", [
-        "GET /shows/:show App::Shows::Show show:Show::Id(Int64)",
-        "POST /shows/:show/holds App::Holds::Create show:Show::Id(Int64) " \
+        "GET /shows/:show App::Shows::Show show:Show::Id(UUID)",
+        "POST /shows/:show/holds App::Holds::Create show:Show::Id(UUID) " \
         "guest:Seating::Email(String) seats:Seating::Seats(Int32)",
-        "GET /shows/:show/holds/:hold App::Holds::Show show:Show::Id(Int64) hold:Int32(min=1)",
-        "POST /shows/:show/holds/:hold/sale App::Holds::Sell show:Show::Id(Int64) " \
+        "GET /shows/:show/holds/:hold App::Holds::Show show:Show::Id(UUID) hold:Int32(min=1)",
+        "POST /shows/:show/holds/:hold/sale App::Holds::Sell show:Show::Id(UUID) " \
         "hold:Int32(min=1)",
-        "POST /shows/:show/waitlist App::Waitlists::Join show:Show::Id(Int64) " \
+        "POST /shows/:show/waitlist App::Waitlists::Join show:Show::Id(UUID) " \
         "guest:Seating::Email(String) seats:Seating::Seats(Int32)",
       ])
       # 09 · Open the box office
       copy(["db/seeds.cr"])
-      scheduled = "Scheduled The Tempest with 120 seats."
-      assert!(frappe("seed", timeout: 600.seconds).stdout.includes?(scheduled))
+      seeded = frappe("seed", timeout: 600.seconds).stdout
+      path = seeded.match(SCHEDULED).try(&.[1]) || ""
+      assert!(!path.empty?, seeded)
       second = frappe("seed", timeout: 600.seconds)
-      assert!(!second.stdout.includes?(scheduled), second.stdout)
+      assert!(!second.stdout.includes?("Scheduled The Tempest"), second.stdout)
       show = have_html {
         section(class: "show") {
           h1 { "The Tempest" }
@@ -70,10 +74,10 @@ module Caramel::Checks
           button(type: "submit") { "Hold seats" }
         }
       }
-      page = fetch("/shows/1")
+      page = fetch(path)
       assert!(show.match(page), show.failure_message(page))
-      # The second seed scheduled nothing, so there is no second show.
-      assert!(fetch("/shows/2", status_only: true) == "404")
+      # An address that names no show answers 404.
+      assert!(fetch("/shows/#{UUID.random}", status_only: true) == "404")
       # 10 · Specify the rules
       copy(["spec/support/box_office.cr", "spec/domain/box_office_spec.cr",
             "spec/requests/box_office_spec.cr"])

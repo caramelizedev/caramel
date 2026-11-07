@@ -28,7 +28,7 @@ cases = {
   "compile_unknown_access"   => ["undefined method 'admin'"],
   "compile_field_value_wire" => [
     "Grams includes Caramel::FieldValue(Float32), but a field value binds from String, " \
-    "Int32, Int64, Float64, Bool or Time: weight",
+    "Int32, Int64, UUID, Float64, Bool or Time: weight",
     "field weight : Grams",
   ],
   "compile_field_value_without_from_field" => [
@@ -42,7 +42,7 @@ cases = {
   ],
   "compile_array_field_value_wire" => [
     "Grams includes Caramel::FieldValue(Float32), but a field value binds from String, " \
-    "Int32, Int64, Float64, Bool or Time: weights",
+    "Int32, Int64, UUID, Float64, Bool or Time: weights",
     "field weights : Array(Grams), max: 3",
   ],
   "compile_array_field_value_without_from_field" => [

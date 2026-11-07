@@ -71,12 +71,13 @@ module SugarORM
     end
   end
 
-  # One page of a keyset read: `after` is the cursor for the next page, nil on the last.
-  struct Page(R)
+  # One page of a keyset read: `after` is the cursor for the next page, nil on the last,
+  # a primary key of type `K`.
+  struct Page(R, K)
     getter records : Array(R)
-    getter after : Int64?
+    getter after : K?
 
-    def initialize(@records : Array(R), @after : Int64?)
+    def initialize(@records : Array(R), @after : K?)
     end
   end
 
@@ -192,12 +193,12 @@ module SugarORM
       first || raise ::SugarORM::NotFound.new("No #{T} matched: #{to_sql}")
     end
 
-    def find(id : Int64)
+    def find(id : T::PrimaryKey)
       condition = ::SugarORM::Condition.column(T.__sugar_primary_key, id)
       __sugar_where([condition]).limit(1).to_a.first?
     end
 
-    def find!(id : Int64)
+    def find!(id : T::PrimaryKey)
       find(id) || raise ::SugarORM::NotFound.new(
         "#{T} with #{T.__sugar_primary_key} = #{id} was not found"
       )
@@ -299,7 +300,7 @@ module SugarORM
       raise ArgumentError.new(
         "each_batch reads in several statements; remove .lock from this query"
       ) if @clauses.lock
-      cursor = nil.as(Int64?)
+      cursor = nil.as(T::PrimaryKey?)
       loop do
         records = keyset(cursor, :asc, size).to_a
         break if records.empty?
@@ -312,7 +313,7 @@ module SugarORM
     # One page of *size* rows in primary-key order, after the row *after* names (the cursor
     # a page returned), ascending or `direction: :desc`. `after` of the result is the cursor
     # of the next page, nil on the last.
-    def page(size : Int32, after : Int64? = nil, direction : Symbol = :asc)
+    def page(size : Int32, after : T::PrimaryKey? = nil, direction : Symbol = :asc)
       refuse_keyset("page", size)
       unless direction.in?(:asc, :desc)
         raise ArgumentError.new("page direction must be :asc or :desc, not #{direction.inspect}")
@@ -320,7 +321,8 @@ module SugarORM
       records = keyset(after, direction, size + 1).to_a
       more = records.size > size
       records = records.first(size)
-      ::SugarORM::Page.new(records, more ? records.last.__sugar_primary_value : nil)
+      cursor = more ? records.last.__sugar_primary_value : nil
+      ::SugarORM::Page(typeof(records.first), T::PrimaryKey).new(records, cursor)
     end
 
     # Narrows to the rows whose *field* holds the key of a row *parent* matches:
@@ -420,11 +422,11 @@ module SugarORM
       end
     {% end %}
 
-    def find(db : ::SugarORM::Handle, id : Int64)
+    def find(db : ::SugarORM::Handle, id : T::PrimaryKey)
       ::SugarORM::Repo.using(db) { find(id) }
     end
 
-    def find!(db : ::SugarORM::Handle, id : Int64)
+    def find!(db : ::SugarORM::Handle, id : T::PrimaryKey)
       ::SugarORM::Repo.using(db) { find!(id) }
     end
 
@@ -448,7 +450,7 @@ module SugarORM
 
     def page(db : ::SugarORM::Handle,
              size : Int32,
-             after : Int64? = nil,
+             after : T::PrimaryKey? = nil,
              direction : Symbol = :asc)
       ::SugarORM::Repo.using(db) { page(size, after, direction) }
     end
@@ -488,13 +490,13 @@ module SugarORM
       new.each_batch(db, size) { |batch| yield batch }
     end
 
-    def self.page(size : Int32, after : Int64? = nil, direction : Symbol = :asc)
+    def self.page(size : Int32, after : T::PrimaryKey? = nil, direction : Symbol = :asc)
       new.page(size, after, direction)
     end
 
     def self.page(db : ::SugarORM::Handle,
                   size : Int32,
-                  after : Int64? = nil,
+                  after : T::PrimaryKey? = nil,
                   direction : Symbol = :asc)
       new.page(db, size, after, direction)
     end
@@ -533,19 +535,19 @@ module SugarORM
       new.each(db) { |record| yield record }
     end
 
-    def self.find(id : Int64)
+    def self.find(id : T::PrimaryKey)
       new.find(id)
     end
 
-    def self.find(db : ::SugarORM::Handle, id : Int64)
+    def self.find(db : ::SugarORM::Handle, id : T::PrimaryKey)
       new.find(db, id)
     end
 
-    def self.find!(id : Int64)
+    def self.find!(id : T::PrimaryKey)
       new.find!(id)
     end
 
-    def self.find!(db : ::SugarORM::Handle, id : Int64)
+    def self.find!(db : ::SugarORM::Handle, id : T::PrimaryKey)
       new.find!(db, id)
     end
 
@@ -591,7 +593,7 @@ module SugarORM
 
     # This query past the cursor *after* (`>` ascending, `<` descending) in primary-key order,
     # limited to *count* rows.
-    private def keyset(after : Int64?, direction : Symbol, count : Int32) : self
+    private def keyset(after : T::PrimaryKey?, direction : Symbol, count : Int32) : self
       key = %("#{T.__sugar_primary_key}")
       conditions = @clauses.conditions
       if after

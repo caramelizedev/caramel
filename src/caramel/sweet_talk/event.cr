@@ -10,7 +10,7 @@ module SweetTalk
   abstract class Event
     @__sweettalk_fields : String = ""
     @__sweettalk_subject : ::SweetTalk::Aggregate? = nil
-    @__sweettalk_subject_id : Int64? = nil
+    @__sweettalk_subject_id : ::SugarORM::Key? = nil
 
     # A random UUID, the same in every job that follows this event.
     getter event_id : String = ""
@@ -40,7 +40,7 @@ module SweetTalk
     # `Shop::Ordering::Order`.
     abstract def __sweettalk_subject_name : String
 
-    def __sweettalk_subject_id : Int64?
+    def __sweettalk_subject_id : ::SugarORM::Key?
       @__sweettalk_subject_id || @__sweettalk_subject.try(&.__sweettalk_raw_id)
     end
 

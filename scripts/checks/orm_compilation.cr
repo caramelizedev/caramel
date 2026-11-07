@@ -4,8 +4,19 @@ require "./support/harness"
 # a remediation. Schema and changeset declaration errors name the exact line
 # with `-->` (Crystal reports class-body macro errors on the class line).
 cases = {
-  "compile_valid"            => nil,
-  "compile_usage_examples"   => nil,
+  "compile_valid"           => nil,
+  "compile_usage_examples"  => nil,
+  "compile_uuid_valid"      => nil,
+  "compile_param_int64_key" => [
+    "compile_param_int64_key.cr:11:9",
+    "param 'id' names Fixture's Int64 primary key, which the database assigns.",
+    "Remediation: remove `param id`, or key Fixture by UUID so a changeset may supply it.",
+  ],
+  "compile_fk_param_mismatch" => [
+    "compile_fk_param_mismatch.cr:17:9",
+    "param 'team_id : Int64' does not match Player field 'team_id : UUID'.",
+    "Remediation: declare `param team_id : UUID`.",
+  ],
   "compile_usage_n_plus_one" => [
     "compile_usage_n_plus_one.cr:5:35",
     "undefined method 'each' for Team::UsersNotLoaded",
@@ -118,7 +129,7 @@ cases = {
   "compile_missing_primary_key" => [
     "compile_missing_primary_key.cr:4:10",
     "Keyless has no primary key",
-    "Remediation: add `field id : Int64, primary: true`",
+    "Remediation: add `field id : UUID, primary: true`",
   ],
   "compile_duplicate_table" => [
     "compile_duplicate_table.cr:10:10",

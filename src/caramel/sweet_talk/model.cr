@@ -259,7 +259,8 @@ module SweetTalk
         {% element = type.type_vars[0] %}
         {% owner = @type.name.split("::").last %}
         {% found = element.is_a?(Path) && element.resolve? %}
-        {% scalar = found && %w[String Int32 Int64 Bool Float64 Time].includes?(found.stringify) %}
+        {% scalars = %w[String Int32 Int64 UUID Bool Float64 Time] %}
+        {% scalar = found && scalars.includes?(found.stringify) %}
         {% if scalar || !element.is_a?(Path) %}
           {% decl.raise "has #{decl} cannot be stored: use a value or an entity; an Array of " +
                         "scalars is not stored" %}
@@ -291,7 +292,7 @@ module SweetTalk
         {% single = members.size == 1 && (!resolved.union? || nilable) %}
         {% base = "::#{members[0].name}" if single && nilable %}
         {% optional = nilable ? "?" : "" %}
-        {% columns = %w[String Int32 Int64 Bool Float64 Time] %}
+        {% columns = %w[String Int32 Int64 UUID Bool Float64 Time] %}
         {% if single && members[0] < ::SweetTalk::Value %}
           {% kind = "value" %}
           {% raw = "#{members[0].constant("SWEETTALK_WRAPS").id}#{optional.id}" %}
@@ -313,13 +314,13 @@ module SweetTalk
              end.join("\n") %}
         {% elsif single && members[0] < ::SweetTalk::Aggregate %}
           {% kind = "reference" %}
-          {% raw = "Int64#{optional.id}" %}
+          {% raw = "::#{members[0]}::Id::Raw#{optional.id}" %}
           {% column = "#{name}_id" %}
           {% row = members[0].constant("SWEETTALK_ROW") %}
           {% lines = "belongs_to #{name} : #{row.id}#{optional.id}" %}
         {% elsif single && members[0] < ::SugarORM::Schema %}
           {% kind = "record" %}
-          {% raw = "Int64#{optional.id}" %}
+          {% raw = "::#{members[0]}::PrimaryKey#{optional.id}" %}
           {% column = "#{name}_id" %}
           {% lines = "belongs_to #{name} : ::#{members[0]}#{optional.id}" %}
         {% elsif flat.all? do |member|
@@ -346,9 +347,9 @@ module SweetTalk
           {% raw = type.stringify %}
           {% lines = "field #{name} : #{type}" + (literal ? " = #{default.id}" : "") %}
         {% else %}
-          {% decl.raise "has #{decl} cannot be stored: use String, Int32, Int64, Bool, Float64, " +
-                        "Time, a value, an aggregate, an application's schema or an Array of " +
-                        "this aggregate's entity" %}
+          {% decl.raise "has #{decl} cannot be stored: use String, Int32, Int64, UUID, Bool, " +
+                        "Float64, Time, a value, an aggregate, an application's schema or an " +
+                        "Array of this aggregate's entity" %}
         {% end %}
       {% end %}
       {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}

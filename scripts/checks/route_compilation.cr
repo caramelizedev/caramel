@@ -14,13 +14,13 @@ cases = {
     "is missing 'field team_id : Type'",
     "compile_missing_contract_field.cr:",
     "Contract: #{FIXTURES}/compile_missing_contract_field.cr:5:5\n",
-    "Remediation: add `field team_id : Int64` to the contract block of TeamShow.",
+    "Remediation: add `field team_id : UUID` to the contract block of TeamShow.",
   ], NONE},
   "compile_wrong_param_type" => {[
     "ROUTE CONTRACT TYPE MISMATCH",
     "compile_wrong_param_type.cr:",
     "Contract: #{FIXTURES}/compile_wrong_param_type.cr:5:5\n",
-    "Remediation: declare `field team_id : Int64`",
+    "Remediation: declare `field team_id : UUID`",
   ], NONE},
   "compile_nilable_param" => {[
     "ROUTE CONTRACT TYPE MISMATCH", "team_id : Int64?", "Remediation:",

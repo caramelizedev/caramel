@@ -6,21 +6,21 @@ Code in spec/fixtures/routes/compile_defaulted_param.cr:18:3
 
  18 | Caramel::Router.draw do
       ^
-Called macro defined in src/caramel/http/router.cr:189:5
+Called macro defined in src/caramel/http/router.cr:313:5
 
- 189 | macro draw(&block)
+ 313 | macro draw(&block)
 
 Which expanded to:
 
-   34 |         
-   35 |       
- > 36 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_defaulted_param.cr:19:5"]) do
+   52 |         
+   53 |       
+ > 54 |       __caramel_router_draw(["@@ROOT@@/spec/fixtures/routes/compile_defaulted_param.cr:19:5"], [false], nil) do
               ^--------------------
 Error: 
 
 ❌ ROUTE CONTRACT TYPE MISMATCH
 Route: '/teams/:team_id' parameter ':team_id' binds to 'TeamShow::Contract' field 'team_id : Int64'
-Path parameters must be non-nilable String, Int32 or Int64 fields without defaults
+Path parameters must be non-nilable String, Int32, Int64 or UUID fields, or field values bound from one, without defaults
   --> @@ROOT@@/spec/fixtures/routes/compile_defaulted_param.cr:19:5
 Contract: @@ROOT@@/spec/fixtures/routes/compile_defaulted_param.cr:5:5
-Remediation: declare `field team_id : Int64` (String, Int32 or Int64; no `?` and no `default:`).
+Remediation: declare `field team_id : UUID` (String, Int32, Int64 or UUID; no `?` and no `default:`).

@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Rules
   include SweetTalk
+  ids Int64
 
   context Shelf, means: "a shelf for trying the rules" do
     aggregate Tin, means: "a tin of tea" do

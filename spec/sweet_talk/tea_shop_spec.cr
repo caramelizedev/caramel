@@ -101,9 +101,26 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
-  it "raises NilAssertionError for an aggregate's id before create" do
-    tea = Catalogue::Tea.new("Sencha", Catalogue::Cents.new(100), Catalogue::Tins.new(3))
-    expect_raises(NilAssertionError, "Tea has no id until it is created") { tea.id }
+  it "gives an aggregate its UUID when it is built, the one its row keeps" do
+    unsaved = Catalogue::Tea.new("Sencha", Catalogue::Cents.new(100), Catalogue::Tins.new(3))
+    unsaved.id.raw.version.should eq(UUID::Version::V7)
+    SweetTalkSpec.rolled_back do
+      tea = TeaShopSpec.tea("Sencha")
+      stored = SugarORM.sql("SELECT id FROM catalogue_teas", as: {id: UUID})
+      stored.should eq([{id: tea.id.raw}])
+    end
+  end
+
+  it "gives an entity an id of its own when a second aggregate stores it again" do
+    SweetTalkSpec.rolled_back do
+      label = Fulfilment::Label.new(street: "1 High St", city: "Leeds", postcode: "LS1 1AA")
+      packing = Fulfilment::Parcel::Packing.new(SugarORM.uuid7, Fulfilment::Tins.new(2))
+      first = Fulfilment::Parcel.pack(SugarORM.uuid7, [packing], label)
+      second = Fulfilment::Parcel.pack(SugarORM.uuid7, [packing], label)
+      stored = [first, second].map { |parcel| Fulfilment::Parcel.find(parcel.id).packings }
+      stored.map(&.size).should eq([1, 1])
+      stored[0][0].id.should_not eq(stored[1][0].id)
+    end
   end
 
   it "refuses a value out of bounds before anything is written" do
@@ -467,7 +484,7 @@ describe "The tea shop on PostgreSQL" do
         tea.restock Catalogue::Tins.new(3)
         select
         when payload = mailbox.receive
-          JSON.parse(payload).should eq(JSON.parse(%({"subject":#{tea.id}})))
+          JSON.parse(payload).should eq(JSON.parse(%({"subject":"#{tea.id}"})))
         when timeout(1.second)
           fail "no notification within 1 s"
         end
@@ -780,7 +797,8 @@ describe "The tea shop on PostgreSQL" do
       reasons = rows.map { |row| JSON.parse(row[:fields])["reason"] }
       reasons.should eq([JSON::Any.new(nil), JSON::Any.new("changed my mind")])
       events = rows.map do |row|
-        Ordering::Order::Cancelled.__sweettalk_load(row[:subject].to_i64, row[:fields], row[:meta])
+        subject = UUID.new(row[:subject])
+        Ordering::Order::Cancelled.__sweettalk_load(subject, row[:fields], row[:meta])
       end
       events.map(&.reason).should eq([nil, "changed my mind"])
     end

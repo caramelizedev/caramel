@@ -21,7 +21,7 @@ describe "@@COLLECTION_LABEL@@" do
 @@ASSERT_ESCAPING@@
       json = client.get(path, headers: {"Accept" => "application/json"})
       json.should have_status(200)
-      JSON.parse(json.body)["record"]["id"].as_i64.should eq(record.id)
+      JSON.parse(json.body)["record"]["id"].to_s.should eq(record.id.to_s)
       # frappe:only index
       client.get("@@ROOT@@/@@PLURAL@@").should render_page("@@COLLECTION_LABEL@@")
       # frappe:end

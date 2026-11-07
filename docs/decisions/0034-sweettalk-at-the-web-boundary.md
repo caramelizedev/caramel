@@ -5,7 +5,8 @@ Date: 2026-10-13
 Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decision 1, and
 applies [ADR 0030](0030-sweettalk-domain-language.md) to actions. Amended: decision 2 by
 [ADR 0058](0058-sweettalk-closed-sets-on-the-screen.md) and
-[ADR 0060](0060-sweettalk-preview-and-commit.md).
+[ADR 0060](0060-sweettalk-preview-and-commit.md), and decisions 3 and 4 by
+[ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -48,17 +49,19 @@ answer, not a fault. A contract field took only `String`, `Int32`, `Int64`, `Flo
    way.
 3. **A contract field may take a field value** (amends ADR 0003 decision 1). A type that
    includes `Caramel::FieldValue(W)` and defines `self.from_field(raw : W, & : String ->)`
-   binds like a field of `W`, which is `String`, `Int32`, `Int64`, `Float64`, `Bool` or
+   binds like a field of `W`, which is `String`, `Int32`, `Int64`, `UUID`, `Float64`, `Bool` or
    `Time`. The JSON type, the text grammar and the "must be a valid" error are `W`'s; then
    `from_field` returns the value, or yields a message that becomes the field's error. Such
    a field may be nilable, take `default:` and be an `Array` item. It binds a route
-   parameter when `W` is `String`, `Int32` or `Int64`, and takes no `min:` or `max:`. Its
+   parameter when `W` is `String`, `Int32`, `Int64` or `UUID`, and takes no `min:` or `max:`. Its
    summary names both types, as in `quantity:Ordering::Quantity(Int32)`, and
    `CARAMEL_FIELD_<NAME>` adds the declared type.
 4. **SweetTalk's values and ids are field values.** A value that wraps `Int32`, `Int64` or
    `String` binds from it, and its refusal is the field's error:
-   `quantity: Quantity must be between 1 and 10`. `Name::Id` binds from `Int64` and never
-   refuses; a route parameter that is not an `Int64` answers 404. A value with parts is not
+   `quantity: Quantity must be between 1 and 10`. `Name::Id` binds from its domain's id
+   type (`UUID` by default, `Int64` under `ids Int64`; its summary reads
+   `order:Order::Id(UUID)`) and never refuses; a route parameter that does not bind as that
+   type answers 404. A value with parts is not
    a field value: an action builds it from one field per part.
 
 ## Reasons

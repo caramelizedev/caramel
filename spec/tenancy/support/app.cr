@@ -28,7 +28,7 @@ module TenancySpec
 
   struct Account < SugarORM::Schema
     schema "accounts" do
-      field id : Int64, primary: true
+      field id : UUID, primary: true
       field name : String
       field slug : String
       index :slug, unique: true
@@ -37,7 +37,7 @@ module TenancySpec
 
   struct Author < SugarORM::Schema
     schema "authors" do
-      field id : Int64, primary: true
+      field id : UUID, primary: true
       tenant account : Account
       field name : String
       has_many books : Book
@@ -46,7 +46,7 @@ module TenancySpec
 
   struct Book < SugarORM::Schema
     schema "books" do
-      field id : Int64, primary: true
+      field id : UUID, primary: true
       tenant account : Account
       field title : String
       field isbn : String
@@ -59,7 +59,7 @@ module TenancySpec
   # Shared by every tenant; its books and its pick are tenanted.
   struct Shelf < SugarORM::Schema
     schema "shelves" do
-      field id : Int64, primary: true
+      field id : UUID, primary: true
       field name : String
       belongs_to pick : Book?
       has_many books : Book
@@ -69,7 +69,7 @@ module TenancySpec
   # What Record saw: the slug of the tenant it ran in, if any.
   struct Run < SugarORM::Schema
     schema "tenancy_runs" do
-      field id : Int64, primary: true
+      field id : UUID, primary: true
       field slug : String?
     end
   end
@@ -87,7 +87,7 @@ module TenancySpec
   class BookUpsert < SugarORM::Changeset(Book)
     param isbn : String
     param title : String
-    param author_id : Int64
+    param author_id : UUID
     upsert on: :isbn, update: [:title]
   end
 
@@ -168,7 +168,7 @@ module TenancySpec
 
   struct Shown < Open
     contract do
-      field id : Int64
+      field id : UUID
     end
 
     def handle(contract : Contract)
@@ -190,7 +190,7 @@ module TenancySpec
 
   struct Renamed < Open
     contract do
-      field id : Int64
+      field id : UUID
       field title : String
     end
 

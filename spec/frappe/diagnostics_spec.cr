@@ -82,8 +82,8 @@ describe Caramel::Frappe::Diagnostics do
     mrdp(diagnostic).should eq(<<-MRDP)
       ERR CONTRACT_MISMATCH:422 at spec/fixtures/routes/compile_missing_contract_field.cr:5:5
       NODE: RequestContract
-      MISSING: team_id:Int64
-      PATCH: INSERT "field team_id : Int64" AT 6:7\n
+      MISSING: team_id:UUID
+      PATCH: INSERT "field team_id : UUID" AT 6:7\n
       MRDP
     declared = "Route '/teams/:team_id' is declared at " \
                "spec/fixtures/routes/compile_missing_contract_field.cr:18:5"
@@ -96,7 +96,8 @@ describe Caramel::Frappe::Diagnostics do
       NODE: RequestContract
       MSG: Route '/teams/:team_id' parameter ':team_id' binds to 'TeamShow::Contract' \
         field 'team_id : Float64'
-      FIX: declare `field team_id : Int64` (String, Int32 or Int64; no `?` and no `default:`).\n
+      FIX: declare `field team_id : UUID` (String, Int32, Int64 or UUID; no `?` and \
+        no `default:`).\n
       MRDP
   end
 
@@ -137,7 +138,7 @@ describe Caramel::Frappe::Diagnostics do
     mrdp(diagnose("sugar_orm_compile_missing_primary_key")).should eq(<<-MRDP)
       ERR COMPILE at spec/fixtures/sugar_orm/compile_missing_primary_key.cr:4:10
       MSG: Keyless has no primary key.
-      FIX: add `field id : Int64, primary: true` to the schema block of Keyless.\n
+      FIX: add `field id : UUID, primary: true` to the schema block of Keyless.\n
       MRDP
     constant = diagnose("diagnostics_compile_undefined_constant")
     expected_constant = {
@@ -148,8 +149,8 @@ describe Caramel::Frappe::Diagnostics do
     {constant.message, constant.remediation, constant.width}.should eq(expected_constant)
     overload = diagnose("routes_compile_wrong_path_id")
     expected_overload = {
-      "expected argument #1 to 'Paths.book_path' to be Int64, not String",
-      ["Overloads are:", "- Paths#book_path(id : Int64)"],
+      "expected argument #1 to 'Paths.book_path' to be Int64 or UUID, not String",
+      ["Overloads are:", "- Paths#book_path(id : Int64)", "- Paths#book_path(id : UUID)"],
     }
     {overload.message, overload.details}.should eq(expected_overload)
     duplicate = "Duplicate route: 'GET /teams/:team_id' and 'GET /teams/:id' " \

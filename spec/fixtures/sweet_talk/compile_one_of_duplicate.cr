@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Ordering, means: "choosing teas and checking out" do
     value Roast, String, one_of: %w[light Light], means: "how far a tea is roasted"

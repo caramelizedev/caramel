@@ -23,7 +23,7 @@ describe "Books as JSON" do
       book = {title: "Dune", author: "Frank Herbert"}
       created = client.post("/books", json: book, headers: accept)
       created.should have_status(201)
-      path = "/books/#{JSON.parse(created.body)["record"]["id"].as_i64}"
+      path = "/books/#{JSON.parse(created.body)["record"]["id"].as_s}"
       edited = {title: "Dune Messiah", author: "Frank Herbert"}
       stale = accept.merge({"If-Match" => %("7")})
       refused = client.patch(path, json: edited, headers: stale)

@@ -102,13 +102,13 @@ describe SugarORM::Query do
     acme = SugarUnit::Team.query.where(name: "Acme")
     query = acme.preload(:members).preload(:owner).preload(:charter)
     typeof(query).should eq(SugarUnit::Team::QueryOf(NamedTuple(
-      members: SugarORM::HasMany(SugarUnit::Team, SugarUnit::Member),
-      owner: SugarORM::BelongsTo(SugarUnit::Team, SugarUnit::Member, SugarUnit::Member?),
-      charter: SugarORM::HasOne(SugarUnit::Team, SugarUnit::Charter))))
+      members: SugarORM::HasMany(SugarUnit::Team, SugarUnit::Member, Int64),
+      owner: SugarORM::BelongsTo(SugarUnit::Team, SugarUnit::Member, SugarUnit::Member?, Int64),
+      charter: SugarORM::HasOne(SugarUnit::Team, SugarUnit::Charter, Int64))))
     query.to_sql.should eq(%(#{SELECT} WHERE "name" = $1))
     members = SugarUnit::Member.query.preload(:team)
     typeof(members).should eq(SugarUnit::Member::QueryOf(NamedTuple(
-      team: SugarORM::BelongsTo(SugarUnit::Member, SugarUnit::Team, SugarUnit::Team))))
+      team: SugarORM::BelongsTo(SugarUnit::Member, SugarUnit::Team, SugarUnit::Team, Int64))))
   end
 
   it "adds FOR UPDATE last when locked, and leaves an unlocked query alone" do

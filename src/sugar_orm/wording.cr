@@ -49,6 +49,10 @@ module SugarORM
       "has already been taken"
     end
 
+    def key_kept : String
+      "cannot be changed"
+    end
+
     def record_gone : String
       "Record no longer exists"
     end

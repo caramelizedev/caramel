@@ -103,7 +103,8 @@ module SweetTalk
 
     {% if owner %}module {{ owner }}{% end %}
     struct {{ job }} < ::Caramel::ColdBrew::Job
-      param subject : Int64? = nil
+      # A number for an Int64-keyed subject, a string for a UUID one.
+      param subject : ::SugarORM::Key? = nil
       param fields : String
       param meta : String
       {% if each %}

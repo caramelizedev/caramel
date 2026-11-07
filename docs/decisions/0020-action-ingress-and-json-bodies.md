@@ -2,7 +2,7 @@
 
 Date: 2026-09-29
 
-Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decisions 3 and 4.
+Status: accepted. Amends [ADR 0003](0003-core-routing-and-contracts.md) decisions 3 and 4. Decision 4 is amended by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -37,7 +37,7 @@ Reading every request the same way before routing, and checking CSRF on every PO
    - numbers keep their source text, so contracts convert them with the existing grammar;
    - `null` is absent;
    - a duplicate member is an error, and the first value wins;
-   - a member must have its field's JSON type (a string for `String` and `Time`, a number for `Int32`, `Int64` and `Float64`, a boolean for `Bool`), or the field reports `must be a JSON number` or similar;
+   - a member must have its field's JSON type (a string for `String`, `UUID` and `Time`, a number for `Int32`, `Int64` and `Float64`, a boolean for `Bool`), or the field reports `must be a JSON number` or similar; a `UUID` string binds in the canonical lowercase hyphenated form only;
    - an array binds to an `Array(T)` field, each item with its element's JSON type; other arrays and objects bind to no field.
 
    A body that is not an object answers 422 with `Expected a JSON object`. Malformed JSON, trailing data, NUL and invalid UTF-8 answer 400. `_csrf` and `_method` are ordinary members: JSON clients send `X-CSRF-Token` and use real methods. `+json` media types are not read as JSON, because their conventions for `null` and nesting mean something this binding would silently change; such routes use `body: :raw`.

@@ -2,7 +2,7 @@ module App
   # The tenant: every page under /SLUG belongs to one @@LABEL@@.
   struct @@MODEL@@ < SugarORM::Schema
     schema "@@PLURAL@@" do
-      field id : Int64, primary: true
+      field id : @@ID@@, primary: true
       field name : String
       field slug : String
       timestamps

@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: accepted.
+Status: accepted. Decision 6 is amended by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -57,15 +57,19 @@ must be able to opt in, pay nothing when it does not, and plug tenancy in and ou
    §5), before any other statement, adds a composite key on a new
    table's own rows after that table's indexes, and halts a key that would wait on a
    unique index it only builds CONCURRENTLY; the halt prints the index to build first.
-6. **Work outside a request.** A job enqueued in a tenant carries its id and runs in it; a
-   job whose tenant is gone fails with `Caramel::Tenancy::Gone`. A job enqueued with no
-   tenant runs with none. A `spawn`ed fiber starts with none. While a tenant is bound,
-   cache keys and PubSub channels get the prefix `t<id>:`, and a prefixed channel stays
-   within 63 characters. With none bound, a cache key or channel name that starts with
-   `t<id>:` raises ArgumentError, except inside `without`. `Cache.clear` deletes the
+6. **Work outside a request.** A job enqueued in a tenant carries its id and runs in it:
+   `"caramel_tenant"` is a JSON number for an Int64 tenant and a string for a UUID
+   tenant. A job whose tenant is gone fails with `Caramel::Tenancy::Gone`. A job enqueued
+   with no tenant runs with none. A `spawn`ed fiber starts with none. While a tenant is
+   bound, cache keys and PubSub channels get its prefix: `t<digits>:` for an Int64 tenant,
+   and `t` + the UUID as 25 lowercase base-36 characters + `:` (27 characters) for a UUID
+   tenant. A prefixed channel stays within 63 characters. With none bound, a cache key or
+   channel name that starts with either form raises ArgumentError, except inside
+   `without`. `Cache.clear` deletes the
    bound tenant's keys; with none bound it deletes the keys no tenant owns; inside
    `without` it deletes every key.
-7. **Frappé.** `frappe make tenancy MODEL` writes the tenant's schema, changeset,
+7. **Frappé.** `frappe make tenancy MODEL [--int64]` writes the tenant's schema (keyed by
+   UUID, or by Int64 with `--int64`; [ADR 0064](0064-uuidv7-identity.md)), changeset,
    migration, sign-up page at `/PLURAL/new` and home at `/SLUG`, and adds the require,
    the tenant block, the path helpers, `member?` to `app/actions/application_action.cr`
    and the `account` and `tenant_session` spec helpers. The generated `member?` reads

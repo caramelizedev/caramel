@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Ordering, event_log: 90.days, means: "choosing teas and checking out" do
     aggregate Order, means: "what a member buys at one checkout" do

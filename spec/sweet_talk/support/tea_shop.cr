@@ -76,8 +76,8 @@ module TeaShop
     end
 
     value Slot, means: "one tea in one order" do
-      part order : Int64
-      part tea : Int64
+      part order : UUID
+      part tea : UUID
     end
 
     aggregate Order, means: "what a member buys at one checkout" do
@@ -189,7 +189,7 @@ module TeaShop
       sums tins_sold, of: :sold
       sums takings_total, of: :takings
 
-      finds of_teas(teas : Array(Int64)) do |rows|
+      finds of_teas(teas : Array(UUID)) do |rows|
         rows.where(tea_id: teas).order_by(:tea_id, :asc)
       end
 
@@ -269,24 +269,24 @@ module TeaShop
     end
 
     aggregate Parcel, means: "the box we dispatch for one order" do
-      has order : Int64
+      has order : UUID
       has packings : Array(Packing)
       has label : Label
       moves packed >> dispatched, packed >> withdrawn
 
       entity Packing, means: "the tins of one tea in a parcel" do
-        has tea : Int64
+        has tea : UUID
         has tins : Tins
       end
 
-      event Packed, order : Int64, means: "a parcel was packed for an order"
-      event Dispatched, order : Int64, packings : Array(Packing), means: "a parcel left the shop"
+      event Packed, order : UUID, means: "a parcel was packed for an order"
+      event Dispatched, order : UUID, packings : Array(Packing), means: "a parcel left the shop"
 
-      factory pack(order : Int64, packings : Array(Packing), label : Label) do
+      factory pack(order : UUID, packings : Array(Packing), label : Label) do
         emit Packed, order: order
       end
 
-      finds for_order(order : Int64), where: {order: order}
+      finds for_order(order : UUID), where: {order: order}
 
       to dispatch do
         dispatched!

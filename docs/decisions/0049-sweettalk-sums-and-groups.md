@@ -3,7 +3,8 @@
 Date: 2026-10-31
 
 Status: accepted. Amends [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md)
-decision 2 and [ADR 0007](0007-sugarorm-schemas-changesets-preload.md) decision 5.
+decision 2 and [ADR 0007](0007-sugarorm-schemas-changesets-preload.md) decision 5. Decision 3
+is amended by [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -31,10 +32,10 @@ together with no error (#249, after #133 and #169).
    a value that wraps `Int32`, `Int64` or a decimal, whose lower bound is absent or 0 and
    whose upper bound is absent: a sum of values each at least 0 is at least 0, so that
    bound holds, while an upper bound or any other lower bound can be broken by the sum.
-   `by:` is a `String`, `Int32`, `Int64` or `Bool` column, a value wrapping a whole number,
-   text, a day or a decimal, an aggregate the model refers to (its `Id`), or `:state`. A
-   `Float64`, a `Time`, a JSON document, a value with parts, a record or a list of entities
-   has no one-column key and does not compile.
+   `by:` is a `String`, `Int32`, `Int64`, `UUID` or `Bool` column, a value wrapping a whole
+   number, text, a day or a decimal, an aggregate the model refers to (its `Id`), or
+   `:state`. A `Float64`, a `Time`, a JSON document, a value with parts, a record or a list
+   of entities has no one-column key and does not compile.
 4. **One statement through SugarORM.** `sum_text(:field)` reads
    `coalesce(sum(col), 0)::text` and `group_sum_text(:by, :of)` one such row per key, each
    over the query's conditions, the tenant's included; a sum of an entity's attribute

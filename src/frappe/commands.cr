@@ -160,7 +160,7 @@ module Caramel::Frappe
         "where none expands, the call whose block encloses it, such as " \
         "`contract` for a `field`, and say which."),
       Command.new("make resource NAME FIELD:TYPE... " \
-                  "[--plural=NAME] [--only=ACTIONS] [--central]",
+                  "[--plural=NAME] [--only=ACTIONS] [--central] [--int64]",
         "Generate a SugarORM schema, migration, actions, views, routes and specs; " \
         "FIELD:TYPE:server marks a field the server sets, " \
         "kept out of forms and contracts, " \
@@ -170,16 +170,18 @@ module Caramel::Frappe
         "of index, show, new, create, edit, update and destroy; " \
         "create and show are required, and edit needs new and update. " \
         "In a multi-tenant application a resource belongs to the tenant " \
-        "unless --central is given."),
+        "unless --central is given. " \
+        "--int64 keys it by an Int64 the database assigns instead of a UUID."),
       Command.new("make locale CODE",
         "Add the locale CODE, such as fr or pt-BR: create app/locales/CODE.cr; " \
         "on first use also app/locales/en.cr and the i18n lines in " \
         "config/application.cr, after which frappe make resource writes translated views."),
-      Command.new("make tenancy MODEL",
+      Command.new("make tenancy MODEL [--int64]",
         "Make the application multi-tenant with MODEL, such as Account, as the tenant: " \
         "its schema, migration, sign-up page at /PLURAL/new and home at /SLUG, " \
         "require \"caramel/tenancy\" and the tenant block in config/routes.cr; " \
-        "frappe make resource then writes resources that belong to a tenant."),
+        "frappe make resource then writes resources that belong to a tenant. " \
+        "--int64 keys it by an Int64 the database assigns instead of a UUID."),
       Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
         "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \

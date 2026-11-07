@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Pricing, means: "what each tea costs" do
     value Evidence, Json, means: "the figures a price was set from"

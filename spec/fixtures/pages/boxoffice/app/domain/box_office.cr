@@ -81,7 +81,7 @@ module App::BoxOffice
     end
 
     value Claim, means: "one hold on one show" do
-      part show : Int64
+      part show : UUID
       part number : Int32
     end
 

@@ -2,7 +2,7 @@
 
 Date: 2026-10-02
 
-Status: accepted.
+Status: accepted. Its key table gains `errors.key_kept` from [ADR 0064](0064-uuidv7-identity.md).
 
 ## Context
 
@@ -86,6 +86,7 @@ The reserved `caramel:` section takes only these keys; an omitted key uses the d
 |`errors.invalid_format`|has invalid format|
 |`errors.invalid`|is invalid|
 |`errors.taken`|has already been taken|
+|`errors.key_kept`|cannot be changed|
 |`errors.record_gone`|Record no longer exists|
 |`errors.record_stale`|Record changed since you loaded it|
 |`pages.check_request`|Check your request|

@@ -9,6 +9,7 @@ require "../../../src/caramel/sweet_talk/money"
 
 module Books
   include SweetTalk
+  ids Int64
 
   kernel Cash, shared_by: [Payments, Rates], means: "how the books count money" do
     currencies %w[USD EUR UZS JPY BHD TRY XAU], exponent: {XAU: 4},

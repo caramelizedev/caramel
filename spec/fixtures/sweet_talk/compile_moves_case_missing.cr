@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Seating, means: "selling the seats of each show" do
     aggregate Show, means: "one performance and the seats it sells" do

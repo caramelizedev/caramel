@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   context Catalogue, follows: Ordering, means: "the teas on our shelves" do
     aggregate Tea, means: "one tea we sell" do

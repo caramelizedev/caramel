@@ -10,10 +10,13 @@ class Fiber
 end
 
 module SugarORM
-  # Every bind value SugarORM sends: crystal-db scalars plus the arrays used by
+  # Every bind value SugarORM sends: crystal-db scalars, UUIDs and the arrays used by
   # `= ANY($n)`.
-  alias Value = ::DB::Any | Array(String) | Array(Int32) | Array(Int64) |
-                Array(Float64) | Array(Bool) | Array(Time)
+  alias Value = ::DB::Any | ::UUID | Array(String) | Array(Int32) | Array(Int64) |
+                Array(::UUID) | Array(Float64) | Array(Bool) | Array(Time)
+
+  # A primary key's value: a schema is keyed by a UUID or an Int64.
+  alias Key = ::Int64 | ::UUID
 
   # An explicit database handle for the `(db, ...)` overloads.
   alias Handle = ::DB::Database | ::DB::Connection

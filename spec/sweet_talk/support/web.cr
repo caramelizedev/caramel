@@ -10,7 +10,7 @@ module TeaShopWeb
 
   struct Hold < PageAction
     contract do
-      field tea : Int64
+      field tea : UUID
       field tins : Int32
     end
 
@@ -24,7 +24,7 @@ module TeaShopWeb
   # Re-renders its form, with the refusal, as it would on a failed contract.
   struct HoldForm < PageAction
     contract do
-      field tea : Int64
+      field tea : UUID
       field tins : Int32
     end
 
@@ -42,7 +42,7 @@ module TeaShopWeb
   # Rescues the refusal itself.
   struct HoldOrConflict < PageAction
     contract do
-      field tea : Int64
+      field tea : UUID
       field tins : Int32
     end
 
@@ -58,7 +58,7 @@ module TeaShopWeb
   # Ships free tins: the refusal names its field, `tins`, which this contract has.
   struct Ship < PageAction
     contract do
-      field tea : Int64
+      field tea : UUID
       field tins : Int32
     end
 
@@ -72,7 +72,7 @@ module TeaShopWeb
   # Ships free tins counted in a field of another name, so the refusal's field is not its.
   struct ShipCount < PageAction
     contract do
-      field tea : Int64
+      field tea : UUID
       field count : Int32
     end
 

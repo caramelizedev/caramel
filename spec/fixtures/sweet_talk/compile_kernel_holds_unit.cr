@@ -2,6 +2,7 @@ require "../../../src/caramel/sweet_talk"
 
 module Shop
   include SweetTalk
+  ids Int64
 
   kernel Money, shared_by: [Catalogue, Ordering], means: "the money the shop agrees on" do
     aggregate Voucher, means: "money set aside under a code" do

@@ -93,6 +93,14 @@ module Caramel::ColdBrew
     end
   end
 
+  # *id* as 25 lowercase base-36 characters: the form a tenant's name prefix takes, and
+  # the one a channel name that holds an id should take, since a PostgreSQL channel name
+  # is at most 63 characters.
+  def self.short_id(id : UUID) : String
+    bytes = id.bytes
+    IO::ByteFormat::BigEndian.decode(UInt128, bytes.to_slice).to_s(36, precision: 25)
+  end
+
   # The PubSub channel *name* stands for. `caramel/tenancy` prefixes the
   # bound tenant.
   def self.channel(name : String) : String

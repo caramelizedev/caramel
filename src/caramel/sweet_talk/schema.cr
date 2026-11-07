@@ -3,7 +3,9 @@ module SweetTalk
   # The SugarORM schema and changeset for one aggregate, entity, projection or process,
   # and for a projection or a process `Start`, the upsert that inserts a row by its key.
   # In a tenanted context the schema declares `tenant`, so SugarORM scopes every read,
-  # lock, key and upsert by the bound tenant (ADR 0033).
+  # lock, key and upsert by the bound tenant (ADR 0033). An aggregate's and an entity's
+  # rows are keyed by their domain's ids, and a UUID one is given by the aggregate or
+  # entity; a projection's and a process's rows by an Int64, since their key names them.
   macro __sweettalk_schema(owner)
     {% type = owner.resolve %}
     {% row = type.constant("SWEETTALK_ROW").id %}
@@ -20,9 +22,11 @@ module SweetTalk
     {% home = ::SweetTalk::BoundedContext.includers
          .find { |context| type.name.starts_with?("#{context.name}::") } %}
     {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+    {% held = aggregate || type < ::SweetTalk::Entity %}
+    {% ids = held && home ? home.constant("SWEETTALK_IDS") : "Int64" %}
     struct {{ row }} < ::SugarORM::Schema
       schema {{ type.constant("SWEETTALK_TABLE") }} do
-        field id : Int64, primary: true
+        field id : ::{{ ids.id }}, primary: true
         {% if tenant %}
           tenant {{ tenant[1].id }} : ::{{ tenant[0].id }}
         {% end %}
@@ -51,8 +55,11 @@ module SweetTalk
     end
 
     class {{ row }}::Changeset < ::SugarORM::Changeset({{ row }})
+      {% if ids == "UUID" %}
+        param id : ::UUID
+      {% end %}
       {% if parent %}
-        param {{ parent[0].id }}_id : Int64
+        param {{ parent[0].id }}_id : ::{{ ids.id }}
       {% end %}
       {% for attribute in attributes %}
         {% if attribute[2] == "composite" %}
@@ -116,6 +123,7 @@ module SweetTalk
       {% stored = type.constant("SWEETTALK_STORED") %}
       {% table = "#{stored.id}_events" %}
       {% tenant = type.constant("SWEETTALK_TENANT") %}
+      {% ids = type.constant("SWEETTALK_IDS") %}
       {% homes = [stored] + type.constant("SWEETTALK_SHARES").map(&.underscore) %}
       {% for other in ::SweetTalk::Model.all_subclasses %}
         {% taken = other.has_constant?("SWEETTALK_TABLE") && other.constant("SWEETTALK_TABLE") %}
@@ -137,7 +145,7 @@ module SweetTalk
           field event_id : String
           field aggregate : String
           field name : String
-          field subject_id : Int64?
+          field subject_id : ::{{ ids.id }}?
           field occurred_at : Time
           field actor : String?
           field cause_id : String?
@@ -158,7 +166,8 @@ module SweetTalk
         return unless SWEETTALK_LOGS.includes?(event.__sweettalk_home)
         aggregate, name = event.__sweettalk_logged_as(SWEETTALK_STORED)
         Rows::Events.create!(event_id: event.event_id, aggregate: aggregate, name: name,
-          subject_id: event.__sweettalk_subject_id, occurred_at: event.occurred_at,
+          subject_id: event.__sweettalk_subject_id.as(::{{ ids.id }}?),
+          occurred_at: event.occurred_at,
           actor: event.actor, cause_id: event.cause_id, flow_id: event.flow_id,
           fields: JSON.parse(event.__sweettalk_fields), created_at: Time.utc)
       end
@@ -168,7 +177,8 @@ module SweetTalk
       # them; `subject:` keeps one aggregate's, `since:` those that occurred at or after a
       # time and `before:` those that occurred before one, so the log reads as it stood
       # then. A class this log does not keep raises ArgumentError.
-      def self.logged(kind : E.class, *, subject : ::SweetTalk::Identity | Int64 | Nil = nil,
+      def self.logged(kind : E.class, *,
+                      subject : ::SweetTalk::Identity | ::{{ ids.id }} | Nil = nil,
                       since : Time? = nil, before : Time? = nil,
                       limit : Int32 = 100) : Array(E) forall E
         unless SWEETTALK_LOGS.includes?(E.__sweettalk_home)
@@ -183,7 +193,7 @@ module SweetTalk
 
       # `{{ short.id }}.logged(subject: id)`: the logged events of every class, as
       # `SweetTalk::Event`, under the same keywords.
-      def self.logged(*, subject : ::SweetTalk::Identity | Int64 | Nil = nil,
+      def self.logged(*, subject : ::SweetTalk::Identity | ::{{ ids.id }} | Nil = nil,
                       since : Time? = nil, before : Time? = nil,
                       limit : Int32 = 100) : Array(::SweetTalk::Event)
         __sweettalk_logged_rows(nil, nil, subject, since, before, limit).map do |row|
@@ -220,7 +230,11 @@ module SweetTalk
         query = Rows::Events.query
         query = query.where(aggregate: aggregate) if aggregate
         query = query.where(name: name) if name
-        id = subject.is_a?(::SweetTalk::Identity) ? subject.raw : subject
+        id = if subject.is_a?(::SweetTalk::Identity)
+               ::SweetTalk.__sweettalk_raw(::{{ ids.id }}, subject)
+             else
+               subject
+             end
         query = query.where(subject_id: id) if id
         query = query.where("occurred_at >= ?", since) if since
         query = query.where("occurred_at < ?", before) if before
