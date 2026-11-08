@@ -1,10 +1,10 @@
 require "./support/harness"
 require "../../src/frappe/word_drift"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051 and 0053 to
-# 0063). Each declaration mistake fails to compile with a fixed problem text, naming its file
-# where the mistake has a line; a valid domain compiles, with and without caramel/tenancy; the
-# example of each word `frappe words` prints compiles; and an
+# caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051, 0053 to
+# 0063 and 0065). Each declaration mistake fails to compile with a fixed problem text, naming
+# its file where the mistake has a line; a valid domain compiles, with and without
+# caramel/tenancy; the example of each word `frappe words` prints compiles; and an
 # application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
 # holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
 # scripts/check integration runs them.
@@ -364,6 +364,20 @@ PROBLEMS = [
    "rolls back, and a call outside cannot be taken back; call Cards from a whenever on its " \
    "event, or before the change"},
   {"command_names_outside", "command Payment#charge names Cards, a border with an outside system"},
+  {"within_unknown", "within Ordering names no context declared before it"},
+  {"within_kernel", "within Money names a kernel"},
+  {"within_in_context", "within Ordering goes at the top level of a domain module"},
+  {"within_publishes_twice", "Shop::Catalogue publishes in two blocks"},
+  {"within_border_twice", "Shop::Billing has two borders with Cards"},
+  {"within_foreign_name", "Shop::Ordering names Catalogue:: outside a border"},
+  {"within_outside_later",
+   "command Payment#charge names Cards, a border with an outside system"},
+  {"within_event_log_taken",
+   "Shop::Ordering::Rows::Event declares the table \"ordering_events\", which " \
+   "Shop::Ordering::Rows::Events already declares"},
+  {"within_operations_taken",
+   "context Ordering keeps its units' operations in ordering_operations, the table " \
+   "aggregate Operation stores its rows in: rename one of them"},
   {"warn_assures",
    "warn in unit Ordering.annotate takes no assures:: a warning that a person confirms lets " \
    "the change through, so it assures nothing; make it a never to assure the requirement"},
@@ -758,7 +772,7 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
   compile_follows_kernel compile_border_kernel compile_kernel_word_alone
   compile_kernel_word_unused compile_unit_changes_foreign compile_json_range
-  compile_older_type]
+  compile_older_type compile_within_foreign_name]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }

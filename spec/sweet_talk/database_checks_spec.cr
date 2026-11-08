@@ -92,6 +92,7 @@ describe "SweetTalk's database checks" do
         check_credit_loans_rate_between_0_and_1 check_credit_loans_spread_from_minus0_5
         check_credit_pricings_rate_between_0_and_1
         check_fulfilment_parcel_packings_tins check_fulfilment_parcels_state_ee51dbc2
+        check_garden_bushes_row
         check_invoicing_invoices_state_048b3f84 check_invoicing_invoices_total
         check_lending_loans_term_all_or_none_5e0012d4
         check_money_vouchers_amount check_money_vouchers_state_b3ad369e
@@ -110,7 +111,8 @@ describe "SweetTalk's database checks" do
         check_payments_entries_reported_currency_one_of_8931cfef
         check_payments_entry_lines_share_currency_one_of_8931cfef
         check_payments_totals_reported_all_or_none
-        check_payments_totals_reported_currency_one_of_8931cfef check_pricing_teas_price
+        check_payments_totals_reported_currency_one_of_8931cfef check_picking_baskets_weight
+        check_pricing_teas_price
         check_rates_quotes_rate_from_one_of_8931cfef check_rates_quotes_rate_to_one_of_8931cfef
         check_shelf_bins_code_length_2_4 check_shelf_bins_size_depth check_shelf_bins_size_width
         check_shelf_boxes_count check_shelf_boxes_state_2ac5fa1a check_shelf_jars_count

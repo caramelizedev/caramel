@@ -15,9 +15,9 @@ module SweetTalk
     # optional, but one is given. With a block instead, `finds newest(count : Int32) do
     # |orders| orders.order_by(:created_at, :desc).limit(count) end` narrows the live rows
     # with SugarORM's `where`, `where_null`, `order_by`, `limit` and `offset`, and the
-    # results are built from what it returns. The context checks every query when it
-    # closes (`__sweettalk_check_queries`), so a wrong one does not compile even if
-    # nothing calls it.
+    # results are built from what it returns. Every query is checked once the program's top
+    # level is complete (`__sweettalk_check_queries`), so a wrong one does not compile even
+    # if nothing calls it.
     #
     # @word query | Finds the aggregates, or a projection's or process's rows, that match the
     #   conditions you give.
@@ -677,7 +677,7 @@ module SweetTalk
     end
 
     # The live rows a `finds` or `counts` filters, before any order or limit. Its keys are
-    # checked when the context closes, so this body assumes they are right.
+    # checked once the program's top level is complete, so this body assumes they are right.
     macro __sweettalk_filter(call, where, satisfying)
       {% verb = call.name %}
       {% where = {} of Nil => Nil if where.is_a?(NilLiteral) %}

@@ -499,18 +499,21 @@ module SweetTalk
   end
 
   # The context map as {from, to, kind} edges, kind "dependency", "event", "outside" or
-  # "kernel". Refuses unknown contexts, foreign names and calls outside a border, names a
-  # context does not publish, `Rows` named in a context, outside borders named like a
-  # context, a kernel named, followed or bordered by one that does not share it, a kernel
-  # that names a context, shared by an unknown or silent context or kernel, or holding a
-  # word fewer than two of its sharers name, cycles of dependency edges, and a `follows:` or
-  # `shares:` the context's text never uses.
+  # "kernel". Reads every block of a context, its header and each `within` (ADR 0065).
+  # Refuses unknown contexts, foreign names and calls outside a border, names a context does
+  # not publish, `Rows` named in a context, outside borders named like a context, a kernel
+  # named, followed or bordered by one that does not share it, a kernel that names a
+  # context, shared by an unknown or silent context or kernel, or holding a word fewer than
+  # two of its sharers name, cycles of dependency edges, a command, a factory or a unit that
+  # names an outside border, and a `follows:` or `shares:` the context's text never uses.
   def self.context_map : Array({String, String, String})
     {% begin %}
     {% contexts = ::SweetTalk::BoundedContext.includers %}
     {% names = contexts.map(&.name.split("::").last) %}
     {% follows = {} of Nil => Nil %}
     {% borders = {} of Nil => Nil %}
+    # The text of every block of each context, its header's and each `within`'s
+    {% written = {} of Nil => Nil %}
     {% edges = [] of Nil %}
     {% kernels = contexts.select(&.constant("SWEETTALK_SHARED_BY"))
          .map(&.name.split("::").last) %}
@@ -520,6 +523,10 @@ module SweetTalk
       {% follows[short] = context.constant("SWEETTALK_FOLLOWS") %}
       {% borders[short] = context.constants.select(&.starts_with?("SWEETTALK_BORDER_"))
            .map { |constant| context.constant(constant) } %}
+      {% withins = context.constants.select(&.starts_with?("SWEETTALK_WITHIN_"))
+           .map { |constant| context.constant(constant) } %}
+      {% blocks = [context.constant("SWEETTALK_TEXT")] + withins.map(&.[0]) %}
+      {% written[short] = blocks.join("\n") %}
       {% for other in follows[short] %}
         {% unless names.includes?(other) %}
           {% raise "#{context.name} follows #{other.id}, but there is no context #{other.id}; " +
@@ -551,7 +558,11 @@ module SweetTalk
           {% edges << edge unless edges.includes?(edge) %}
         {% end %}
       {% end %}
-      {% for react in context.constant("SWEETTALK_REACTS") %}
+      {% reacts = context.constant("SWEETTALK_REACTS") %}
+      {% for within in withins %}
+        {% reacts = reacts + within[1] %}
+      {% end %}
+      {% for react in reacts %}
         {% edge = {short, react[0], "event"} %}
         {% if names.includes?(react[0]) && react[0] != short && !edges.includes?(edge) %}
           {% edges << edge %}
@@ -590,7 +601,7 @@ module SweetTalk
     {% end %}
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
-      {% text = context.constant("SWEETTALK_TEXT") %}
+      {% text = written[short] %}
       {% named = text.includes?("Rows::") ||
                  borders[short].any?(&.[1].includes?("Rows::")) %}
       {% if named %}
@@ -639,7 +650,8 @@ module SweetTalk
           {% end %}
         {% end %}
         {% upstream = contexts.find { |candidate| candidate.name.split("::").last == other } %}
-        {% offers = other != short && upstream.constant("SWEETTALK_PUBLISHES") %}
+        {% offers = other != short && upstream.has_constant?("SWEETTALK_PUBLISHES") &&
+                    upstream.constant("SWEETTALK_PUBLISHES") %}
         {% if offers %}
           {% offered = offers.join(", ") %}
           {% texts = [text] + borders[short].map(&.[2]) %}
@@ -689,8 +701,7 @@ module SweetTalk
         {% for word in context.constant("SWEETTALK_WORDS") %}
           {% users = [] of Nil %}
           {% for sharer in context.constant("SWEETTALK_SHARED_BY") %}
-            {% home = contexts.find { |candidate| candidate.name.split("::").last == sharer } %}
-            {% texts = [home.constant("SWEETTALK_TEXT")] + borders[sharer].map(&.[1]) %}
+            {% texts = [written[sharer]] + borders[sharer].map(&.[1]) %}
             {% named = false %}
             {% for text in texts %}
               {% for piece in text.split(short + "::")[1..-1] %}
@@ -711,10 +722,35 @@ module SweetTalk
         {% end %}
       {% end %}
     {% end %}
+    # A command, a factory or a unit that names an outside border a later block declares
+    # (ADR 0065); one declared before it is refused at its line.
+    {% for context in contexts %}
+      {% withins = context.constants.select(&.starts_with?("SWEETTALK_WITHIN_"))
+           .map { |constant| context.constant(constant) } %}
+      {% systems = context.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_"))
+           .map { |constant| context.constant(constant)[0] } %}
+      {% unless withins.empty? || systems.empty? %}
+        {% bodies = context.constant("SWEETTALK_BODIES") %}
+        {% for within in withins %}
+          {% bodies = bodies + within[2] %}
+        {% end %}
+        {% for checked in bodies %}
+          {% padded = " " + checked[1].gsub(/[^\w:.]/, " ") %}
+          {% for system in systems %}
+            {% if padded.includes?(" #{system.id}.") || padded.includes?(" #{system.id}::") %}
+              {% raise "#{checked[0].id} names #{system.id}, a border with an outside system: a " +
+                       "preview runs it and rolls back, and a call outside cannot be taken " +
+                       "back; call #{system.id} from a whenever on its event, or before the " +
+                       "change\n  --> #{checked[2].id}" %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
     # A follows: or shares: that the context's own text never uses (ADR 0059).
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
-      {% text = context.constant("SWEETTALK_TEXT") %}
+      {% text = written[short] %}
       {% at = "\n  --> #{context.constant("SWEETTALK_AT").id}" %}
       {% for other in follows[short] %}
         {% texts = [text] + borders[short].reject { |border| border[0] == other }.map(&.[1]) %}

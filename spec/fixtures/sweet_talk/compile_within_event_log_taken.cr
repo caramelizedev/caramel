@@ -1,0 +1,17 @@
+require "../../../src/caramel/sweet_talk"
+
+module Shop
+  include SweetTalk
+  ids Int64
+
+  context Ordering, event_log: true, means: "choosing teas and checking out" do
+  end
+
+  within Ordering do
+    aggregate Event, means: "a tasting the shop holds" do
+      has name : String
+    end
+  end
+end
+
+SweetTalk.boot

@@ -77,8 +77,8 @@ describe "SweetTalk event log" do
   it "declares the log table with its columns and indexes, for the context that keeps one" do
     tables = SugarORM::Catalog.declared
     tables.map(&.name).select(&.ends_with?("_events"))
-      .should eq(["books_events", "carry_events", EventLogSpec::TABLE, "receipts_events",
-                  "setup_events", "till_events"])
+      .should eq(["books_events", "carry_events", EventLogSpec::TABLE, "picking_events",
+                  "receipts_events", "setup_events", "till_events"])
     table = tables.find! { |declared| declared.name == EventLogSpec::TABLE }
     table.columns.map(&.name).should eq(%w[id event_id aggregate name subject_id occurred_at actor
       cause_id flow_id fields created_at])

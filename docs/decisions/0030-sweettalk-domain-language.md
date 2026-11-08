@@ -10,7 +10,8 @@ Status: accepted. Amended: decisions 2, 4 and 6 by
 [ADR 0041](0041-sweettalk-events-that-carry-attributes.md) and
 [ADR 0048](0048-sweettalk-event-log.md), 3 by [ADR 0044](0044-sweettalk-shared-kernels.md),
 4 by [ADR 0045](0045-sweettalk-database-constraints.md), 5 by
-[ADR 0046](0046-sweettalk-units.md), 4 and 6 by [ADR 0064](0064-uuidv7-identity.md).
+[ADR 0046](0046-sweettalk-units.md), 4 and 6 by [ADR 0064](0064-uuidv7-identity.md), 1 and 2
+by [ADR 0065](0065-sweettalk-contexts-across-files.md).
 
 ## Context
 
@@ -22,13 +23,14 @@ or a policy, and nothing stops one context from reaching into another's types.
 
 1. **`require "caramel/sweet_talk"` is the way in, a module's words come by its own
    require (ADR 0061), and `include SweetTalk` scopes the words.** A module that includes
-   `SweetTalk` may use `context`, and a context's body the other words. No word is a
-   top-level macro. `frappe make domain NAME CONTEXT --means=TEXT` starts one in
+   `SweetTalk` may use `context` and `within`, and a context's body the other words. No
+   word is a top-level macro. `frappe make domain NAME CONTEXT --means=TEXT` starts one in
    `app/domain/`, required after the models.
 2. **The words.**
    - **Contexts.** `context Name, follows: Other, means: "…" do … end` is a bounded context,
-     a module; `follows: Other` lets it use `Other`'s types as they are. `border Other do …
-     end` holds its only code that may name `Other::` without following it.
+     a module, and `within Name do … end` continues it in another file. `follows: Other`
+     lets it use `Other`'s types as they are. `border Other do … end` holds its only code
+     that may name `Other::` without following it.
    - **Values.** `value Name, Int32, at_least:, at_most:, within:` (or `Int64`) is an
      immutable integer, validated when built and by every arithmetic result. `+` and `-`
      take the same value or an integer, `*` an integer, and `times: Other` lets `*` take
@@ -74,12 +76,10 @@ or a policy, and nothing stops one context from reaching into another's types.
      ([ADR 0050](0050-sweettalk-nested-entities.md)); no `Array` of scalars.
 
    `has` options and the words `unique`, `index` and `check` declare database constraints
-   (ADR 0045); `parts:` and `pinned_at:` tie
-   attributes to a closed-set value's members and pin a reference (ADRs 0054, 0056). Any
-   other type, or a
-   name the tenant's or the parent's column takes, does not compile. An entity another
-   parent holds is inserted anew. A projection's key is uniquely indexed. `frappe db diff`
-   derives migrations (ADR 0008).
+   (ADR 0045); `parts:` and `pinned_at:` tie attributes to a closed-set value's members and
+   pin a reference (ADRs 0054, 0056). Any other type, or a name the tenant's or the parent's
+   column takes, does not compile. An entity another parent holds is inserted anew. A
+   projection's key is uniquely indexed. `frappe db diff` derives migrations (ADR 0008).
 5. **A command is one transaction on one aggregate.** `to` runs in
    `SugarORM::Repo.transaction`: it locks the root's row and loads the aggregate, runs
    the body, checks every `never` and `always`, saves the root, then its entities, and
@@ -124,9 +124,8 @@ or a policy, and nothing stops one context from reaching into another's types.
    integration`. Every refusal that decisions 2 to 6 promise has a fixture in a
    `sweet-talk-compilation` check that must fail to compile with its message.
    `frappe-project` derives a generated domain's tables with `frappe db diff` and runs its
-   spec in `frappe corretto`. `page-boxoffice` builds the Box Office path's application
-   from `spec/fixtures/pages/boxoffice` with the page's commands and runs its specs, and the
-   website check holds the page's snippets to those files.
+   spec in `frappe corretto`. `page-boxoffice` builds the Box Office path's application and
+   runs its specs.
 
 ## Reasons
 

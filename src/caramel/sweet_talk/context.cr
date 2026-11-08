@@ -1677,11 +1677,254 @@ module SweetTalk
       typeof({{ name }}.__sweettalk_condition)
     end
 
+    # One block of a context: its header's or a `within`'s. The checks that read the block
+    # as written, the constants the whole-program checks read, and the block itself.
+    macro __sweettalk_block(header, &block)
+      {% parts = @type.name.split("::") %}
+      {% name = parts.last %}
+      {% prefix = parts.size > 1 ? parts[0..-2].join("::") + "::" : "" %}
+      {% body = block.body %}
+      {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
+      # A border is outside when its outside: is text, as in the border macro; any other
+      # outside:, nil included, is refused at the border's line.
+      {% for node in expressions %}
+        {% if node.is_a?(Call) && node.name == "border" %}
+          {% said = (node.named_args || [] of Nil).find { |arg| arg.name.stringify == "outside" } %}
+          {% if said && !said.value.is_a?(StringLiteral) %}
+            {% node.raise "border #{node.args[0]} takes outside: \"…\", what the system is to " +
+                          "this context, the line its glossary entry shows" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% outsides = expressions.select do |node|
+           node.is_a?(Call) && node.name == "border" &&
+             (node.named_args || [] of Nil).any? do |arg|
+               arg.name.stringify == "outside" && arg.value.is_a?(StringLiteral)
+             end
+         end %}
+      {% borders = expressions.select do |node|
+           node.is_a?(Call) && node.name == "border" && !outsides.includes?(node)
+         end %}
+      {% publishers = expressions.select { |node| node.is_a?(Call) && node.name == "publishes" } %}
+      {% published = [] of Nil %}
+      {% for node in publishers %}
+        {% for argument in node.args %}
+          {% published << argument.stringify %}
+        {% end %}
+      {% end %}
+      # {statement, its text, in an outside border?} for each statement a check may refuse,
+      # so the refusal names its line; a handler's text leaves out the event it reacts to.
+      {% handlers = %w[whenever compensate] %}
+      {% checks = [] of Nil %}
+      {% for node in expressions %}
+        {% with_block = node.is_a?(Call) && !node.block.is_a?(Nop) %}
+        {% outside = outsides.includes?(node) %}
+        {% if with_block && handlers.includes?(node.name.stringify) %}
+          {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+          {% checks << {node, node.block.body.stringify + "\n" + extra, false} %}
+        {% elsif with_block %}
+          {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+          {% checks << {node, node.args.map(&.stringify).join("\n") + "\n" + extra, false} %}
+          {% inner = node.block.body %}
+          {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+            {% nested = step.is_a?(Call) && !step.block.is_a?(Nop) &&
+                        handlers.includes?(step.name.stringify) %}
+            {% if nested %}
+              {% extra = (step.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
+              {% checks << {step, step.block.body.stringify + "\n" + extra, outside} %}
+            {% else %}
+              {% checks << {step, step.stringify, outside} %}
+            {% end %}
+          {% end %}
+        {% else %}
+          {% checks << {node, node.stringify, false} %}
+        {% end %}
+      {% end %}
+      # The published languages of the contexts of this domain declared before this block.
+      {% for up in ::SweetTalk::BoundedContext.includers %}
+        {% upname = up.name.split("::").last %}
+        {% offers = up.has_constant?("SWEETTALK_PUBLISHES") && up.constant("SWEETTALK_PUBLISHES") %}
+        {% if offers && up.name.stringify == prefix + upname && upname != name %}
+          {% offered = offers.join(", ") %}
+          {% for check in checks %}
+            {% for piece in check[1].split(upname + "::")[1..-1] %}
+              {% path = piece.gsub(/\A([A-Z]\w*(?:::[A-Z]\w*)*)[\s\S]*\z/, "\\1") %}
+              {% found = parse_type(up.name.stringify + "::" + path).resolve? %}
+              {% open = offers.any? { |offer| path == offer || path.starts_with?(offer + "::") } ||
+                        (found && found < ::SweetTalk::Event) %}
+              {% unless open %}
+                {% check[0].raise "#{prefix.id}#{name.id} names #{upname.id}::#{path.id}, " +
+                                  "which #{upname.id} does not publish; it publishes " +
+                                  "#{offered.id}: use one of those, or publish #{path.id} in " +
+                                  "#{upname.id}" %}
+              {% end %}
+            {% end %}
+            {% for piece in check[1].split(upname + ".")[1..-1] %}
+              {% call = piece =~ /\A[a-z_]/ && piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
+              {% if call && !offers.includes?(call) %}
+                {% check[0].raise "#{prefix.id}#{name.id} calls #{upname.id}.#{call.id}, which " +
+                                  "#{upname.id} does not publish; it publishes #{offered.id}: " +
+                                  "use one of those, or publish #{call.id} in #{upname.id}" %}
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+      # HTTP leaves the program only through a border with an outside system.
+      {% for check in checks %}
+        {% reached = nil %}
+        {% reached = "Caramel::Outbound" if check[1].includes?("Caramel::Outbound") %}
+        {% reached = "HTTP::Client" if check[1].includes?("HTTP::Client") %}
+        {% if reached && !check[2] %}
+          {% check[0].raise "#{prefix.id}#{name.id} reaches #{reached.id} outside a border with " +
+                            "an outside system: move that call into the border with the system " +
+                            "it reaches, as in border Cards, outside: \"…\" do … end" %}
+        {% end %}
+      {% end %}
+      # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
+      # an outside system cannot be taken back, so none names an outside border (ADR 0060).
+      # This block checks the borders declared by now; the context map, those of later blocks.
+      {% systems = outsides.map(&.args[0].names.last.stringify) %}
+      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
+        {% systems << @type.constant(constant)[0] %}
+      {% end %}
+      {% bodies = [] of Nil %}
+      {% for node in expressions %}
+        {% if node.is_a?(Call) && node.name == "unit" && !node.block.is_a?(Nop) &&
+                node.args[0].is_a?(Call) %}
+          {% verb = node.args[0] %}
+          {% at = "#{verb.filename.id}:#{verb.line_number}:#{verb.column_number}" %}
+          {% bodies << {"unit #{name.id}.#{node.args[0].name}", node.block.body, at} %}
+        {% elsif node.is_a?(Call) && node.name == "aggregate" && !node.block.is_a?(Nop) %}
+          {% inner = node.block.body %}
+          {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+            {% if step.is_a?(Call) && %w[to factory].includes?(step.name.stringify) &&
+                    !step.block.is_a?(Nop) && step.args[0].is_a?(Call) %}
+              {% joint = step.name == "to" ? "#" : "." %}
+              {% what = step.name == "to" ? "command" : "factory" %}
+              {% verb = step.args[0] %}
+              {% at = "#{verb.filename.id}:#{verb.line_number}:#{verb.column_number}" %}
+              {% bodies << {"#{what.id} #{node.args[0]}#{joint.id}#{step.args[0].name}",
+                            step.block.body, at} %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% for checked in (systems.empty? ? [] of Nil : bodies) %}
+        {% inner = checked[1] %}
+        {% for statement in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
+          {% padded = " " + statement.stringify.gsub(/[^\w:.]/, " ") %}
+          {% for system in systems %}
+            {% if padded.includes?(" #{system.id}.") || padded.includes?(" #{system.id}::") %}
+              {% statement.raise "#{checked[0].id} names #{system.id}, a border with an outside " +
+                                 "system: a preview runs it and rolls back, and a call outside " +
+                                 "cannot be taken back; call #{system.id} from a whenever on " +
+                                 "its event, or before the change" %}
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% kinds = %w[value aggregate projection process] %}
+      {% own = expressions.select do |node|
+           node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?
+         end.map(&.args[0].stringify) %}
+      {% reacts = [] of Nil %}
+      {% pieces = [] of Nil %}
+      {% for node in expressions %}
+        {% if borders.includes?(node) %}
+        {% elsif node.is_a?(Call) && node.name == "process" && !node.block.is_a?(Nop) %}
+          {% inner = node.block.body %}
+          {% steps = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
+          {% for step in steps %}
+            {% handler = step.is_a?(Call) && handlers.includes?(step.name.stringify) &&
+                         !step.block.is_a?(Nop) %}
+            {% if handler %}
+              {% path = step.args[0] %}
+              {% react = path.is_a?(Path) && {path.names[0].stringify, path.stringify} %}
+              {% if react && !own.includes?(react[0]) && !@type.has_constant?(react[0]) &&
+                      !reacts.includes?(react) %}
+                {% reacts << react %}
+              {% end %}
+              {% for argument in (step.named_args || [] of Nil) %}
+                {% pieces << argument.value.stringify %}
+              {% end %}
+              {% pieces << step.block.body.stringify %}
+            {% else %}
+              {% pieces << step.stringify %}
+            {% end %}
+          {% end %}
+        {% else %}
+          {% pieces << node.stringify %}
+        {% end %}
+      {% end %}
+      {% listed = reacts.map { |react| "{#{react[0]}, #{react[1]}}" } %}
+      {% kept = bodies.map { |checked| {checked[0], checked[1].stringify, checked[2]} } %}
+      {% if header %}
+        SWEETTALK_TEXT = {{ pieces.join("\n") }}
+        # {first segment, path} of each event of another context a process follows
+        SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
+        # {command, factory or unit, its body's text, where it is}, for the outside borders
+        # a later block declares
+        SWEETTALK_BODIES = [{{ kept.splat }}] of {String, String, String}
+      {% else %}
+        {% count = @type.constants.select(&.starts_with?("SWEETTALK_WITHIN_")).size + 1 %}
+        # {text, reacts, bodies} of a `within`, read as the header's SWEETTALK_TEXT,
+        # SWEETTALK_REACTS and SWEETTALK_BODIES
+        SWEETTALK_WITHIN_{{ count }} = { {{ pieces.join("\n") }},
+          [{{ listed.join(", ").id }}] of {String, String},
+          [{{ kept.splat }}] of {String, String, String} }
+      {% end %}
+      {% unless publishers.empty? %}
+        {% if @type.has_constant?("SWEETTALK_PUBLISHES") %}
+          {% publishers[0].raise "#{prefix.id}#{name.id} publishes in two blocks: list every " +
+                                 "name it publishes in one block" %}
+        {% end %}
+        # The names other contexts may use; with none, every name is open to a follower
+        SWEETTALK_PUBLISHES = [{{ published.splat }}] of String
+      {% end %}
+      {% seen = [] of Nil %}
+      {% for node in expressions %}
+        {% if outsides.includes?(node) || borders.includes?(node) %}
+          {% other = node.args[0].names.last.stringify %}
+          {% twice = seen.includes?(other) ||
+                     @type.has_constant?("SWEETTALK_OUTSIDE_#{other.upcase.id}") ||
+                     @type.has_constant?("SWEETTALK_BORDER_#{other.upcase.id}") %}
+          {% if twice %}
+            {% node.raise "#{prefix.id}#{name.id} has two borders with #{other.id}: keep one " +
+                          "border for each context or outside system" %}
+          {% end %}
+          {% seen << other %}
+        {% end %}
+      {% end %}
+      {% for border in outsides %}
+        {% system = border.args[0].names.last %}
+        {% said = border.named_args.find { |argument| argument.name.stringify == "outside" } %}
+        # {outside system, what it is to this context}
+        SWEETTALK_OUTSIDE_{{ system.upcase }} = { {{ system.stringify }}, {{ said.value }} }
+      {% end %}
+      {% for border in borders %}
+        {% inner = border.block.body %}
+        {% steps = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
+        {% reacting = steps.any? { |step| step.is_a?(Call) && step.name == "whenever" } %}
+        {% rest = steps.map do |step|
+             handler = step.is_a?(Call) && handlers.includes?(step.name.stringify) &&
+                       !step.block.is_a?(Nop)
+             handler ? step.block.body.stringify : step.stringify
+           end.join("\n") %}
+        {% other = border.args[0].names.last %}
+        {% entry = {other.stringify, inner.stringify, rest, reacting} %}
+        # {other context, its whole text, its text without the events it reacts to, reacts?}
+        SWEETTALK_BORDER_{{ other.upcase }} = {{ entry }}
+      {% end %}
+
+      {{ body }}
+    end
+
     # Checks every `finds` and `counts` of this context's aggregates, projections and
-    # processes when the context closes, whether or not anything calls them: each key
-    # names a stored attribute or `state:` a declared state, each `order:` key `id` or an
-    # attribute stored in one column, and `satisfying:` a specification on the same
-    # aggregate.
+    # processes once the program's top level is complete, whether or not anything calls
+    # them: each key names a stored attribute or `state:` a declared state, each `order:` key
+    # `id` or an attribute stored in one column, and `satisfying:` a specification on the
+    # same aggregate.
     macro __sweettalk_check_queries
       {% depth = @type.name.split("::").size + 1 %}
       {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::Projection.all_subclasses +
@@ -1935,10 +2178,16 @@ module SweetTalk
                     "not in context #{@type.name.split("::").last.id}" %}
     end
 
+    macro within(name, &block)
+      {% name.raise "within #{name} goes at the top level of a domain module, beside context, " +
+                    "not inside a context or a kernel" %}
+    end
+
     # `publishes Cents, Tea::Id, price_of` is this context's published language: the
     # types, services, units and calculations another context may name. Once a context
     # publishes, every other context names only those, and the events it reacts to.
-    # `context` reads the list; this checks that each name is declared before it.
+    # The block's `context` or `within` reads the list; this checks that each name is
+    # declared before it.
     #
     # @word boundary | Lists the types, services, units and calculations other contexts may name.
     # @usage publishes NAME[, NAME ...]
@@ -2181,8 +2430,9 @@ module SweetTalk
     SWEETTALK_PREFIX = {{ prefix }}
   end
 
-  # `context Ordering, follows: Catalogue, means: "…" do … end` is a bounded context. Its
-  # source text is kept so the context map can find foreign names, and each border's
+  # `context Ordering, follows: Catalogue, means: "…" do … end` is a bounded context, and
+  # `within Ordering do … end` continues it in another file. Each block keeps its source
+  # text (`__sweettalk_block`), so the context map can find foreign names, and each border's
   # text apart from the events its `whenever`s name, so reacting to an event is not a
   # dependency. In a program that requires caramel/tenancy its rows belong to one tenant,
   # unless it says `central: true`, which shares them between every tenant.
@@ -2259,8 +2509,6 @@ module SweetTalk
     {% declared_ids = @type.has_constant?("SWEETTALK_IDS") && @type.constant("SWEETTALK_IDS") %}
     __sweettalk_shared("context", {{ name }}, {{ shares }})
     ::SweetTalk.__sweettalk_renamed({{ name }}, {{ renamed_from }})
-    {% body = block ? block.body : nil %}
-    {% expressions = body.is_a?(Expressions) ? body.expressions : [body] %}
     {% followed = [] of Nil %}
     {% followed = [follows] unless follows.is_a?(NilLiteral) %}
     {% followed = follows if follows.is_a?(TupleLiteral) %}
@@ -2268,172 +2516,6 @@ module SweetTalk
     {% shared = [shares] unless shares.is_a?(NilLiteral) %}
     {% shared = shares if shares.is_a?(ArrayLiteral) %}
     {% shared = shared.select { |path| path.is_a?(Path) } %}
-    # A border is outside when its outside: is text, as in the border macro; any other
-    # outside:, nil included, is refused at the border's line.
-    {% for node in expressions %}
-      {% if node.is_a?(Call) && node.name == "border" %}
-        {% said = (node.named_args || [] of Nil).find { |arg| arg.name.stringify == "outside" } %}
-        {% if said && !said.value.is_a?(StringLiteral) %}
-          {% node.raise "border #{node.args[0]} takes outside: \"…\", what the system is to " +
-                        "this context, the line its glossary entry shows" %}
-        {% end %}
-      {% end %}
-    {% end %}
-    {% outsides = expressions.select do |node|
-         node.is_a?(Call) && node.name == "border" &&
-           (node.named_args || [] of Nil).any? do |arg|
-             arg.name.stringify == "outside" && arg.value.is_a?(StringLiteral)
-           end
-       end %}
-    {% borders = expressions.select do |node|
-         node.is_a?(Call) && node.name == "border" && !outsides.includes?(node)
-       end %}
-    {% published = nil %}
-    {% for node in expressions %}
-      {% if node.is_a?(Call) && node.name == "publishes" %}
-        {% published = [] of Nil unless published %}
-        {% for argument in node.args %}
-          {% published << argument.stringify %}
-        {% end %}
-      {% end %}
-    {% end %}
-    # {statement, its text, in an outside border?} for each statement a check may refuse,
-    # so the refusal names its line; a handler's text leaves out the event it reacts to.
-    {% handlers = %w[whenever compensate] %}
-    {% checks = [] of Nil %}
-    {% for node in expressions %}
-      {% block = node.is_a?(Call) && !node.block.is_a?(Nop) %}
-      {% outside = outsides.includes?(node) %}
-      {% if block && handlers.includes?(node.name.stringify) %}
-        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
-        {% checks << {node, node.block.body.stringify + "\n" + extra, false} %}
-      {% elsif block %}
-        {% extra = (node.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
-        {% checks << {node, node.args.map(&.stringify).join("\n") + "\n" + extra, false} %}
-        {% inner = node.block.body %}
-        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
-          {% nested = step.is_a?(Call) && !step.block.is_a?(Nop) &&
-                      handlers.includes?(step.name.stringify) %}
-          {% if nested %}
-            {% extra = (step.named_args || [] of Nil).map(&.value.stringify).join("\n") %}
-            {% checks << {step, step.block.body.stringify + "\n" + extra, outside} %}
-          {% else %}
-            {% checks << {step, step.stringify, outside} %}
-          {% end %}
-        {% end %}
-      {% else %}
-        {% checks << {node, node.stringify, false} %}
-      {% end %}
-    {% end %}
-    # The published languages of the contexts of this domain declared before this one.
-    {% for up in ::SweetTalk::BoundedContext.includers %}
-      {% upname = up.name.split("::").last %}
-      {% offers = up.constant("SWEETTALK_PUBLISHES") %}
-      {% if offers && up.name.stringify == prefix + upname && upname != name.stringify %}
-        {% offered = offers.join(", ") %}
-        {% for check in checks %}
-          {% for piece in check[1].split(upname + "::")[1..-1] %}
-            {% path = piece.gsub(/\A([A-Z]\w*(?:::[A-Z]\w*)*)[\s\S]*\z/, "\\1") %}
-            {% found = parse_type(up.name.stringify + "::" + path).resolve? %}
-            {% open = offers.any? { |offer| path == offer || path.starts_with?(offer + "::") } ||
-                      (found && found < ::SweetTalk::Event) %}
-            {% unless open %}
-              {% check[0].raise "#{prefix.id}#{name} names #{upname.id}::#{path.id}, which " +
-                                "#{upname.id} does not publish; it publishes #{offered.id}: use " +
-                                "one of those, or publish #{path.id} in #{upname.id}" %}
-            {% end %}
-          {% end %}
-          {% for piece in check[1].split(upname + ".")[1..-1] %}
-            {% call = piece =~ /\A[a-z_]/ && piece.gsub(/\A([a-z_]\w*[?!]?)[\s\S]*\z/, "\\1") %}
-            {% if call && !offers.includes?(call) %}
-              {% check[0].raise "#{prefix.id}#{name} calls #{upname.id}.#{call.id}, which " +
-                                "#{upname.id} does not publish; it publishes #{offered.id}: " +
-                                "use one of those, or publish #{call.id} in #{upname.id}" %}
-            {% end %}
-          {% end %}
-        {% end %}
-      {% end %}
-    {% end %}
-    # HTTP leaves the program only through a border with an outside system.
-    {% for check in checks %}
-      {% reached = nil %}
-      {% reached = "Caramel::Outbound" if check[1].includes?("Caramel::Outbound") %}
-      {% reached = "HTTP::Client" if check[1].includes?("HTTP::Client") %}
-      {% if reached && !check[2] %}
-        {% check[0].raise "#{prefix.id}#{name} reaches #{reached.id} outside a border with an " +
-                          "outside system: move that call into the border with the system it " +
-                          "reaches, as in border Cards, outside: \"…\" do … end" %}
-      {% end %}
-    {% end %}
-    # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
-    # an outside system cannot be taken back, so none names an outside border (ADR 0060).
-    {% systems = outsides.map(&.args[0].names.last.stringify) %}
-    {% bodies = [] of Nil %}
-    {% for node in (systems.empty? ? [] of Nil : expressions) %}
-      {% if node.is_a?(Call) && node.name == "unit" && !node.block.is_a?(Nop) &&
-              node.args[0].is_a?(Call) %}
-        {% bodies << {"unit #{name}.#{node.args[0].name}", node.block.body} %}
-      {% elsif node.is_a?(Call) && node.name == "aggregate" && !node.block.is_a?(Nop) %}
-        {% inner = node.block.body %}
-        {% for step in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
-          {% if step.is_a?(Call) && %w[to factory].includes?(step.name.stringify) &&
-                  !step.block.is_a?(Nop) && step.args[0].is_a?(Call) %}
-            {% joint = step.name == "to" ? "#" : "." %}
-            {% what = step.name == "to" ? "command" : "factory" %}
-            {% bodies << {"#{what.id} #{node.args[0]}#{joint.id}#{step.args[0].name}",
-                          step.block.body} %}
-          {% end %}
-        {% end %}
-      {% end %}
-    {% end %}
-    {% for checked in bodies %}
-      {% inner = checked[1] %}
-      {% for statement in (inner.is_a?(Expressions) ? inner.expressions : [inner]) %}
-        {% padded = " " + statement.stringify.gsub(/[^\w:.]/, " ") %}
-        {% for system in systems %}
-          {% if padded.includes?(" #{system.id}.") || padded.includes?(" #{system.id}::") %}
-            {% statement.raise "#{checked[0].id} names #{system.id}, a border with an outside " +
-                               "system: a preview runs it and rolls back, and a call outside " +
-                               "cannot be taken back; call #{system.id} from a whenever on its " +
-                               "event, or before the change" %}
-          {% end %}
-        {% end %}
-      {% end %}
-    {% end %}
-    {% kinds = %w[value aggregate projection process] %}
-    {% own = expressions.select do |node|
-         node.is_a?(Call) && kinds.includes?(node.name.stringify) && !node.args.empty?
-       end.map(&.args[0].stringify) %}
-    {% reacts = [] of Nil %}
-    {% pieces = [] of Nil %}
-    {% for node in expressions %}
-      {% if borders.includes?(node) %}
-      {% elsif node.is_a?(Call) && node.name == "process" && !node.block.is_a?(Nop) %}
-        {% inner = node.block.body %}
-        {% steps = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
-        {% for step in steps %}
-          {% handler = step.is_a?(Call) && %w[whenever compensate].includes?(step.name.stringify) &&
-                       !step.block.is_a?(Nop) %}
-          {% if handler %}
-            {% path = step.args[0] %}
-            {% react = path.is_a?(Path) && {path.names[0].stringify, path.stringify} %}
-            {% if react && !own.includes?(react[0]) && !reacts.includes?(react) %}
-              {% reacts << react %}
-            {% end %}
-            {% for argument in (step.named_args || [] of Nil) %}
-              {% pieces << argument.value.stringify %}
-            {% end %}
-            {% pieces << step.block.body.stringify %}
-          {% else %}
-            {% pieces << step.stringify %}
-          {% end %}
-        {% end %}
-      {% else %}
-        {% pieces << node.stringify %}
-      {% end %}
-    {% end %}
-    {% listed = reacts.map { |react| "{#{react[0]}, #{react[1]}}" } %}
-    {% offering = published ? "[#{published.map(&.stringify).join(", ").id}] of String" : "nil" %}
     module {{ name }}
       include ::SweetTalk::BoundedContext
 
@@ -2457,43 +2539,65 @@ module SweetTalk
       SWEETTALK_SHARES  = [{{ shared.map(&.names.last.stringify).splat }}] of String
       # The contexts and kernels that share this module when it is a kernel; nil for a context
       SWEETTALK_SHARED_BY = nil
-      SWEETTALK_TEXT    = {{ pieces.join("\n") }}
       # Where the context is declared, for the context map's refusals
       SWEETTALK_AT      = {{ "#{name.filename.id}:#{name.line_number}:#{name.column_number}" }}
-      # {first segment, path} of each event of another context a process follows
-      SWEETTALK_REACTS = [{{ listed.join(", ").id }}] of {String, String}
-      # The names other contexts may use, or nil when every name is open to a follower
-      SWEETTALK_PUBLISHES = {{ offering.id }}
-      {% for border in outsides %}
-        {% system = border.args[0].names.last %}
-        {% said = border.named_args.find { |argument| argument.name.stringify == "outside" } %}
-        # {outside system, what it is to this context}
-        SWEETTALK_OUTSIDE_{{ system.upcase }} = { {{ system.stringify }}, {{ said.value }} }
-      {% end %}
-      {% for border in borders %}
-        {% inner = border.block.body %}
-        {% parts = inner.is_a?(Expressions) ? inner.expressions : [inner] %}
-        {% reacting = parts.any? { |part| part.is_a?(Call) && part.name == "whenever" } %}
-        {% rest = parts.map do |part|
-             handler = part.is_a?(Call) && %w[whenever compensate].includes?(part.name.stringify) &&
-                       !part.block.is_a?(Nop)
-             handler ? part.block.body.stringify : part.stringify
-           end.join("\n") %}
-        {% other = border.args[0].names.last %}
-        {% entry = {other.stringify, inner.stringify, rest, reacting} %}
-        # {other context, its whole text, its text without the events it reacts to, reacts?}
-        SWEETTALK_BORDER_{{ other.upcase }} = {{ entry }}
-      {% end %}
 
       # This context's SugarORM schemas, one per aggregate, entity and projection.
       module Rows
       end
 
-      {{ body }}
+      __sweettalk_block(true) do
+        {% if block %}{{ block.body }}{% end %}
+      end
 
       ::SweetTalk.__sweettalk_event_log(::{{ prefix.id }}{{ name }})
       ::SweetTalk.__sweettalk_operations(::{{ prefix.id }}{{ name }})
-      __sweettalk_check_queries
+
+      # After every block of the context, the `within`s in later files included.
+      macro finished
+        __sweettalk_check_queries
+      end
+    end
+  end
+
+  # `within Ordering do … end` continues context Ordering, declared before it in the same
+  # domain module, so its words can live in a file of their own (ADR 0065). It takes the
+  # words a context's body takes and no option: those belong to the `context` block. Each
+  # block is checked as the header's is (`__sweettalk_block`), and the context map and the
+  # query check read every block.
+  #
+  # @word setup | Continues a context declared before it, so its words can live in another file.
+  # @usage within CONTEXT do ... end
+  # @guide c-sweettalk-files
+  # @example
+  #   context Vineyard, means: "the vines we tend" do
+  #     value Row, Int32, at_least: 1, means: "the row a vine grows in"
+  #   end
+  #
+  #   within Vineyard do
+  #     aggregate Vine, means: "one vine in a row" do
+  #       has row : Row
+  #     end
+  #   end
+  macro within(name, &block)
+    {% prefix = @type == @top_level ? "" : "#{@type.name.id}::" %}
+    {% name.raise "within #{name} needs a block: within #{name} do … end" unless block %}
+    {% found = ::SweetTalk::BoundedContext.includers.find do |context|
+         context.name.stringify == "#{prefix.id}#{name}"
+       end %}
+    {% unless found %}
+      {% name.raise "within #{name} names no context declared before it: declare context " +
+                    "#{name}, means: \"…\" do … end in a file required before this one" %}
+    {% end %}
+    {% if found.constant("SWEETTALK_SHARED_BY") %}
+      {% name.raise "within #{name} names a kernel, which is one block: add the words to " +
+                    "kernel #{name} itself" %}
+    {% end %}
+    module {{ name }}
+      __sweettalk_block(false) do
+        {{ block.body }}
+      end
+      ::SweetTalk.__sweettalk_operations(::{{ prefix.id }}{{ name }})
     end
   end
 end
