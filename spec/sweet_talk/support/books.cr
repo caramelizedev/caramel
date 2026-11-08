@@ -65,6 +65,10 @@ module Books
 
       finds of_amount(amount : Cash::Amount), where: {original: amount}
       finds unreported, where: {reported: nil}
+      sums originals, of: :original
+      sums fees, of: :fee
+      sums shares, of: Line.share
+      groups fees_by_currency, of: :fee, by: :original
 
       to report(rate : Cash::Rate) do
         @reported = original.convert(rate)

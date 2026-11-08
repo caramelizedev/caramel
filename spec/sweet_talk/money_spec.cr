@@ -157,6 +157,37 @@ describe "SweetTalk's amounts" do
     end
   end
 
+  it "adds up amounts per currency, and groups by an amount's currency, in one statement each" do
+    SweetTalkSpec.rolled_back do
+      entries, currency = MoneySpec::Ledger::Entry, MoneySpec::Money::Currency
+      entries.originals.should be_empty
+      entries.fees.should eq(MoneySpec::USD.zero)
+      first = MoneySpec.entry("12.30", "EUR")
+      first.charge(MoneySpec::USD.parse("0.25"))
+      first.split([MoneySpec.amount("4", "USD"), MoneySpec.amount("600", "JPY")])
+      MoneySpec.entry("1.70", "EUR").charge(MoneySpec::USD.parse("1.00"))
+      MoneySpec.entry("10", "USD")
+
+      before = SugarORM::Repo.statements_executed
+      originals = entries.originals
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      originals.should eq({currency.eur => MoneySpec::EUR.new(1400),
+                           currency.usd => MoneySpec::USD.new(1000)})
+      originals.keys.should eq([currency.eur, currency.usd])
+      before = SugarORM::Repo.statements_executed
+      entries.fees.should eq(MoneySpec::USD.new(125))
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      before = SugarORM::Repo.statements_executed
+      entries.shares.should eq({currency.jpy => MoneySpec.amount("600", "JPY"),
+                                currency.usd => MoneySpec.amount("4", "USD")})
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      before = SugarORM::Repo.statements_executed
+      entries.fees_by_currency.should eq([{by: currency.eur, total: MoneySpec::USD.new(125)},
+                                          {by: currency.usd, total: MoneySpec::USD.new(0)}])
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+    end
+  end
+
   it "needs no migration once its tables exist" do
     declared = SugarORM::Catalog.declared
     snapshot = SugarORM::Introspection.read(SweetTalkSpec.owner)
