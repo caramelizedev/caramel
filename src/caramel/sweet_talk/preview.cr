@@ -28,9 +28,11 @@ module SweetTalk
   end
 
   # What a run would record: its events, in dispatch order; each aggregate it changed,
-  # before and after; the `warn` lines that held; the sentence it was refused with; and the
-  # fingerprint over all of it. Ids the run made read as `new Receipt #1`, in the order it
-  # made them, and instants are left out, so two runs that would record the same agree.
+  # before and after; the `warn` lines that held; the sentences of a unit's `never` and
+  # `always` lines that failed; the sentence a commit would be refused with; and the
+  # fingerprint over all of it but the blockers after the first. Ids the run made read as
+  # `new Receipt #1`, in the order it made them, and instants are left out, so two runs that
+  # would record the same agree.
   class Preview
     # One event: its class, its subject as `Tea 4` or `new Receipt #1` (nil for a
     # context's event), and its fields in canonical form.
@@ -89,12 +91,15 @@ module SweetTalk
 
     getter events : Array(Emitted)
     getter warnings : Array(String)
+    # The sentences of a unit's `never` and `always` lines that failed, in the order they ran.
+    getter blockers : Array(String)
+    # The sentence a commit would be refused with: the body's refusal, or the first blocker.
     getter refusal : String?
     getter fingerprint : Fingerprint
     @rows : Array(Change)
 
     def initialize(@events : Array(Emitted), @rows : Array(Change), @warnings : Array(String),
-                   @refusal : String?)
+                   @refusal : String?, @blockers : Array(String) = [] of String)
       @fingerprint = Fingerprint.new(Digest::SHA256.hexdigest(canonical))
     end
 
@@ -138,6 +143,7 @@ module SweetTalk
         json.field("fingerprint", @fingerprint)
         json.field("refusal", @refusal)
         json.field("warnings", @warnings)
+        json.field("blockers", @blockers)
         json.field("events", @events)
         json.field("changes", changes)
         json.field("summary", summary)
@@ -177,6 +183,17 @@ module SweetTalk
     end
   end
 
+  # A preview that keeps what its block returned: `value`, nil when the body was refused.
+  # The value stays out of the fingerprint and `to_json`.
+  class Preview::Of(T) < Preview
+    getter value : T?
+
+    def initialize(@value : T?, events : Array(Emitted), rows : Array(Change),
+                   warnings : Array(String), refusal : String?, blockers : Array(String))
+      super(events, rows, warnings, refusal, blockers)
+    end
+  end
+
   # The world moved between a preview and its commit: the same body would now record
   # something else. Nothing was written. It carries the fresh preview, which a form shows
   # again with its fingerprint; an action that does not rescue it answers 422 (ADR 0034).
@@ -193,6 +210,9 @@ module SweetTalk
   class Run
     getter? dry : Bool
     getter warnings = [] of String
+    # The sentences of a unit's `never` and `always` lines that failed in a dry run, in the
+    # order they ran.
+    getter blockers = [] of String
     getter events = [] of Event
     # Every aggregate instance a command loaded or saved, which reload after a dry run.
     getter instances = [] of Aggregate
@@ -245,10 +265,22 @@ module SweetTalk
       @made[{type, raw}]? || "#{type.split("::").last} #{raw}"
     end
 
-    # What the run would record, or only *refusal* when it was refused.
+    # What the run would record, or only *refusal* when the body was refused.
     def preview(refusal : String?) : Preview
+      Preview.new(*parts(refusal))
+    end
+
+    # The same, keeping *value*, what the body returned as a *type*, nil when it was refused.
+    def preview(refusal : String?, type : T.class, value : T?) : Preview::Of(T) forall T
+      Preview::Of(T).new(value, *parts(refusal))
+    end
+
+    # A preview's events, rows, warnings, refusal and blockers: the body's refusal alone,
+    # or what the run recorded with its first blocker as the refusal.
+    private def parts(refusal : String?)
       if refusal
-        return Preview.new([] of Preview::Emitted, [] of Preview::Change, [] of String, refusal)
+        return {[] of Preview::Emitted, [] of Preview::Change, [] of String,
+                refusal.as(String?), [] of String}
       end
       emitted = @events.map do |event|
         Preview::Emitted.new(event.class.name, event.__sweettalk_canon_subject(self),
@@ -258,7 +290,7 @@ module SweetTalk
         Preview::Change.new(entry[0], subject(entry[0], entry[1]), entry[2], canon(entry[3]),
           entry[3].__sweettalk_ended?)
       end
-      Preview.new(emitted, rows, @warnings.dup, nil)
+      {emitted, rows, @warnings.dup, @blockers.first?, @blockers.dup}
     end
 
     private def canon(aggregate : Aggregate) : JSON::Any
@@ -281,19 +313,19 @@ module SweetTalk
                        "the outside system before the change, or from a whenever on its event"
 
   # Runs the block dry: in a transaction that always rolls back, with the commit's locks,
-  # and `Caramel::Outbound` refused. Returns what it would record; a refusal returns a
-  # preview with only its sentence. Every aggregate instance a command loaded or saved
-  # reloads what is stored afterwards.
-  def self.preview(&) : Preview
+  # and `Caramel::Outbound` refused. Answers what it would record and what the block
+  # returned; a refusal raised by the body answers its sentence alone, with no value.
+  # Every aggregate instance a command loaded or saved reloads what is stored afterwards.
+  def self.preview(& : -> T) : Preview::Of(T) forall T
     run = Run.new(dry: true)
     preview = nil
     begin
       ::SugarORM::Repo.transaction do
         begin
-          __sweettalk_running(run) { yield }
-          preview = run.preview(nil)
+          value = __sweettalk_running(run) { yield }
+          preview = run.preview(nil, T, value)
         rescue error : Refusal
-          preview = run.preview(error.message || "")
+          preview = run.preview(error.message || "", T, nil)
         end
         ::SugarORM::Repo.rollback
       end
@@ -330,6 +362,25 @@ module SweetTalk
     run = ::Fiber.current.__sweettalk_run
     raise Refusal.new(sentence) unless run
     run.warnings << sentence unless run.warnings.includes?(sentence)
+  end
+
+  # A unit's `never` or `always` line, run after the body; the block answers whether the
+  # rule holds. A rule that fails refuses with its sentence, except in a preview: there its
+  # sentence joins the blockers and the next line runs. In a preview that already holds a
+  # blocker, a line whose block raises is skipped, since the commit refuses before it.
+  def self.__sweettalk_rule(sentence : String, on : Symbol?, & : -> Bool) : Nil
+    run = ::Fiber.current.__sweettalk_run
+    unless run && run.dry?
+      raise Refusal.new(sentence, on: on) unless yield
+      return
+    end
+    begin
+      return if yield
+    rescue error
+      raise error if run.blockers.empty?
+      return
+    end
+    run.blockers << sentence unless run.blockers.includes?(sentence)
   end
 
   private def self.__sweettalk_running(run : Run, &)

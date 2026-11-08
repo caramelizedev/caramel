@@ -41,7 +41,9 @@ aggregate first.
    the whole unit back, every aggregate instance its commands touched reloads what is
    stored, and the error goes on. Inside `SweetTalk.preview` it runs dry: the same locks,
    body and lines, then the preview always rolls back and every instance reloads; a
-   `warn` line runs with them ([ADR 0060](0060-sweettalk-preview-and-commit.md)).
+   `warn` line runs with them, and a `never` or `always` line that fails adds its sentence
+   to the preview's blockers and lets the next line run
+   ([ADR 0060](0060-sweettalk-preview-and-commit.md) decision 11).
 3. **`SweetTalk.lock` is the ordered lock.** `SweetTalk.lock(*ids)` takes ids, aggregates
    and arrays of either, groups them by table and locks each table's rows in one statement,
    `WHERE removed_at IS NULL AND id = ANY($1) ORDER BY id FOR UPDATE`, through the
