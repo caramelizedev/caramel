@@ -130,4 +130,5 @@ Rejected:
 - **`preview` answering `{preview, value}`.** Every caller's type would change without a
   release that warns first.
 - **Every blocker in the fingerprint.** A blocked preview never commits, and an unchanged
-  canonical form keeps every fingerprint a form holds across the upgrade.
+  canonical form keeps the fingerprint of every preview with no failing line across the
+  upgrade.
