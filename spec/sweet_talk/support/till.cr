@@ -97,6 +97,17 @@ module PreviewShop
       warn "The new price is less than half the old one." { price.raw * 2 < was.raw }
     end
 
+    unit clear(tea : Tea::Id), changes: [Tea], locks: [tea],
+      means: "takes a tea that sold out off the shelf" do
+      found = Tea.find(tea)
+      stock = found.stock
+      sold = found.sold_at
+      found.retire
+      never "Tins are still on the shelf." { stock > Tins.zero }
+      never "The tea was never sold." { sold.nil? }
+      always "The tea was last sold before now." { sold.not_nil! <= Time.utc }
+    end
+
     unit sell_and_ask(tea : Tea::Id, tins : Tins), changes: [Tea, Receipt], locks: [tea],
       means: "sells tins and asks the gateway, which a unit must not do" do
       found = Tea.find(tea)

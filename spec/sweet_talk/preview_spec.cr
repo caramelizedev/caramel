@@ -2,7 +2,8 @@
 # leaving no receipt, job or log row; two previews of the same change agree, though the
 # clock and the id sequence moved; a commit against that fingerprint keeps the change, and
 # one against a world that moved raises Stale and writes nothing; a warn line refuses a
-# plain call and is confirmed by a fingerprint; and a preview refuses Caramel::Outbound.
+# plain call and is confirmed by a fingerprint; a unit's failing lines show as blockers, and
+# a preview answers the block's value; and a preview refuses Caramel::Outbound.
 require "./support/app"
 require "./support/preview_web"
 
@@ -128,6 +129,38 @@ describe "SweetTalk's preview and commit" do
       preview.refusal.should eq("Only 1 tins of Sencha left.")
       preview.events.should be_empty
       preview.changes.should be_empty
+      preview.blockers.should be_empty
+    end
+  end
+
+  it "lists every failing line of a unit as a blocker beside what the run would record" do
+    SweetTalkSpec.rolled_back do
+      tea = PreviewSpec.tea(5)
+      preview = SweetTalk.preview { PreviewShop::Till.clear(tea.id) }
+      preview.blockers.should eq(["Tins are still on the shelf.", "The tea was never sold."])
+      preview.refusal.should eq("Tins are still on the shelf.")
+      preview.changes.map(&.removed?).should eq([true])
+      expect_raises(SweetTalk::Refusal, "Tins are still on the shelf.") do
+        SweetTalk.commit(preview.fingerprint) { PreviewShop::Till.clear(tea.id) }
+      end
+      expect_raises(SweetTalk::Refusal, "Tins are still on the shelf.") do
+        PreviewShop::Till.clear(tea.id)
+      end
+      PreviewSpec.stock(tea).should eq(5)
+    end
+  end
+
+  it "answers what the block returned, typed, and nil when the body was refused" do
+    SweetTalkSpec.rolled_back do
+      tea = PreviewSpec.tea(5)
+      preview = SweetTalk.preview do
+        PreviewSpec.sell(tea)
+        PreviewShop::Till::Tea.find(tea.id).stock.raw
+      end
+      preview.value.should eq(3)
+      typeof(preview.value).should eq(Int32?)
+      PreviewSpec.stock(tea).should eq(5)
+      SweetTalk.preview { PreviewSpec.sell(tea, 9); 1 }.value.should be_nil
     end
   end
 

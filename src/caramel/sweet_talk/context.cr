@@ -1064,8 +1064,9 @@ module SweetTalk
     # is a unit (ADR 0046): one transaction whose commands change the aggregates named in
     # `changes:`, each existing row locked first through `SweetTalk.lock` on the arguments
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
-    # rule over the set, checked after the body; a `warn "…" { … }` line, checked with them,
-    # refuses a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
+    # rule over the set, checked after the body; `SweetTalk.preview` runs every one and
+    # lists those that fail as blockers. A `warn "…" { … }` line, checked with them, refuses
+    # a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
     # entry, timed as a domain span named `Ledger.post`. `once_by: key` makes it run once
     # per operation key: the first run keeps the key, a fingerprint of the other arguments
     # and what it returned in the context's `<context>_operations` table; a repeat with the
@@ -1346,14 +1347,14 @@ module SweetTalk
               {% field = named.find { |arg| arg.name.stringify == "on" } %}
               {% on = field ? field.value : nil %}
               {% if rule.name == "never" %}
-                if ({{ rule.block.body }})
-                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                ::SweetTalk.__sweettalk_rule({{ rule.args[0] }}, {{ on }}) do
+                  !({{ rule.block.body }})
                 end
               {% elsif rule.name == "warn" %}
                 ::SweetTalk.__sweettalk_warn({{ rule.args[0] }}) if ({{ rule.block.body }})
               {% else %}
-                unless ({{ rule.block.body }})
-                  raise ::SweetTalk::Refusal.new({{ rule.args[0] }}, on: {{ on }})
+                ::SweetTalk.__sweettalk_rule({{ rule.args[0] }}, {{ on }}) do
+                  !!({{ rule.block.body }})
                 end
               {% end %}
             {% end %}
