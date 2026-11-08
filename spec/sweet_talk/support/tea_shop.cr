@@ -119,6 +119,10 @@ module TeaShop
       sums spent_by(member : Account), of: Line.price, where: {member: member, state: :placed}
       groups priced_by_tea(member : Account), of: Line.price, by: Line.tea,
         where: {member: member, state: :placed}
+      sums spent_on(member : Account, teas : Array(Catalogue::Tea::Id)), of: Line.price,
+        where: {member: member, state: :placed, lines: {tea: teas}}
+      groups priced_by_order(member : Account), of: Line.price, by: :id,
+        where: {member: member, state: :placed}
       finds holding(tea : Catalogue::Tea::Id) do |orders|
         orders.where("id IN (SELECT order_id FROM ordering_order_lines WHERE tea_id = ?)", tea.raw)
       end

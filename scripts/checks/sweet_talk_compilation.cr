@@ -296,18 +296,30 @@ PROBLEMS = [
    "line"},
   {"sums_not_number",
    "sums grams_total adds up :label, which is not a number: add up an Int32, Int64 or Float64 " \
-   "attribute, or a value that wraps a whole number or a decimal"},
+   "attribute, a value that wraps a whole number or a decimal, or an amount"},
   {"sums_bounded_value",
    "sums grams_total adds up :dose, a Dose, whose bounds a sum can break: add up a value that " \
    "takes 0 and has no upper bound, as in value Cents, Int64, means: \"…\""},
   {"groups_without_by",
    "groups grams_by_tea takes by:, the attribute it groups by, as in by: :state or by: Line.tea"},
   {"groups_by_outside_entity",
-   "groups grams_by_tea adds up Slot.grams, so it groups by another attribute of Slot, not " \
-   ":label: narrow Jar with where: instead"},
+   "groups grams_by_tea adds up Slot.grams, so it groups by another attribute of Slot, or by " \
+   ":id, one row per Jar, not :label: narrow Jar with where: instead"},
   {"groups_by_ungroupable",
    "groups grams_by_tea groups by Slot.brewed_at, which has no one-column key: group by text, " \
-   "a whole number, a UUID, a Bool, a day, a decimal, an aggregate it refers to, or state"},
+   "a whole number, a UUID, a Bool, a day, a decimal, an aggregate it refers to, an amount, by " \
+   "its currency, or state"},
+  {"sums_filters_own_list",
+   "sums count_total filters slots, but adds up :count, an attribute of Jar: filter a list's " \
+   "entities only in a sums or groups that adds up one of their attributes"},
+  {"sums_filters_other_list",
+   "sums grams_total filters label, which is not the list of Slot it adds up"},
+  {"sums_filters_entity_unknown",
+   "sums grams_total filters slots on colour, which is not one of Slot's stored attributes " \
+   "declared above this line: tea, grams, brewed_at"},
+  {"groups_by_id_own",
+   "groups count_by_jar adds up :count, an attribute of Jar, so by: :id gives each Jar a row " \
+   "of its own: read count with finds"},
   {"finds_where_not_tuple",
    "finds labelled takes where: {attribute: value}, as in where: {member: member, state: " \
    ":placed}"},
@@ -565,6 +577,9 @@ PROBLEMS = [
   {"money_amounts_added",
    "expected argument #1 to 'Shop::Till::Minor(Shop::Till::Currency::EUR)#+' to be " \
    "Shop::Till::Minor(Shop::Till::Currency::EUR), not (Shop::Till::Minor"},
+  {"money_groups_amount",
+   "groups taken_by_label adds up :taken, an amount whose currency is data: add it up with " \
+   "sums, which answers a total per currency"},
   {"decimal_without_require",
    "value Rate wraps Decimal, which needs require \"caramel/sweet_talk/decimal\" before this " \
    "domain: a program that declares no decimal value never links GMP"},

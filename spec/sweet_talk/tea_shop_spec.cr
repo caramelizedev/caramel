@@ -636,6 +636,31 @@ describe "The tea shop on PostgreSQL" do
     end
   end
 
+  it "adds up the lines of some teas, and each order's lines, in one statement each" do
+    SweetTalkSpec.rolled_back do
+      stock = Catalogue::Tins.new(50)
+      x = Catalogue::Tea.create(name: "Sencha", price: Catalogue::Cents.new(300), stock: stock)
+      y = Catalogue::Tea.create(name: "Assam", price: Catalogue::Cents.new(500), stock: stock)
+      ada, bob = TeaShopSpec.account("ada@example.com"), TeaShopSpec.account("bob@example.com")
+      first = TeaShopSpec.order({x, 1}, {y, 1}, member: ada).tap(&.place)
+      second = TeaShopSpec.order({x, 1}, member: ada).tap(&.place)
+      TeaShopSpec.order({y, 1}, member: ada)
+      TeaShopSpec.order({x, 1}, member: bob).place
+
+      before = SugarORM::Repo.statements_executed
+      Ordering::Order.spent_on(ada, [x.id]).raw.should eq(600)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      Ordering::Order.spent_on(ada, [x.id, y.id]).raw.should eq(1100)
+      Ordering::Order.spent_on(ada, [y.id]).raw.should eq(500)
+      Ordering::Order.spent_on(bob, [y.id]).raw.should eq(0)
+      before = SugarORM::Repo.statements_executed
+      by_order = Ordering::Order.priced_by_order(ada)
+      (SugarORM::Repo.statements_executed - before).should eq(1)
+      by_order.map { |row| {row[:by], row[:total].raw} }
+        .should eq([{first.id, 800}, {second.id, 300}])
+    end
+  end
+
   it "reads the best-selling teas from Sales with finds and counts" do
     SweetTalkSpec.rolled_back do |connection|
       teas = %w[Sencha Assam Darjeeling Earl\ Grey Genmaicha].map do |name|

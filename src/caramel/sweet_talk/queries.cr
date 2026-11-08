@@ -283,15 +283,22 @@ module SweetTalk
     # over every live one. `of:` names an attribute of this model by symbol, or of one of
     # its entities as `Line.price`; it is an Int32, Int64 or Float64 column, or a value that
     # wraps a whole number or a decimal, takes 0 and has no upper bound. The sum comes back
-    # as that type, zero when nothing matches.
+    # as that type, zero when nothing matches. With `of: Line.price`, `where:` also takes
+    # conditions on each line it adds up, under the name of their list, as in `lines: {tea:
+    # tea}`. An amount (caramel/sweet_talk/money) adds up too: a `Minor(USD)` as a number, and
+    # an `Amount`, whose currency is data, as a `Hash(Currency, Amount)` with a total for each
+    # currency that has rows, in code order.
     #
     # @word query | Adds up one number attribute over the matching rows and returns the total.
     # @usage sums NAME[(ARG : TYPE, ...)], of: ATTRIBUTE[, where: CONDITIONS]
     #   [, satisfying: SPECIFICATION]
     # @option of | an attribute symbol, or Entity.attribute | - | The attribute to add up: an
-    #   Int32, Int64 or Float64, or a value that wraps a number. It is required.
+    #   Int32, Int64 or Float64, or a value that wraps a number, or an amount
+    #   (caramel/sweet_talk/money). It is required.
     # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
-    #   the expressions, as in finds. state: inside it takes a state or a list of states.
+    #   the expressions, as in finds. state: inside it takes a state or a list of states. With
+    #   of: Entity.attribute, the name of the list that holds those entities takes their
+    #   conditions, as in lines: {tea: tea}.
     # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
     #   specification. Only in an aggregate, not in a projection or a process.
     # @guide c-sweettalk-queries
@@ -370,8 +377,32 @@ module SweetTalk
         {% summed = entity.constant("SWEETTALK_HAS_#{of.name.upcase}") %}
         {% foreign = "#{entity.constant("SWEETTALK_PARENT")[0].id}_id" %}
       {% end %}
+      {% conditions = nil %}
+      {% list = nil %}
+      {% if where.is_a?(NamedTupleLiteral) %}
+        {% for key, value in where %}
+          {% if value.is_a?(NamedTupleLiteral) %}
+            {% unless entity %}
+              {% value.raise "sums #{verb} filters #{key.id}, but adds up #{of}, an attribute " +
+                             "of #{short.id}: filter a list's entities only in a sums or groups " +
+                             "that adds up one of their attributes" %}
+            {% end %}
+            {% named = "SWEETTALK_HAS_#{key.id.upcase}" %}
+            {% holder = @type.has_constant?(named) && @type.constant(named) %}
+            {% unless holder && holder[2] == "entities" &&
+                        holder[3] == "Array(#{of.receiver.id})" %}
+              {% value.raise "sums #{verb} filters #{key.id}, which is not the list of " +
+                             "#{of.receiver.id} it adds up" %}
+            {% end %}
+            {% conditions = value %}
+            {% list = key.id.stringify %}
+          {% end %}
+        {% end %}
+      {% end %}
       {% total = nil %}
       {% build = nil %}
+      {% column = summed[4] %}
+      {% per_currency = nil %}
       {% scalars = {"Int32" => "to_i32", "Int64" => "to_i64", "Float64" => "to_f64"} %}
       {% if summed[2] == "column" && scalars[summed[6]] %}
         {% total = summed[6] %}
@@ -396,13 +427,28 @@ module SweetTalk
                         "in value Cents, Int64, means: \"…\"" %}
           {% end %}
         {% end %}
+      {% elsif summed[2] == "composite" && summed[7].size == 2 &&
+                 summed[7][0][0] == "currency" && summed[7][1][0] == "raw" %}
+        {% marker = parse_type(summed[7][0][3]).resolve? %}
+        {% if marker && marker.has_constant?("SWEETTALK_EXPONENTS") %}
+          {% column = summed[7][1][1] %}
+          {% if summed[10].ends_with?("::Amounts") %}
+            {% per_currency = summed[7][0] %}
+            {% total = "::Hash(#{summed[7][0][3].id}, " +
+                       "#{summed[7][0][3].gsub(/Currency\z/, "Amount").id})" %}
+          {% else %}
+            {% total = summed[10] %}
+            {% build = "#{summed[10].id}.new(total.to_i64)" %}
+          {% end %}
+        {% end %}
       {% end %}
       {% unless total %}
         {% of.raise "sums #{verb} adds up #{of}, which is not a number: add up an Int32, " +
-                    "Int64 or Float64 attribute, or a value that wraps a whole number or a " +
-                    "decimal" %}
+                    "Int64 or Float64 attribute, a value that wraps a whole number or a " +
+                    "decimal, or an amount" %}
       {% end %}
       {% keys = where.is_a?(NilLiteral) ? [] of String : where.keys.map(&.stringify) %}
+      {% keys = keys.reject { |key| key == list } if list %}
       {% states = [] of String %}
       {% if where.is_a?(NamedTupleLiteral) %}
         {% for key, value in where %}
@@ -421,15 +467,28 @@ module SweetTalk
                                            {{ keys }} of String, {{ states }} of String,
                                            [] of String, {{ rule }}, {{ at }}}
       __sweettalk_filter {{ call }}, {{ where }}, {{ satisfying }}
+      {% if entity %}
+        __sweettalk_held {{ call }}, "sums", ::{{ entity }}, {{ list }}, {{ conditions }}
+      {% end %}
 
       def self.{{ verb }}({{ call.args.splat }}) : {{ total.id }}
-        rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
         {% if entity %}
-          {% row = entity.constant("SWEETTALK_ROW") %}
-          rows = {{ row.id }}.query.where_in(:{{ foreign.id }}, rows)
+          rows = __sweettalk_held_{{ verb }}({{ call.args.map(&.var).splat }})
+        {% else %}
+          rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
         {% end %}
-        total = rows.sum_text(:{{ summed[4].id }})
-        {{ build.id }}
+        {% if per_currency %}
+          totals = {{ total.id }}.new
+          rows.group_sum_text(:{{ per_currency[1].id }}, :{{ column.id }}).each do |key, total|
+            next unless key # an optional amount's unset rows
+            code = {{ per_currency[3].id }}.new(key)
+            totals[code] = {{ summed[10].id }}.new(currency: code, raw: total.to_i64)
+          end
+          totals
+        {% else %}
+          total = rows.sum_text(:{{ column.id }})
+          {{ build.id }}
+        {% end %}
       end
 
       {% nothing = call.args.map { |arg| "Pointer(#{arg.type}).null.value".id } %}
@@ -439,20 +498,27 @@ module SweetTalk
     # `groups priced_by_tea(member : Account), of: Line.price, by: Line.tea, where: {member:
     # member, state: :placed}` is `sums` once per value of `by:`, an attribute of the same
     # model as `of:` with a one-column key: text, a whole number, a UUID, a Bool, a day, a
-    # decimal, an aggregate it refers to, or `:state`. Each row is `{by: key, total: sum}`,
-    # ordered by the stored key, nil (an optional attribute's) last; a key no row has is
-    # absent.
+    # decimal, an aggregate it refers to, an amount, by its currency, or `:state`; or `:id`,
+    # one row per aggregate, when `of:` names an entity's attribute. Each row is `{by: key,
+    # total: sum}`, ordered by the stored key, nil (an optional attribute's) last; a key no
+    # row has is absent. `where:` takes conditions on each entity it adds up as `sums` does;
+    # an `Amount`, whose currency is data, is added up by `sums` alone.
     #
     # @word query | Sums one attribute per value of another and returns a row of key and total
     #   for each.
     # @usage groups NAME[(ARG : TYPE, ...)], of: ATTRIBUTE, by: ATTRIBUTE[, where: CONDITIONS]
     #   [, satisfying: SPECIFICATION]
-    # @option of | an attribute symbol, or Entity.attribute | - | The number to add up, as in sums.
-    #   It is required.
-    # @option by | an attribute symbol, :state, or Entity.attribute | - | The attribute that
-    #   splits the rows into groups, of the same model as of:. It is required.
+    # @option of | an attribute symbol, or Entity.attribute | - | The number to add up, as in sums,
+    #   but an amount (caramel/sweet_talk/money) only when its currency is a type, as in
+    #   Minor(USD). It is required.
+    # @option by | an attribute symbol, :state, :id, or Entity.attribute | - | The attribute that
+    #   splits the rows into groups, of the same model as of:; :id gives one row per aggregate
+    #   when of: names an entity's attribute, and an amount groups by its currency. It is
+    #   required.
     # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
-    #   the expressions, as in finds. state: inside it takes a state or a list of states.
+    #   the expressions, as in finds. state: inside it takes a state or a list of states. With
+    #   of: Entity.attribute, the name of the list that holds those entities takes their
+    #   conditions, as in lines: {tea: tea}.
     # @option satisfying | a specification name | - | Keeps the aggregates that satisfy the
     #   specification. Only in an aggregate, not in a projection or a process.
     # @guide c-sweettalk-queries
@@ -532,8 +598,31 @@ module SweetTalk
         {% summed = entity.constant("SWEETTALK_HAS_#{of.name.upcase}") %}
         {% foreign = "#{entity.constant("SWEETTALK_PARENT")[0].id}_id" %}
       {% end %}
+      {% conditions = nil %}
+      {% list = nil %}
+      {% if where.is_a?(NamedTupleLiteral) %}
+        {% for key, value in where %}
+          {% if value.is_a?(NamedTupleLiteral) %}
+            {% unless entity %}
+              {% value.raise "groups #{verb} filters #{key.id}, but adds up #{of}, an " +
+                             "attribute of #{short.id}: filter a list's entities only in a sums " +
+                             "or groups that adds up one of their attributes" %}
+            {% end %}
+            {% named = "SWEETTALK_HAS_#{key.id.upcase}" %}
+            {% holder = @type.has_constant?(named) && @type.constant(named) %}
+            {% unless holder && holder[2] == "entities" &&
+                        holder[3] == "Array(#{of.receiver.id})" %}
+              {% value.raise "groups #{verb} filters #{key.id}, which is not the list of " +
+                             "#{of.receiver.id} it adds up" %}
+            {% end %}
+            {% conditions = value %}
+            {% list = key.id.stringify %}
+          {% end %}
+        {% end %}
+      {% end %}
       {% total = nil %}
       {% build = nil %}
+      {% column = summed[4] %}
       {% scalars = {"Int32" => "to_i32", "Int64" => "to_i64", "Float64" => "to_f64"} %}
       {% if summed[2] == "column" && scalars[summed[6]] %}
         {% total = summed[6] %}
@@ -558,11 +647,23 @@ module SweetTalk
                         "in value Cents, Int64, means: \"…\"" %}
           {% end %}
         {% end %}
+      {% elsif summed[2] == "composite" && summed[7].size == 2 &&
+                 summed[7][0][0] == "currency" && summed[7][1][0] == "raw" %}
+        {% marker = parse_type(summed[7][0][3]).resolve? %}
+        {% if marker && marker.has_constant?("SWEETTALK_EXPONENTS") %}
+          {% if summed[10].ends_with?("::Amounts") %}
+            {% of.raise "groups #{verb} adds up #{of}, an amount whose currency is data: add " +
+                        "it up with sums, which answers a total per currency" %}
+          {% end %}
+          {% column = summed[7][1][1] %}
+          {% total = summed[10] %}
+          {% build = "#{summed[10].id}.new(total.to_i64)" %}
+        {% end %}
       {% end %}
       {% unless total %}
         {% of.raise "groups #{verb} adds up #{of}, which is not a number: add up an Int32, " +
-                    "Int64 or Float64 attribute, or a value that wraps a whole number or a " +
-                    "decimal" %}
+                    "Int64 or Float64 attribute, a value that wraps a whole number or a " +
+                    "decimal, or an amount" %}
       {% end %}
       {% shaped = by.is_a?(SymbolLiteral) ||
                   (by.is_a?(Call) && by.receiver.is_a?(Path) && by.args.empty? &&
@@ -572,15 +673,21 @@ module SweetTalk
                                                     "it groups by, as in by: :state or by: " +
                                                     "Line.tea" %}
       {% end %}
+      {% per_root = by.is_a?(SymbolLiteral) && by.id.stringify == "id" %}
       {% if entity %}
-        {% unless by.is_a?(Call) && by.receiver.stringify == of.receiver.stringify %}
+        {% unless per_root || (by.is_a?(Call) && by.receiver.stringify == of.receiver.stringify) %}
           {% by.raise "groups #{verb} adds up #{of}, so it groups by another attribute of " +
-                      "#{of.receiver}, not #{by}: narrow #{short.id} with where: instead" %}
+                      "#{of.receiver}, or by :id, one row per #{short.id}, not #{by}: narrow " +
+                      "#{short.id} with where: instead" %}
         {% end %}
-        {% key_name = by.name.stringify %}
+        {% key_name = per_root ? "id" : by.name.stringify %}
         {% key_owner = entity %}
         {% key_home = of.receiver %}
       {% else %}
+        {% if per_root %}
+          {% by.raise "groups #{verb} adds up #{of}, an attribute of #{short.id}, so by: :id " +
+                      "gives each #{short.id} a row of its own: read #{of.id} with finds" %}
+        {% end %}
         {% unless by.is_a?(SymbolLiteral) %}
           {% by.raise "groups #{verb} adds up #{of}, so it groups by an attribute of " +
                       "#{short.id}, not #{by}" %}
@@ -590,7 +697,13 @@ module SweetTalk
         {% key_home = short %}
       {% end %}
       {% inner = nil %}
-      {% if key_name == "state" %}
+      {% if per_root %}
+        {% key_column = foreign %}
+        {% key_type = "::#{@type.name}::Id" %}
+        {% inner = "::#{@type.name}::Id.new(::SweetTalk.__sweettalk_raw(" +
+                   "::#{@type.name}::Id::Raw, text))" %}
+        {% optional = false %}
+      {% elsif key_name == "state" %}
         {% unless key_owner.has_constant?("SWEETTALK_MOVES") %}
           {% by.raise "groups #{verb} groups by state, which #{key_home.id} does not have " +
                       "above this line" %}
@@ -626,15 +739,24 @@ module SweetTalk
           {% key_type = "#{key[10].id}::Id" %}
           {% inner = "#{key[10].id}::Id.new(::SweetTalk.__sweettalk_raw(" +
                      "#{key[10].id}::Id::Raw, text))" %}
+        {% elsif key[2] == "composite" && key[7].size == 2 && key[7][0][0] == "currency" &&
+                   key[7][1][0] == "raw" %}
+          {% marker = parse_type(key[7][0][3]).resolve? %}
+          {% if marker && marker.has_constant?("SWEETTALK_EXPONENTS") %}
+            {% key_column = key[7][0][1] %}
+            {% key_type = key[7][0][3] %}
+            {% inner = "#{key[7][0][3].id}.new(text)" %}
+          {% end %}
         {% end %}
       {% end %}
       {% unless inner %}
         {% by.raise "groups #{verb} groups by #{by}, which has no one-column key: group by " +
                     "text, a whole number, a UUID, a Bool, a day, a decimal, an aggregate it " +
-                    "refers to, or state" %}
+                    "refers to, an amount, by its currency, or state" %}
       {% end %}
       {% key_type = "#{key_type.id}?" if optional %}
       {% keys = where.is_a?(NilLiteral) ? [] of String : where.keys.map(&.stringify) %}
+      {% keys = keys.reject { |key| key == list } if list %}
       {% states = [] of String %}
       {% if where.is_a?(NamedTupleLiteral) %}
         {% for key, value in where %}
@@ -653,15 +775,18 @@ module SweetTalk
                                            {{ keys }} of String, {{ states }} of String,
                                            [] of String, {{ rule }}, {{ at }}}
       __sweettalk_filter {{ call }}, {{ where }}, {{ satisfying }}
+      {% if entity %}
+        __sweettalk_held {{ call }}, "groups", ::{{ entity }}, {{ list }}, {{ conditions }}
+      {% end %}
 
       def self.{{ verb }}({{ call.args.splat }}) \
         : Array(NamedTuple(by: {{ key_type.id }}, total: {{ total.id }}))
-        rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
         {% if entity %}
-          {% row = entity.constant("SWEETTALK_ROW") %}
-          rows = {{ row.id }}.query.where_in(:{{ foreign.id }}, rows)
+          rows = __sweettalk_held_{{ verb }}({{ call.args.map(&.var).splat }})
+        {% else %}
+          rows = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
         {% end %}
-        rows.group_sum_text(:{{ key_column.id }}, :{{ summed[4].id }}).map do |key, total|
+        rows.group_sum_text(:{{ key_column.id }}, :{{ column.id }}).map do |key, total|
           {% if optional %}
             by = key.try { |text| {{ inner.id }} }
           {% else %}
@@ -676,8 +801,11 @@ module SweetTalk
       typeof({{ verb }}({{ nothing.splat }}))
     end
 
-    # The live rows a `finds` or `counts` filters, before any order or limit. Its keys are
-    # checked once the program's top level is complete, so this body assumes they are right.
+    # The live rows a `finds`, `counts`, `sums` or `groups` filters, before any order or limit.
+    # Its keys are checked once the program's top level is complete, so this body assumes they
+    # are right. A key that names a list of entities holds that entity's conditions, which
+    # `__sweettalk_held` applies to its rows, so it adds nothing here; `finds` and `counts`
+    # refuse such a key.
     macro __sweettalk_filter(call, where, satisfying)
       {% verb = call.name %}
       {% where = {} of Nil => Nil if where.is_a?(NilLiteral) %}
@@ -704,7 +832,8 @@ module SweetTalk
                            "{{ call.line_number }}:{{ call.column_number }}" %}
                 \{% end %}
               {% end %}
-              \{% if attribute[2] == "composite" %}
+              \{% if attribute && attribute[2] == "entities" %}
+              \{% elsif attribute[2] == "composite" %}
                 composite_{{ key.id }} = ({{ value }})
                 \{% parts = attribute[7].map do |part|
                      "#{part[1].id}: ::SweetTalk.column(composite_{{ key.id }}.#{part[0].id})"
@@ -728,6 +857,57 @@ module SweetTalk
           {% end %}
           query
         \{% end %}
+      end
+    end
+
+    # The rows of *entity* a `sums` or `groups` adds up: the ones the aggregates it filters
+    # hold, narrowed by *conditions*, the conditions its `where:` gives under *list*, the name
+    # of their list. `of:` needs the entity and its attributes declared above the query, so
+    # they are read now, not when the program's top level is complete.
+    macro __sweettalk_held(call, word, entity, list, conditions)
+      {% verb = call.name %}
+      {% type = entity.resolve %}
+      {% short = type.name.split("::").last %}
+      {% attributes = type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+           .map { |constant| type.constant(constant) }.sort_by { |attribute| attribute[1] } %}
+      {% names = attributes.reject { |attribute| attribute[2] == "entities" }
+           .map { |attribute| attribute[0] } %}
+      {% conditions = {} of Nil => Nil if conditions.is_a?(NilLiteral) %}
+      def self.__sweettalk_held_{{ verb }}({{ call.args.splat }})
+        filtered = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
+        query = {{ type.constant("SWEETTALK_ROW").id }}.query
+          .where_in(:{{ type.constant("SWEETTALK_PARENT")[0].id }}_id, filtered)
+        {% for key, value in conditions %}
+          {% attribute = attributes.find { |attribute| attribute[0] == key.id.stringify } %}
+          {% unless attribute && attribute[2] != "entities" %}
+            {% value.raise "#{word.id} #{verb} filters #{list.id} on #{key.id}, which is not " +
+                           "one of #{short.id}'s stored attributes declared above this line: " +
+                           "#{names.join(", ").id}" %}
+          {% end %}
+          {% if value.is_a?(NilLiteral) && !attribute[9] %}
+            {% value.raise "#{verb} asks for #{key.id}: nil, but #{key.id} is not optional: " +
+                           "nil is a value of an optional attribute, as in has #{key.id} : " +
+                           "#{attribute[3].id}?" %}
+          {% end %}
+          {% if attribute[2] == "composite" %}
+            composite_{{ key.id }} = ({{ value }})
+            {% parts = attribute[7].map do |part|
+                 "#{part[1].id}: ::SweetTalk.column(composite_#{key.id}.#{part[0].id})"
+               end %}
+            {% if attribute[9] %}
+              if composite_{{ key.id }}.nil?
+                query = query.where({{ attribute[7][0][1].id }}: nil)
+              else
+                query = query.where({{ parts.join(", ").id }})
+              end
+            {% else %}
+              query = query.where({{ parts.join(", ").id }})
+            {% end %}
+          {% else %}
+            query = query.where({{ attribute[4].id }}: ::SweetTalk.column({{ value }}))
+          {% end %}
+        {% end %}
+        query
       end
     end
   end

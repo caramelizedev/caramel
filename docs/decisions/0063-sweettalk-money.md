@@ -4,7 +4,8 @@ Date: 2026-11-07
 
 Status: accepted. A module under [ADR 0061](0061-sweettalk-modules.md).
 Amends [ADR 0047](0047-sweettalk-decimal-and-json-values.md) (Rejected, integer minor units)
-and [ADR 0040](0040-sweettalk-closed-set-values.md) decision 4.
+and [ADR 0040](0040-sweettalk-closed-set-values.md) decision 4. Decision 10 amends
+[ADR 0049](0049-sweettalk-sums-and-groups.md) decisions 2 and 3.
 
 ## Context
 
@@ -78,6 +79,13 @@ currency in a type needs a type per currency.
    `spec/fixtures/sweet_talk/money.cr` to prove decision 1 on the binary, and
    `spec/sweet_talk` runs amounts, rates and allocations on PostgreSQL with the other
    modules, and catches a split seeded one unit short within 200 drawn cases.
+10. **`sums` and `groups` add up amounts** (amends ADR 0049 decisions 2 and 3). A
+    `Minor(Currency::USD)` adds up as a number: `sums` returns one, zero when nothing
+    matches, and `groups` one per key. A `sums` of an `Amount` returns `Hash(Currency,
+    Amount)` in one statement grouped by `<name>_currency`: a total per currency that has
+    rows, in code order, as `by_currency` totals loaded amounts, `{}` when nothing matches;
+    an optional amount's unset rows add nothing. A `groups` that adds up an `Amount` does
+    not compile. `by:` an amount groups by its currency, as `{by: Currency, total: …}`.
 
 ## Reasons
 
@@ -100,6 +108,9 @@ currency in a type needs a type per currency.
   a hand-written split one unit short fails within 200 cases. Ties by key make the result
   one function of its arguments, and refusing floats at the author's line keeps the shares
   exact.
+- **A total of amounts is per currency.** Adding `original` without its currency adds
+  euros to yen; grouping by the currency column keeps them apart, and `Hash(Currency,
+  Amount)` is the shape `by_currency` answers.
 
 Rejected:
 
@@ -111,3 +122,6 @@ Rejected:
   mistake the refusal names.
 - **A tie broken at random, or by insertion order.** The same weights would split two
   ways, and a property case could not be replayed from its seed.
+- **`Array(Amount)` for a sum of amounts.** A lookup by currency would scan it.
+- **`by: Line.original.currency`.** An amount's one key is its currency, and an
+  aggregate's own amount would need another form.
