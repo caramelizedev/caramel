@@ -233,8 +233,9 @@ if [ -n "$PROGRAM" ]; then
     # the keep-10 cleanup that ends every build (codegen/cache_dir.cr) never
     # evicts them for applications and temporary projects in the shared
     # cache. Temporary trees and installed releases, which build a program
-    # once, stay in the shared cache. scripts/check all prunes roots unused
-    # for 30 days.
+    # once, stay in the shared cache. A checkout's root records the checkout
+    # in .checkout, so scripts/check all deletes it once the checkout is gone;
+    # it also prunes any root unused for 7 days.
     case $CHECKOUT in
         /private/tmp/* | /private/var/folders/* | "${HOME:-/nonexistent}/Library/Application Support/Caramel"/*) ;;
         *)
@@ -243,6 +244,7 @@ if [ -n "$PROGRAM" ]; then
                     if [ -f "$CHECKOUT/.caramel-toolchain" ]; then
                         CRYSTAL_CACHE_DIR=$BASE/crystal-cache-programs/$NAME
                         [ -d "$CRYSTAL_CACHE_DIR" ] || mkdir -p "$CRYSTAL_CACHE_DIR"
+                        [ -f "$CRYSTAL_CACHE_DIR/.checkout" ] || printf '%s\n' "$CHECKOUT" > "$CRYSTAL_CACHE_DIR/.checkout"
                     fi
                     ;;
                 # A check's generated application lives at a fixed path

@@ -313,21 +313,30 @@ module Caramel::Checks::All
   end
 
   # scripts/crystal gives each checkout program a compiler cache root of its
-  # own, in this toolchain and in each lane's prefix. A root no build has
-  # touched for 30 days, such as a renamed check's, is deleted before the
-  # build step.
+  # own, in this toolchain and in each lane's prefix, and records the checkout
+  # in the root's .checkout file. Before the build step a root is deleted
+  # when that checkout no longer exists (a removed worktree), and any root no
+  # build has touched for 7 days is deleted too, such as a renamed check's or
+  # one written before roots recorded their checkout.
   private def prune_program_caches : Nil
     root = File.realpath(ENV["CARAMEL_TOOLCHAIN_ROOT"]? || return)
     lanes = Dir.glob(File.join(root, "lanes/lane-*/crystal-cache-programs"))
-    cutoff = Time.utc - 30.days
+    cutoff = Time.utc - 7.days
     ([File.join(root, "crystal-cache-programs")] + lanes).each do |programs|
       next unless Dir.exists?(programs)
       Dir.each_child(programs) do |name|
         path = File.join(programs, name)
         info = File.info?(path, follow_symlinks: false) || next
-        FileUtils.rm_rf(path) if info.directory? && info.modification_time < cutoff
+        next unless info.directory?
+        FileUtils.rm_rf(path) if info.modification_time < cutoff || checkout_gone?(path)
       end
     end
+  end
+
+  private def checkout_gone?(cache_root : String) : Bool
+    marker = File.join(cache_root, ".checkout")
+    return false unless File.file?(marker)
+    !Dir.exists?(File.read(marker).chomp)
   end
 
   # Every check in scripts/checks, each run as `scripts/check NAME`.
