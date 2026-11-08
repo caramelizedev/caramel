@@ -2,8 +2,8 @@ require "./project"
 require "../latte/postgres"
 
 module Caramel::Frappe
-  # Frappé's command line, stated once. Help, per-command usage, argument
-  # validation, project dispatch and `frappe agent-manifest` all read TABLE.
+  # Frappé's command line, stated once. Help, family help, completion, usage,
+  # argument validation, project dispatch and `frappe agent-manifest` all read TABLE.
   #
   # Syntax grammar: leading lowercase words name the command; `NAME` is a
   # positional, `a|b` a literal choice, `X...` one or more, `[...]` optional.
@@ -16,11 +16,14 @@ module Caramel::Frappe
       getter subject : String
       getter commands : Array(Command)
       getter suggestion : String?
+      # A family run with no subcommand: its message is a statement, not a complaint.
+      getter? bare : Bool
 
       def initialize(message : String,
                      @subject : String,
                      @commands : Array(Command) = [] of Command,
-                     @suggestion : String? = nil)
+                     @suggestion : String? = nil,
+                     @bare : Bool = false)
         super(message)
       end
 
@@ -35,6 +38,11 @@ module Caramel::Frappe
     class Command
       getter syntax : String
       getter description : String
+      # The one line that lists show: capitalised, no trailing period.
+      getter brief : String
+      # Invocations without the leading `frappe `, as plain strings: the website
+      # reads them from this file, and a spec proves each parses.
+      getter examples : Array(String)
       getter? project : Bool
       # The final repeated positional takes every remaining argument verbatim.
       getter? passthrough : Bool
@@ -48,6 +56,8 @@ module Caramel::Frappe
       def initialize(@syntax : String,
                      @description : String,
                      *,
+                     @brief : String,
+                     @examples : Array(String) = [] of String,
                      @project : Bool = true,
                      @passthrough : Bool = false,
                      @deprecated : String? = nil)
@@ -111,54 +121,93 @@ module Caramel::Frappe
     MODE = "[--agent|--human]"
 
     TABLE = [
-      Command.new("help", "Print every command with its description.", project: false),
-      Command.new("version", "Print the Frappé version.", project: false),
+      Command.new("help [COMMAND...]",
+        "Print every command grouped by task, or, given a command's words such as db branch, " \
+        "its usage and examples or its subcommands.",
+        brief: "List commands, or show one command's help",
+        examples: ["help make resource", "help db"],
+        project: false),
+      Command.new("version", "Print the Frappé version.",
+        brief: "Print the Frappé version",
+        project: false),
+      Command.new("completion zsh|bash|fish",
+        "Print the shell completion script for zsh, bash or fish; it completes commands, " \
+        "subcommands, options and their choices. For zsh, add source <(frappe completion zsh) " \
+        "to ~/.zshrc after compinit; for bash, add source <(frappe completion bash) to " \
+        "~/.bashrc; for fish, run frappe completion fish > ~/.config/fish/completions/frappe.fish.",
+        brief: "Print a shell completion script for zsh, bash or fish",
+        examples: ["completion zsh", "completion fish"],
+        project: false),
       Command.new("agent-manifest",
         "Print the release's version and the addresses of its documentation and guides, " \
         "this strict command list and the MRDP diagnostic grammar for coding agents.",
+        brief: "Print every command in full, for coding agents",
         project: false),
       Command.new("new NAME",
         "Create the application ./NAME, install its locked dependencies " \
         "and register it with Latte.",
+        brief: "Create a new application and set it up",
+        examples: ["new my-app"],
         project: false),
       Command.new("setup [--no-migrate]",
         "Install locked dependencies, register this project with Latte and apply " \
         "pending migrations to the development database, preserving existing files; " \
-        "--no-migrate leaves the database unchanged."),
+        "--no-migrate leaves the database unchanged.",
+        brief: "Install dependencies and prepare the database",
+        examples: ["setup", "setup --no-migrate"]),
       Command.new("dev [--no-open] [--branch NAME]",
         "Build, serve and reload the app at its HTTPS origin; " \
-        "--branch runs it against database branch NAME."),
+        "--branch runs it against database branch NAME.",
+        brief: "Build, serve and reload the app in your browser",
+        examples: ["dev", "dev --branch spike"]),
       Command.new("check #{MODE}",
         "Run the Tier-1 type check (crystal build --no-codegen) " \
-        "and report diagnostics; MRDP unless stdout is a TTY."),
+        "and report diagnostics; MRDP unless stdout is a TTY.",
+        brief: "Type-check the application",
+        examples: ["check", "check --agent"]),
       Command.new("lint #{MODE}",
         "Check the application against Caramel's rule set in .ameba.yml; " \
-        "MRDP unless stdout is a TTY."),
+        "MRDP unless stdout is a TTY.",
+        brief: "Lint the application against Caramel's rules",
+        examples: ["lint", "lint --agent"]),
       Command.new("format",
-        "Format the application's Crystal files with the pinned compiler's formatter."),
+        "Format the application's Crystal files with the pinned compiler's formatter.",
+        brief: "Format the application's Crystal files"),
       Command.new("routes [FILTER]",
         "List routes with their contracts; FILTER keeps routes whose method, " \
-        "path or action contains it (any case)."),
+        "path or action contains it (any case).",
+        brief: "List routes with their contracts",
+        examples: ["routes", "routes books"]),
       Command.new("requirements [ID]",
         "List the requirement ids the SweetTalk domain declares, each with the never, " \
-        "always, specification and unit lines that assure it; ID shows one."),
+        "always, specification and unit lines that assure it; ID shows one.",
+        brief: "List the requirements the domain assures",
+        examples: ["requirements"]),
       Command.new("glossary [--json]",
         "Print the SweetTalk domain's detailed glossary as Markdown: each term's meaning, " \
         "a value's bounds and words, an aggregate's states and moves, an event's handlers " \
-        "in the order they run, a unit's changes: and locks:; --json prints the document."),
+        "in the order they run, a unit's changes: and locks:; --json prints the document.",
+        brief: "Print the domain's glossary",
+        examples: ["glossary", "glossary --json"]),
       Command.new("contexts [--mermaid]",
         "Print the SweetTalk context map: each context and kernel with what it depends on, " \
-        "reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart."),
+        "reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart.",
+        brief: "Print the domain's context map",
+        examples: ["contexts", "contexts --mermaid"]),
       Command.new("words [WORD] [--json]",
         "Print SweetTalk's vocabulary as its macros state it, with no application needed: " \
         "every word with its kind and summary, or WORD's usage, options, one example " \
         "that compiles and its guide section; an unknown WORD names the nearest; " \
         "--json prints the same as JSON.",
+        brief: "Look up SweetTalk's vocabulary, no app needed",
+        examples: ["words", "words context"],
         project: false),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
         "where none expands, the call whose block encloses it, such as " \
-        "`contract` for a `field`, and say which."),
+        "`contract` for a `field`, and say which.",
+        brief: "Show the plain Crystal a macro call expands to",
+        examples: ["expand app/actions/books/show.cr:3:5"]),
       Command.new("make resource NAME FIELD:TYPE... " \
                   "[--plural=NAME] [--only=ACTIONS] [--central] [--int64]",
         "Generate a SugarORM schema, migration, actions, views, routes and specs; " \
@@ -171,17 +220,24 @@ module Caramel::Frappe
         "create and show are required, and edit needs new and update. " \
         "In a multi-tenant application a resource belongs to the tenant " \
         "unless --central is given. " \
-        "--int64 keys it by an Int64 the database assigns instead of a UUID."),
+        "--int64 keys it by an Int64 the database assigns instead of a UUID.",
+        brief: "Generate a schema, migration, actions, views and specs",
+        examples: ["make resource Book title:string author:string",
+                   "make resource Note body:string --only=create,show,index,new"]),
       Command.new("make locale CODE",
         "Add the locale CODE, such as fr or pt-BR: create app/locales/CODE.cr; " \
         "on first use also app/locales/en.cr and the i18n lines in " \
-        "config/application.cr, after which frappe make resource writes translated views."),
+        "config/application.cr, after which frappe make resource writes translated views.",
+        brief: "Add a locale and translate generated views",
+        examples: ["make locale fr"]),
       Command.new("make tenancy MODEL [--int64]",
         "Make the application multi-tenant with MODEL, such as Account, as the tenant: " \
         "its schema, migration, sign-up page at /PLURAL/new and home at /SLUG, " \
         "require \"caramel/tenancy\" and the tenant block in config/routes.cr; " \
         "frappe make resource then writes resources that belong to a tenant. " \
-        "--int64 keys it by an Int64 the database assigns instead of a UUID."),
+        "--int64 keys it by an Int64 the database assigns instead of a UUID.",
+        brief: "Make the application multi-tenant",
+        examples: ["make tenancy Account"]),
       Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
         "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
@@ -189,86 +245,155 @@ module Caramel::Frappe
         "in config/application.cr. When the application has no SweetTalk skill for agents, " \
         "it also writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application " \
         "the domain names the tenant, and --central makes the context one every tenant " \
-        "shares."),
+        "shares.",
+        brief: "Start a SweetTalk domain with its first context",
+        examples: ["make domain Library Lending --means=\"Members borrow and return books\""]),
       Command.new("translations",
         "List the keys each locale still takes from the default locale; " \
-        "exits 1 while any is missing."),
+        "exits 1 while any is missing.",
+        brief: "List keys a locale still takes from the default"),
       Command.new("migrate [--dev-override] #{MODE}",
-        "Lint and apply pending migrations, then report schema drift read-only."),
-      Command.new("seed", "Load db/seeds.cr into the development database."),
+        "Lint and apply pending migrations, then report schema drift read-only.",
+        brief: "Apply pending migrations and report drift",
+        examples: ["migrate", "migrate --dev-override"]),
+      Command.new("seed", "Load db/seeds.cr into the development database.",
+        brief: "Load db/seeds.cr into the development database"),
       Command.new("build",
         "Build the Linux release artifact in a container: a static linux/amd64 binary and " \
-        "public/ in .caramel/build/; refuses uncommitted changes and prints the artifact's path."),
+        "public/ in .caramel/build/; refuses uncommitted changes and prints the artifact's path.",
+        brief: "Build the Linux release artifact in a container"),
       Command.new("corretto [SPEC_PATHS...] " \
                   "[--concurrency=1..#{Latte::Postgres::MAX_TEST_WORKERS}]",
-        "Run specs in isolated Latte test databases with synchronous queue drains."),
-      Command.new("db dump", "Save a backup of the development database."),
+        "Run specs in isolated Latte test databases with synchronous queue drains.",
+        brief: "Run specs in isolated test databases",
+        examples: ["corretto", "corretto spec/requests/books_spec.cr", "corretto --concurrency=4"]),
+      Command.new("db dump", "Save a backup of the development database.",
+        brief: "Save a backup of the development database"),
       Command.new("db restore FILE",
-        "Restore the development database from FILE after a safety backup."),
+        "Restore the development database from FILE after a safety backup.",
+        brief: "Restore the database from a backup file",
+        examples: ["db restore backup.dump"]),
       Command.new("db diff --name NAME [--dev-override] #{MODE}",
-        "Derive migrations from the declared schema and prove them on a scratch branch."),
+        "Derive migrations from the declared schema and prove them on a scratch branch.",
+        brief: "Derive migrations from the declared schema",
+        examples: ["db diff --name add_isbn_to_books"]),
       Command.new("db branch create NAME",
-        "Clone the development database into branch NAME and print its connection URL."),
-      Command.new("db branch list", "List this project's database branches."),
-      Command.new("db branch delete NAME", "Drop database branch NAME."),
+        "Clone the development database into branch NAME and print its connection URL.",
+        brief: "Clone the development database into a branch",
+        examples: ["db branch create spike"]),
+      Command.new("db branch list", "List this project's database branches.",
+        brief: "List this project's database branches"),
+      Command.new("db branch delete NAME", "Drop database branch NAME.",
+        brief: "Drop a database branch",
+        examples: ["db branch delete spike"]),
       Command.new("db diagnose",
         "Report database health: connections, locks, cache hits, unused indexes " \
-        "and the slowest statements."),
+        "and the slowest statements.",
+        brief: "Report connections, locks, cache hits and slow queries"),
       Command.new("logs [app|compiler|access] [--follow]",
-        "Show the development app or compiler log, or Caddy's access log."),
+        "Show the development app or compiler log, or Caddy's access log.",
+        brief: "Show the app, compiler or access log",
+        examples: ["logs", "logs compiler --follow"]),
       Command.new("traces [--errors] [--slow=MS] [--limit=N] #{MODE}",
         "List the development session's recent requests, jobs and schedule runs, " \
-        "newest first."),
+        "newest first.",
+        brief: "List recent requests, jobs and schedule runs",
+        examples: ["traces --errors", "traces --slow=200 --limit=5"]),
       Command.new("trace REF [--md]",
         "Show one development trace: its summary, queries, logs and error. " \
         "REF is last, last-error, or a prefix of a trace id, a request id or an error " \
-        "fingerprint."),
+        "fingerprint.",
+        brief: "Show one trace: queries, logs and error",
+        examples: ["trace last", "trace last-error --md"]),
       Command.new("errors #{MODE}",
-        "List development runtime errors and repeated queries, grouped."),
+        "List development runtime errors and repeated queries, grouped.",
+        brief: "List runtime errors and repeated queries",
+        examples: ["errors", "errors --agent"]),
       Command.new("services [status|start|stop]",
         "Show, start or stop Latte's PostgreSQL, DNS and HTTPS services.",
+        brief: "Show, start or stop PostgreSQL, DNS and HTTPS",
+        examples: ["services", "services start"],
         project: false),
-      Command.new("sites", "List the sites registered with Latte.", project: false),
+      Command.new("sites", "List the sites registered with Latte.",
+        brief: "List the sites registered with Latte",
+        project: false),
       Command.new("sites remove NAME",
         "Unregister site NAME, keeping its files, databases, credentials, logs and backups.",
+        brief: "Unregister a site, keeping its files and data",
+        examples: ["sites remove my-app"],
         project: false),
       Command.new("installations [list]",
         "List the Caramel releases installed on this Mac.",
+        brief: "List the Caramel releases on this Mac",
+        examples: ["installations"],
         project: false),
       Command.new("installations install VERSION",
         "Clone, build and register the tagged release VERSION, " \
         "reusing this toolchain when the release pins the same one; " \
         "if VERSION is installed, build what it lacks, such as its linter.",
+        brief: "Clone, build and register a release",
+        examples: ["installations install 0.22.0"],
         project: false),
       Command.new("installations register",
         "Register this checkout for projects pinned to its version; " \
         "~/.local/bin/frappe and latte run the newest installed release.",
+        brief: "Register this checkout for its version",
         project: false),
       Command.new("installations remove VERSION",
         "Forget the installation registered for VERSION; " \
         "the launchers move to the newest remaining release.",
+        brief: "Forget an installed release",
+        examples: ["installations remove 0.21.0"],
         project: false),
       Command.new("doctor",
         "Check the toolchain, this Caramel installation, dependencies, local configuration, " \
-        "Latte services, trusted HTTPS and the port relay."),
+        "Latte services, trusted HTTPS and the port relay.",
+        brief: "Check your toolchain, Latte and local setup"),
       Command.new("open",
         "Open the application's HTTPS origin in the browser; while frappe dev runs, a " \
-        "single-use link signs the browser in to the toolbar and inspector."),
+        "single-use link signs the browser in to the toolbar and inspector.",
+        brief: "Open the running app in your browser"),
       Command.new("lsp crystalline|ameba-ls [SERVER_ARGS...]",
         "Run a pinned language server for this project on stdio.",
+        brief: "Run a language server for this project on stdio",
+        examples: ["lsp crystalline"],
         passthrough: true),
-      Command.new("lsp install", "Build the pinned language servers.", project: false),
+      Command.new("lsp install", "Build the pinned language servers.",
+        brief: "Build the pinned language servers",
+        project: false),
+    ]
+
+    # `frappe help`'s rows, in the order a newcomer needs them: each name is a
+    # command's first word, listed once (commands_spec holds every first word to one group).
+    record Group, title : String, names : Array(String)
+
+    # The line for each run of words that two or more commands share, shown in help,
+    # family help and completion; commands_spec holds this to exactly those runs.
+    FAMILIES = {
+      "make"          => "Generate code: resource, locale, tenancy, domain",
+      "db"            => "Dump, restore, diff, branch or diagnose the database",
+      "db branch"     => "Create, list or delete database branches",
+      "sites"         => "List or unregister the sites Latte serves",
+      "installations" => "List, install, register or remove Caramel releases",
+      "lsp"           => "Run or build the language servers",
+    }
+
+    GROUPS = [
+      Group.new("GET STARTED", %w[new setup dev open doctor]),
+      Group.new("WRITE YOUR APP", %w[make routes expand translations]),
+      Group.new("CHECK AND TEST", %w[check lint format corretto]),
+      Group.new("DATABASE", %w[migrate seed db]),
+      Group.new("DEBUG A RUNNING APP", %w[logs traces trace errors]),
+      Group.new("SWEETTALK DOMAIN", %w[words requirements glossary contexts]),
+      Group.new("SHIP", %w[build]),
+      Group.new("LATTE AND THIS MAC", %w[services sites installations lsp]),
+      Group.new("ABOUT FRAPPÉ", %w[help version completion agent-manifest]),
     ]
 
     def self.parse(args : Array(String)) : Invocation
       first = args.first? || raise Usage.new("missing command", "frappe", [TABLE.first])
       family = TABLE.select { |command| command.words.first == first }
-      if family.empty?
-        suggestion = nearest(first, TABLE.map(&.words.first).uniq!)
-        intended = suggestion ? TABLE.select(&.words.first.==(suggestion)) : [] of Command
-        message = "unknown command #{first}"
-        raise Usage.new(message, "frappe #{first}", intended, suggestion)
-      end
+      raise unknown(first) if family.empty?
       depth = family.max_of { |command| shared(command.words, args) }
       group = family.select { |command| shared(command.words, args) == depth }
       subject = "frappe #{args[0, depth].join(' ')}"
@@ -283,12 +408,21 @@ module Caramel::Frappe
           raise Usage.new(ex.message || "invalid arguments", subject, group, suggestion)
         end
       end
-      if word = args[depth]?
+      # `frappe db --human` names no subcommand: the mode flags select the output only.
+      if (word = args[depth]?) && !{"--agent", "--human"}.includes?(word)
         message = "unknown #{subject.lchop("frappe ")} subcommand #{word}"
         subcommands = group.compact_map(&.words[depth]?).uniq!
         raise Usage.new(message, subject, group, nearest(word, subcommands))
       end
-      raise Usage.new("#{subject} needs a subcommand", subject, group)
+      raise Usage.new("#{subject} needs a subcommand", subject, group, bare: true)
+    end
+
+    # The error for a first word that names no command, with the nearest command's
+    # family as the intended commands.
+    def self.unknown(first : String) : Usage
+      suggestion = nearest(first, TABLE.map(&.words.first).uniq!)
+      intended = suggestion ? TABLE.select(&.words.first.==(suggestion)) : [] of Command
+      Usage.new("unknown command #{first}", "frappe #{first}", intended, suggestion)
     end
 
     # The commands whose words start with `words`, for `frappe db --help`.
@@ -296,6 +430,28 @@ module Caramel::Frappe
       TABLE.select do |command|
         command.words.size >= words.size && command.words[0, words.size] == words
       end
+    end
+
+    # The line for a run of command words: a family's, or a single command's.
+    def self.brief(words : Array(String)) : String
+      FAMILIES[words.join(' ')]? || TABLE.find!(&.words.==(words)).brief
+    end
+
+    # The longest run of leading words that all of `commands` share.
+    def self.prefix(commands : Array(Command)) : Array(String)
+      first = commands.first.words
+      count = first.size
+      commands.each { |command| count = {count, shared(first, command.words)}.min }
+      first[0, count]
+    end
+
+    # The longest leading run of `args` that names a command or family, or nil.
+    def self.help_words(args : Array(String)) : Array(String)?
+      args.size.downto(1) do |size|
+        words = args[0, size]
+        return words unless matching(words).empty?
+      end
+      nil
     end
 
     # Whether `args` name a project command, which a project pinned to another

@@ -22,6 +22,9 @@ require "./traces"
 require "./expand_fallback"
 require "./glossary"
 require "./words"
+require "./terminal"
+require "./help"
+require "./completion"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
@@ -35,12 +38,8 @@ module Caramel::Frappe
       args = arguments.empty? ? ["help"] : arguments.dup
       args[0] = "help" if {"--help", "-h"}.includes?(args[0])
       args[0] = "version" if {"--version", "-v"}.includes?(args[0])
-      if args.size > 1 && {"--help", "-h"}.includes?(args.last) &&
-         !(matches = Commands.matching(args[0...-1])).empty?
-        matches.each do |command|
-          @output.puts("Usage: frappe #{command.syntax}\n  #{command.summary}")
-        end
-        return 0
+      if words = help_target(args)
+        return show_help(words)
       end
       invocation = Commands.parse(args)
       invocation.command.deprecated.try do |replacement|
@@ -77,9 +76,13 @@ module Caramel::Frappe
     private def execute(invocation : Commands::Invocation) : Int32
       case name = invocation.command.name
       when "help"
-        help
+        asked = invocation.list("COMMAND")
+        words = asked.empty? ? asked : help_words!(asked)
+        return show_help(words)
       when "version"
         @output.puts("Frappé #{Caramel::VERSION}")
+      when "completion"
+        @output.print(Completion.script(invocation["zsh|bash|fish"]))
       when "agent-manifest"
         manifest
       when "new"
@@ -91,14 +94,17 @@ module Caramel::Frappe
         client.ready!
         tools.dependencies(project)
         configure(project, client)
+        serve = "build, serve and reload the app at #{project.origin}"
         if invocation.flag?("--no-migrate")
           @output.puts("Skipped migrations (--no-migrate); " \
                        "the development database was not changed.")
-          @output.puts("#{project.name} is configured. " \
-                       "Run frappe migrate to apply any pending migrations, then frappe dev.")
+          @output.puts("#{project.name} is configured.")
+          next_steps(@output, [{"frappe migrate", "apply pending migrations"},
+                               {"frappe dev", serve}])
         else
           migrate_configured(project, tools)
-          @output.puts("#{project.name} is configured. Run frappe dev.")
+          @output.puts("#{project.name} is configured.")
+          next_steps(@output, [{"frappe dev", serve}])
         end
       when "dev"
         dev(invocation)
@@ -106,13 +112,13 @@ module Caramel::Frappe
         agent = MRDP.agent?(invocation.flags, @output)
         project = Project.load
         tools = Tools.new(@framework_root, @output, @error)
-        color = !agent && @output.tty?
+        color = !agent && Terminal.color?(@output)
         return Check.new(project, tools, @output).run(agent, color)
       when "lint"
         agent = MRDP.agent?(invocation.flags, @output)
         project = Project.load
         tools = Tools.new(@framework_root, @output, @error)
-        color = !agent && @output.tty?
+        color = !agent && Terminal.color?(@output)
         return Lint.new(project, tools, @output, @error).run(agent, color)
       when "format"
         project = Project.load
@@ -134,8 +140,8 @@ module Caramel::Frappe
           central: invocation.flag?("--central"), int64: invocation.flag?("--int64"),
         )
         files.each { |path| @output.puts("Generated #{path}") }
-        @output.puts("\nRun frappe migrate to apply the new schema. " \
-                     "Use frappe routes to see the generated URLs.")
+        next_steps(@output, [{"frappe migrate", "apply the new schema"},
+                             {"frappe routes", "list the generated URLs"}])
       when "make locale"
         make_locale(invocation["CODE"])
       when "make tenancy"
@@ -235,21 +241,63 @@ module Caramel::Frappe
         fields << {"FIX", "frappe agent-manifest lists every command"} unless syntax
         MRDP.write(@error, "USAGE", error.subject, fields)
       else
-        @error.puts("#{error.subject}: #{error.message}")
-        @error.puts("Usage: #{syntax}") if syntax
-        error.suggestion.try { |suggestion| @error.puts("Did you mean #{suggestion}?") }
-        @error.puts("Use frappe --help for available commands.") unless syntax
+        commands = error.commands
+        @error.puts(error.bare? ? "#{error.message}." : "#{error.subject}: #{error.message}")
+        if commands.size == 1
+          command = commands.first
+          @error.puts("Usage: frappe #{command.syntax}")
+          error.suggestion.try { |suggestion| @error.puts("Did you mean #{suggestion}?") }
+          @error.puts("Run frappe #{command.name} --help for details.")
+        elsif commands.empty?
+          @error.puts("Run frappe help to list every command.")
+        else
+          error.suggestion.try { |suggestion| @error.puts("Did you mean #{suggestion}?") }
+          @error.puts
+          @error.print(Help.family(Commands.prefix(commands), Terminal.color?(@error)))
+        end
       end
     end
 
-    private def help : Nil
-      @output.puts("Frappé — Caramel's application CLI\n")
-      Commands::TABLE.each do |command|
-        @output.puts("  frappe #{command.syntax}\n      #{command.summary}")
+    private def show_help(words : Array(String)) : Int32
+      color = Terminal.color?(@output)
+      if words.empty?
+        @output.print(Help.overview(color))
+        return 0
       end
-      @output.puts("\nUse frappe COMMAND --help for one command's syntax. " \
-                   "Diagnostics print as MRDP with --agent or when stdout " \
-                   "is not a terminal; --human selects the terminal layout.")
+      matches = Commands.matching(words)
+      command = matches.find(&.words.==(words)) || (matches.first if matches.size == 1)
+      page = command ? Help.command(command, color) : Help.family(words, color)
+      @output.print(page)
+      0
+    end
+
+    # The words `frappe WORDS --help` asks about, unless the command passes
+    # `--help` through to a tool (`frappe lsp crystalline --help`).
+    private def help_target(args : Array(String)) : Array(String)?
+      return unless args.size > 1 && {"--help", "-h"}.includes?(args.last)
+      words = Commands.help_words(args[0...-1]) || return
+      return if words.size < args.size - 1 && Commands.matching(words).any?(&.passthrough?)
+      words
+    end
+
+    private def help_words!(asked : Array(String)) : Array(String)
+      Commands.help_words(asked) || raise Commands.unknown(asked.first)
+    end
+
+    # The commands to run next: {command, purpose} pairs aligned in two columns,
+    # a step with an empty purpose printed as written, then each note as a paragraph.
+    private def next_steps(io : IO, steps : Array(Tuple(String, String)),
+                           notes : Array(String) = [] of String) : Nil
+      width = steps.reject(&.[1].empty?).max_of?(&.[0].size) || 0
+      io.puts
+      io.puts("Next:")
+      steps.each do |command, purpose|
+        io.puts(purpose.empty? ? "  #{command}" : "  #{command.ljust(width)}  #{purpose}")
+      end
+      notes.each do |note|
+        io.puts
+        Terminal.wrap(note, 80).each { |line| io.puts(line) }
+      end
     end
 
     # Stateless: reads only the command table.
@@ -288,8 +336,8 @@ module Caramel::Frappe
         raise Error.new("#{ex.message}\nProject files were preserved. " \
                         "Run cd #{name} && frappe setup to resume.")
       end
-      @output.puts("\n#{project.name} is configured at #{project.origin}\n\n" \
-                   "Next:\n  cd #{name}\n  frappe dev")
+      @output.puts("\n#{project.name} is configured at #{project.origin}")
+      next_steps(@output, [{"cd #{name}", ""}, {"frappe dev", "build, serve and reload the app"}])
     end
 
     private def dev(invocation : Commands::Invocation) : Nil
@@ -337,28 +385,27 @@ module Caramel::Frappe
     private def make_locale(code : String) : Nil
       files = LocaleGenerator.new.generate(Project.load, code)
       files.each { |path| @output.puts("Generated #{path}") }
-      @output.puts("\nNext: write translations in app/locales/#{code}.cr, " \
-                   "set dir: locale.dir in app/views/layouts/application.cr " \
-                   "for right-to-left languages, " \
-                   "and run frappe translations to list what is missing.")
+      next_steps(@output, [{"Write the translations in app/locales/#{code}.cr.", ""},
+                           {"frappe translations", "list the keys still missing"}],
+        ["For a right-to-left language, set dir: locale.dir in app/views/layouts/application.cr."])
     end
 
     private def make_tenancy(model : String, int64 : Bool) : Nil
       files = TenancyGenerator.new(@framework_root).generate(Project.load, model, int64: int64)
       files.each { |path| @output.puts("Generated #{path}") }
       plural = ResourceGenerator.pluralize(model.underscore)
-      next_step = "\nNext: run frappe migrate and open /#{plural}/new. " \
-                  "frappe make resource now writes tenant resources; " \
-                  "pass --central for one every tenant shares. " \
-                  "Tenant pages answer 401 unless member? in " \
-                  "app/actions/application_action.cr holds: it reads the slugs the session " \
-                  "signed up, until you replace it with a membership table of your own."
+      notes = ["frappe make resource now writes tenant resources; " \
+               "pass --central for one every tenant shares. " \
+               "Tenant pages answer 401 unless member? in " \
+               "app/actions/application_action.cr holds: it reads the slugs the session " \
+               "signed up, until you replace it with a membership table of your own."]
       if files.any?(&.starts_with?("app/domain/"))
-        next_step += " Each SweetTalk domain in app/domain/ now names App::#{model}, " \
-                     "and its contexts belong to the tenant unless they say central: true; " \
-                     "a domain that already holds data follows Add tenancy to existing data first."
+        notes << "Each SweetTalk domain in app/domain/ now names App::#{model}, " \
+                 "and its contexts belong to the tenant unless they say central: true; " \
+                 "a domain that already holds data follows Add tenancy to existing data first."
       end
-      @output.puts(next_step)
+      next_steps(@output, [{"frappe migrate", "apply the tenant schema"},
+                           {"Open /#{plural}/new to sign up the first tenant.", ""}], notes)
     end
 
     private def make_domain(invocation : Commands::Invocation) : Nil
@@ -367,8 +414,9 @@ module Caramel::Frappe
         invocation["--means"], central: invocation.flag?("--central"))
       files.each { |path| @output.puts("Generated #{path}") }
       singular = name.underscore
-      @output.puts("\nNext: write the domain in app/domain/#{singular}.cr, " \
-                   "then run frappe db diff --name create_#{singular} and frappe migrate.")
+      next_steps(@output, [{"Write the domain in app/domain/#{singular}.cr.", ""},
+                           {"frappe db diff --name create_#{singular}", "derive its tables"},
+                           {"frappe migrate", "apply them"}])
     end
 
     # Prints the application's report of keys each locale still lacks.
@@ -522,6 +570,10 @@ module Caramel::Frappe
       else
         @error.puts("WARNING: schema drift (read-only check; nothing was changed):")
         @error.print(report)
+        unless agent
+          next_steps(@error, [{"frappe db diff --name NAME",
+                               "derive the migrations the declared schema needs"}])
+        end
       end
       0
     end
@@ -775,6 +827,8 @@ module Caramel::Frappe
         url = client.create_branch(id, branch)["runtime_url"].as_s
         @error.puts("Created database branch #{name} from #{project.name}'s development database.")
         @output.puts(url)
+        next_steps(@error, [{"frappe dev --branch #{branch}", "run the app against this branch"},
+                            {"frappe db branch delete #{branch}", "drop it when you are done"}])
       when "db branch list"
         names = client.branches(id).compact_map(&.["name"].as_s?)
         names.each { |entry| @output.puts(entry) }

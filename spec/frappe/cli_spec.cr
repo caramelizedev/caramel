@@ -14,25 +14,41 @@ end
 
 describe Caramel::Frappe::CLI do
   it "shows help, per-command usage and the version without touching a toolchain or service" do
+    commands = Caramel::Frappe::Commands
+    groups = Caramel::Frappe::Commands::GROUPS
     frappe, output, errors = cli
     frappe.run(["--help"]).should eq(0)
     help = output.to_s
-    Caramel::Frappe::Commands::TABLE.each do |command|
-      help.should contain("  frappe #{command.syntax}\n      #{command.summary}\n")
+    groups.each do |group|
+      help.should contain("\n#{group.title}\n")
+      group.names.each do |name|
+        row = help.lines.find(&.starts_with?("  #{name} "))
+        row.try(&.ends_with?(commands.brief([name]))).should be_true
+      end
     end
     errors.to_s.should eq("")
     output.clear
-    frappe.run(["db", "branch", "--help"]).should eq(0)
-    usages = [
-      "Usage: frappe db branch create NAME",
-      "Usage: frappe db branch list",
-      "Usage: frappe db branch delete NAME",
-    ]
-    output.to_s.lines.select(&.starts_with?("Usage: ")).should eq(usages)
+    frappe.run(["help", "db", "branch"]).should eq(0)
+    family = output.to_s
     output.clear
-    frappe.run(["setup", "--help"]).should eq(0)
-    summary = Caramel::Frappe::Commands::TABLE.find!(&.name.==("setup")).summary
-    output.to_s.should eq("Usage: frappe setup [--no-migrate]\n  #{summary}\n")
+    frappe.run(["db", "branch", "--help"]).should eq(0)
+    output.to_s.should eq(family)
+    rows = family.lines.select(&.starts_with?("  db branch ")).map { |line| line.split("  ")[1] }
+    rows.should eq(["db branch create", "db branch list", "db branch delete"])
+    output.clear
+    frappe.run(["dev", "--branch", "x", "--help"]).should eq(0)
+    page = output.to_s
+    output.clear
+    frappe.run(["help", "dev"]).should eq(0)
+    output.to_s.should eq(page)
+    page.should contain("  frappe dev [--no-open] [--branch NAME]\n")
+    page.should contain("  $ frappe dev --branch spike\n")
+    output.clear
+    frappe.run(["format", "--help"]).should eq(0)
+    output.to_s.should_not contain("EXAMPLES")
+    output.clear
+    frappe.run(["lsp", "--help"]).should eq(0)
+    output.to_s.should contain("  frappe lsp crystalline|ameba-ls [SERVER_ARGS...]\n")
     output.clear
     frappe.run(["--version"]).should eq(0)
     output.to_s.should eq("Frappé #{Caramel::VERSION}\n")
@@ -77,23 +93,20 @@ describe Caramel::Frappe::CLI do
       MRDP
     errors.clear
     frappe.run(["routes", "--verbose", "--human"]).should eq(1)
-    errors.to_s.should eq(<<-TEXT)
-      frappe routes: unknown option --verbose
-      Usage: frappe routes [FILTER]\n
-      TEXT
+    errors.to_s.should contain("Usage: frappe routes [FILTER]")
     errors.clear
     frappe.run(["dev", "--branc", "x", "--human"]).should eq(1)
-    errors.to_s.should eq(<<-TEXT)
-      frappe dev: unknown option --branc
-      Usage: frappe dev [--no-open] [--branch NAME]
-      Did you mean --branch?\n
-      TEXT
+    errors.to_s.should contain("Usage: frappe dev [--no-open] [--branch NAME]")
+    errors.to_s.should contain("Did you mean --branch?")
     errors.clear
     frappe.run(["florp", "--human"]).should eq(1)
-    errors.to_s.should eq(<<-TEXT)
-      frappe florp: unknown command florp
-      Use frappe --help for available commands.\n
-      TEXT
+    errors.to_s.should start_with("frappe florp: unknown command florp")
+    output.to_s.should eq("")
+    errors.clear
+    frappe.run(["db", "--human"]).should eq(1)
+    errors.to_s.should start_with("frappe db needs a subcommand.\n")
+    errors.to_s.should contain("  db branch create ")
+    output.to_s.should eq("")
     errors.clear
     frappe.run(["florp"]).should eq(1)
     errors.to_s.should eq(<<-MRDP)
@@ -138,7 +151,8 @@ describe Caramel::Frappe::CLI do
     frappe, _, errors = cli(File.expand_path("../..", __DIR__))
     syntax = "frappe lsp crystalline|ameba-ls [SERVER_ARGS...] | frappe lsp install"
     frappe.run(["lsp", "--human"]).should eq(1)
-    errors.to_s.should contain("Usage: #{syntax}")
+    errors.to_s.should contain("frappe lsp: unknown option --human")
+    errors.to_s.should contain("  lsp install ")
     errors.clear
     frappe.run(["lsp", "liger"]).should eq(1)
     errors.to_s.should contain("SYNTAX: #{syntax}")

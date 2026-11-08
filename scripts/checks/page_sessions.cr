@@ -19,7 +19,8 @@ module Caramel::Checks
         config/routes.cr].each do |path|
         assert!(tenancy.stdout.includes?("Generated #{path}\n"), tenancy.stdout)
       end
-      next_step = "Next: run frappe migrate and open /accounts/new."
+      next_step = "Next:\n  frappe migrate  apply the tenant schema\n  " \
+                  "Open /accounts/new to sign up the first tenant.\n"
       assert!(tenancy.stdout.includes?(next_step), tenancy.stdout)
       migrate(1)
       # 02 · Keep the revocable part in PostgreSQL
