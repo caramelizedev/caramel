@@ -1,5 +1,6 @@
 require "spec"
 require "../../src/frappe/commands"
+require "../../src/frappe/help"
 
 private def parse(*args : String) : Caramel::Frappe::Commands::Invocation
   Caramel::Frappe::Commands.parse(args.to_a)
@@ -138,5 +139,50 @@ describe Caramel::Frappe::Commands do
   it "declares every command only once" do
     names = Caramel::Frappe::Commands::TABLE.map(&.name)
     names.uniq.size.should eq(names.size)
+  end
+
+  it "lists every command family in help exactly once" do
+    listed = Caramel::Frappe::Commands::GROUPS.flat_map(&.names)
+    families = Caramel::Frappe::Commands::TABLE.map(&.words.first).uniq!
+    listed.sort!.should eq(families.sort!)
+  end
+
+  it "names every shared run of command words" do
+    commands = Caramel::Frappe::Commands
+    prefixes = Caramel::Frappe::Commands::TABLE.flat_map do |command|
+      (1..command.words.size).map { |size| command.words[0, size] }
+    end.uniq!
+    shared = prefixes.select { |words| commands.matching(words).size >= 2 }
+    shared.map(&.join(' ')).to_set.should eq(Caramel::Frappe::Commands::FAMILIES.keys.to_set)
+    (prefixes - shared).each do |words|
+      commands.matching(words).map(&.words).should eq([words])
+    end
+  end
+
+  it "gives every command a brief and examples that parse as it" do
+    commands = Caramel::Frappe::Commands
+    Caramel::Frappe::Commands::TABLE.each do |command|
+      command.brief.should_not be_empty
+      command.brief.size.should be <= 54
+      command.brief.should_not end_with('.')
+      unless command.flags.empty? && command.positionals.empty?
+        command.examples.should_not be_empty
+      end
+      command.examples.each do |example|
+        commands.parse(Process.parse_arguments_posix(example)).command.should be(command)
+      end
+    end
+    Caramel::Frappe::Help::EXAMPLES.each do |example|
+      commands.parse(Process.parse_arguments_posix(example))
+    end
+  end
+
+  it "finds the words a help request names" do
+    commands = Caramel::Frappe::Commands
+    commands.help_words(%w[db branch create extra]).should eq(%w[db branch create])
+    commands.help_words(%w[db bogus]).should eq(%w[db])
+    commands.help_words(%w[bogus db]).should be_nil
+    commands.prefix(commands.matching(%w[db branch])).should eq(%w[db branch])
+    commands.prefix(commands.matching(%w[db])).should eq(%w[db])
   end
 end

@@ -15,8 +15,8 @@ frappe migrate
 frappe corretto
 ```
 
-`frappe --help` lists every command, and `frappe COMMAND --help` prints one command's
-syntax. `frappe check`, `frappe lint` and `frappe corretto` verify a change.
+`frappe help` lists every command, and `frappe help COMMAND` or `frappe COMMAND --help`
+prints one command's usage and examples. `frappe check`, `frappe lint` and `frappe corretto` verify a change.
 [AGENTS.md](AGENTS.md) is the map for coding agents.
 
 Commit `shard.yml`, `shard.lock` and `config/environment.yml`: `shard.lock` pins the

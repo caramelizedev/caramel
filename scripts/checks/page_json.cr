@@ -17,7 +17,8 @@ module Caramel::Checks
       create
       made = frappe("make", "resource", "Book", "title:string", "author:string")
       assert!(made.stdout.includes?("Generated app/models/book.cr\n"), made.stdout)
-      assert!(made.stdout.includes?("Run frappe migrate to apply the new schema."), made.stdout)
+      next_step = "\nNext:\n  frappe migrate  apply the new schema\n"
+      assert!(made.stdout.includes?(next_step), made.stdout)
       migrate(1)
       # 1 · Give the model a version
       copy(["app/models/book.cr"])

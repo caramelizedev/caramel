@@ -23,8 +23,8 @@ module Caramel::Checks
         .claude/skills/sweettalk/SKILL.md].each do |path|
         assert!(domain.stdout.includes?("Generated #{path}\n"), domain.stdout)
       end
-      next_step = "Next: write the domain in app/domain/box_office.cr, " \
-                  "then run frappe db diff --name create_box_office and frappe migrate."
+      next_step = "Next:\n  Write the domain in app/domain/box_office.cr.\n  " \
+                  "frappe db diff --name create_box_office  derive its tables\n"
       assert!(domain.stdout.includes?(next_step), domain.stdout)
       # 02 to 05 · The domain, as one file, then frappe format and frappe check
       copy(["app/domain/box_office.cr"])

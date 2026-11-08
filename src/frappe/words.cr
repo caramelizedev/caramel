@@ -2,6 +2,7 @@ require "compiler/crystal/syntax"
 require "json"
 require "./commands"
 require "./word_doc"
+require "./terminal"
 
 module Caramel::Frappe
   # `frappe words`: SweetTalk's vocabulary as its own macros state it. Each word's macro
@@ -304,7 +305,7 @@ module Caramel::Frappe
       io << "    " << option.name << (option.positional ? "" : ":") << "  " << option.forms
       io << "; default " << option.default if option.default
       io << "\n"
-      Words.wrap(option.does, 88).each { |line| io << "        " << line << "\n" }
+      Terminal.wrap(option.does, 88).each { |line| io << "        " << line << "\n" }
     end
 
     def to_json(json : JSON::Builder) : Nil
@@ -360,20 +361,6 @@ module Caramel::Frappe
 
     def self.capitalized(text : String) : String
       text.empty? ? text : text[0].upcase + text[1..]
-    end
-
-    # *text* in lines of at most *width* characters, broken at spaces.
-    def self.wrap(text : String, width : Int32) : Array(String)
-      lines = [] of String
-      text.split.each do |piece|
-        last = lines.last?
-        if last && last.size + 1 + piece.size <= width
-          lines[-1] = "#{last} #{piece}"
-        else
-          lines << piece
-        end
-      end
-      lines
     end
   end
 end
