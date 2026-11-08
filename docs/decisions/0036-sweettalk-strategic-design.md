@@ -5,7 +5,8 @@ Date: 2026-10-13
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decisions 2 and 3. Its
 rejection of a shared kernel word is reversed by
 [ADR 0044](0044-sweettalk-shared-kernels.md). Amended: decision 3 by
-[ADR 0062](0062-sweettalk-calculations.md), and decision 4 by
+[ADR 0062](0062-sweettalk-calculations.md) and
+[ADR 0065](0065-sweettalk-contexts-across-files.md), and decision 4 by
 [ADR 0060](0060-sweettalk-preview-and-commit.md).
 
 ## Context
@@ -35,8 +36,9 @@ that neither follows Catalogue nor sits in its border compiles, and draws no edg
    stays nameable by any context that may name the publisher, because a follower reacts to
    them. A name it does not publish does not compile, at the line that names it when the
    publisher is declared first, and when the program's checks run otherwise. `publishes`
-   lists only names declared before it in the same context. A context that does not
-   publish keeps ADR 0030's rules.
+   lists only names declared before it in the same context, and appears in one block of
+   the context ([ADR 0065](0065-sweettalk-contexts-across-files.md)). A context that does
+   not publish keeps ADR 0030's rules.
 4. **A border may face a system outside the program.** `border Cards, outside: "…" do …
    end` declares a module `Cards` in the context and an `outside` edge in the context
    map; `outside:` is the line its glossary entry shows, with kind "outside", and anything

@@ -4,6 +4,7 @@ Date: 2026-10-13
 
 Status: accepted. Amends [ADR 0030](0030-sweettalk-domain-language.md) decision 2 and
 [ADR 0031](0031-sweettalk-services-processes-and-richer-values.md) decisions 3 and 11.
+Decision 2 is amended by [ADR 0065](0065-sweettalk-contexts-across-files.md).
 
 ## Context
 
@@ -43,12 +44,12 @@ and a two-word state was written without its underscore, so `finds state:` misse
      that narrows them with SugarORM's `where`, `where_null`, `order_by`, `limit` and
      `offset`; the aggregates are built from its result. It names neither `Rows`, nor
      SugarORM, nor its `Repo`.
-   - A specification is checked where it is declared, and a context checks every `finds`,
-     `counts`, `sums` and `groups` when it closes, whether or not anything calls them. A
-     key, a state or an `order:` key the aggregate lacks, a list of entities, a derived
-     value, a value of the wrong type, an unknown argument, a query name used twice or
-     named like a repository method, or a `satisfying:` that is not a specification on the
-     same aggregate does not compile.
+   - A specification is checked where it is declared, and every `finds`, `counts`, `sums`
+     and `groups` is checked once the program's top level is complete, whether or not
+     anything calls them. A key, a state or an `order:` key the aggregate lacks, a list of
+     entities, a derived value, a value of the wrong type, an unknown argument, a query
+     name used twice or named like a repository method, or a `satisfying:` that is not a
+     specification on the same aggregate does not compile.
    - A projection or a process declares `finds`, `counts`, `sums` and `groups` too, over
      its own attributes and its key, with `order:`, `first:` and the block; a process's
      `state:` too. Neither takes `satisfying:`, and every row is live. A query named
@@ -83,7 +84,7 @@ and a two-word state was written without its underscore, so `finds state:` misse
   removed row or return rows instead of aggregates. Allowing only narrowing calls keeps it
   a read.
 - ADR 0031 promised that a wrong query does not compile; a check inside its method waited
-  for a call, so the context checks it when it closes.
+  for a call, so each query is checked once the program's top level is complete.
 - A state check holds for every writer, as a bound does. Removing a state that rows still
   hold stops the migration that validates the new check, not a later load. SugarORM
   compares an expression check by name, hence the hash.

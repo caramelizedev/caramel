@@ -115,7 +115,8 @@ module SweetTalk
   # reader; and `__sweettalk_prune`, which the schedule `event_log: 90.days` registers
   # loops, once an hour in Cold Brew's scheduler (ADR 0051). Without the keyword
   # `__sweettalk_log` does nothing. A declaration whose table the log would take is
-  # refused.
+  # refused; one in a later `within` meets `Rows::Events` already declared, and SugarORM
+  # refuses its table.
   macro __sweettalk_event_log(owner)
     {% type = owner.resolve %}
     {% short = type.name.split("::").last %}
@@ -248,26 +249,29 @@ module SweetTalk
       end
 
       # The typed event a row holds, by the aggregate and name it stores; a row no event
-      # of this log stores any more is an error naming it.
+      # of this log stores any more is an error naming it. The events are read when the
+      # method is typed, so those a later `within` declares are among them.
       def self.__sweettalk_logged_event(row : Rows::Events) : ::SweetTalk::Event
+        \{% begin %}
         case {row.aggregate, row.name}
-        {% for event in ::SweetTalk::Event.all_subclasses %}
-          {% if event.has_constant?("SWEETTALK_HOME") &&
-                  homes.includes?(event.constant("SWEETTALK_HOME")) %}
-            {% home = event.constant("SWEETTALK_HOME") %}
-            {% aggregate = event.constant("SWEETTALK_AGGREGATE") %}
-            {% own = home == stored %}
-            {% column = aggregate ? (own ? aggregate : "#{home.id}_#{aggregate.id}") : home %}
-            when { {{ column }}, {{ event.constant("SWEETTALK_NAME") }} }
-              {{ event }}.__sweettalk_load(row.subject_id, row.fields.to_json,
+        \{% for event in ::SweetTalk::Event.all_subclasses %}
+          \{% if event.has_constant?("SWEETTALK_HOME") &&
+                  [{{ homes.splat }}].includes?(event.constant("SWEETTALK_HOME")) %}
+            \{% home = event.constant("SWEETTALK_HOME") %}
+            \{% aggregate = event.constant("SWEETTALK_AGGREGATE") %}
+            \{% own = home == {{ stored }} %}
+            \{% column = aggregate ? (own ? aggregate : "#{home.id}_#{aggregate.id}") : home %}
+            when { \{{ column }}, \{{ event.constant("SWEETTALK_NAME") }} }
+              \{{ event }}.__sweettalk_load(row.subject_id, row.fields.to_json,
                 __sweettalk_logged_meta(row))
-          {% end %}
-        {% end %}
+          \{% end %}
+        \{% end %}
         else
           raise ArgumentError.new("{{ table.id }} row #{row.id} holds #{row.aggregate}." +
                                   "#{row.name}, which no event of {{ short.id }} stores: " +
                                   "add renamed_from: to the event that replaced it")
         end
+        \{% end %}
       end
 
       # Deletes up to *chunk* rows that occurred before *before*, oldest first, across
@@ -304,13 +308,17 @@ module SweetTalk
   # unit and key holding a fingerprint of the other arguments and what the first run
   # returned. It is `Rows::Operations`, the `<context>_operations` table, part of the derived
   # schema and tenanted as the context's rows are, and exists only when some unit asks for it.
-  # A declaration whose table it would take is refused.
+  # A declaration whose table it would take is refused. A context runs it after each of its
+  # blocks, and the first block with such a unit declares the table; a later declaration of
+  # that table meets `Rows::Operations` already declared, and SugarORM refuses it.
   macro __sweettalk_operations(owner)
     {% type = owner.resolve %}
     {% short = type.name.split("::").last %}
     {% units = type.constants.select(&.starts_with?("SWEETTALK_UNIT_"))
          .map { |constant| type.constant(constant) } %}
-    {% if units.any? { |unit| unit[3] } %}
+    {% needed = units.any? { |unit| unit[3] } %}
+    {% exists = parse_type("::#{type.name}::Rows::Operations").resolve? %}
+    {% if needed && !exists %}
       {% stored = type.constant("SWEETTALK_STORED") %}
       {% table = "#{stored.id}_operations" %}
       {% tenant = type.constant("SWEETTALK_TENANT") %}

@@ -19,7 +19,7 @@ module Caramel::Frappe
       "behaviour" => "says what happens",
       "query"     => "reads rows",
       "boundary"  => "draws a line between contexts or around the program",
-      "setup"     => "is written once before the contexts",
+      "setup"     => "is written at the top level of a domain module, beside the contexts",
     }
 
     # Where the macros of each module may be written. A form's `@in` replaces it.

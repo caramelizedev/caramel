@@ -4,7 +4,8 @@ Date: 2026-10-31
 
 Status: accepted. Amends [ADR 0035](0035-sweettalk-specifications-queries-and-state-checks.md)
 decision 2 and [ADR 0007](0007-sugarorm-schemas-changesets-preload.md) decision 5. Decision 3
-is amended by [ADR 0064](0064-uuidv7-identity.md).
+is amended by [ADR 0064](0064-uuidv7-identity.md), and decision 1 by
+[ADR 0065](0065-sweettalk-contexts-across-files.md).
 
 ## Context
 
@@ -20,10 +21,11 @@ together with no error (#249, after #133 and #169).
    of: Line.price, where: {member: member, state: :placed}` and `groups
    priced_by_tea(member : Account), of: Line.price, by: Line.tea, where: {…}` are declared
    on an aggregate, a projection or a process, take `where:` and `satisfying:` as `counts`
-   does, and are checked when the context closes. `of:` and `by:` name an attribute of the
-   model by symbol, `of: :total`, or an attribute of one of the aggregate's first-level
-   entities, `of: Line.price`; a `groups` that adds up an entity's attribute groups by an
-   attribute of that entity. The name is unique among the model's queries.
+   does, and are checked once the program's top level is complete. `of:` and `by:` name an
+   attribute of the model by symbol, `of: :total`, or an attribute of one of the
+   aggregate's first-level entities, `of: Line.price`; a `groups` that adds up an entity's
+   attribute groups by an attribute of that entity. The name is unique among the model's
+   queries.
 2. **Return types.** `sums` returns the attribute's type: the `Int32`, `Int64` or `Float64`
    of a column, or the value. A sum no row matches is the zero of that type, built the way
    every sum is. `groups` returns `Array(NamedTuple(by: K, total: T))`, `K` the key's type
