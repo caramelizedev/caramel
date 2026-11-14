@@ -63,12 +63,21 @@ private def with_rules(project : Caramel::Frappe::Project, section : String) : S
   read(project, LINT)
 end
 
+private GUIDE = "AGENTS.md"
+# The line of the guide `frappe new` writes that the first domain's lines follow.
+private GUIDE_DATA = "Data: app/models/ and app/changesets/\n"
+# What the first domain adds to that guide.
+private GUIDE_LINES = "Domain: app/domain/ in SweetTalk (add one with frappe make domain " \
+                      "NAME CONTEXT --means=TEXT)\n" \
+                      "Domain rules: .claude/skills/sweettalk/SKILL.md\n"
+
 describe Caramel::Frappe::DomainGenerator do
   it "writes the domain, its spec and the require lines" do
     domain_project do |project, generator|
       written = generator.generate(project, "Shop", "Ordering", MEANS)
-      written.should eq([".ameba.yml", ".claude/skills/sweettalk/SKILL.md", "app/domain/shop.cr",
-                         "config/application.cr", "spec/domain/shop_spec.cr"])
+      written.should eq([".ameba.yml", ".claude/skills/sweettalk/SKILL.md", "AGENTS.md",
+                         "app/domain/shop.cr", "config/application.cr",
+                         "spec/domain/shop_spec.cr"])
     end
   end
 
@@ -109,7 +118,7 @@ describe Caramel::Frappe::DomainGenerator do
       begin
         File.symlink(target, File.join(project.root, ".claude"))
         written = generator.generate(project, "Shop", "Ordering", MEANS)
-        written.should eq(%w[.ameba.yml app/domain/shop.cr config/application.cr
+        written.should eq(%w[.ameba.yml AGENTS.md app/domain/shop.cr config/application.cr
           spec/domain/shop_spec.cr])
         Dir.children(target).should be_empty
       ensure
@@ -264,6 +273,61 @@ describe Caramel::Frappe::DomainGenerator do
     end
     domain_project do |project, generator|
       File.delete(File.join(project.root, LINT))
+      refuses(project, generator, remedy)
+    end
+  end
+
+  it "adds the domain's two lines to AGENTS.md with the first domain, after the data line" do
+    domain_project do |project, generator|
+      guide = read(project, GUIDE)
+      guide.should_not contain("Domain")
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      read(project, GUIDE).should eq(guide.sub(GUIDE_DATA, GUIDE_DATA + GUIDE_LINES))
+    end
+  end
+
+  it "leaves AGENTS.md alone for a second domain" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      guide = read(project, GUIDE).sub(GUIDE_LINES, "")
+      File.write(File.join(project.root, GUIDE), guide)
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should_not contain(GUIDE)
+      read(project, GUIDE).should eq(guide)
+    end
+  end
+
+  it "leaves alone a guide that has both lines already, however they end" do
+    domain_project do |project, generator|
+      own = "Domain: app/domain/, ours\nDomain rules: docs/domain.md\n"
+      guide = read(project, GUIDE).sub(GUIDE_DATA, GUIDE_DATA + own)
+      File.write(File.join(project.root, GUIDE), guide)
+      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written.should_not contain(GUIDE)
+      read(project, GUIDE).should eq(guide)
+    end
+  end
+
+  it "adds the one line a guide lacks, after its domain line" do
+    domain_project do |project, generator|
+      own = "Domain: app/domain/, ours"
+      File.write(File.join(project.root, GUIDE), own)
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      read(project, GUIDE).should eq("#{own}\n#{GUIDE_LINES.lines(chomp: false).last}")
+    end
+  end
+
+  it "refuses a guide it cannot edit with the lines to add, writing nothing" do
+    remedy = "AGENTS.md is not in a shape frappe make domain can edit: add the lines " \
+             "Domain: app/domain/ in SweetTalk and Domain rules: " \
+             ".claude/skills/sweettalk/SKILL.md by hand, then make the domain again"
+    domain_project do |project, generator|
+      path = File.join(project.root, GUIDE)
+      File.write(path, File.read(path).sub(GUIDE_DATA, ""))
+      refuses(project, generator, remedy)
+    end
+    domain_project do |project, generator|
+      File.delete(File.join(project.root, GUIDE))
       refuses(project, generator, remedy)
     end
   end

@@ -361,12 +361,13 @@ module Caramel::Frappe
         examples: ["make tenancy Account"]),
       Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
-        "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
-        "require \"caramel/sweet_talk\", require \"../app/domain/*\" and SweetTalk.boot " \
-        "in config/application.cr. When the application has no SweetTalk skill for agents, " \
-        "it also writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application " \
-        "the domain names the tenant, and --central makes the context one every tenant " \
-        "shares.",
+        "which means TEXT, and spec/domain/NAME_spec.cr. The first domain also edits " \
+        "three files: it adds require \"caramel/sweet_talk\", require \"../app/domain/*\" " \
+        "and SweetTalk.boot to config/application.cr, the app/domain/** exclusion of " \
+        "Lint/UnusedArgument to .ameba.yml, and the Domain: and Domain rules: lines to " \
+        "AGENTS.md. When the application has no SweetTalk skill for agents, it also " \
+        "writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application the " \
+        "domain names the tenant, and --central makes the context one every tenant shares.",
         brief: "Start a SweetTalk domain with its first context",
         examples: ["make domain Library Lending --means=\"Members borrow and return books\""]),
       Command.new("translations",

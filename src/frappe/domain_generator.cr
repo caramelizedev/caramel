@@ -8,9 +8,9 @@ module Caramel::Frappe
   # context, its spec, on first use the require lines and `SweetTalk.boot` in
   # config/application.cr, and the SweetTalk skill for Claude Code when the
   # application has none. The first domain also excludes app/domain/ from
-  # Lint/UnusedArgument in the application's .ameba.yml. In a multi-tenant
-  # application the domain names the tenant the routes' tenant block names
-  # (ADR 0033).
+  # Lint/UnusedArgument in the application's .ameba.yml and adds the domain's
+  # two lines to its AGENTS.md. In a multi-tenant application the domain names
+  # the tenant the routes' tenant block names (ADR 0033).
   class DomainGenerator
     ROUTES = "config/routes.cr"
     SKILL  = ".claude/skills/sweettalk/SKILL.md"
@@ -55,9 +55,22 @@ module Caramel::Frappe
                       "- \"app/domain/**\" to Excluded: under Lint/UnusedArgument: by hand, " \
                       "then make the domain again"
 
+    GUIDE = "AGENTS.md"
+    # What the first domain tells agents, each line after the one it follows in
+    # the guide `frappe new` writes: where data lives, then where the domain does.
+    GUIDE_LINES = [
+      "Domain: app/domain/ in SweetTalk (add one with frappe make domain NAME CONTEXT " \
+      "--means=TEXT)",
+      "Domain rules: .claude/skills/sweettalk/SKILL.md",
+    ]
+    GUIDE_ANCHORS    = ["Data: ", "Domain: "]
+    UNEDITABLE_GUIDE = "AGENTS.md is not in a shape frappe make domain can edit: add " \
+                       "the lines Domain: app/domain/ in SweetTalk and Domain rules: " \
+                       ".claude/skills/sweettalk/SKILL.md by hand, then make the domain again"
+
     # Writes app/domain/NAME.cr, spec/domain/NAME_spec.cr and, when missing,
-    # the skill; the first domain also edits .ameba.yml. Returns the written
-    # paths.
+    # the skill; the first domain also edits .ameba.yml and AGENTS.md. Returns
+    # the written paths.
     def generate(project : Project, name : String, context : String,
                  means : String, *, central : Bool = false) : Array(String)
       validate(name, context, means)
@@ -77,6 +90,9 @@ module Caramel::Frappe
       end
       if rules = lint_edit(root)
         originals[LINT], files[LINT] = rules
+      end
+      if guide = guide_edit(root)
+        originals[GUIDE], files[GUIDE] = guide
       end
       singular = name.underscore
       files["app/domain/#{singular}.cr"] = domain(name, context, means, tenant, central)
@@ -105,11 +121,35 @@ module Caramel::Frappe
     # the rules exclude it already.
     private def lint_edit(root : String) : {String, String}?
       return unless first_domain?(root)
-      Publication.validate_path(root, LINT)
+      Toolkit.validate_path(root, LINT)
       path = File.join(root, LINT)
       raise Error.new(UNEDITABLE_LINT) unless File.file?(path)
       rules = File.read(path)
       {rules, excluding(rules)} unless excluded?(rules)
+    end
+
+    # The application's AGENTS.md before and after its first domain adds the
+    # lines that say where the domain and its rules are; nil for a later domain,
+    # and when the guide has a line for each already. A missing line goes after
+    # the last line that says where data or the domain lives, and every other
+    # line stays as it is.
+    private def guide_edit(root : String) : {String, String}?
+      return unless first_domain?(root)
+      Toolkit.validate_path(root, GUIDE)
+      path = File.join(root, GUIDE)
+      raise Error.new(UNEDITABLE_GUIDE) unless File.file?(path)
+      guide = File.read(path)
+      lines = guide.lines(chomp: false)
+      missing = GUIDE_LINES.reject do |line|
+        label = line[/\A[^:]+: /]
+        lines.any?(&.starts_with?(label))
+      end
+      return if missing.empty?
+      anchor = lines.rindex { |line| GUIDE_ANCHORS.any? { |start| line.starts_with?(start) } }
+      raise Error.new(UNEDITABLE_GUIDE) unless anchor
+      lines[anchor] += "\n" unless lines[anchor].ends_with?('\n')
+      lines.insert(anchor + 1, missing.join { |line| "#{line}\n" })
+      {guide, lines.join}
     end
 
     # The rules by name, as YAML reads them.
