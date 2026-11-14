@@ -16,12 +16,13 @@ module Caramel::Frappe::Dispatch
   end
 
   # The `frappe` of the release a project pins in its shard.lock, when that
-  # is another release than this one.
-  def self.target(arguments : Array(String),
+  # is another release than this one and *arguments* name a project command of *table*.
+  def self.target(table : Commands::Table,
+                  arguments : Array(String),
                   directory : String = Dir.current,
                   environment : ENV.class | Hash(String, String) = ENV) : String?
     return if environment[ENVIRONMENT_KEY]? == "1"
-    return unless Commands.project?(arguments)
+    return unless table.project?(arguments)
     pin = Project.pin(directory)
     return unless pin && pin.matches?(RELEASE) && pin != Caramel::VERSION
 

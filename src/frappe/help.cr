@@ -4,7 +4,7 @@ require "./terminal"
 
 module Caramel::Frappe
   # What `frappe help`, `frappe help WORDS` and `WORDS --help` print, all read from
-  # Commands::TABLE: uppercase headings (bold on a colour terminal), content
+  # a command table: uppercase headings (bold on a colour terminal), content
   # indented two spaces, sections separated by a blank line, lines of at most WIDTH.
   module Help
     WIDTH = 80
@@ -13,17 +13,17 @@ module Caramel::Frappe
                 "db branch create spike", "dev --branch spike"]
 
     # Every command grouped by task.
-    def self.overview(color : Bool) : String
-      width = Commands::GROUPS.max_of { |group| group.names.max_of(&.size) } + 2
+    def self.overview(table : Commands::Table, color : Bool) : String
+      width = table.groups.max_of { |group| group.names.max_of(&.size) } + 2
       String.build do |io|
         io << "Frappé creates, runs and checks Caramel applications.\n"
         io << '\n'
         heading(io, "USAGE", color)
         io << "  frappe COMMAND [ARGUMENTS]\n"
-        Commands::GROUPS.each do |group|
+        table.groups.each do |group|
           io << '\n'
           heading(io, group.title, color)
-          rows(io, group.names.map { |name| {name, Commands.brief([name])} }, width)
+          rows(io, group.names.map { |name| {name, table.brief([name])} }, width)
         end
         io << '\n'
         heading(io, "EXAMPLES", color)
@@ -40,7 +40,7 @@ module Caramel::Frappe
 
     # One command: its description, usage and examples, then its subcommands
     # when it is also the root of a family (`frappe lsp`).
-    def self.command(command : Commands::Command, color : Bool) : String
+    def self.command(table : Commands::Table, command : Commands::Command, color : Bool) : String
       String.build do |io|
         text = command.summary
         text += " Works outside an application." unless command.project?
@@ -53,7 +53,7 @@ module Caramel::Frappe
           heading(io, "EXAMPLES", color)
           command.examples.each { |example| io << "  $ frappe " << example << '\n' }
         end
-        subcommands = Commands.matching(command.words).reject(&.same?(command))
+        subcommands = table.matching(command.words).reject(&.same?(command))
         unless subcommands.empty?
           io << '\n'
           heading(io, "COMMANDS", color)
@@ -67,11 +67,11 @@ module Caramel::Frappe
     end
 
     # A run of command words that two or more commands share: its subcommands.
-    def self.family(words : Array(String), color : Bool) : String
-      commands = Commands.matching(words)
+    def self.family(table : Commands::Table, words : Array(String), color : Bool) : String
+      commands = table.matching(words)
       width = commands.max_of(&.name.size) + 2
       String.build do |io|
-        io << Commands::FAMILIES[words.join(' ')] << ".\n"
+        io << table.families[words.join(' ')] << ".\n"
         io << '\n'
         heading(io, "COMMANDS", color)
         rows(io, commands.map { |command| {command.name, command.brief} }, width)

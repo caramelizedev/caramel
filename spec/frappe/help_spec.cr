@@ -9,27 +9,29 @@ private class TerminalMemory < IO::Memory
 end
 
 describe Caramel::Frappe::Help do
+  builtin = Caramel::Frappe::Commands.builtin
   table = Caramel::Frappe::Commands::TABLE
   families = Caramel::Frappe::Commands::FAMILIES
 
   it "keeps every page within 80 columns" do
-    Caramel::Frappe::Help.overview(false).lines.max_of(&.size).should be <= 80
+    Caramel::Frappe::Help.overview(builtin, false).lines.max_of(&.size).should be <= 80
     table.each do |command|
-      Caramel::Frappe::Help.command(command, false).lines.max_of(&.size).should be <= 80
+      Caramel::Frappe::Help.command(builtin, command, false).lines.max_of(&.size).should be <= 80
     end
     families.each_key do |key|
-      Caramel::Frappe::Help.family(key.split(' '), false).lines.max_of(&.size).should be <= 80
+      page = Caramel::Frappe::Help.family(builtin, key.split(' '), false)
+      page.lines.max_of(&.size).should be <= 80
     end
   end
 
   it "bolds headings only on a colour terminal" do
-    Caramel::Frappe::Help.overview(false).should_not contain("\e")
-    Caramel::Frappe::Help.overview(true).should contain("\e[1mUSAGE\e[0m\n")
+    Caramel::Frappe::Help.overview(builtin, false).should_not contain("\e")
+    Caramel::Frappe::Help.overview(builtin, true).should contain("\e[1mUSAGE\e[0m\n")
   end
 
   it "prints a command's syntax, wrapped without splitting a token" do
     command = table.find!(&.name.==("make resource"))
-    page = Caramel::Frappe::Help.command(command, false)
+    page = Caramel::Frappe::Help.command(builtin, command, false)
     usage = page.lines.skip_while { |line| line != "USAGE" }.skip(1)
     usage = usage.take_while { |line| !line.empty? }
     usage.size.should be > 1
@@ -38,10 +40,10 @@ describe Caramel::Frappe::Help do
 
   it "lists a family root's subcommands after its own usage" do
     command = table.find!(&.name.==("lsp"))
-    page = Caramel::Frappe::Help.command(command, false)
+    page = Caramel::Frappe::Help.command(builtin, command, false)
     page.should contain("  frappe lsp crystalline|ameba-ls [SERVER_ARGS...]\n")
     page.should contain("\nCOMMANDS\n  lsp install  ")
-    Caramel::Frappe::Help.command(table.find!(&.name.==("format")), false)
+    Caramel::Frappe::Help.command(builtin, table.find!(&.name.==("format")), false)
       .should_not contain("COMMANDS")
   end
 

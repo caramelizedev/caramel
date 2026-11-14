@@ -31,7 +31,13 @@ require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
+    # The commands this run answers to.
+    getter table : Commands::Table
+
+    def initialize(@framework_root : String,
+                   @output : IO = STDOUT,
+                   @error : IO = STDERR,
+                   @table : Commands::Table = Commands.builtin)
     end
 
     def run(arguments : Array(String)) : Int32
@@ -41,7 +47,7 @@ module Caramel::Frappe
       if words = help_target(args)
         return show_help(words)
       end
-      invocation = Commands.parse(args)
+      invocation = @table.parse(args)
       invocation.command.deprecated.try do |replacement|
         @error.puts("Warning: frappe #{invocation.command.name} is deprecated " \
                     "and will be removed in the next minor release. #{replacement}")
@@ -82,7 +88,7 @@ module Caramel::Frappe
       when "version"
         @output.puts("Frappé #{Caramel::VERSION}")
       when "completion"
-        @output.print(Completion.script(invocation["zsh|bash|fish"]))
+        @output.print(Completion.script(@table, invocation["zsh|bash|fish"]))
       when "agent-manifest"
         manifest
       when "new"
@@ -253,7 +259,8 @@ module Caramel::Frappe
         else
           error.suggestion.try { |suggestion| @error.puts("Did you mean #{suggestion}?") }
           @error.puts
-          @error.print(Help.family(Commands.prefix(commands), Terminal.color?(@error)))
+          family = Commands.prefix(commands)
+          @error.print(Help.family(@table, family, Terminal.color?(@error)))
         end
       end
     end
@@ -261,12 +268,12 @@ module Caramel::Frappe
     private def show_help(words : Array(String)) : Int32
       color = Terminal.color?(@output)
       if words.empty?
-        @output.print(Help.overview(color))
+        @output.print(Help.overview(@table, color))
         return 0
       end
-      matches = Commands.matching(words)
+      matches = @table.matching(words)
       command = matches.find(&.words.==(words)) || (matches.first if matches.size == 1)
-      page = command ? Help.command(command, color) : Help.family(words, color)
+      page = command ? Help.command(@table, command, color) : Help.family(@table, words, color)
       @output.print(page)
       0
     end
@@ -275,13 +282,13 @@ module Caramel::Frappe
     # `--help` through to a tool (`frappe lsp crystalline --help`).
     private def help_target(args : Array(String)) : Array(String)?
       return unless args.size > 1 && {"--help", "-h"}.includes?(args.last)
-      words = Commands.help_words(args[0...-1]) || return
-      return if words.size < args.size - 1 && Commands.matching(words).any?(&.passthrough?)
+      words = @table.help_words(args[0...-1]) || return
+      return if words.size < args.size - 1 && @table.matching(words).any?(&.passthrough?)
       words
     end
 
     private def help_words!(asked : Array(String)) : Array(String)
-      Commands.help_words(asked) || raise Commands.unknown(asked.first)
+      @table.help_words(asked) || raise @table.unknown(asked.first)
     end
 
     # The commands to run next: {command, purpose} pairs aligned in two columns,
@@ -306,7 +313,7 @@ module Caramel::Frappe
       @output.puts("VERSION: #{Caramel::VERSION}")
       @output.puts("DOCS: #{Caramel::REPOSITORY}/tree/v#{Caramel::VERSION}")
       @output.puts("GUIDES: #{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/llms.txt")
-      Commands::TABLE.each do |command|
+      @table.commands.each do |command|
         @output.puts("frappe #{command.syntax}  # #{command.summary}")
       end
       @output.puts
@@ -437,7 +444,7 @@ module Caramel::Frappe
         nearest = vocabulary.nearest(word)
         message = "unknown word #{word}"
         message += "; nearest: #{nearest.join(", ")}" unless nearest.empty?
-        raise Commands::Usage.new(message, "frappe words", Commands.matching(["words"]),
+        raise Commands::Usage.new(message, "frappe words", @table.matching(["words"]),
           nearest.first?)
       end
       @output.puts(json ? words_json(vocabulary, word) : words_text(vocabulary, word))
@@ -483,7 +490,7 @@ module Caramel::Frappe
       match = location.match(/\A(.+):([1-9][0-9]*):([1-9][0-9]*)\z/)
       unless match
         message = "#{location} is not FILE:LINE:COL"
-        intended = Commands.matching(["expand"])
+        intended = @table.matching(["expand"])
         raise Commands::Usage.new(message, "frappe expand", intended)
       end
       project = Project.load

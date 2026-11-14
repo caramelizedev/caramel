@@ -15,7 +15,8 @@ end
 
 describe Caramel::Frappe::Completion do
   script = File.tempname("frappe-completion-", ".bash")
-  File.write(script, Caramel::Frappe::Completion.script("bash"))
+  builtin = Caramel::Frappe::Commands.builtin
+  File.write(script, Caramel::Frappe::Completion.script(builtin, "bash"))
   Spec.after_suite { File.delete?(script) }
 
   it "completes commands, subcommands, options and choices" do

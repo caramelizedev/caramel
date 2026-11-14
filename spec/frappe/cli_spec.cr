@@ -14,7 +14,7 @@ end
 
 describe Caramel::Frappe::CLI do
   it "shows help, per-command usage and the version without touching a toolchain or service" do
-    commands = Caramel::Frappe::Commands
+    commands = Caramel::Frappe::Commands.builtin
     groups = Caramel::Frappe::Commands::GROUPS
     frappe, output, errors = cli
     frappe.run(["--help"]).should eq(0)
@@ -112,6 +112,14 @@ describe Caramel::Frappe::CLI do
     errors.to_s.should eq(<<-MRDP)
       ERR USAGE at frappe florp
       MSG: unknown command florp
+      FIX: frappe agent-manifest lists every command\n
+      MRDP
+    output.to_s.should eq("")
+    errors.clear
+    frappe.run(["something:else"]).should eq(1)
+    errors.to_s.should eq(<<-MRDP)
+      ERR USAGE at frappe something:else
+      MSG: unknown command something:else
       FIX: frappe agent-manifest lists every command\n
       MRDP
     output.to_s.should eq("")
