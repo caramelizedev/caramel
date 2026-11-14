@@ -22,7 +22,7 @@ build time. `markdown.mjs` turns each page into Markdown, written as `index.md` 
 
 - Every command, framework catalog key, Crema metric, environment variable and editor
   preset in the source is on its page; the SweetTalk skill
-  (`templates/skills/sweettalk/SKILL.md`) cites only sections the Markdown edition has; no
+  (`templates/skills/sweettalk/SKILL.md`) and each ADR cite only sections the edition has; no
   page or skill still calls something planned for a release the edition has reached.
 - A page that shows application code keeps those files, at their in-app paths, under
   `spec/fixtures/pages/<key>/`; `scripts/checks/page_<key>.cr` builds them with the page's
@@ -64,7 +64,7 @@ current edition and keeps every earlier `/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` fr
 `gh-pages` history. Redirect pages are not editions: each run rewrites one for every
 release tag with no edition, pointing at the newest edition of its minor, beside copies
 of that edition's `llms.txt` and `index.md` files
-([ADR 0026](../docs/decisions/0026-writing-homes.md) decision 1). `--dry-run` prints what
+([ADR 0014](../docs/decisions/0014-repository-and-writing.md)). `--dry-run` prints what
 it keeps and publishes nothing. After pushing it waits up to 15 minutes until every
 edition answers 200. Generated output is ignored on `main`.
 

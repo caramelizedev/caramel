@@ -1,14 +1,17 @@
 require "./support/harness"
 
-# Every kind of writing has one home (ADR 0026): markdown lives only in the files
-# that state a contract, each ADR keeps its three sections, every relative link
-# resolves, and every file except a skill stays within its byte cap.
+# Every kind of writing has one home (ADR 0014): markdown lives only in the files
+# that state a contract, each decision record keeps its three sections, every
+# relative link resolves, and every capped file stays within its byte cap.
 module Caramel::Checks::Prose
   extend self
 
+  # A framework record, or a SweetTalk record in its own directory.
+  ADR_PATH = /\Adocs\/decisions\/(sweettalk\/)?\d{4}-[a-z0-9-]+\.md\z/
+
   HOMES = [
     /\A(README|CONTRIBUTING|CHANGELOG|AGENTS|CLAUDE|SECURITY|THIRD_PARTY_NOTICES)\.md\z/,
-    /\Adocs\/decisions\/\d{4}-[a-z0-9-]+\.md\z/,
+    ADR_PATH,
     /\Awebsite\/README\.md\z/,
     /\Atemplates\/application\/(README|AGENTS|CLAUDE)\.md\z/,
     /\Atemplates\/skills\/sweettalk\/SKILL\.md\z/,
@@ -26,12 +29,11 @@ module Caramel::Checks::Prose
     "templates/application/README.md" => 3_000,
     "templates/application/AGENTS.md" => 2_000,
     "templates/application/CLAUDE.md" => 200,
-    # A skill has no cap: it is read when its task matches, and the link check keeps it
-    # from becoming a second source (ADR 0026).
+    # A decision record has no cap: it is as long as its subject. A skill has none
+    # either: it is read when its task matches, and the link check keeps it from
+    # becoming a second source (ADR 0014).
   }
-  ADR_CAP = 12_000
 
-  ADR_PATH   = /\Adocs\/decisions\/\d{4}-[a-z0-9-]+\.md\z/
   ADR_TITLE  = /\A# ADR (\d{4}): \S/
   ADR_DATE   = /\ADate: \d{4}-\d{2}-\d{2}\z/
   ADR_STATUS = "Status: "
@@ -52,8 +54,8 @@ module Caramel::Checks::Prose
     homed.each { |path| problems.concat(cap_problems(path)) }
     Checks.fail(problems.join("\n")) unless problems.empty?
     puts "PASS: #{homed.size} markdown files sit in their homes, #{adrs.size} ADRs keep " \
-         "Context, Decision and Reasons, every relative link resolves, and every file " \
-         "is within its cap"
+         "Context, Decision and Reasons, every relative link resolves, and every capped " \
+         "file is within its cap"
     0
   end
 
@@ -132,7 +134,7 @@ module Caramel::Checks::Prose
   end
 
   private def cap_problems(path : String) : Array(String)
-    cap = path.matches?(ADR_PATH) ? ADR_CAP : CAPS[path]?
+    cap = CAPS[path]?
     return [] of String unless cap
     size = File.size(absolute(path))
     return [] of String if size <= cap
