@@ -156,13 +156,16 @@ describe Caramel::Frappe::Completion do
 
     it "offers a project's contributed commands after the built-ins, and their options" do
       project do |root, _|
-        candidates(["de"], root).should eq(ROOTS + ["demo:greet", "demo:notes"])
+        shard = ["demo:greet", "demo:notes", "demo:database", "demo:install"]
+        candidates(["de"], root).should eq(ROOTS + shard)
         candidates(["demo:notes", ""], root).should eq(%w[list add])
         candidates(["demo:greet", "Ada", "--"], root).should eq(["--loud"])
         candidates(["help", "demo:notes", ""], root).should eq(%w[list add])
         _, answer, _ = answered(["demo:"], root)
-        answer.lines.last(2).should eq([
+        answer.lines.last(4).should eq([
           "demo:greet\tGreet someone by name", "demo:notes\tList or add notes",
+          "demo:database\tName the application's database",
+          "demo:install\tAdd the shard to the application",
         ])
       end
     end
@@ -237,9 +240,10 @@ describe Caramel::Frappe::Completion do
     it "completes shard:command as one word, though bash breaks words at the colon" do
       project do |_, table|
         matching = ROOTS.select(&.starts_with?("de"))
-        bash(["de"], table).should eq(matching + ["demo:greet", "demo:notes"])
+        shard = ["demo:greet", "demo:notes", "demo:database", "demo:install"]
+        bash(["de"], table).should eq(matching + shard)
         # bash replaces what follows the colon, so that is what the script offers.
-        bash(["demo:"], table).should eq(%w[greet notes])
+        bash(["demo:"], table).should eq(%w[greet notes database install])
         asked.should eq(["__complete", "demo:"])
         bash(["demo:gr"], table).should eq(["greet"])
         asked.should eq(["__complete", "demo:gr"])
@@ -285,8 +289,10 @@ describe Caramel::Frappe::Completion do
     it "escapes the colon of shard:command, which separates a word from its description" do
       project do |_, table|
         offered = zsh(["de"], table)
-        offered.last(2).should eq([
+        offered.last(4).should eq([
           "demo\\:greet:Greet someone by name", "demo\\:notes:List or add notes",
+          "demo\\:database:Name the application's database",
+          "demo\\:install:Add the shard to the application",
         ])
         offered.first.should eq("#{ROOTS.first}:#{BUILTIN.brief([ROOTS.first])}")
         zsh(["demo:"], table).should eq(offered)
