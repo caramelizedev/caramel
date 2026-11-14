@@ -241,7 +241,7 @@ module Caramel::Frappe
       end
       missing = self.class.uncovered(ids, descriptions)
       return if missing.empty?
-      raise Error.new("No example names requirement #{missing.join(", ")}: put each id in " \
+      raise Error.new("No example names #{missing.join(", ")}: put each id in " \
                       "the name of an example that proves it, as in " \
                       "it \"refuses an unbalanced journal (AC-12)\"")
     end
