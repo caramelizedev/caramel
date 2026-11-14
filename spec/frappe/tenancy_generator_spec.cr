@@ -2,7 +2,6 @@ require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
 require "../../src/frappe/tenancy_generator"
-require "../../src/frappe/domain_generator"
 
 private VERSION = 20261003000001_i64
 
@@ -21,11 +20,14 @@ private def read(project : Caramel::Frappe::Project, relative : String) : String
   File.read(File.join(project.root, relative))
 end
 
-# Starts the Shop domain, as frappe make domain does.
-private def shop(project : Caramel::Frappe::Project) : Nil
-  generator = Caramel::Frappe::DomainGenerator.new
-  generator.generate(project, "Shop", "Ordering", "choosing teas and checking out")
-end
+# A file the application wrote itself, outside what frappe make tenancy wires.
+private OWN_FILE   = "app/domain/shop.cr"
+private OWN_SOURCE = <<-CRYSTAL
+  module App::Shop
+    include SweetTalk
+  end
+
+  CRYSTAL
 
 # Every file under the project, with its content, to prove a refusal wrote nothing.
 private def snapshot(project : Caramel::Frappe::Project) : Hash(String, String)
@@ -245,22 +247,14 @@ describe Caramel::Frappe::TenancyGenerator do
     end
   end
 
-  it "names the tenant in each SweetTalk domain" do
+  it "leaves the application's other source files as they are" do
     tenancy_project do |project, generator|
-      shop(project)
+      path = File.join(project.root, OWN_FILE)
+      Dir.mkdir_p(File.dirname(path))
+      File.write(path, OWN_SOURCE)
       written = generator.generate(project, "Account", version: VERSION)
-      written.should contain("app/domain/shop.cr")
-      tenanted = "  include SweetTalk\n  tenant App::Account\n"
-      read(project, "app/domain/shop.cr").should contain(tenanted)
-    end
-  end
-
-  it "refuses a domain without its include SweetTalk line, writing nothing" do
-    tenancy_project do |project, generator|
-      shop(project)
-      path = File.join(project.root, "app/domain/shop.cr")
-      File.write(path, File.read(path).sub("  include SweetTalk", "  include ::SweetTalk"))
-      refuses(project, generator, "app/domain/shop.cr needs exactly one include SweetTalk line")
+      written.should_not contain(OWN_FILE)
+      read(project, OWN_FILE).should eq(OWN_SOURCE)
     end
   end
 

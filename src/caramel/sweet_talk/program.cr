@@ -1,15 +1,20 @@
 # The whole program: dispatch, the context map and the glossary.
 module SweetTalk
   # In a program that requires caramel/tenancy, every domain names its tenant (ADR 0033),
-  # so no domain's rows are shared between tenants by omission.
+  # so no domain's rows are shared between tenants by omission. The refusal names the
+  # line to add, with the routes' tenant model when the routes declare one.
   macro finished
     {% if ::Caramel.has_constant?("Tenancy") %}
       {% for domain in ::SweetTalk.includers %}
         {% unless domain.has_constant?("SWEETTALK_TENANT") %}
-          {% raise "#{domain} uses SweetTalk in a program that requires caramel/tenancy: name " +
-                   "the tenant before its contexts, as in tenant App::Account, the model the " +
-                   "routes' tenant block names; a context every tenant shares takes " +
-                   "central: true" %}
+          {% tenancy = ::SugarORM::Tenancy %}
+          {% routed = tenancy.has_constant?(:SCHEMA) %}
+          {% model = routed ? tenancy.constant(:SCHEMA) : "MODEL" %}
+          {% legend = routed ? "" : ", where MODEL is the model the routes' tenant block names" %}
+          {% raise "#{domain} uses SweetTalk in a program that requires caramel/tenancy: add " +
+                   "the line tenant #{model.id} to module #{domain}, after its include " +
+                   "SweetTalk line and before its contexts#{legend.id}; a context every " +
+                   "tenant shares takes central: true" %}
         {% end %}
       {% end %}
     {% end %}

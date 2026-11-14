@@ -188,8 +188,9 @@ PROBLEMS = [
   {"central_without_tenancy",
    "context Catalogue takes central: true only in a program that requires caramel/tenancy"},
   {"tenant_unnamed",
-   "Shop uses SweetTalk in a program that requires caramel/tenancy: name the tenant before " \
-   "its contexts"},
+   "Shop uses SweetTalk in a program that requires caramel/tenancy: add the line tenant " \
+   "Shop::Account to module Shop, after its include SweetTalk line and before its contexts; " \
+   "a context every tenant shares takes central: true"},
   {"tenant_after_context",
    "tenant Account comes after context Catalogue: name the tenant before the contexts"},
   {"tenant_without_tenancy", "tenant Account needs require \"caramel/tenancy\" before this domain"},

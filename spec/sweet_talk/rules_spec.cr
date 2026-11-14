@@ -492,6 +492,11 @@ describe "SweetTalk's requirements" do
     ])
   end
 
+  it "declares every requirement id as one a full spec run must name" do
+    ids = SweetTalk.declared_requirements.map(&.id)
+    (Caramel::SpecIds.all & ids).should eq(ids)
+  end
+
   it "prints every requirement, one, or only the ids, and refuses what it cannot read" do
     output, errors = IO::Memory.new, IO::Memory.new
     SweetTalk.__sweettalk_print_requirements(["--ids"], output, errors).should eq(0)
