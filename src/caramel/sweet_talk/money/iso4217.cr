@@ -1,6 +1,9 @@
 # ISO 4217 list one, published 2026-09-17 by SIX, its maintenance agency, and fetched on
-# 2026-11-07 from the address ADR 0063 gives. Regenerate it from that file, one entry per
-# code with a number of minor units; never edit a line by hand.
+# 2026-11-07 from this address, split here to fit the line limit:
+#   https://www.six-group.com/dam/download/financial-information/data-center/
+#   iso-currrency/lists/list-one.xml
+# Regenerate it from that file, one entry per code with a number of minor units; never edit
+# a line by hand.
 module SweetTalk
   module Money
     # Each current code with its minor units: the digits after the point it counts in.
