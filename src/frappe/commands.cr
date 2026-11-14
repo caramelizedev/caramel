@@ -243,7 +243,7 @@ module Caramel::Frappe
       Command.new("completion zsh|bash|fish",
         "Print the shell completion script for zsh, bash or fish; it completes commands, " \
         "subcommands, options and their choices. For zsh, add source <(frappe completion zsh) " \
-        "to ~/.zshrc after compinit; for bash, add source <(frappe completion bash) to " \
+        "to ~/.zshrc after compinit; for bash, add eval \"$(frappe completion bash)\" to " \
         "~/.bashrc; for fish, run frappe completion fish > ~/.config/fish/completions/frappe.fish.",
         brief: "Print a shell completion script for zsh, bash or fish",
         examples: ["completion zsh", "completion fish"],
