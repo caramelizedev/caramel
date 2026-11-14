@@ -26,19 +26,24 @@ require "./terminal"
 require "./help"
 require "./completion"
 require "./shard_commands"
+require "./shard_tool"
+require "./toolkit"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    # The commands this run answers to, and the shards whose manifests were refused.
+    # The commands this run answers to, the shards whose manifests were refused, and by
+    # shard the entry file of the program that runs its tool commands.
     @table : Commands::Table
     @problems : Array(ShardCommands::Problem)
+    @programs : Hash(String, String)
 
     def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
       @table = Commands.builtin
       @problems = [] of ShardCommands::Problem
+      @programs = {} of String => String
     end
 
     def run(arguments : Array(String)) : Int32
@@ -57,7 +62,7 @@ module Caramel::Frappe
                     "and will be removed in the next minor release. #{replacement}")
       end
       shard = command.shard
-      return contributed(command, shard, args) if shard
+      return contributed(invocation, shard, args) if shard
       execute(invocation)
     rescue ex : Commands::Usage
       usage(ex, arguments)
@@ -111,12 +116,12 @@ module Caramel::Frappe
           @output.puts("Skipped migrations (--no-migrate); " \
                        "the development database was not changed.")
           @output.puts("#{project.name} is configured.")
-          next_steps(@output, [{"frappe migrate", "apply pending migrations"},
-                               {"frappe dev", serve}])
+          Toolkit.next_steps(@output, [{"frappe migrate", "apply pending migrations"},
+                                       {"frappe dev", serve}])
         else
           migrate_configured(project, tools)
           @output.puts("#{project.name} is configured.")
-          next_steps(@output, [{"frappe dev", serve}])
+          Toolkit.next_steps(@output, [{"frappe dev", serve}])
         end
       when "dev"
         dev(invocation)
@@ -151,9 +156,9 @@ module Caramel::Frappe
           plural: invocation["--plural"]?, only: invocation["--only"]?,
           central: invocation.flag?("--central"), int64: invocation.flag?("--int64"),
         )
-        files.each { |path| @output.puts("Generated #{path}") }
-        next_steps(@output, [{"frappe migrate", "apply the new schema"},
-                             {"frappe routes", "list the generated URLs"}])
+        Toolkit.generated(@output, files)
+        Toolkit.next_steps(@output, [{"frappe migrate", "apply the new schema"},
+                                     {"frappe routes", "list the generated URLs"}])
       when "make locale"
         make_locale(invocation["CODE"])
       when "make tenancy"
@@ -279,11 +284,13 @@ module Caramel::Frappe
       builtin = Commands.builtin
       @table = builtin
       @problems = [] of ShardCommands::Problem
+      @programs = {} of String => String
       help = args.first == "help" || {"--help", "-h"}.includes?(args.last)
       return unless help || args.first == "agent-manifest" || builtin.project?(args)
       loaded = ShardCommands.load(Dir.current, builtin)
       @table = loaded.table
       @problems = loaded.problems
+      @programs = loaded.tools
       problem = broken(args, help) || return
       raise Error.new(problem.message)
     end
@@ -313,26 +320,34 @@ module Caramel::Frappe
       @problems.each { |problem| @error.puts(problem.message) }
     end
 
-    # Runs the command *shard* contributes as the application's own command of that
-    # name, and returns the application's status. An application that registers no such
-    # command answers with its usage and status 2.
-    private def contributed(command : Commands::Command,
+    # Runs the command *shard* contributes and returns its status: a tool command as
+    # the shard's program (ShardTool), any other as the application's own command of
+    # that name (Tools#contributed).
+    private def contributed(invocation : Commands::Invocation,
                             shard : String,
                             arguments : Array(String)) : Int32
       project = Project.load
       tools = Tools.new(@framework_root, @output, @error)
+      command = invocation.command
+      return tool(invocation, project, tools, shard, arguments) if command.run.try(&.tool?)
       binary = tools.compile(project)
-      errors = IO::Memory.new
-      development = {"CARAMEL_ENV" => "development"}
-      status, printed = tools.capture(binary, arguments, project.root, development, errors)
-      usage = "Usage: #{File.basename(binary)} "
-      answers = {printed, errors.to_s}
-      if status.exit_code? == 2 && answers.any?(&.starts_with?(usage))
-        raise Error.new(unregistered(command, shard))
-      end
-      @output.print(printed)
-      @error.print(errors.to_s)
-      status.exit_code? || 1
+      status = tools.contributed(project, binary, arguments)
+      status || raise Error.new(unregistered(command, shard))
+    end
+
+    # Runs a tool command as its shard's program, with the command's words as the
+    # manifest writes them, and tells it who reads its output by the rule of Frappé's
+    # own commands: `--agent`, `--human`, else whether the output is a terminal.
+    private def tool(invocation : Commands::Invocation,
+                     project : Project,
+                     tools : Tools,
+                     shard : String,
+                     arguments : Array(String)) : Int32
+      agent = MRDP.agent?(invocation.flags, @output)
+      color = !agent && Terminal.color?(@output)
+      program = ShardTool.new(tools, project.root, shard, @programs[shard], @error)
+      words = [arguments.first.lchop("#{shard}:")] + arguments[1..]
+      program.run(words, agent, color)
     end
 
     # What to say when a manifest declares a command its shard's code does not register.
@@ -377,22 +392,6 @@ module Caramel::Frappe
       @table.help_words(asked) || raise @table.unknown(asked.first)
     end
 
-    # The commands to run next: {command, purpose} pairs aligned in two columns,
-    # a step with an empty purpose printed as written, then each note as a paragraph.
-    private def next_steps(io : IO, steps : Array(Tuple(String, String)),
-                           notes : Array(String) = [] of String) : Nil
-      width = steps.reject(&.[1].empty?).max_of?(&.[0].size) || 0
-      io.puts
-      io.puts("Next:")
-      steps.each do |command, purpose|
-        io.puts(purpose.empty? ? "  #{command}" : "  #{command.ljust(width)}  #{purpose}")
-      end
-      notes.each do |note|
-        io.puts
-        Terminal.wrap(note, 80).each { |line| io.puts(line) }
-      end
-    end
-
     # Stateless: reads only the command table.
     private def manifest : Nil
       @output.puts("CARAMEL CLI INTERFACE (STRICT TOKENS)")
@@ -431,7 +430,8 @@ module Caramel::Frappe
                         "Run cd #{name} && frappe setup to resume.")
       end
       @output.puts("\n#{project.name} is configured at #{project.origin}")
-      next_steps(@output, [{"cd #{name}", ""}, {"frappe dev", "build, serve and reload the app"}])
+      steps = [{"cd #{name}", ""}, {"frappe dev", "build, serve and reload the app"}]
+      Toolkit.next_steps(@output, steps)
     end
 
     private def dev(invocation : Commands::Invocation) : Nil
@@ -478,34 +478,37 @@ module Caramel::Frappe
 
     private def make_locale(code : String) : Nil
       files = LocaleGenerator.new.generate(Project.load, code)
-      files.each { |path| @output.puts("Generated #{path}") }
-      next_steps(@output, [{"Write the translations in app/locales/#{code}.cr.", ""},
-                           {"frappe translations", "list the keys still missing"}],
+      Toolkit.generated(@output, files)
+      steps = [{"Write the translations in app/locales/#{code}.cr.", ""},
+               {"frappe translations", "list the keys still missing"}]
+      Toolkit.next_steps(@output, steps,
         ["For a right-to-left language, set dir: locale.dir in app/views/layouts/application.cr."])
     end
 
     private def make_tenancy(model : String, int64 : Bool) : Nil
       files = TenancyGenerator.new(@framework_root).generate(Project.load, model, int64: int64)
-      files.each { |path| @output.puts("Generated #{path}") }
+      Toolkit.generated(@output, files)
       plural = ResourceGenerator.pluralize(model.underscore)
       notes = ["frappe make resource now writes tenant resources; " \
                "pass --central for one every tenant shares. " \
                "Tenant pages answer 401 unless member? in " \
                "app/actions/application_action.cr holds: it reads the slugs the session " \
                "signed up, until you replace it with a membership table of your own."]
-      next_steps(@output, [{"frappe migrate", "apply the tenant schema"},
-                           {"Open /#{plural}/new to sign up the first tenant.", ""}], notes)
+      steps = [{"frappe migrate", "apply the tenant schema"},
+               {"Open /#{plural}/new to sign up the first tenant.", ""}]
+      Toolkit.next_steps(@output, steps, notes)
     end
 
     private def make_domain(invocation : Commands::Invocation) : Nil
       name = invocation["NAME"]
       files = DomainGenerator.new.generate(Project.load, name, invocation["CONTEXT"],
         invocation["--means"], central: invocation.flag?("--central"))
-      files.each { |path| @output.puts("Generated #{path}") }
+      Toolkit.generated(@output, files)
       singular = name.underscore
-      next_steps(@output, [{"Write the domain in app/domain/#{singular}.cr.", ""},
-                           {"frappe db diff --name create_#{singular}", "derive its tables"},
-                           {"frappe migrate", "apply them"}])
+      steps = [{"Write the domain in app/domain/#{singular}.cr.", ""},
+               {"frappe db diff --name create_#{singular}", "derive its tables"},
+               {"frappe migrate", "apply them"}]
+      Toolkit.next_steps(@output, steps)
     end
 
     # Prints the application's report of keys each locale still lacks.
@@ -660,8 +663,8 @@ module Caramel::Frappe
         @error.puts("WARNING: schema drift (read-only check; nothing was changed):")
         @error.print(report)
         unless agent
-          next_steps(@error, [{"frappe db diff --name NAME",
-                               "derive the migrations the declared schema needs"}])
+          Toolkit.next_steps(@error, [{"frappe db diff --name NAME",
+                                       "derive the migrations the declared schema needs"}])
         end
       end
       0
@@ -916,8 +919,9 @@ module Caramel::Frappe
         url = client.create_branch(id, branch)["runtime_url"].as_s
         @error.puts("Created database branch #{name} from #{project.name}'s development database.")
         @output.puts(url)
-        next_steps(@error, [{"frappe dev --branch #{branch}", "run the app against this branch"},
-                            {"frappe db branch delete #{branch}", "drop it when you are done"}])
+        steps = [{"frappe dev --branch #{branch}", "run the app against this branch"},
+                 {"frappe db branch delete #{branch}", "drop it when you are done"}]
+        Toolkit.next_steps(@error, steps)
       when "db branch list"
         names = client.branches(id).compact_map(&.["name"].as_s?)
         names.each { |entry| @output.puts(entry) }

@@ -34,6 +34,11 @@ module Caramel::Frappe
       fields.each { |key, value| io << key << ": " << flat(value) << '\n' }
     end
 
+    # The line that closes a success: `OK command summary`.
+    def self.ok(io : IO, command : String, summary : String) : Nil
+      io << "OK " << command << ' ' << flat(summary) << '\n'
+    end
+
     # Values are single-line: a line break would start a new field.
     def self.flat(text : String) : String
       text.strip.gsub(/\s*\n\s*/, " ")

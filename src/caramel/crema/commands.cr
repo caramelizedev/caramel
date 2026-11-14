@@ -28,4 +28,9 @@ module Caramel::Crema
   def self.command_syntaxes : Array(String)
     @@commands.values.map(&.[0])
   end
+
+  # The name of each registered command, in the order they were added.
+  def self.command_names : Array(String)
+    @@commands.keys
+  end
 end

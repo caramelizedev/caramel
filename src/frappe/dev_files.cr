@@ -24,27 +24,51 @@ module Caramel::Frappe
       SOURCE_FILES.each do |path|
         source[path] = digest(File.join(@root, path)) if File.file?(File.join(@root, path))
       end
-      framework_source.try { |signature| source["lib/caramel"] = signature }
-      Snapshot.new(signature(source), signature(tree("app/assets").merge(tree("public"))))
+      source.merge!(DevFiles.path_sources(@root))
+      assets = tree("app/assets").merge(tree("public"))
+      Snapshot.new(DevFiles.signature(source), DevFiles.signature(assets))
     end
 
     # The signature of spec/, which Corretto's spec binaries also build from.
     def spec_signature : String
-      signature(tree("spec"))
+      DevFiles.signature(tree("spec"))
     end
 
-    # A path dependency (lib/caramel, a symlink Shards made to a checkout)
-    # builds against that checkout's working tree, so its source is part of
-    # every build. It is hashed but not watched: after editing it, save any
-    # application file or restart frappe dev. A release changes only with
-    # shard.lock.
-    private def framework_source : String?
-      link = File.join(@root, "lib/caramel")
-      return unless File.symlink?(link)
-      source = File.join(File.realpath(link), "src")
-      return unless Dir.exists?(source)
-      files = Dir.glob(File.join(source, "**", "*")).select { |path| File.file?(path) }
-      signature(files.to_h { |path| {path, Digest::SHA256.hexdigest(File.read(path))} })
+    # The signature of the sources of each path dependency of the project at *root*, by
+    # its place under lib/. A path dependency (lib/NAME, a symlink Shards made to a
+    # checkout) builds against that checkout's working tree, so its src/ is part of
+    # every build. It is hashed but not watched: after editing it, save any application
+    # file or restart frappe dev. A release changes only with shard.lock.
+    def self.path_sources(root : String) : Hash(String, String)
+      sources = {} of String => String
+      library = File.join(root, "lib")
+      return sources unless Dir.exists?(library)
+      Dir.children(library).sort!.each do |name|
+        link = File.join(library, name)
+        next unless File.symlink?(link)
+        signature = source_signature(link) || next
+        sources["lib/#{name}"] = signature
+      end
+      sources
+    end
+
+    # The signature of the files under the src/ of the checkout that *link* points to,
+    # each by its path from the checkout; nil when it has none to read.
+    private def self.source_signature(link : String) : String?
+      checkout = File.realpath(link)
+      paths = Dir.glob(File.join(checkout, "src", "**", "*")).select { |path| File.file?(path) }
+      return if paths.empty?
+      files = paths.to_h do |path|
+        {path.lchop(checkout + "/"), Digest::SHA256.hexdigest(File.read(path))}
+      end
+      signature(files)
+    rescue File::Error
+      nil
+    end
+
+    # One signature for *files*, each a path with the digest of its content.
+    def self.signature(files : Hash(String, String)) : String
+      Digest::SHA256.hexdigest(files.to_a.sort_by(&.[0]).to_json)
     end
 
     def publish_assets : Nil
@@ -155,10 +179,6 @@ module Caramel::Frappe
     private def digest(path : String) : String
       validate_path(path)
       Digest::SHA256.hexdigest(File.read(path))
-    end
-
-    private def signature(files : Hash(String, String)) : String
-      Digest::SHA256.hexdigest(files.to_a.sort_by(&.[0]).to_json)
     end
 
     private def validate_path(path : String) : Nil

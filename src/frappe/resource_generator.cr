@@ -1,5 +1,5 @@
 require "./project"
-require "./publication"
+require "./toolkit"
 require "../caramel/i18n/keys"
 require "./schema_diff"
 require "../sugar_orm/catalog"
@@ -349,7 +349,7 @@ module Caramel::Frappe
         insertions["app/locales/#{default_locale}.cr"] = {MESSAGES_MARKER, messages, messages[0, 1]}
       end
       insertions.each do |relative, insertion|
-        Publication.validate_path(project.root, relative)
+        Toolkit.validate_path(project.root, relative)
         original = File.read(File.join(project.root, relative))
         marker, lines, probes = insertion
         unless original.lines.count(marker) == 1
@@ -362,7 +362,7 @@ module Caramel::Frappe
         originals[relative] = original
         files[relative] = original.sub(marker, "#{lines.join('\n')}\n#{marker}")
       end
-      Publication.publish(project, files, originals)
+      Toolkit.publish(project.root, files, originals)
       files.keys.sort!
     end
 
@@ -400,7 +400,7 @@ module Caramel::Frappe
     # The table the tenant model's schema declares.
     private def tenant_table(root : String, model : String) : String
       relative = "app/models/#{model.underscore}.cr"
-      Publication.validate_path(root, relative)
+      Toolkit.validate_path(root, relative)
       path = File.join(root, relative)
       table = File.read(path).match(TENANT_SCHEMA).try(&.[1]) if File.file?(path)
       return table if table

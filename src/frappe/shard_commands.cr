@@ -11,7 +11,9 @@ module Caramel::Frappe
   #
   # A manifest names its format and lists its commands, each written without the shard's
   # name in the syntax grammar of Commands, and the line for each run of words that
-  # begins longer commands:
+  # begins longer commands. A command says how it runs: `application`, as a command that
+  # the shard's code registers in the built application, or `tool`, as the program that
+  # the manifest names by its Crystal entry file under the shard's src/ (ShardTool):
   #
   # ```yaml
   # format: 1
@@ -22,15 +24,22 @@ module Caramel::Frappe
   #     examples:
   #       - notes add "Call the roaster" --pinned
   #     run: application
+  #   - syntax: install [--agent|--human]
+  #     brief: Add the shard to the application
+  #     description: Write config/notes.cr and require it.
+  #     run: tool
   # families:
   #   notes: List or add notes
+  # tool: src/notes/frappe.cr
   # ```
   module ShardCommands
     FILE = "frappe.yml"
     # The manifest format this Frappé reads.
     FORMAT = 1
-    # How a contributed command runs: as a command of the built application.
-    RUNS  = %w[application]
+    # How a contributed command runs, as a manifest writes it.
+    RUNS = {"application" => Commands::Run::Application, "tool" => Commands::Run::Tool}
+    # A tool program's entry file, from its shard's root: a Crystal file under src/.
+    ENTRY = /\Asrc\/[A-Za-z0-9_\/-]+\.cr\z/
     LIMIT = 1_048_576
 
     # Why a shard's commands are absent: its manifest, the rule it breaks and the remedy.
@@ -40,8 +49,16 @@ module Caramel::Frappe
       end
     end
 
-    # A project's commands, and the manifests that contribute none.
-    record Loaded, table : Commands::Table, problems : Array(Problem)
+    # A project's commands, the manifests that contribute none, and by shard the entry
+    # file, from the shard's root, of the program that runs its tool commands.
+    record Loaded,
+      table : Commands::Table,
+      problems : Array(Problem),
+      tools : Hash(String, String)
+
+    # What one shard's manifest declares: its commands as a table of their own, and its
+    # tool program's entry file when it has tool commands.
+    private record Contribution, table : Commands::Table, tool : String?
 
     # A rule a manifest breaks, and its remedy.
     private class Refusal < Exception
@@ -71,6 +88,7 @@ module Caramel::Frappe
       getter format : Int64
       getter commands : Array(Entry) = [] of Entry
       getter families : Hash(String, String) = {} of String => String
+      getter tool : String?
     end
 
     # The commands of the project at *root*: *builtin*, then what each of its shards
@@ -78,12 +96,15 @@ module Caramel::Frappe
     def self.load(root : String, builtin : Commands::Table = Commands.builtin) : Loaded
       table = builtin
       problems = [] of Problem
+      tools = {} of String => String
       shards(root).each do |shard|
-        table += contribution(shard, File.join(root, file(shard)))
+        contribution = contribution(shard, File.join(root, file(shard)))
+        table += contribution.table
+        contribution.tool.try { |entry| tools[shard] = entry }
       rescue ex : Refusal
         problems << Problem.new(shard, file(shard), ex.message.to_s, ex.remedy)
       end
-      Loaded.new(table, problems)
+      Loaded.new(table, problems, tools)
     end
 
     # Where *shard*'s manifest is, from the project's root.
@@ -91,18 +112,25 @@ module Caramel::Frappe
       File.join("lib", shard, FILE)
     end
 
-    # The shards a project locks and holds under lib/ with a manifest, in name order. A
-    # name that cannot prefix a command is no shard's.
+    # The shards a project locks and holds under lib/ with a manifest, in name order.
     private def self.shards(root : String) : Array(String)
       locked = Project.locked(root)
       return [] of String unless locked.has_key?("caramel")
-      names = locked.keys.select { |name| "#{name}:x".matches?(Commands::NAMESPACED_WORD) }
+      names = locked.keys.reject { |name| name.includes?('/') || name.starts_with?('.') }
       names.select! { |name| File.file?(File.join(root, file(name))) }
       names.sort!
     end
 
-    # What *shard*'s manifest at *path* declares, as a table of its own.
-    private def self.contribution(shard : String, path : String) : Commands::Table
+    # Refuses a shard whose name cannot come before the colon of a command.
+    private def self.prefixable(shard : String) : Nil
+      return if "#{shard}:x".matches?(Commands::NAMESPACED_WORD)
+      refuse("the shard's name, #{shard.inspect}, cannot prefix a command",
+        "Name the shard with a lowercase letter, then lowercase letters, digits, - or _.")
+    end
+
+    # What *shard*'s manifest at *path* declares.
+    private def self.contribution(shard : String, path : String) : Contribution
+      prefixable(shard)
       manifest = read(path)
       if manifest.commands.empty?
         refuse("the manifest declares no command",
@@ -114,7 +142,43 @@ module Caramel::Frappe
       group = Commands::Group.new(shard.upcase, commands.map(&.words.first).uniq!)
       table = Commands::Table.new(commands, lines, [group])
       exemplified(shard, table)
-      table
+      Contribution.new(table, tool(shard, File.dirname(path), manifest.tool, commands))
+    end
+
+    # The entry file of the program that runs *shard*'s tool commands, from the shard's
+    # root *directory*; nil when no command runs as tool. Refuses a manifest whose
+    # *entry* and commands disagree, and an entry that is no Crystal file under src/.
+    private def self.tool(shard : String,
+                          directory : String,
+                          entry : String?,
+                          commands : Array(Commands::Command)) : String?
+      first = commands.find(&.run.==(Commands::Run::Tool))
+      example = "src/#{shard}/frappe.cr"
+      unless entry
+        return unless first
+        refuse("the command #{plain(shard, first.syntax).inspect} runs as tool, and the " \
+               "manifest names no tool program",
+          "Add tool: with the program's Crystal entry file, such as #{example}.")
+      end
+      unless first
+        refuse("the manifest names the tool program #{entry.inspect}, and no command runs " \
+               "as tool", "Write run: tool on the commands the program runs, or remove tool:.")
+      end
+      unless entry.matches?(ENTRY)
+        refuse("the tool program #{entry.inspect} is not a Crystal file under the shard's " \
+               "src/", "Name a file such as #{example}.")
+      end
+      return entry if shipped?(directory, entry)
+      refuse("the tool program #{entry.inspect} is not a file of the shard",
+        "Ship the file with the shard, at that path.")
+    end
+
+    # Whether *entry* is a file that stays inside the shard at *directory*.
+    private def self.shipped?(directory : String, entry : String) : Bool
+      path = File.realpath(File.join(directory, entry))
+      File.file?(path) && path.starts_with?(File.realpath(directory) + "/")
+    rescue File::Error
+      false
     end
 
     # The manifest at *path*, once its format is one this Frappé reads.
@@ -158,10 +222,11 @@ module Caramel::Frappe
       line(syntax, "syntax", label)
       brief = present(entry.brief, "brief", label)
       description = present(entry.description, "description", label)
-      require_run(entry.run, label)
+      run = run(entry.run, label)
       examples = entry.examples.map { |example| "#{shard}:#{line(example, "example", label)}" }
       begin
-        Commands::Command.new("#{shard}:#{syntax}", description, brief: brief, examples: examples)
+        Commands::Command.new("#{shard}:#{syntax}", description,
+          brief: brief, examples: examples, run: run)
       rescue ArgumentError
         refuse("#{label} does not start with a command word",
           "Start the syntax with a lowercase word, such as greet; Frappé adds #{shard}: itself.")
@@ -184,15 +249,17 @@ module Caramel::Frappe
       refuse("the #{field} of #{label} takes more than one line", "Write it on one line.")
     end
 
-    # Refuses a command that does not say it runs in one of RUNS.
-    private def self.require_run(run : String?, label : String) : Nil
-      return if run && RUNS.includes?(run)
+    # How the command *label* runs; refuses one that does not say so in one of RUNS.
+    private def self.run(run : String?, label : String) : Commands::Run
+      RUNS[run]?.try { |known| return known } if run
+      ways = RUNS.keys.join(" or ")
       rule = if run
-               "#{label} runs as #{run.inspect}, and this Frappé runs a command as application"
+               "#{label} runs as #{run.inspect}, and this Frappé runs a command as #{ways}"
              else
                "#{label} does not say how it runs"
              end
-      refuse(rule, "Write run: application, and register the command in the shard's code.")
+      refuse(rule, "Write run: application for a command the shard's code registers in " \
+                   "the application, or run: tool for one the shard's tool program runs.")
     end
 
     # Refuses two commands of one name.

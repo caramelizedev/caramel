@@ -36,7 +36,7 @@ module Caramel::Frappe
         end
       end
       return 1 unless issues.zero?
-      @output.puts("OK lint #{document["summary"]["target_sources_count"]} files")
+      MRDP.ok(@output, "lint", "#{document["summary"]["target_sources_count"]} files")
       0
     end
 

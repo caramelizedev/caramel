@@ -128,13 +128,20 @@ module Caramel::Frappe
     end
   end
 
-  # Serializes one application's builds across processes. `frappe dev` holds
-  # it while it checks, builds and installs, and a command while it looks for
-  # a build or makes one. So a command waits for a build in flight and can
+  # Serializes the builds kept in one directory across processes: an application's, in
+  # its .caramel, or those of a shard's tool program, in its place in the toolchain.
+  # `frappe dev` holds it while it checks, builds and installs, and a command while it
+  # looks for a build or makes one. So a command waits for a build in flight and can
   # reuse it, and no two builds write the program's compiler cache at once.
   class BuildLock
-    def initialize(root : String)
-      state = Latte::StateSecurity.ensure_owned_directory(File.join(root, ".caramel"))
+    # The lock on the builds of the application at *root*.
+    def self.application(root : String) : self
+      new(File.join(root, ".caramel"))
+    end
+
+    # The lock on the builds in *directory*, made private to this user when missing.
+    def initialize(directory : String)
+      state = Latte::StateSecurity.ensure_owned_directory(directory)
       path = File.join(state, "build.lock")
       if info = File.info?(path, follow_symlinks: false)
         unless Latte::StateSecurity.owned_file?(info)

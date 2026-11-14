@@ -76,7 +76,7 @@ module Caramel::Frappe
     # under `CARAMEL_ENV=development`.
     def compile(project : Project) : String
       slot = BuildSlot.command(project.root, @toolchain.root)
-      lock = BuildLock.new(project.root)
+      lock = BuildLock.application(project.root)
       begin
         lock.acquire { @error.puts("Waiting for another build of #{project.name}…") }
         fingerprint = source_fingerprint(project)
@@ -123,6 +123,32 @@ module Caramel::Frappe
       run(binary, args, project.root, values)
     end
 
+    # Runs the command a shard contributes, *arguments* from its name on, as a command
+    # of *project*'s application at *binary*, and returns its exit status. It runs in
+    # development with the project's local environment, as the commands that reach the
+    # database do, on the terminal's streams: what it prints appears as it is written,
+    # and it reads *input*. Nil when the application registers no command of that
+    # name; the application is asked first, so nothing is read into what the command
+    # prints or how it exits.
+    def contributed(project : Project,
+                    binary : String,
+                    arguments : Array(String),
+                    input : Process::Stdio = Process::Redirect::Inherit) : Int32?
+      values = project.local_environment.merge({"CARAMEL_ENV" => "development"})
+      return unless registered(binary, project.root, values).includes?(arguments.first)
+      execute(binary, arguments, project.root, values, input).exit_code? || 1
+    end
+
+    # The name of each command the application at *binary* registers: what its
+    # `commands` command prints.
+    def registered(binary : String,
+                   directory : String,
+                   values : Hash(String, String)) : Array(String)
+      status, names = capture(binary, ["commands"], directory, values)
+      return names.lines if status.success?
+      raise Error.new("The application did not list its commands; see the diagnostic above")
+    end
+
     def run(command : String,
             args : Array(String),
             directory : String,
@@ -133,18 +159,19 @@ module Caramel::Frappe
       raise Error.new("Command failed (exit #{code}); see the diagnostic above")
     end
 
-    # Runs a command on the terminal's streams and returns its status.
+    # Runs a command on the terminal's streams, reading *input*, and returns its status.
     def execute(command : String,
                 args : Array(String),
                 directory : String,
-                values : Hash(String, String) = {} of String => String) : Process::Status
+                values : Hash(String, String) = {} of String => String,
+                input : Process::Stdio = Process::Redirect::Inherit) : Process::Status
       Process.run(command, args,
         chdir: directory,
         env: environment(values),
         clear_env: true,
         output: @output,
         error: @error,
-        input: Process::Redirect::Inherit)
+        input: input)
     end
 
     # Runs a command, returning its status and standard output; standard
