@@ -84,10 +84,10 @@ Every piece of writing has one home, chosen by what it is ([ADR 0014](docs/decis
 - What contributors must do: this file; pages of the website: `.claude/skills/caramel-docs`.
 - How to report a vulnerability: `SECURITY.md`.
 - A decision: one ADR per subject in `docs/decisions`, SweetTalk's in `sweettalk/`:
-  Context (optional, the problem), Decision (the rules in force, present tense) and
-  Reasons (why, and what was rejected). Edit an ADR in the commit that alters its
-  decision; none amends another. An ADR cites what the site or a doc comment states
-  (`site#c-coldbrew-run`), not restating it. Cite ADR rules in words, not numbers.
+  Context (optional, the problem), Decision (the choices made) and Reasons (why, and
+  what was rejected). It states no rule or mechanic; code, tests, doc comments and the
+  site do. Edit an ADR in the commit that changes a choice; none amends another. Cite
+  its choices in words, not numbers; a site section as `site#anchor`.
 - Status, measurements, investigations, incident timelines and history: not this
   repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
   pull request description or the CHANGELOG.
