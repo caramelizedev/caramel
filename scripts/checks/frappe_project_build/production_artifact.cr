@@ -163,7 +163,7 @@ module Caramel::Checks
       status = get("/books").try(&.status_code)
       assert!(status == 200, "GET /books: #{status}\n#{logs(@app)}")
       # The artifact's public/ files, found through CARAMEL_ROOT, with validators and
-      # the versioned name's immutable caching (ADR 0038).
+      # the versioned name's immutable caching (ADR 0032).
       script = get("/assets/htmx-4.0.0.min.js")
       status = script.try(&.status_code)
       assert!(status == 200, "GET /assets/htmx-4.0.0.min.js: #{status}\n#{logs(@app)}")

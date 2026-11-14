@@ -5,7 +5,7 @@ description: How Caramel's documentation is shaped and worded. Use whenever writ
 
 # Writing a page in website/source/site.html
 
-`CONTRIBUTING.md` (Writing) and ADR 0026 (`docs/decisions`) say where writing lives;
+`CONTRIBUTING.md` (Writing) and ADR 0014 (`docs/decisions`) say where writing lives;
 `website/README.md` describes the build and its checks. Every page is also an `index.md`
 for agents: what only works visually is lost to them.
 

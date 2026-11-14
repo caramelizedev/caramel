@@ -1,6 +1,6 @@
-# SweetTalk's calculations (ADR 0062): a typed function whose rules hold on its result, a
+# SweetTalk's calculations (ADR 0035): a typed function whose rules hold on its result, a
 # broken rule a defect that rolls back what it ran in, and Corretto's property cases
-# (ADR 0010 decision 11), which run it on drawn arguments without a database.
+# (ADR 0010, the property runner), which run it on drawn arguments without a database.
 require "./support/app"
 require "../../src/caramel/sweet_talk/corretto"
 

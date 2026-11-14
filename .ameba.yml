@@ -66,7 +66,7 @@ Lint/SpecFilename:
     - "spec/data/**"
     - "spec/**/spec_helper.cr"
 
-# A line holds at most 100 characters (ADR 0021). The formatter never breaks
+# A line holds at most 100 characters (ADR 0017). The formatter never breaks
 # a line, so this rule does. No file is exempt.
 Layout/LineLength:
   Enabled: true

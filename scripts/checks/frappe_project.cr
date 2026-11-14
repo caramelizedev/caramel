@@ -787,7 +787,7 @@ module Caramel::Checks
     # The generated Shop domain with P5's Ordering context, a policy that does
     # not read its event and a compensation that does not read its refusal.
     SHOP_DOMAIN = <<-CRYSTAL
-      # The Shop domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
+      # The Shop domain, in SweetTalk (ADR 0030). Its words, such as
       # context, value, aggregate, event and whenever, exist only inside this module.
       module App::Shop
         include SweetTalk

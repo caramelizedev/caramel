@@ -1,5 +1,5 @@
-# What a screen reads of the domain's closed sets (ADR 0058): a closed-set value's member as
-# an enum, a lifecycle's graph, and the field a refusal is about.
+# What a screen reads of the domain's closed sets (ADRs 0033, 0039 and 0040): a closed-set
+# value's member as an enum, a lifecycle's graph, and the field a refusal is about.
 require "./support/app"
 
 module ClosedSetsSpec

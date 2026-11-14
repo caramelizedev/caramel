@@ -1,11 +1,11 @@
 require "./support/harness"
 require "../../src/frappe/word_drift"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033 to 0036, 0039 to 0041, 0043 to 0051, 0053 to
-# 0063 and 0065). Each declaration mistake fails to compile with a fixed problem text, naming
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0035, 0036, 0039 to 0041, 0045, 0046, 0048, 0060
+# and 0063). Each declaration mistake fails to compile with a fixed problem text, naming
 # its file where the mistake has a line; a valid domain compiles, with and without
 # caramel/tenancy; the example of each word `frappe words` prints compiles; and an
-# application that does not require caramel/sweet_talk, or one of its modules (ADR 0061),
+# application that does not require caramel/sweet_talk, or one of its modules,
 # holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
 # scripts/check integration runs them.
 
@@ -14,7 +14,7 @@ ABSENT   = "SweetTalk code must be absent from an application that does not requ
            "caramel/sweet_talk"
 # A string only SweetTalk's boundary holds.
 MARKER = "a command changes one aggregate"
-# Each module of caramel/sweet_talk (ADR 0061) with a string only its own code holds, and
+# Each module of caramel/sweet_talk (ADR 0030) with a string only its own code holds, and
 # the modules it requires; the application spec/fixtures/sweet_talk/<module>.cr requires it.
 MODULES = {
   "decimal" => {"must be a decimal written with digits and a point", [] of String},
@@ -829,7 +829,7 @@ end
 puts "PASS: the examples of #{words.words.size} SweetTalk words compile as written"
 
 # The same application without and with caramel/sweet_talk, and with each of its modules
-# (ADR 0061): only an application that requires a module holds its code, and all run alike.
+# (ADR 0030): only an application that requires a module holds its code, and all run alike.
 root = Caramel::Checks.private_temp("caramel-sweet-talk-")
 at_exit { FileUtils.rm_rf(root) }
 (["plain", "sweet"] + MODULES.keys).each do |name|

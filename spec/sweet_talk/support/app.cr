@@ -20,7 +20,7 @@ private def owned_url(variable : String) : String
   ENV[variable]? || raise "Run scripts/check integration; no #{variable} provided"
 end
 
-# SweetTalk's domains (ADRs 0030 and 0031) on a scratch database of their own. Most
+# SweetTalk's domains (ADR 0030) on a scratch database of their own. Most
 # examples run in a transaction that is rolled back; those that need commits empty
 # every table afterwards.
 module SweetTalkSpec

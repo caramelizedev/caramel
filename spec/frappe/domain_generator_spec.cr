@@ -126,7 +126,7 @@ describe Caramel::Frappe::DomainGenerator do
     domain_project do |project, generator|
       generator.generate(project, "Shop", "Ordering", MEANS)
       read(project, "app/domain/shop.cr").should eq(<<-CRYSTAL)
-        # The Shop domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
+        # The Shop domain, in SweetTalk (ADR 0030). Its words, such as
         # context, value, aggregate, event and whenever, exist only inside this module.
         module App::Shop
           include SweetTalk

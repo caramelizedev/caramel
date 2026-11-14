@@ -1,7 +1,7 @@
 require "./support/app"
 require "../../src/caramel/corretto"
 
-# The tea house's strategic design (ADR 0036) and its shared kernels (ADR 0044). Its card
+# The tea house's strategic design (ADR 0036) and its shared kernels. Its card
 # gateway is faked at the wire: Corretto.wire starts the suite's wire proxy and points
 # Caramel::Outbound at it.
 Corretto.wire

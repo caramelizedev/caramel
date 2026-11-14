@@ -38,7 +38,7 @@ Documentation/Admonition:
   Enabled: true
 
 # Views are Blueprint classes, where `p` is the paragraph element, not the
-# debug print (ADR 0018).
+# debug print (ADR 0004).
 Lint/DebugCalls:
   Excluded:
     - "app/views/**/*.cr"

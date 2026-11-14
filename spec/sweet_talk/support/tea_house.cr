@@ -1,4 +1,4 @@
-# The tea house's strategic design (ADRs 0036 and 0044): subdomains, a calendar and a money
+# The tea house's strategic design (ADR 0036): subdomains, a calendar and a money
 # kernel that Pricing and Billing share, a published language that a follower and a border
 # read, and a border with an outside card gateway, which the specs fake at the wire with
 # Corretto.stub_wire.

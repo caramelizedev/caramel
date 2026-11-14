@@ -1,4 +1,4 @@
-# A billing desk that keeps its event log (ADR 0048, 0051): invoices whose commands and a
+# A billing desk that keeps its event log (ADR 0048): invoices whose commands and a
 # service's event are logged in `invoicing_events`, a correction that keeps the total in
 # effect on the row while the log keeps what was known before it, a projection rebuilt from
 # the log, a policy and a second projection, Nudges, that run after that projection's

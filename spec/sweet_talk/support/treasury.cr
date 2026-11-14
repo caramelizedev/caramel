@@ -1,4 +1,4 @@
-# A treasury that lends at a rate, for SweetTalk's decimal and JSON values (ADR 0047): a
+# A treasury that lends at a rate, for SweetTalk's decimal and JSON values (ADR 0040): a
 # decimal value with bounds kept in a numeric column and a CHECK, ranged, sorted and
 # counted; a JSON value over a JSON::Serializable type and one over any document, kept in
 # jsonb columns, optional in an aggregate and in a projection; and an event that carries

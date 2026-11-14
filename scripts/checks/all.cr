@@ -5,7 +5,7 @@ require "./support/harness"
 # result. Once the build step passes, the checks reuse its binaries
 # (Checks::PREBUILT). The runs after the build step go to lanes that run side
 # by side, as many as the machine's cores and memory allow unless --lanes
-# says otherwise (ADR 0022): each lane beyond the first uses a private
+# says otherwise (ADR 0017): each lane beyond the first uses a private
 # toolchain prefix with its own compiler caches, and within a lane the runs
 # go one after another. The lanes are balanced by the durations the last
 # run recorded on this machine, and each prints its total and longest run.
@@ -35,7 +35,7 @@ module Caramel::Checks::All
     spec/cold_brew spec/corretto spec/release
   ]
   USAGE = "usage: scripts/check all [--lanes N] [--except NAME ...]"
-  # The most lanes --lanes takes, and the default's ceiling (ADR 0022).
+  # The most lanes --lanes takes, and the default's ceiling (ADR 0017).
   MAX_LANES = 8
   # Where the toolchain root keeps the runs' durations and lanes.
   DURATIONS = "check-durations.json"
@@ -44,7 +44,7 @@ module Caramel::Checks::All
   # spoil both. The lock names its holder for the run that is refused.
   GATE = "/private/tmp/caramel-gate.lock"
   # Runs that stay on the first lane, which uses this checkout's toolchain
-  # (ADR 0022): installations checks that a release reuses that toolchain,
+  # (ADR 0017): installations checks that a release reuses that toolchain,
   # editor-tools uses its editor tools, and native rebuilds the installers
   # in bin/.
   FIRST_LANE = %w[native installations editor-tools]
