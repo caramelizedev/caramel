@@ -2,12 +2,18 @@ require "../caramel/version"
 require "./commands"
 
 module Caramel::Frappe
-  # `frappe completion zsh|bash|fish`: a script that completes commands,
-  # subcommands, options and choices, generated from a command table.
+  # Completion of commands, subcommands, options and choices from a command table.
+  # `frappe completion zsh|bash|fish` prints a script that asks Frappé, each time the
+  # shell completes, for what may follow the words typed so far: `frappe __complete
+  # WORD…`. Frappé answers from the commands of the directory it runs in, so a project's
+  # shards complete beside the built-ins.
   module Completion
+    # The hidden command the scripts call. No table lists it: a command word has no `_`.
+    COMMAND = "__complete"
+
     # What may follow a run of command words: a word (with its line), or an option.
-    # value: the option takes a value; joined: it is written --name=VALUE, so no space follows.
-    record Candidate, word : String, description : String, value : Bool, joined : Bool
+    # An option written --name=VALUE ends in `=`, so that no space follows it.
+    record Candidate, word : String, description : String
 
     # Each run of command words ("" for none) with its candidates, in the table's order.
     # Every command is a node, even one with no candidates, so that the walk
@@ -17,37 +23,56 @@ module Caramel::Frappe
       table.commands.each do |command|
         command.words.each_index do |depth|
           add(nodes, command.words[0, depth].join(' '),
-            Candidate.new(command.words[depth], table.brief(command.words[0, depth + 1]),
-              false, false))
+            Candidate.new(command.words[depth], table.brief(command.words[0, depth + 1])))
         end
         nodes[command.name] ||= [] of Candidate
         command.positionals.each do |positional|
           positional.choices.try &.each do |choice|
-            add(nodes, command.name, Candidate.new(choice, "", false, false))
+            add(nodes, command.name, Candidate.new(choice, ""))
           end
         end
         command.flags.each do |flag|
           flag.names.each do |name|
-            candidate = if flag.equals
-                          Candidate.new("#{name}=", "", true, true)
-                        elsif flag.value
-                          Candidate.new(name, "", true, false)
-                        else
-                          Candidate.new(name, "", false, false)
-                        end
-            add(nodes, command.name, candidate)
+            add(nodes, command.name, Candidate.new(flag.equals ? "#{name}=" : name, ""))
           end
         end
       end
       nodes
     end
 
-    def self.script(table : Commands::Table, shell : String) : String
+    # What follows *words*, the words typed after `frappe`: the last is the one under the
+    # cursor, which the shell matches itself. `help` completes as the commands it explains.
+    def self.candidates(table : Commands::Table, words : Array(String)) : Array(Candidate)
       nodes = self.nodes(table)
+      before = words.empty? ? words : words[0...-1]
+      before = before[1..] if before.first? == "help"
+      node = ""
+      before.each do |word|
+        extended = node.empty? ? word : "#{node} #{word}"
+        break unless nodes.has_key?(extended)
+        node = extended
+      end
+      nodes[node]
+    end
+
+    # The candidates for *words* as the scripts read them: one to a line, a tab before
+    # the description of a candidate that has one.
+    def self.answer(table : Commands::Table, words : Array(String)) : String
+      String.build do |io|
+        candidates(table, words).each do |candidate|
+          io << candidate.word
+          io << '\t' << candidate.description unless candidate.description.empty?
+          io << '\n'
+        end
+      end
+    end
+
+    # The script that completes `frappe` in *shell* by asking Frappé for the candidates.
+    def self.script(shell : String) : String
       case shell
-      when "zsh"  then zsh(nodes)
-      when "bash" then bash(nodes)
-      when "fish" then fish(nodes)
+      when "zsh"  then ZSH_HEADER + ZSH
+      when "bash" then BASH_HEADER + BASH
+      when "fish" then FISH_HEADER + FISH
       else
         raise ArgumentError.new("no completion script for #{shell}")
       end
@@ -59,159 +84,110 @@ module Caramel::Frappe
       candidates << candidate unless candidates.any?(&.word.==(candidate.word))
     end
 
-    # POSIX single quoting, which zsh, bash and fish all read the same.
-    private def self.quote(text : String) : String
-      "'" + text.gsub("'", "'\\''") + "'"
-    end
+    private BASH_HEADER = <<-TEXT
+      # frappe completion for bash, from Frappé #{Caramel::VERSION}.
+      # Load it from ~/.bashrc: eval "$(frappe completion bash)"\n
+      TEXT
 
-    # Every node but the root, quoted: the runs of words the walk may extend.
-    private def self.keys(nodes : Hash(String, Array(Candidate))) : Array(String)
-      nodes.keys.reject(&.empty?).map { |key| quote(key) }
-    end
-
-    private def self.bash(nodes : Hash(String, Array(Candidate))) : String
-      String.build do |io|
-        io << "# frappe completion for bash, from Frappé #{Caramel::VERSION}.\n"
-        io << "# Load it from ~/.bashrc: source <(frappe completion bash)\n"
-        io << <<-BASH
-          _frappe() {
-            local cur=${COMP_WORDS[COMP_CWORD]} node='' next='' i=1 candidates=''
-            if [[ ${COMP_WORDS[1]} == help && $COMP_CWORD -gt 1 ]]; then i=2; fi
-            while ((i < COMP_CWORD)); do
-              next="${node:+$node }${COMP_WORDS[i]}"
-              case $next in
-
-          BASH
-        io << "      " << keys(nodes).join('|') << ") node=$next ;;\n"
-        io << <<-BASH
-                *) break ;;
-              esac
-              i=$((i + 1))
-            done
-            case $node in
-
-          BASH
-        nodes.each do |node, candidates|
-          io << "    " << quote(node) << ") candidates=" <<
-            quote(candidates.join(' ', &.word)) << " ;;\n"
-        end
-        io << <<-BASH
-            esac
-            # bash splits --name=VALUE at `=`: nothing in the table completes a value.
-            if [[ $cur == = || ${COMP_WORDS[COMP_CWORD-1]} == = ]]; then return 0; fi
-            COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
-            if [[ ${#COMPREPLY[@]} -eq 0 ]]; then
-              COMPREPLY=($(compgen -f -- "$cur"))
-            elif [[ ${#COMPREPLY[@]} -eq 1 && ${COMPREPLY[0]} == *= ]]; then
-              type compopt >/dev/null 2>&1 && compopt -o nospace
-            fi
-          }
-          complete -F _frappe frappe
-
-          BASH
-      end
-    end
-
-    # The variable is `node`, never `path`: zsh ties `path` to PATH.
-    private def self.zsh(nodes : Hash(String, Array(Candidate))) : String
-      String.build do |io|
-        io << "#compdef frappe\n"
-        io << "# frappe completion for zsh, from Frappé #{Caramel::VERSION}.\n"
-        io << "# Load it from ~/.zshrc after compinit: source <(frappe completion zsh)\n"
-        io << <<-ZSH
-          _frappe() {
-            local node='' next=''
-            local -i i=2 ret=1
-            local -a described joined
-            if [[ ${words[2]} == help && $CURRENT -gt 2 ]]; then i=3; fi
-            while (( i < CURRENT )); do
-              next="${node:+$node }${words[i]}"
-              case $next in
-
-          ZSH
-        io << "      (" << keys(nodes).join('|') << ") node=$next ;;\n"
-        io << <<-ZSH
-                (*) break ;;
-              esac
-              i=$((i + 1))
-            done
-            case $node in
-
-          ZSH
-        nodes.each do |node, candidates|
-          words, joined = candidates.partition { |candidate| !candidate.joined }
-          io << "    (" << quote(node) << ") described=("
-          io << words.join(' ') { |candidate| described(candidate) }
-          io << "); joined=("
-          io << joined.join(' ') { |candidate| quote(candidate.word) }
-          io << ") ;;\n"
-        end
-        io << <<-ZSH
-            esac
-            if (( ${#described} )); then
-              _describe -t frappe-commands 'frappe' described && ret=0
-            fi
-            if (( ${#joined} )); then compadd -S '' -- "${joined[@]}" && ret=0; fi
-            (( ret )) && _files
-            return 0
-          }
-          if [[ ${funcstack[1]} == _frappe ]]; then
-            _frappe "$@"
+    # bash breaks a word at `:` and `=` and replaces only what follows the break, so the
+    # script puts the pieces back together for Frappé and offers each candidate without
+    # the part of the word that bash already holds.
+    private BASH = <<-'BASH'
+      _frappe() {
+        local cur='' held='' word='' description='' glued=0 i
+        local -a typed
+        for ((i = 1; i <= COMP_CWORD; i++)); do
+          word=${COMP_WORDS[i]}
+          if [[ $i -gt 1 && -n $word && ( -z ${word//[:=]/} || $glued == 1 ) ]]; then
+            typed[${#typed[@]}-1]+=$word
           else
-            compdef _frappe frappe
+            typed+=("$word")
           fi
+          if [[ -n $word && -z ${word//[:=]/} ]]; then glued=1; else glued=0; fi
+        done
+        cur=${typed[${#typed[@]}-1]}
+        # Nothing completes the VALUE of --name=VALUE.
+        if [[ $cur == -*=* ]]; then return 0; fi
+        if [[ $cur == *:* && $COMP_WORDBREAKS == *:* ]]; then held=${cur%"${cur##*:}"}; fi
+        COMPREPLY=()
+        while IFS=$'\t' read -r word description; do
+          if [[ -n $word && $word == "$cur"* ]]; then COMPREPLY+=("${word#"$held"}"); fi
+        done < <("${COMP_WORDS[0]}" __complete "${typed[@]}" 2>/dev/null)
+        if [[ ${#COMPREPLY[@]} -eq 0 ]]; then
+          COMPREPLY=($(compgen -f -- "${cur#"$held"}"))
+        elif [[ ${#COMPREPLY[@]} -eq 1 && ${COMPREPLY[0]} == *= ]]; then
+          type compopt >/dev/null 2>&1 && compopt -o nospace
+        fi
+      }
+      complete -F _frappe frappe
 
-          ZSH
+      BASH
+
+    private ZSH_HEADER = <<-TEXT
+      #compdef frappe
+      # frappe completion for zsh, from Frappé #{Caramel::VERSION}.
+      # Load it from ~/.zshrc after compinit: source <(frappe completion zsh)\n
+      TEXT
+
+    # _describe reads word:description, so a `:` inside the word is escaped. A candidate
+    # that ends in `=` is written --name=VALUE, so no space follows it.
+    private ZSH = <<-'ZSH'
+      _frappe() {
+        local word='' description=''
+        local -i ret=1
+        local -a described joined
+        while IFS=$'\t' read -r word description; do
+          if [[ -z $word ]]; then continue; fi
+          if [[ $word == *= ]]; then
+            joined+=("$word")
+          elif [[ -n $description ]]; then
+            described+=("${word//:/\\:}:$description")
+          else
+            described+=("${word//:/\\:}")
+          fi
+        done < <("${words[1]}" __complete "${(@)words[2,CURRENT]}" 2>/dev/null)
+        if (( ${#described} )); then
+          _describe -t frappe-commands 'frappe' described && ret=0
+        fi
+        if (( ${#joined} )); then compadd -S '' -- "${joined[@]}" && ret=0; fi
+        (( ret )) && _files
+        return 0
+      }
+      if [[ ${funcstack[1]} == _frappe ]]; then
+        _frappe "$@"
+      else
+        compdef _frappe frappe
+      fi
+
+      ZSH
+
+    private FISH_HEADER = <<-TEXT
+      # frappe completion for fish, from Frappé #{Caramel::VERSION}.
+      # Install it: frappe completion fish > ~/.config/fish/completions/frappe.fish\n
+      TEXT
+
+    # fish reads word<TAB>description and keeps shard:command as one word. It would match
+    # the description too, so the script offers the words that begin as the one typed,
+    # in Frappé's order. File names are offered unless Frappé offers a word: a command
+    # or a choice, not an option.
+    private FISH = <<-FISH
+      function __frappe_answer
+          set -l words (commandline -opc)
+          set -l frappe $words[1]
+          set -e words[1]
+          set -l current (commandline -ct)
+          $frappe __complete $words "$current" 2>/dev/null
       end
-    end
-
-    private def self.described(candidate : Candidate) : String
-      return quote(candidate.word) if candidate.description.empty?
-      quote("#{candidate.word}:#{candidate.description}")
-    end
-
-    # `-f` appears only on `-a` lines, so a node whose candidates are all options
-    # still completes file names.
-    private def self.fish(nodes : Hash(String, Array(Candidate))) : String
-      String.build do |io|
-        io << "# frappe completion for fish, from Frappé #{Caramel::VERSION}.\n"
-        io << "# Install it: frappe completion fish > ~/.config/fish/completions/frappe.fish\n"
-        io << "set -g __frappe_nodes " << keys(nodes).join(' ') << "\n"
-        io << <<-FISH
-          function __frappe_at --argument-names expected
-              set -l tokens (commandline -opc)
-              set -e tokens[1]
-              if test (count $tokens) -gt 0; and test "$tokens[1]" = help
-                  set -e tokens[1]
-              end
-              set -l node ''
-              for word in $tokens
-                  set -l next (string trim -- "$node $word")
-                  if contains -- $next $__frappe_nodes
-                      set node $next
-                  else
-                      break
-                  end
-              end
-              test "$node" = "$expected"
-          end
-
-          FISH
-        nodes.each do |node, candidates|
-          candidates.each do |candidate|
-            io << "complete -c frappe"
-            if candidate.word.starts_with?("--")
-              name = candidate.word.lstrip('-').rchop('=')
-              io << " -n \"__frappe_at '" << node << "'\" -l " << name
-              io << " -r" if candidate.value
-            else
-              io << " -f -n \"__frappe_at '" << node << "'\" -a " << quote(candidate.word)
-              io << " -d " << quote(candidate.description) unless candidate.description.empty?
-            end
-            io << '\n'
-          end
-        end
+      function __frappe_candidates
+          set -l typed (string escape --style=regex -- (commandline -ct))
+          __frappe_answer | string match -r -- "^$typed.*"
       end
-    end
+      function __frappe_offers_words
+          __frappe_answer | string match -q -r -v -- '^-'
+      end
+      complete -c frappe -n __frappe_offers_words -f
+      complete -c frappe -k -a '(__frappe_candidates)'
+
+      FISH
   end
 end

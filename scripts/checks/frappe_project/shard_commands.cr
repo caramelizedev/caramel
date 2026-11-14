@@ -18,6 +18,7 @@ module Caramel::Checks
       depend_on_shard(shard)
       command([@frappe, "setup", "--no-migrate"], chdir: @project)
       listed_shard_commands
+      completed_shard_commands(File.join(shard, "frappe.yml"))
       ran_shard_commands
       manifest = File.join(shard, "frappe.yml")
       declared = File.read(manifest)
@@ -60,6 +61,44 @@ module Caramel::Checks
       puts "PASS: in an application that depends on a shard with a frappe.yml, frappe help " \
            "lists the shard's group, frappe help demo its commands and frappe agent-manifest " \
            "each in full; outside the application none appear"
+    end
+
+    # What bash offers for `frappe demo:gr` with the script the built frappe prints, and
+    # for `frappe demo:greet Ada --`.
+    BASH_COMPLETION = <<-'BASH'
+      eval "$("$FRAPPE" completion bash)"
+      COMP_WORDS=("$FRAPPE" demo : gr); COMP_CWORD=3; _frappe
+      printf '%s\n' "${COMPREPLY[@]}"
+      COMP_WORDS=("$FRAPPE" demo : greet Ada --); COMP_CWORD=5; _frappe
+      printf '%s\n' "${COMPREPLY[@]}"
+      BASH
+
+    private def completed_shard_commands(manifest : String) : Nil
+      asked = [@frappe, "__complete", "de"]
+      inside = command(asked, chdir: @project, echo: false)
+      offered = inside.stdout.includes?("dev\t") && inside.stderr.empty? &&
+                inside.stdout.ends_with?("demo:greet\tGreet someone by name\n" \
+                                         "demo:notes\tList or add notes\n")
+      assert!(offered, inside.stdout + inside.stderr)
+      options = command([@frappe, "__complete", "demo:greet", "Ada", "--"],
+        chdir: @project, echo: false)
+      assert!(options.stdout == "--loud\n", options.stdout)
+      outside = command(asked, chdir: @projects, echo: false)
+      builtin = outside.stdout.includes?("dev\t") && !outside.stdout.includes?("demo:")
+      assert!(builtin && outside.stderr.empty?, outside.stdout + outside.stderr)
+      bash = command(["/bin/bash", "--norc", "--noprofile", "-c", BASH_COMPLETION],
+        chdir: @project, echo: false, environment: environment({"FRAPPE" => @frappe}))
+      assert!(bash.stdout == "greet\n--loud\n", bash.stdout + bash.stderr)
+      declared = File.read(manifest)
+      File.write(manifest, declared.sub("format: 1\n", "format: 2\n"))
+      refused = attempt(asked, chdir: @project)
+      File.write(manifest, declared)
+      silent = refused.status.exit_code == 0 && refused.stderr.empty? &&
+               refused.stdout == outside.stdout
+      assert!(silent, refused.stdout + refused.stderr)
+      puts "PASS: frappe __complete offers the shard's commands and their options in the " \
+           "application and the built-ins outside it, bash completes demo:greet as one " \
+           "word through the script, and a refused manifest is passed over in silence"
     end
 
     private def ran_shard_commands : Nil

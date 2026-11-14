@@ -42,6 +42,7 @@ module Caramel::Frappe
     end
 
     def run(arguments : Array(String)) : Int32
+      return complete(arguments[1..]) if arguments.first? == Completion::COMMAND
       args = arguments.empty? ? ["help"] : arguments.dup
       args[0] = "help" if {"--help", "-h"}.includes?(args[0])
       args[0] = "version" if {"--version", "-v"}.includes?(args[0])
@@ -93,7 +94,7 @@ module Caramel::Frappe
       when "version"
         @output.puts("Frappé #{Caramel::VERSION}")
       when "completion"
-        @output.print(Completion.script(@table, invocation["zsh|bash|fish"]))
+        @output.print(Completion.script(invocation["zsh|bash|fish"]))
       when "agent-manifest"
         manifest
       when "new"
@@ -294,6 +295,17 @@ module Caramel::Frappe
       shard, colon, _ = asked.partition(':')
       named = !colon.empty? || (help && @table.help_words([asked]).nil?)
       @problems.find(&.shard.==(shard)) if named
+    end
+
+    # Answers a shell's completion request: what may follow *words* among the commands
+    # of the current directory, a project's with its shards'. It reads files only, says
+    # nothing on standard error, and offers nothing when it cannot answer.
+    private def complete(words : Array(String)) : Int32
+      table = ShardCommands.load(Dir.current).table
+      @output.print(Completion.answer(table, words))
+      0
+    rescue Exception
+      0
     end
 
     # Says on standard error which shards' commands are absent, and why.
