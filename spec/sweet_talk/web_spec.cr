@@ -1,4 +1,4 @@
-# SweetTalk at the web boundary (ADR 0034): a refusal that an action does not rescue
+# SweetTalk at the web boundary (ADR 0033): a refusal that an action does not rescue
 # answers 422 in the contract-failure shapes, a missing aggregate 404, and a second
 # aggregate in one command stays a 500.
 require "./support/app"
@@ -134,7 +134,7 @@ describe "SweetTalk at the web boundary" do
     end
   end
 
-  it "answers a calculation's broken rule with 500 and reports it (ADR 0062)" do
+  it "answers a calculation's broken rule with 500 and reports it (ADR 0035)" do
     WebSpec::REPORTS.clear
     response = WebSpec.get("/lots/split?total=100&units=3", WebSpec.accepting("text/plain"))
     response.status.should eq(500)

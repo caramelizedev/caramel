@@ -16,7 +16,7 @@ module Caramel::Latte
   class Postgres
     MAJOR           = Toolchain::POSTGRES_MAJOR
     MAX_CONNECTIONS = 64
-    # The schema of `pg_stat_statements` in the development database (ADR 0029).
+    # The schema of `pg_stat_statements` in the development database (ADR 0012).
     STATISTICS_SCHEMA          = "caramel_stats"
     PRELOADED_LIBRARIES        = "pg_stat_statements,auto_explain"
     RUNTIME_CONNECTION_LIMIT   = DatabaseRoles::RUNTIME_CONNECTION_LIMIT

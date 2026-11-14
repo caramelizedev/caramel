@@ -1,7 +1,7 @@
 require "./support/harness"
 require "../../src/frappe/word_drift"
 
-# The website builds and passes its own checks (ADR 0026). website/build.mjs
+# The website builds and passes its own checks (ADR 0014). website/build.mjs
 # refuses a site that does not name the version in shard.yml, so during
 # scripts/release, which writes the new version first, this check builds the
 # edition for the new version.

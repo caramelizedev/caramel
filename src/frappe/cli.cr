@@ -643,7 +643,7 @@ module Caramel::Frappe
     end
 
     # The trace collector's line of `frappe services`: its state, and its port or why it
-    # is unavailable (ADR 0029).
+    # is unavailable (ADR 0012).
     private def collector_line(document : JSON::Any) : Nil
       collector = document["collector"]? || return
       state = collector["state"].as_s

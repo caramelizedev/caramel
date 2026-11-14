@@ -99,6 +99,17 @@ for (const file of paged) {
   assert(fs.existsSync(path.join(root, edition)), `${file}: no Markdown edition`);
   assert(llms.includes(`](https://caramelize.dev/${edition}): `), `llms.txt omits ${edition}`);
 }
+// A decision record cites a site section as a code span holding `site#` and the section's
+// id (docs/decisions/0014-repository-and-writing.md): every cited anchor is an id in a
+// built page of this edition.
+const decisions = new URL('../docs/decisions/', import.meta.url);
+const anchors = new Set(paged.flatMap(file => [...fs.readFileSync(path.join(root, file), 'utf8').matchAll(/\sid="([^"]+)"/g)].map(match => match[1])));
+const records = fs.readdirSync(decisions, {recursive: true}).filter(file => file.endsWith('.md')).sort();
+assert(records.length > 0, 'No decision records found in docs/decisions');
+const uncited = records.flatMap(record => [...fs.readFileSync(new URL(record, decisions), 'utf8').matchAll(/`site#([^`\s]+)`/g)]
+  .filter(([, anchor]) => !anchors.has(anchor))
+  .map(([, anchor]) => `docs/decisions/${record} cites site#${anchor}, which is no id in a built page of ${version}`));
+assert.equal(uncited.length, 0, uncited.join('\n'));
 // Every page declares its contract and ends in proof (.claude/skills/caramel-docs).
 for (const file of paged) {
   const html = fs.readFileSync(path.join(root, file), 'utf8');

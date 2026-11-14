@@ -1,5 +1,5 @@
 # Actions that call the tea shop and the shelf, to show how an action answers
-# SweetTalk's errors (ADR 0034).
+# SweetTalk's errors (ADR 0033).
 module TeaShopWeb
   abstract struct PageAction < Caramel::Action
     def layout(page : Caramel::Page) : String

@@ -3,7 +3,7 @@ require "./support/harness"
 
 # Lints the framework with Caramel's rule set (.ameba.yml, ADR
 # 0017), after proving that bin/frappe-lint carries Caramel's own rule and
-# that the framework's line limit is on (ADR 0021). Under scripts/check all
+# that the framework's line limit is on. Under scripts/check all
 # the build step has just built the linter.
 module Caramel::Checks::Lint
   extend self
@@ -95,7 +95,7 @@ module Caramel::Checks::Lint
          "not read_file or other paths"
   end
 
-  # ADR 0021: the framework's configuration holds a line to 100 characters.
+  # ADR 0017: the framework's configuration holds a line to 100 characters.
   private def line_length : Nil
     result = probe("# #{"x" * (LIMIT - 2)}\n# #{"x" * (LIMIT - 1)}\n")
     lines = issues(result, "Layout/LineLength").map(&.[0])
@@ -127,20 +127,20 @@ module Caramel::Checks::Lint
     puts "PASS: HTML expectation syntax is scoped; ordinary debug calls and curly blocks are linted"
   end
 
-  # ADR 0021: no file is exempt from the line limit, by the configuration or
+  # ADR 0017: no file is exempt from the line limit, by the configuration or
   # by an inline directive.
   private def no_exemptions : Nil
     rule = YAML.parse(File.read(CONFIG))["Layout/LineLength"]?
     if rule.try(&.["Excluded"]?)
       Checks.fail("Layout/LineLength excludes files in .ameba.yml; " \
-                  "rewrite their long lines instead (ADR 0021)")
+                  "rewrite their long lines instead (ADR 0017)")
     end
     disabled = linted_sources.select do |path|
       File.read_lines(path).any? { |line| disables_line_length?(line) }
     end
     unless disabled.empty?
       Checks.fail("These files disable Layout/LineLength inline; " \
-                  "rewrite their long lines instead (ADR 0021):\n#{disabled.join('\n')}")
+                  "rewrite their long lines instead (ADR 0017):\n#{disabled.join('\n')}")
     end
     puts "PASS: Layout/LineLength exempts no file, by configuration or inline directive"
   end

@@ -14,7 +14,7 @@ module SugarORM
     record DropColumn, table : String, column : String, explicit : Bool
     record AlterNull, table : String, column : String, nullable : Bool
     record AlterDefault, table : String, column : String, default : String?
-    # `checked`: an AssertDateText ran first, so the retype is deliberate (ADR 0042).
+    # `checked`: an AssertDateText ran first, so the retype is deliberate (ADR 0007).
     record AlterType, table : String, column : String, sql_type : String, checked : Bool = false
     # Raises, naming the rows it found, unless every value of the text column is a
     # calendar day written YYYY-MM-DD; it runs before the column becomes a date.

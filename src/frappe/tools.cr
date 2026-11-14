@@ -67,8 +67,8 @@ module Caramel::Frappe
       raise Error.new("Locked dependencies are missing or inconsistent; run frappe setup")
     end
 
-    # Builds the application for a one-shot command (ADR 0013 §5), or reuses
-    # a build of the same sources: `frappe dev`'s, hard-linked so its cleanup
+    # Builds the application for a one-shot command (ADR 0013, the shared development
+    # build), or reuses a build of the same sources: `frappe dev`'s, hard-linked so its cleanup
     # cannot delete it, or the previous command's. Commands build with the
     # dev build's define, so both reuse one object set in the compiler cache
     # instead of recompiling about 170 modules at each switch. The

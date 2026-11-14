@@ -4,7 +4,7 @@ require "random/secure"
 
 module Corretto
   # `Corretto.property(Billing.share)` runs a class method on 200 generated cases and fails
-  # the example when one raises (ADR 0010 decision 11). It takes any `Owner.method` whose
+  # the example when one raises (ADR 0010, the property runner). It takes any `Owner.method` whose
   # arguments each have a type, read where the method is defined, and draws each argument
   # from its type: `Int32`, `Int64`, `Bool`, `String`, nil, unions, arrays of at most 8
   # elements, hashes of at most 8 keys, and any type with a generator, the class method

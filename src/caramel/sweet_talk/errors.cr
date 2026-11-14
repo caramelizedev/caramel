@@ -1,8 +1,8 @@
 # The errors SweetTalk raises, and a glossary entry.
 module SweetTalk
   # A domain rule said no. It ends the command, and the command's transaction rolls back.
-  # An action that does not rescue it answers 422 (ADR 0034), under the field `on` names
-  # when its contract has that field, else under `_base` (ADR 0058).
+  # An action that does not rescue it answers 422, under the field `on` names when its
+  # contract has that field, else under `_base` (ADR 0033).
   class Refusal < Exception
     # The field the refusal is about, as `refuse "…", on: :quantity` names it, or nil.
     getter on : String?

@@ -9,7 +9,7 @@ module Caramel::Frappe
   # while the record names that fingerprint, this toolchain, this framework
   # version and this mode, and the binary and debug file still hash to what
   # it recorded. A build is therefore reused only while every input Frappé
-  # hashes is unchanged (ADR 0012, ADR 0013 §5, ADR 0010).
+  # hashes is unchanged (ADR 0012; ADR 0013, the shared development build; ADR 0010).
   class BuildSlot
     # `frappe dev` and one-shot commands build with the same flags.
     DEVELOPMENT = "caramel_development"

@@ -6,7 +6,7 @@ require "./crema/dump"
 require "./islands"
 
 module Caramel
-  # A view is a Blueprint class (ADR 0018): its inputs are typed in
+  # A view is a Blueprint class (ADR 0004): its inputs are typed in
   # `initialize` and its markup is Crystal in `private def blueprint`.
   #
   #     class App::Views::Books::Show < App::ApplicationView
@@ -25,7 +25,7 @@ module Caramel
     include Blueprint::HTML
     include Crema::Dumping
 
-    # Writes an island (ADR 0005) in place.
+    # Writes an island (ADR 0004) in place.
     def island(component : String, props) : Nil
       raw Island.tag(component, props)
     end
@@ -55,7 +55,7 @@ module Caramel
   end
 end
 
-# Caramel's escaping contract, applied to Blueprint 1.1.0 (ADR 0018).
+# Caramel's escaping contract, applied to Blueprint 1.1.0 (ADR 0004).
 # Attribute values are escaped like text: Blueprint escaped only `"`, so `&`
 # reached the browser raw and a stored `&amp;` came back as `&`. Attributes
 # render per call: Blueprint cached every rendered attribute set in a

@@ -1,4 +1,4 @@
-# Corretto's property cases (ADR 0010 decision 11) on plain class methods: arguments drawn
+# Corretto's property cases (ADR 0010, the property runner) on plain class methods: arguments drawn
 # from their types, a type's own generator, skipped cases, and a failure that names its
 # case, its seed and its arguments.
 require "spec"

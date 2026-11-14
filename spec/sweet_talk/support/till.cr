@@ -1,5 +1,5 @@
 # A till that sells tins of tea and writes receipts, to preview a change before it commits
-# and to commit it against that preview (ADR 0060).
+# and to commit it against that preview (ADR 0046).
 
 # A system outside the program, reached from a module the context does not hold, so the
 # context's check on the code as written cannot see it; a preview refuses it at run time.

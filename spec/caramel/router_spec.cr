@@ -57,7 +57,7 @@ struct FileShow < RouterSpecAction
   end
 end
 
-# A field value (ADR 0034) that refuses an odd number.
+# A field value (ADR 0003) that refuses an odd number.
 struct RouterSpecEven
   include Caramel::FieldValue(Int32)
 

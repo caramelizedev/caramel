@@ -1,4 +1,4 @@
-# How an action answers SweetTalk's errors (ADR 0034): a refusal is 422 and a missing
+# How an action answers SweetTalk's errors (ADR 0033): a refusal is 422 and a missing
 # aggregate 404. `SweetTalk::Boundary` is a programming error and stays a 500.
 abstract struct Caramel::Action
   # :nodoc:
@@ -28,7 +28,7 @@ abstract struct Caramel::Action
   end
 
   # Answers a `SweetTalk::Stale` that `handle` did not rescue with 422, as a refusal, and
-  # gives a JSON client the fresh preview under `preview` too (ADR 0060). Override it to
+  # gives a JSON client the fresh preview under `preview` too (ADR 0046). Override it to
   # render the form again with `stale.preview` and its fingerprint.
   def render_stale(contract : Caramel::RequestContract,
                    stale : ::SweetTalk::Stale) : Caramel::Response

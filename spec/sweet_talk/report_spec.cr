@@ -1,4 +1,4 @@
-# The detailed glossary (ADR 0059): every glossary term with the facts its declaration
+# The detailed glossary (ADR 0036): every glossary term with the facts its declaration
 # holds, and the `glossary` command that prints it with the context map as JSON.
 require "./support/app"
 

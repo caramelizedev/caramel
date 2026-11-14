@@ -231,7 +231,7 @@ struct AddLine < Caramel::Action
 end
 
 # A case over a closed-set value's members, or over the states a lifecycle may enter, that
-# names every one (ADR 0058).
+# names every one (ADR 0040).
 def roast_label(roast : Shop::Ordering::Roast) : String
   case roast.member
   in .light?  then "Light"

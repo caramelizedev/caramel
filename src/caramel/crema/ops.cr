@@ -9,7 +9,7 @@ require "./rings"
 require "./runtime"
 
 module Caramel::Crema
-  # The ops socket (ADR 0028): an HTTP/1.1 API and a read-only console on an
+  # The ops socket (ADR 0027): an HTTP/1.1 API and a read-only console on an
   # owner-only Unix socket inside the running binary. Nothing here listens on
   # the public listener. Every request must name a local host and carry the key in the
   # `.key` file beside the socket, and a write that carries an `Origin` header is

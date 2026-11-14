@@ -52,7 +52,7 @@ module Caramel::Frappe
     end
 
     # The port of Latte's local trace collector, or nil when Latte is unreachable or the
-    # collector does not run (ADR 0029).
+    # collector does not run (ADR 0012).
     def collector_port : Int32?
       collector = status["collector"]?
       return unless collector && collector["state"]?.try(&.as_s?) == "running"

@@ -53,7 +53,7 @@ cases = {
   "compile_wrong_path_id" => {["expected argument #1"], NONE},
 }
 
-# ADR 0020: an action's ingress declaration.
+# ADR 0003: an action's ingress declaration.
 ingress = {
   "csrf_without_authenticate" => [
     "ingress csrf: false needs authenticate:",

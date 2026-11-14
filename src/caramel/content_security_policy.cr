@@ -4,7 +4,7 @@ module Caramel
   #     Caramel.content_security_policy.add("script-src", "https://js.stripe.com")
   #
   # An action changes its own response's copy with `content_security_policy`
-  # (ADR 0037).
+  # (ADR 0032).
   class ContentSecurityPolicy
     DIRECTIVE = /\A[a-z]+(?:-[a-z]+)*\z/
     # Printable ASCII without spaces, ',' or ';'.

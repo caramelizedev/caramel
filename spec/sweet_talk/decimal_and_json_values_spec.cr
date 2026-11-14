@@ -1,4 +1,4 @@
-# SweetTalk's decimal and JSON values (ADR 0047): `value Rate, Decimal(20, 8)` is a
+# SweetTalk's decimal and JSON values (ADR 0040): `value Rate, Decimal(20, 8)` is a
 # BigDecimal kept exact in a numeric column with its bounds as a CHECK, ranged, sorted,
 # counted and read by a specification; `value Evidence, Json(Snapshot)` and `value Note,
 # Json` are documents kept in jsonb columns, optional in an aggregate and in a projection;

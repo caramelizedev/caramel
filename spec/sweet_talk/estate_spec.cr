@@ -1,4 +1,4 @@
-# A context across files (ADR 0065): the estate's Picking context is declared in one file
+# A context across files (ADR 0030): the estate's Picking context is declared in one file
 # and continued by `within` in two more, so its event log, its once_by unit and its query
 # check must see what the later blocks declare. Picking's header declares two events of its
 # own, so a log that read only the header's events would still compile and would raise

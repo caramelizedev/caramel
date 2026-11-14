@@ -71,7 +71,7 @@ module Caramel::Frappe
     end
 
     # Sends every trace the application reports to Latte's collector at *port*, as OTLP/HTTP
-    # JSON for *service* (ADR 0029), from a fiber with a queue of 500; a full queue drops
+    # JSON for *service* (ADR 0012), from a fiber with a queue of 500; a full queue drops
     # the trace. A failed delivery is announced once.
     def forward(port : Int32, service : String) : Nil
       queue = Channel(Crema::TraceEvent).new(FORWARD_QUEUE)

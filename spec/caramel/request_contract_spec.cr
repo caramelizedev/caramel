@@ -28,7 +28,7 @@ struct ArrayContract < Caramel::RequestContract
   field tags : Array(String), max: 2
 end
 
-# A field value (ADR 0034): bound from an Int32, refusing an odd one.
+# A field value (ADR 0003): bound from an Int32, refusing an odd one.
 struct EvenCount
   include Caramel::FieldValue(Int32)
 

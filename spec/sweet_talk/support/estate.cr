@@ -1,4 +1,4 @@
-# A tea estate whose contexts span files (ADR 0065): each context's header in a file of
+# A tea estate whose contexts span files (ADR 0030): each context's header in a file of
 # its own, each aggregate in its own file inside `within`, a specification in a later
 # block than the query that reads it, a once_by unit in a `within`, and events logged from
 # both a header and a `within`.

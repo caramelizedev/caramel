@@ -1,4 +1,4 @@
-# Preview and commit (ADR 0060): one body run dry to show what it would record, then run
+# Preview and commit (ADR 0046): one body run dry to show what it would record, then run
 # again and compared inside the transaction that keeps it.
 module SweetTalk
   # A preview's fingerprint: SHA-256, as 64 hex digits, over the canonical form of what a
@@ -196,7 +196,7 @@ module SweetTalk
 
   # The world moved between a preview and its commit: the same body would now record
   # something else. Nothing was written. It carries the fresh preview, which a form shows
-  # again with its fingerprint; an action that does not rescue it answers 422 (ADR 0034).
+  # again with its fingerprint; an action that does not rescue it answers 422 (ADR 0033).
   class Stale < Refusal
     getter preview : Preview
 

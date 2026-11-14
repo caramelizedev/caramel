@@ -1,4 +1,4 @@
-# What SweetTalk keeps of how things came about (ADR 0056): `Books.reached(event)` walks
+# What SweetTalk keeps of how things came about (ADR 0041): `Books.reached(event)` walks
 # every context's event log forward by cause, and a reference `pinned_at:` a state copies the
 # aggregate it names when the state is entered, read only.
 require "./support/app"

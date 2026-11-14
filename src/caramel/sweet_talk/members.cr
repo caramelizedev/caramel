@@ -1,4 +1,4 @@
-# The members of a closed-set value as a Crystal enum (ADR 0058).
+# The members of a closed-set value as a Crystal enum (ADR 0040).
 module SweetTalk
   abstract struct Value
     # Writes `enum Member` for a value with `one_of:`, one member per word in the order the

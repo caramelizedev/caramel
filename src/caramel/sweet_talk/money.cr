@@ -1,6 +1,6 @@
 # Money: `currencies %w[USD EUR], means: "…"` and `quote Rate, rounding: :half_up, means:
 # "…"` in a context or a kernel, and `allocation` in a context (ADR 0063). Opt-in, a module
-# under ADR 0061: it requires caramel/sweet_talk/decimal, and a program that declares no
+# under ADR 0030: it requires caramel/sweet_talk/decimal, and a program that declares no
 # currency holds none of this file.
 require "./decimal"
 require "./money/iso4217"

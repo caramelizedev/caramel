@@ -1,4 +1,4 @@
-# The BoxOffice domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
+# The BoxOffice domain, in SweetTalk (ADR 0030). Its words, such as
 # context, value, aggregate, event and whenever, exist only inside this module.
 module App::BoxOffice
   include SweetTalk

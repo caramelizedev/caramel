@@ -1,7 +1,7 @@
 # Shared kernels: the part of a model that named contexts own together.
 module SweetTalk
   # Refuses a `shares:` that names anything but a kernel declared before it, or a kernel
-  # whose `shared_by:` leaves *name* out (ADR 0044). *kind* is "context" or "kernel".
+  # whose `shared_by:` leaves *name* out (ADR 0036). *kind* is "context" or "kernel".
   macro __sweettalk_shared(kind, name, shares)
     {% shared = [] of Nil %}
     {% shared = [shares] unless shares.is_a?(NilLiteral) %}
@@ -29,7 +29,7 @@ module SweetTalk
   # requires caramel/tenancy, its rows belong to the tenant. `shares: Calendar` names
   # the kernels declared before it that it shares. Only its sharers name it, it names no
   # context, and each of its words that no other of its words uses is named by two or
-  # more sharers (ADR 0044).
+  # more sharers (ADR 0036).
   #
   # @word noun | Declares a part of the model that two or more contexts own together.
   # @usage kernel NAME, shared_by: [SHARER, SHARER, ...][, shares: KERNELS], means: TEXT do ... end

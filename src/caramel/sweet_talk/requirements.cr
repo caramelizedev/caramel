@@ -1,5 +1,5 @@
 # `frappe requirements`: the requirement ids a SweetTalk domain declares, each with what
-# assures it (ADR 0057). The application answers it; Frappé compiles the application and asks.
+# assures it (ADR 0035). The application answers it; Frappé compiles the application and asks.
 module SweetTalk
   REQUIREMENTS_USAGE = "Usage: requirements [ID|--ids]"
 

@@ -75,7 +75,7 @@ module Caramel
       false
     end
 
-    # Declares how the route reads this action's request (ADR 0020):
+    # Declares how the route reads this action's request (ADR 0003):
     #
     # ```
     # ingress body: :raw,
@@ -389,7 +389,7 @@ module Caramel
     # :nodoc:
     # The router answers a valid *contract* through this hook, which only yields. An
     # opt-in require replaces it to answer errors of its own, as `caramel/sweet_talk`
-    # answers a refusal with 422 (ADR 0034).
+    # answers a refusal with 422 (ADR 0003).
     def __caramel_answer(contract : RequestContract, & : -> Response) : Response
       yield
     end

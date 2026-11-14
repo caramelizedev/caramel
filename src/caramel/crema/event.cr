@@ -168,7 +168,7 @@ module Caramel::Crema
   end
 
   # One span Latte's collector holds, from any service that exported OTLP/HTTP JSON to it
-  # (ADR 0029). Latte, Frappé and `Render` share it.
+  # (ADR 0012). Latte, Frappé and `Render` share it.
   class CollectedSpan
     include JSON::Serializable
 

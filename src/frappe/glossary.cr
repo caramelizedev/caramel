@@ -4,7 +4,7 @@ require "./tools"
 
 module Caramel::Frappe
   # `frappe glossary` and `frappe contexts`: the detailed glossary and the context map the
-  # application's `glossary` command prints as JSON (ADR 0059). The document is kept in
+  # application's `glossary` command prints as JSON (ADR 0036). The document is kept in
   # `.caramel/glossary.json` with the source signature it was read from, so an unchanged
   # application answers without a build.
   class Glossary

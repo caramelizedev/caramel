@@ -1,61 +1,39 @@
-# ADR 0016: Versioning and releases
+# ADR 0016: One version serves the repository, applications pin a release as a shard, and each release keeps stated compatibility promises
 
 Date: 2026-09-28
 
-Status: accepted. Amends ADR 0015 on on-demand start and the launchers.
+Status: accepted.
 
 ## Context
 
-Caramel needs releases that applications can pin, upgrade and install side by side:
-
-- One version number must serve the framework, Latte and the shard, and compatibility between Frappé, Latte and its state must be explicit.
-- Latte is one per user on the default ports (one daemon, one PostgreSQL cluster, one CA, one resolver, one relay), while several Caramel versions can be installed at once. Another state root (a check's, or a second user's) runs on ports of its own, set by `CARAMEL_LATTE_DNS_PORT`, `CARAMEL_LATTE_HTTP_PORT` and `CARAMEL_LATTE_HTTPS_PORT`, and gets no resolver or relay: its HTTP listener redirects to its own HTTPS port. A Latte whose port is held, by another Latte or anything else, refuses to start that service and names the port's owner (`port_in_use`) before starting anything.
-- A copied framework and a thick generated entry point would drift from the release an application pins.
-- `bin/frappe` and `bin/latte` find OpenSSL through an absolute rpath into the builder's toolchain, so they cannot run on another machine ([ADR 0001](0001-managed-toolchain-provider.md)).
+Applications must be able to pin a Caramel release, upgrade it and keep several releases installed side by side. Latte is one per user: one daemon, one PostgreSQL cluster, one CA, one resolver and one relay, whatever the number of installed releases. A framework copied into each application, or a thick generated entry point, drifts from the release the application pins. The binaries find OpenSSL through a path into the builder's toolchain, so they do not run on another machine ([ADR 0001](0001-toolchain-and-setup.md)).
 
 ## Decision
 
-1. **One version for the repository.** The public repository `github.com/caramelizedev/caramel` tags releases `vX.Y.Z` (semantic versioning), with pre-releases `X.Y.Z-rc.N`, which are tagged by hand; `scripts/release` cuts final releases. During 0.x a minor release may break compatibility, and a patch release never does. The version is written only in `shard.yml`; `Caramel::VERSION` (read when the framework compiles, `src/caramel/version.cr`) and `Latte.app`'s bundle versions (written by `scripts/build-latte-menu`) are generated from it.
-2. **Explicit compatibility contracts.** Each release keeps these promises:
-   - Latte's control API is versioned. Latte serves the versions in `Latte::ControlAPI::VERSIONS`, reports its release and window in `/v1/status`, and answers any other version with `unsupported_api` and both. Each Frappé states the version it needs (`LatteClient::API_VERSION`) and names the release that fixes a mismatch. `latte version` prints the release and window.
-   - Latte's state formats migrate forward when Latte starts. Latte's registry, `installations.json` and the trust receipt refuse a newer format, naming the file and the format this release reads (`src/latte/state_format.cr`); the Swift toolchain installer refuses a newer receipt the same way. Choosing which Latte runs is not refusing: when `installations.json` is unreadable there, this release's own Latte runs. The first new format adds its forward migration.
-   - A PostgreSQL major bump ships a `pg_upgrade` step, and the previous major's binaries are kept until that step has run. The cluster lives in `services/postgres/<major>/data`, and Latte refuses to start an empty cluster beside another major's data. Latte adopts a postmaster that another toolchain's build of the major started on the cluster's directory, identified by the private PID file, owner, start time and data directory.
-   - Framework migrations are only appended, never edited: `scripts/release` refuses to tag when a migration the last release shipped was edited or removed, or a new one sorts before it.
-   - Latte's CA is never replaced silently.
-   - `frappe doctor` reports a resolver, relay or plist that differs from the newest installed release's, with the command that replaces it. `install-local-integration status` compares them without sudo. `frappe doctor` asks the newest installed release, and prints `prepare` then `sudo … apply` when nothing is installed, or `prepare`, `sudo … uninstall` and `sudo … apply` to replace another release's integration, which `apply` alone refuses.
-3. **Apps depend on the framework as a shard.**
-   - Generated apps declare `caramel: github: caramelizedev/caramel, version: "~> X.Y.Z"`, and `shard.lock` pins the release's commit, which Shards checks out. `CARAMEL_REPOSITORY` substitutes a git repository for GitHub; that entry pins the release by tag alone.
-   - Every git dependency is locked to the commit its tag pointed at, in Shards' own pin form `version: X.Y.Z+git.commit.<sha>`, which Shards checks out whatever the tag points at now and records in `lib/.shards.info`. `scripts/check shard-pins` refuses an unpinned entry in the framework's `shard.lock`, `scripts/shards` refuses an install that put a pinned shard at another commit, and a generated application locks Caramel's commit and copies the framework's entries. Crystalline's dependencies are pinned the same way, from `tools/editor-darwin-arm64.json`. `shards update` strips the pins, so a dependency is updated by writing its tag's commit into the lock by hand.
-   - `vendor/caramel/`, `snapshot.json` and `.caramel-version` do not exist. Frappé reads the pinned version from `shard.lock`.
-   - A checkout that is not a git checkout of its release tag without tracked changes (an unreleased checkout, or a source archive) generates apps with a `path:` dependency on itself. Untracked files, such as an app generated inside a release clone, do not make a release unreleased.
-   - A release's framework changes only with `shard.lock`, which `frappe dev` watches. A `path:` dependency's sources are hashed into every build's fingerprint but not watched, so after editing that checkout, save an application file or restart `frappe dev`.
-4. **Frappé installs the version a project pins.**
-   - `frappe installations install VERSION` clones the tag into `~/Library/Application Support/Caramel/releases/<version>/`, installs its toolchain (reusing one with the same digest), builds it and registers it.
-   - It builds a release with that release's own `scripts/build-release`, and with fixed steps for releases through 0.3.0, which have none. Installing a registered release again builds what it lacks, such as the linter, and `frappe doctor` names that command.
-   - When a project pins a version that is not installed, `frappe` offers to install it on a terminal, or prints that command to agents and pipes.
-   - `frappe installations register` remains for contributors' checkouts.
-5. **One Latte: the newest installed.** On-demand start, the login item and the `~/.local/bin` launchers all run the newest installed release's Latte: `latte daemon` hands over to the newest installed release's built `latte`. Older releases' Frappé use it through the API window. A Frappé that needs a newer API than the running Latte names the release to install.
-6. **Releases are cut by `scripts/release`, written in Crystal.**
-   - It derives the next version from the Conventional Commits since the last tag. A fix is a patch and a feature is a minor; a breaking change is a minor during 0.x.
-   - It writes `CHANGELOG.md` from those commits plus hand-written upgrade notes (`CHANGELOG.md` holds the Unreleased notes), sets the version in `shard.yml`, and creates an annotated tag only after the full check suite passes.
-   - It refuses a version that `website/source/site.html` does not name; the check suite it runs includes `scripts/check website`, which builds and checks that edition with Node.js 22 or newer.
-   - Pushing the tag and publishing the GitHub release stay manual.
-7. **Releases are source-only until signing.** A release is a tag and its source archive; users build with `scripts/install-toolchain` and the build scripts, or with `frappe installations install`. Prebuilt, notarized binaries wait for an Apple Developer ID, before 1.0. They also need three things:
-   - OpenSSL shipped beside the binaries with an `@executable_path`-relative rpath, or linked statically;
-   - `SMAppService` for the login item and the port relay;
-   - a signed release manifest that the Swift installer verifies with CryptoKit.
-8. **Deprecate before removing.** Even in 0.x, a removal is preceded by one release that warns and names the replacement. `CONTRIBUTING.md` states the rule. A command carries `deprecated:` in the command table, and framework APIs use Crystal's `@[Deprecated]`. Support windows are published at 1.0. A change whose warning cannot reach applications, such as a compile-time narrowing in the framework that Crystal reports inside `lib/`, where warnings are hidden, ships as a breaking change in a minor release without a deprecation release; the ADR it alters says why.
-9. **The version is visible to agents.** `frappe agent-manifest` prints `VERSION:`, `DOCS:` and `GUIDES:` lines after its first line: the documentation for each release is the tagged tree on GitHub, and `GUIDES:` names the Markdown index of that release's guides, `https://caramelize.dev/docs/X.Y.Z/llms.txt`.
-10. **The generated app is thin.** The behaviour that was in the generated `src/<app>.cr` lives in the framework, so a framework upgrade upgrades it; the app's main is one call: `Caramel.run(App)` and `Corretto.configure(App)` replace the generated main, configuration and spec helper bodies, and `config/database.yml` does not exist because `Caramel::Database.url` knows Frappé's variables.
-11. **Deferred: mechanical upgrades.** Publishing the diff between apps generated by consecutive releases, and a `frappe upgrade` command that applies what it can, are wanted eventually but not built.
+1. **One version serves the framework, Latte and the shard.** It follows semantic versioning and is written in one place, from which every other statement of it is generated. During 0.x a minor release may break compatibility; a patch release never does.
+2. **Latte's control API is versioned, and each side names its window.** Latte serves a window of versions and each Frappé states the one version it needs. A mismatch is refused with the release that fixes it.
+3. **Latte's state formats migrate forward, and a release refuses a newer format.** Choosing which Latte runs is not refusing: when the list of installations is unreadable, this release's own Latte runs.
+4. **Each PostgreSQL major keeps its own cluster, and a major bump ships a `pg_upgrade` step.** The previous major's binaries stay until that step has run. Latte refuses to start an empty cluster beside another major's data.
+5. **Framework migrations are only appended, never edited.** The release tool refuses to tag a release that breaks this.
+6. **Latte's CA is never replaced silently.**
+7. **The resolver, the relay and the login item's plist belong to the newest installed release.** `frappe doctor` reports one that differs. Replacing another release's integration is an explicit uninstall followed by an install, never an overwrite.
+8. **An application depends on the framework as a shard.** Its lock pins the release, Frappé reads the pinned version from the lock, and nothing of the framework is copied into the application. The framework an application runs changes only when its lock changes. A checkout that is not a clean release tag generates applications that depend on the checkout itself by path.
+9. **Every git dependency is locked to the commit its tag pointed at.** The rule covers the framework's own dependencies, a generated application's lock and the editor tools' dependencies (`site#c-releases-dependencies`).
+10. **Frappé installs the version a project pins.** It fetches the release's tag and builds it with that release's own build script. When the pinned version is not installed, Frappé offers to install it on a terminal and prints the command to agents and pipes (`site#c-local-releases`).
+11. **One Latte runs: the newest installed.** On-demand start, the login item and the launchers all run it ([ADR 0012](0012-latte.md)). Older releases' Frappé use it through the API window.
+12. **A native tool cuts releases from the commit history.** It derives the next version from the Conventional Commits since the last tag and tags only after the full check suite passes. Pushing the tag and publishing the release stay manual.
+13. **Releases are source-only until signing.** A release is a tag and its source; users build it. Prebuilt, notarized binaries wait for an Apple Developer ID, before 1.0.
+14. **A removal is deprecated first.** Even in 0.x, one release warns and names the replacement before the removal. A change whose warning cannot reach applications ships as a breaking change in a minor release without a deprecation release.
+15. **The version is visible to agents.** The agent manifest states the release and where that release's documentation is.
+16. **The generated application is thin.** Its main and its spec helper's configuration are one call each into the framework; the behaviour lives in the framework.
 
 ## Reasons
 
-- Rejected: copying the framework into each app, because Rails 2's `vendor/rails` copies were edited and drifted until Bundler and a lockfile replaced them.
-- A project's pin should select, and if necessary fetch, its tools, as `bin/rails`, `artisan`, mix tasks and Go 1.21's `go.mod` toolchain line do.
-- Generated code becomes code that users upgrade by hand (Laravel 11 cut its skeleton for this reason), so the generated app stays thin.
-- A single local environment should be its own product and own its binaries: Laravel Herd does, and Valet broke when Homebrew upgraded its packages.
-- Postgres.app keeps a data directory per PostgreSQL major version, and `pg_upgrade` needs the old and new binaries at once.
-- A database is never lost across an upgrade, and the CA is never replaced silently.
+- Rejected: copying the framework into each application. Rails 2's `vendor/rails` copies were edited and drifted until Bundler and a lockfile replaced them.
+- A project's pin selects, and if necessary fetches, its tools, as `bin/rails`, `artisan`, mix tasks and Go 1.21's `go.mod` toolchain line do.
+- Generated code becomes code that users upgrade by hand; Laravel 11 cut its skeleton for this reason. With the behaviour in the framework, a framework upgrade upgrades the application.
+- A single local environment is its own product and owns its binaries: Laravel Herd does, and Valet broke when Homebrew upgraded its packages.
+- A database is never lost across an upgrade, and the CA is never replaced silently. Postgres.app keeps a data directory per PostgreSQL major, and `pg_upgrade` needs the old and new binaries at once.
 - Rails and Django warn for at least one release before removing a feature.
-- The release tool itself is native; only the website check runs Node, which the website's build already needs.
+- The release tool is native. Only the website check it runs needs Node, which the website's build already needs.
+- Deferred: mechanical upgrades. Publishing the diff between applications generated by consecutive releases, and a command that applies what it can, are wanted but not built.

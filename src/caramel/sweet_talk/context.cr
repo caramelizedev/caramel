@@ -54,7 +54,7 @@ module SweetTalk
     # is checked in Crystal only, because PostgreSQL reads regular expressions differently.
     # `otherwise: "A balance cannot go below zero."` is the sentence a value outside its
     # bounds, length, pattern or list is refused with, in place of the generated one
-    # (ADR 0045); the database check is unchanged.
+    # (ADR 0039); the database check is unchanged.
     # `SWEETTALK_CHECK` records {"range", "lo..hi"}, {"length", name suffix, SQL condition}
     # or {"column", name suffix, SQL condition}, or nil. A whole number or decimal value also
     # records `SWEETTALK_BOUNDS = {least, most}`, each its source text or nil.
@@ -1066,12 +1066,12 @@ module SweetTalk
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
     # rule over the set, checked after the body; `SweetTalk.preview` runs every one and
     # lists those that fail as blockers. A `warn "…" { … }` line, checked with them, refuses
-    # a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
+    # a plain call and is listed by `SweetTalk.preview` (ADR 0046). It is a glossary
     # entry, timed as a domain span named `Ledger.post`. `once_by: key` makes it run once
     # per operation key: the first run keeps the key, a fingerprint of the other arguments
     # and what it returned in the context's `<context>_operations` table; a repeat with the
     # same arguments answers the first outcome without running, and one with other
-    # arguments is refused with `otherwise:` (ADR 0055).
+    # arguments is refused with `otherwise:` (ADR 0046).
     #
     # @word noun | Declares a unit: one transaction that changes several aggregates, their rows
     #   locked first.
@@ -1783,7 +1783,7 @@ module SweetTalk
         {% end %}
       {% end %}
       # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
-      # an outside system cannot be taken back, so none names an outside border (ADR 0060).
+      # an outside system cannot be taken back, so none names an outside border (ADR 0046).
       # This block checks the borders declared by now; the context map, those of later blocks.
       {% systems = outsides.map(&.args[0].names.last.stringify) %}
       {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
@@ -2230,7 +2230,7 @@ module SweetTalk
   end
 
   # `requirements "AC-01", "AC-02"`, before the first context, lists the requirement ids this
-  # domain module answers to (ADR 0057). `SWEETTALK_REQUIREMENTS` records them; every
+  # domain module answers to (ADR 0035). `SWEETTALK_REQUIREMENTS` records them; every
   # context and kernel copies the list, or nil, as it copies `SWEETTALK_TENANT`.
   #
   # @word setup | Lists the requirement ids a domain module answers to, before its first context.
@@ -2278,7 +2278,7 @@ module SweetTalk
 
   # Checks `assures:` of a `never`, an `always`, a specification or a unit against the
   # requirements of the module that holds the context *home*, and records
-  # `{kind, text, [ids], owner}` as the constant *constant* (ADR 0057). *what* names the
+  # `{kind, text, [ids], owner}` as the constant *constant* (ADR 0035). *what* names the
   # declaration in a refusal.
   macro __sweettalk_assures(kind, what, text, ids, home, owner, constant)
     {% unless ids.is_a?(NilLiteral) %}
@@ -2527,13 +2527,13 @@ module SweetTalk
       SWEETTALK_TENANT  = {{ tenant ? tenant : nil }}
       ::SweetTalk.__sweettalk_id_constants({{ name }}, {{ domain }}, {{ keyed_by }},
         {{ declared_ids }})
-      # The requirement ids the module that holds this context lists, or nil (ADR 0057)
+      # The requirement ids the module that holds this context lists, or nil (ADR 0035)
       {% key = "SWEETTALK_REQUIREMENTS" %}
       SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
-      # Whether `<context>_events` keeps every event of this context (ADR 0048)
+      # Whether `<context>_events` keeps every event of this context (ADR 0041)
       SWEETTALK_EVENT_LOG = {{ event_log ? true : false }}
-      # How many days the log keeps an event, or nil to keep every event (ADR 0051)
+      # How many days the log keeps an event, or nil to keep every event (ADR 0041)
       SWEETTALK_EVENT_DAYS = {{ days }}
       SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String
@@ -2562,7 +2562,7 @@ module SweetTalk
   end
 
   # `within Ordering do … end` continues context Ordering, declared before it in the same
-  # domain module, so its words can live in a file of their own (ADR 0065). It takes the
+  # domain module, so its words can live in a file of their own (ADR 0030). It takes the
   # words a context's body takes and no option: those belong to the `context` block. Each
   # block is checked as the header's is (`__sweettalk_block`), and the context map and the
   # query check read every block.

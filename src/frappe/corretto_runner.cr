@@ -350,7 +350,8 @@ module Caramel::Frappe
         "CORRETTO_LATTE_SOCKET"         => client.socket_path,
       }
       # The seed of Corretto's property cases is the one setting a worker takes from the
-      # shell, so a failing case's printed seed runs it again (ADR 0010 decision 11).
+      # shell, so a failing case's printed seed runs it again (the property runner of
+      # ADR 0010).
       ENV["CORRETTO_SEED"]?.try { |seed| environment["CORRETTO_SEED"] = seed }
       environment
     end

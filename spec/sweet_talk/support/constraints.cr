@@ -1,4 +1,4 @@
-# A pantry for SweetTalk's database constraints (ADR 0045): a crate whose label and code
+# A pantry for SweetTalk's database constraints (ADR 0039): a crate whose label and code
 # are unique, with a plain index and a check on one attribute; an adjustment unique by two
 # attributes together, indexed by two, with a check over its lifecycle; and a shipment
 # whose parcels are unique by tag within it.

@@ -3,7 +3,7 @@ require "./publication"
 require "./resource_generator"
 
 module Caramel::Frappe
-  # Adds a SweetTalk domain (ADRs 0030 and 0031): the module with its first
+  # Adds a SweetTalk domain (ADR 0030): the module with its first
   # context, its spec, on first use the require lines and `SweetTalk.boot` in
   # config/application.cr, and the SweetTalk skill for Claude Code when the
   # application has none. In a multi-tenant application the domain names the
@@ -12,7 +12,7 @@ module Caramel::Frappe
     CONFIG = "config/application.cr"
     ROUTES = "config/routes.cr"
     SKILL  = ".claude/skills/sweettalk/SKILL.md"
-    # The release's skill (ADR 0026 decision 8), compiled into Frappé.
+    # The release's skill (ADR 0014, a generator's skill), compiled into Frappé.
     SKILL_TEXT = {{ read_file("#{__DIR__}/../../templates/skills/sweettalk/SKILL.md") }}
 
     CARAMEL_REQUIRE    = %(require "caramel")
@@ -21,7 +21,7 @@ module Caramel::Frappe
     JOBS_REQUIRE       = %(require "../app/jobs/*")
     DOMAIN_REQUIRE     = %(require "../app/domain/*")
     # Types every command, factory and service, called or not, so `frappe check`
-    # sees their bodies (ADR 0031 decision 10).
+    # sees their bodies (ADR 0030, bodies typed uncalled).
     BOOT = "SweetTalk.boot"
 
     MISSING_ANCHORS = "config/application.cr needs exactly one require \"caramel\" " \
@@ -114,7 +114,7 @@ module Caramel::Frappe
       tenant_line = tenant ? "  tenant App::#{tenant}\n" : ""
       opening = central ? "#{context}, central: true" : context
       <<-CRYSTAL
-        # The #{name} domain, in SweetTalk (ADRs 0030 and 0031). Its words, such as
+        # The #{name} domain, in SweetTalk (ADR 0030). Its words, such as
         # context, value, aggregate, event and whenever, exist only inside this module.
         module App::#{name}
           include SweetTalk
