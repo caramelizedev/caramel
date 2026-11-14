@@ -360,8 +360,8 @@ module Caramel
           {% known = known || (format && entry[0] == "message") %}
           {% unless known %}
             {% node.raise "unknown framework key '#{path.id}'" + at +
-                          "\nRemediation: use the keys listed in ADR 0024 " +
-                          "(language, number, time, errors and pages)." %}
+                          "\nRemediation: use the keys in the Internationalization guide, " +
+                          "Look up catalog keys (language, number, time, errors and pages)." %}
           {% end %}
           {% if path == "caramel.number.separator" || path == "caramel.number.delimiter" %}
             {% unless node.size == 1 %}
