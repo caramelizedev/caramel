@@ -1,4 +1,4 @@
-# ADR 0017: One formatter and one rule set hold applications and the framework, the framework's lines stop at 100 characters, and `scripts/check all` runs in parallel lanes
+# ADR 0017: One formatter and one rule set hold applications and the framework, and the checks run in parallel lanes
 
 Date: 2026-09-28
 
@@ -6,75 +6,43 @@ Status: accepted.
 
 ## Context
 
-Code should read like prose while the compiler does the proving, and one formatter and linter must give every developer, agent, editor and check the same answer. Generated applications and the framework itself must pass the same rule set without hand fixes after every `frappe make resource`.
-
-The formatter owns indentation and spacing but never breaks a line, so long lines accumulate: a call with six arguments, a hash and a block on one line reads as a run-on sentence, and its diff hides which argument changed. Generated applications grow lines with their fields. The framework's code is written by hand.
-
-Running the checks one after another is slow: a full run is 23 mostly single-threaded runs, 417 s on a 12-core machine. They ran serially because they share one compiler cache: Crystal's keep-10 cleanup ends every build, `crystal spec` names its program after `<cwd>/spec`, and the suite's temporary projects churn the cache. A private toolchain prefix isolates that: its `data/installs` and `bin` link to the toolchain's, it has compiler and shards caches of its own, and Frappé, Latte and the checks follow `CARAMEL_TOOLCHAIN_ROOT` to it (`src/latte/toolchain.cr`). Runs on different prefixes then compete only for CPU, memory and free ports (fixtures bind port 0; latte-daemon passes the ports it picked to its daemon through `CARAMEL_LATTE_DNS_PORT`, `CARAMEL_LATTE_HTTP_PORT`, `CARAMEL_LATTE_HTTPS_PORT` and `CARAMEL_LATTE_OTLP_PORT`). A prefix's compiler sees the standard library through the prefix's path, so objects cached under the toolchain's own paths do not match there. A throwaway prefix compiles cold every time.
+Code should read like prose while the compiler does the proving. One formatter and one linter must give every developer, agent, editor and check the same answer, and generated applications and the framework must pass the same rule set without hand fixes. The formatter never breaks a line, so long lines accumulate. The checks share one compiler cache, so they ran one after another, which is slow.
 
 ## Decision
 
-What an application author relies on is on the website ([site.html](../../website/source/site.html)), in the sections cited below by anchor. The rule sets are [templates/application/.ameba.yml](../../templates/application/.ameba.yml) and [.ameba.yml](../../.ameba.yml), and Caramel's own rules are under [src/frappe/lint](../../src/frappe/lint). What a contributor must do is in [CONTRIBUTING.md](../../CONTRIBUTING.md).
-
-1. **The formatter is `crystal tool format`, from the pinned compiler.** Ameba's `Lint/Formatting` rule runs the same formatter, so one command reports both. `frappe format` runs the pinned formatter on an application's `src`, `config`, `app`, `db` and `spec`.
-2. **The linter is Ameba 1.7.0, the version `ameba-ls` bundles.** It is a development dependency of the framework, and both configurations pin `Version: "1.7.0"`, so a later Ameba cannot switch on new rules silently. `scripts/build-lint` builds `bin/frappe-lint`: Ameba's rules plus Caramel's.
-3. **The rule set is Ameba's defaults plus Caramel's additions, and every generated application receives it.** It lives in `templates/application/.ameba.yml`; `site#c-practices-style` sums it up for application authors. The additions:
-   - `Caramel/ServiceNoun` reports classes, structs and modules named for a service noun: names ending in `Service`, `Handler`, `Manager`, `Factory`, `Controller`, `Helper`, `Util`, `Utils` or `Utility`, or starting with `Abstract`.
-   - `Caramel/SourceTreeRead` reports `File` and `Dir` readers whose arguments contain `__DIR__`, since a release artifact holds no source tree ([ADR 0032](0032-production.md)), and `Caramel/Dump` reports a leftover `dump`. Both are described at their classes under `Ameba::Rule::Caramel`.
-   - `Metrics/CyclomaticComplexity` is set at 10.
-   - `Documentation/Admonition` is on: shipped code carries no undated or overdue `TODO`, `FIXME` or `BUG` comments.
-   - Ameba's defaults already carry the rest. `Naming/PredicateName` and `Naming/QueryBoolMethods` make predicates read as questions (`active?`, not `is_active` or a bare `Bool` getter). `Naming/AccessorMethodName` and `Naming/BlockParameterName` ask for plain accessors and descriptive block names. `Style/VerboseBlock` asks for `each(&.terminate!)`. The redundancy rules are `RedundantReturn`, `RedundantBegin`, `RedundantNext`, `RedundantSelf` and `RedundantNilInControlExpression`. `Style/NegatedConditionsInUnless` and `Style/UnlessElse` make conditions read positively. Under `Lint/NotNil` the compiler proves presence; code does not assert it with `not_nil!`.
-4. **Applications do not adopt four of Ameba's rules.** They are `Layout/LineLength`, the `Typing/*` rules, `Style/LargeNumbers` and `Lint/ComparisonToBoolean`. `templates/application/.ameba.yml` keeps `Layout/LineLength` off.
-5. **`frappe lint` reports and never rewrites.** `frappe lint [--agent|--human]` runs `bin/frappe-lint` in the project and prints Ameba's report on a TTY and MRDP otherwise (`site#c-commands-frappe`). The `LINT_<RULE>` code, the `FIX: frappe format` of a `Lint/Formatting` finding and `OK lint <n> files` are in `site#c-agents-diagnose` and `site#c-agents-proof`; `Caramel::Frappe::Lint#mrdp` says how the code is spelled and that `MSG` ends with the rule's own name for `# ameba:disable`.
-6. **The linter is built with its release.** `frappe installations install` builds a release's linter with the release, and a registered checkout builds its linter on first use. Either rebuilds it after its sources or `shard.lock` change. A frappe older than 0.3.0 installs releases without the linter; `frappe doctor` then names `frappe installations install <version>`, which builds it.
-7. **Generated code passes the rule set.** Generated actions pass view inputs as constructor arguments ([ADR 0004](0004-egress.md)), so no local exists only for a template to read. Migrations quote a SQL heredoc only when it contains `#{` or a backslash, the only text an unquoted heredoc would change. A backslash that is no Crystal escape sequence gets a reasoned `Style/HeredocEscape` directive, since obeying that rule would drop it.
-8. **The application rule set excludes two places where a rule misreads the code.** It globs `app/**/*.cr`. It excludes `app/views/**/*.cr` from `Lint/DebugCalls`: in a Blueprint view `p` is the paragraph element, not the debug print ([ADR 0004](0004-egress.md)). It excludes `app/domain/**` from `Lint/UnusedArgument`, where a macro's block names parameters that the handler the macro writes receives ([ADR 0030](sweettalk/0030-scope-and-modules.md)).
-9. **The framework follows the same rule set, through `.ameba.yml` at the repository root, run by `scripts/check lint`.** Apart from the globs each layout needs and the line limit below, it differs in six places:
-   - Complexity keeps Ameba's default limit of 12. Dispatch tables, parsers, scanners, state machines, and step-by-step validation or process-lifecycle code that exceed it carry an inline `ameba:disable` naming why, so new code still meets the limit.
-   - Crystal under `scripts/`, the checks and the release tool, is exempt from the complexity rule: its branches are scenario steps and assertions.
-   - Specs and the Crystal under `scripts/` may assert presence with `not_nil!`.
-   - Fixture data is excluded: some of it is invalid on purpose, and checks assert exact positions inside it.
-   - `Lint/SpecFilename` also ignores `spec/**/support/**`, where each product keeps files its specs require.
-   - `Lint/DebugCalls` has no view exclusion: the framework's views live in fixture applications, which the fixture exclusion already covers.
-10. **Every inline `ameba:disable` names its reason** on the directive line, above the code it covers.
-11. **A framework line holds at most 100 characters, and no file is exempt.** The framework's `.ameba.yml` enables `Layout/LineLength` at 100 characters, so `scripts/check lint` enforces it. Ameba counts characters, not bytes. The rule excludes no file, and no file may disable it with an inline directive.
-12. **`scripts/check lint` proves the limit is on and exempts nothing.** Under the framework's configuration, a 101-character line must be reported and a 100-character line must not. The rule must have no `Excluded` key. No linted file may carry an `# ameba:disable Layout/LineLength` (or `Layout`) directive.
-13. **What a linter cannot check is written down.** It is in the Style section of `CONTRIBUTING.md` for people and agents (`AGENTS.md` points agents there): named steps, early returns, stacked arguments, heredocs for multi-line text, and specs that name their inputs.
-14. **`scripts/check all` deals its runs to lanes that run side by side.** `scripts/check all --lanes N` (1 to 8) runs the build step first, then deals the spec run and the checks to N lanes. Within a lane, runs go one after another. Without `--lanes`, `check all` uses the smaller of half the machine's cores and a quarter of its memory in GB, from 2 to 8, and prints its choice. After the runs it prints each lane's total and longest run.
-15. **Each lane beyond the first has a persistent toolchain prefix.** The first lane uses the checkout's toolchain. Each further lane uses the prefix `lanes/lane-N` inside that toolchain, made on first use, with its shards cache cloned from the toolchain's. It persists, so its caches stay warm from one run to the next; a new toolchain's lanes start cold once.
-16. **A run is placed by what it needs and by what it last took.**
-    - The first lane takes installations, which checks that a release reuses this toolchain's selection; editor-tools, which uses its editor tools; and native, which rebuilds the installers in `bin/`.
-    - The spec run and the other `crystal spec` programs (native's, integration's and latte-postgres's) are dealt like any other run. `scripts/crystal` names a spec program's cache root after the top-level spec directories it runs, a single file sharing its directory's, so programs for different directories keep their own objects and running one file at a time compiles nothing cold.
-    - The other runs are dealt heaviest first to the lightest lane, weighted by the duration each took the last time it passed on this machine, which `check all` records with its lane in `check-durations.json` in the toolchain root, and until then by constants from a 2026-10 run. A run keeps the lane it last ran on while that lane's load is no further above the lightest lane's than the run's own duration. The timing-sensitive latte-ipc is dealt last.
-    - `frappe-project`, `frappe-project-dev` and `frappe-project-build` each create their own application.
-    - A check that generates an application (`LatteFixture`) keeps its root at `/private/tmp/caramel-checks/<checkout hash>/<check>`, emptied at the start of each run and locked while it runs, so a second run of the same check from the same checkout fails at once instead of disturbing the first. `scripts/crystal` gives the programs under it cache roots of their own, as it gives the checkout's programs, so a generated application's dev build, Corretto worker and dependency postinstall compile warm from the second run on. A failed run's root is renamed `<check>.failed-<time>` and kept. The roots fall under the 30-day prune.
-    - browser runs first in its lane.
-    - No check uses Latte's default ports, so a full run runs beside the user's own Latte.
-17. **When the build step fails, the checks run in one lane.** Without its binaries each check builds its own into `bin/`, and lanes would race to write them.
-18. **Outside `check all`, two checks never run at once.** There the checks share the checkout's toolchain, so two `scripts/check NAME` never run at the same time. A release runs every check ([ADR 0016](0016-versioning-and-releases.md)).
-19. **One lane's processes do not block another's.** Latte refuses to start a service only when another process has its exact executable ([ADR 0012](0012-latte.md)), so same-named processes of other lanes do not block it. Managed-child specs use a private executable, so another lane's `sleep` cannot match them.
+1. **The formatter is the pinned compiler's own.** The linter runs the same formatter as one of its rules, so one command reports both.
+2. **The linter is Ameba, pinned to the version the editor's language server bundles.** The pin is explicit in the configuration, so a later Ameba cannot switch on new rules silently.
+3. **The rule set is Ameba's defaults plus a few Caramel rules, and every generated application receives it.** A Caramel rule covers what configuration cannot express, such as a class named for a service noun. Applications get a stricter complexity limit than Ameba's default.
+4. **Applications do not adopt the line-length, typing, large-number and boolean-comparison rules.**
+5. **The lint command reports and never rewrites, and the linter is built with the release it belongs to.**
+6. **Generated code passes the rule set as generated.** Where a rule misreads a construct, such as the paragraph element in a view, the rule set excludes that place and keeps the rule.
+7. **The framework follows the same rule set, and every inline disable names its reason.** The framework's differences are few, and each comes from its layout or its kind of code.
+8. **A framework line holds at most 100 characters, and no file is exempt.** The limit is a lint rule, and the lint check proves that the rule is on and that neither the configuration nor an inline directive exempts anything.
+9. **What a linter cannot check is written down in the contributors' guide.**
+10. **A full check run deals its runs to lanes that run side by side.** The lane count follows the machine's cores and memory, and one lane keeps serial behaviour.
+11. **Each lane beyond the first has a persistent toolchain prefix of its own.** The prefix has private compiler and dependency caches, so lanes compete only for CPU, memory and free ports.
+12. **A run is placed by what it took last time on this machine, and it keeps its lane while the loads stay close.**
+13. **A check that generates an application keeps it at a stable path with a persistent cache.** The path is locked while the check runs, so a second run of the same check fails at once instead of disturbing the first.
 
 ## Reasons
 
 - A rule set only helps if the same one runs everywhere. Pinning the editor's Ameba for the command line and for checks gives one answer.
-- Ameba is the Crystal ecosystem's linter and runs natively. A Caramel rule covers what its configuration cannot express. The editor's pinned `ameba-ls` binary cannot load Caramel's rule; it ignores the key and applies the rest of the rule set, except `Layout/TrailingWhitespace`, `Layout/TrailingBlankLines` and `Lint/Formatting`, which it turns off while editing.
-- Applying the rule set to the framework found real improvements: repeated "private owned file" checks became named predicates, SIGHUP shuts `latte daemon` and `frappe dev` down cleanly, and `not_nil!` assertions became types that carry the fact.
-- A deterministic linter that agents run and read as MRDP keeps tooling stateless.
-- Native tooling needs no Node or Python layer.
-- A service noun holds a verb that belongs on its subject. A complexity limit of 10 keeps an action a single thought, not a junk drawer.
-- Rejected: auto-fixing in `frappe lint`, because Ameba's corrections are not all safe: `Lint/ComparisonToBoolean` changes behaviour, and `Lint/SpecFilename` renames support files that specs require.
-- Rejected: `Layout/LineLength` in applications. A generated resource's lines grow with its fields, and the formatter owns layout.
-- Rejected: the `Typing/*` rules. Contracts are typed, not every method.
-- Rejected: `Style/LargeNumbers`. It rewrites identifiers such as migration versions (`20260927000001_i64`) and protocol codes, which read worse. Semantic units are a library feature, not a lint.
-- Rejected: `Lint/ComparisonToBoolean`. Its automatic correction turns `json["key"]? == false` into `!json["key"]?`, which is never true for a present `JSON::Any`.
-- A limit that no tool checks drifts. The limit belongs in the rule set that already runs in `scripts/check lint` and before every release.
-- 100 characters leaves room for lines that a shorter limit would split for no gain, such as a spec's description or a row of an aligned table. The Style section asks for lines that read as one thought, which are usually far shorter.
-- Rejected: a per-file `Excluded` list for the line limit, because a listed file can still gain a long line and an exception, once allowed, invites the next. With none, the proof refuses any new one, in the configuration or inline.
-- Rewrites that enforce the limit keep the strings the code emits or compares byte-identical, so the change is layout only.
-- Contention between lanes is moderate: with warm prefixes, the heaviest checks slow by 10–40 % in a full three-lane run, and the lanes still more than halve the suite.
-- The spec suite as one program is 12 s of compile and 25 s of running 764 examples. While every `crystal spec` from the checkout shared one cache root, each replaced the others' objects on every run, which cost the spec run 17 s of its 55 s and kept the four spec programs pinned to the first lane; the per-path root ends the replacing. Rejected: one program per spec directory, measured at no change in wall time on six lanes, because the lanes were already balanced and the floor was `frappe-project`, while compiling the framework into seven programs added about a minute of CPU that a machine with two or three lanes would pay in wall time.
-- A run's wall time is the build step plus its heaviest lane. In 2026-10 one check, `frappe-project --dev`, took 391 s of a 540 s lane on a 12-core machine, and the planner, dealing by weights measured at v0.5.0, still put three other runs beside it. Recording each machine's own durations, splitting that check into three that each create their own application, and letting the lane count follow the machine remove that floor without a fixed number for any machine: the longest flow does not bound one lane.
-- A run that changes lane compiles cold in the new prefix, which can double its time, so a run keeps its lane while the loads stay close, and its compiler cache there stays warm.
-- A generated application at a fresh temporary path compiled cold on every run: in 2026-10 that was 466 s of a 1636 s serial gate, and a fixed root with a persistent cache took a page check from 61 s to 45 s. The compiler keys its cache by the program's absolute path, so the path must be stable; a stable path in the shared cache alone would still be evicted by the keep-10 cleanup.
-- Each lane's compiler peaks at about 2 GB resident, so a quarter of the memory in GB bounds the lanes; `--lanes 1` keeps serial behaviour on any machine.
+- Ameba is the Crystal ecosystem's linter and runs natively, so the tooling needs no Node or Python layer.
+- A deterministic linter that agents run and read keeps tooling stateless.
+- Applying the rule set to the framework found real improvements: repeated checks became named predicates, and presence assertions became types that carry the fact.
+- A service noun holds a verb that belongs on its subject. A tight complexity limit keeps an action a single thought.
+- Rejected: auto-fixing in the lint command, because Ameba's corrections are not all safe: one changes behaviour, another renames files that specs require.
+- Rejected: a line limit in applications. A generated resource's lines grow with its fields, and the formatter owns layout.
+- Rejected: the typing rules. Contracts are typed, not every method.
+- Rejected: the large-number rule. It rewrites identifiers such as migration versions and protocol codes, which read worse.
+- Rejected: the boolean-comparison rule. Its automatic correction changes what a comparison with `false` means.
+- A limit that no tool checks drifts. The limit belongs in the rule set that already runs before every release.
+- 100 characters leaves room for lines that a shorter limit would split for no gain, such as a spec's description or a row of an aligned table.
+- Rejected: a per-file exemption list for the line limit, because a listed file can still gain a long line and an exception, once allowed, invites the next.
+- Contention between lanes is moderate, and the lanes still more than halve the suite.
 - Rejected: a fresh prefix per run, because it compiles cold every time and costs more than the contention it avoids.
+- A run's wall time is the build step plus its heaviest lane. Recording each machine's own durations and letting the lane count follow the machine balance the lanes without a fixed number for any machine.
+- A run that changes lane compiles cold in the new prefix, which can double its time.
+- The compiler keys its cache by the program's absolute path, so a generated application at a fresh temporary path compiled cold on every run.
+- Rejected: one spec program per spec directory. The lanes were already balanced, and compiling the framework into several programs adds CPU time that a machine with few lanes pays in wall time.
+- Each lane's compiler needs a large share of memory, so memory bounds the lane count.
