@@ -24,7 +24,7 @@ Raw HTML substring assertions couple specs to quote style, attribute order and e
 10. **Third parties are faked at the wire, through a proxy that the framework's one outbound HTTP client is pointed at.** A stub answers real request bytes, and a request no stub matches fails. A direct call refuses the host's own network and connects to the address it vetted.
 11. **Mocks do not compile and do not run.** Loading a mocking library is a compile error, and `frappe corretto` refuses to run a spec file that calls a mocking API.
 12. **Specs drain queues synchronously, and no worker runs in the test environment.** The drain rule is in [ADR 0009](0009-cold-brew.md).
-13. **A full passing run fails unless an example that ran names every requirement id the application declares.** A run of chosen paths checks nothing.
+13. **A full passing run fails unless an example that ran names every id that must be named.** The ids come from a registry in core, to which any library adds its own and which names no library. A run of chosen paths checks nothing. SweetTalk's ids are in [ADR 0035](sweettalk/0035-reads-and-rules.md).
 14. **Property cases run any typed class method on generated arguments, and Corretto names no library.** A type that Corretto cannot draw supplies its own generator as a class method, as a library does for its types ([ADR 0035](sweettalk/0035-reads-and-rules.md)). An exception is marked as outside the domain at run time, and a case that raises it is skipped.
 15. **A session is a signed cookie the browser holds, with nothing held server-side, and a spec signs in by writing it.** The current application secret signs, and it and each previous secret verify.
 
@@ -39,6 +39,7 @@ Raw HTML substring assertions couple specs to quote style, attribute order and e
 - Deriving keys from the current secret and from each previous one lets a secret rotate without ending every session and open form at once.
 - No tautological mocks: specs test subcutaneous behaviour against real PostgreSQL branches and real morphed HTML, and read as ingress, state and egress.
 - A property runner that names no library runs any typed class method, and a library gives its own types their generators, so Corretto depends on none of them.
+- A registry in core keeps the full-run check in Corretto and the ids with the library that declares them. Corretto and Frappé then ask one question of every application and depend on no library's command.
 - A generator is a class method on its type because the check that refuses an undrawable argument runs at compile time, and it can see a method. Rejected: a generator registered at run time, which would be refused only in the example.
 - An exception is marked as outside the domain at run time because nothing at compile time depends on it.
 - Decoded elements make specs independent of quote style, attribute order and escaping spelling.

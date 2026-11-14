@@ -10,7 +10,7 @@ An application with a rich domain assembles Domain-Driven Design by hand from sc
 
 ## Decision
 
-1. **SweetTalk is opt-in: a require brings it, and `include SweetTalk` scopes its words.** A plain application compiles none of it. No word is a top-level macro.
+1. **SweetTalk is opt-in: a require brings it, and `include SweetTalk` scopes its words.** A plain application compiles none of it. No word is a top-level macro. What only an application with a domain needs outside its code, such as a lint exclusion and the lines that tell an agent where the domain is, arrives with the first domain; a new application carries none of it.
 2. **Every word is a macro that expands into SugarORM and Cold Brew.** A context is a module in the application's one binary.
 3. **Every noun carries its meaning, and the program lists them.** A declaration that names a concept without a meaning does not compile.
 4. **A rename keeps what was stored.** A renamed concept names its old name, and its table, its channel and its queued jobs stay. No data moves.
@@ -28,6 +28,7 @@ An application with a rich domain assembles Domain-Driven Design by hand from sc
 
 - A compiled glossary and a checked context map turn the drift Domain-Driven Design warns about into compile errors, with macros and no reflection. Contexts are modules in one binary, so one machine stays enough.
 - `require` keeps SweetTalk out of an application that does not ask for it; `include` keeps the words out of every other module.
+- An application that never asks for SweetTalk reads nothing about it, and the framework's application template names no library, so SweetTalk can leave the framework without changing what a new application holds.
 - Expanding into SugarORM and Cold Brew keeps state in PostgreSQL and one way to migrate.
 - Refactoring toward deeper insight renames concepts, but tables, channels and queued jobs keep the names they were stored under.
 - A require is the cheapest opt-in Crystal has: an absent file is never parsed, declares nothing and links nothing, so a program pays only for the words it asks for.

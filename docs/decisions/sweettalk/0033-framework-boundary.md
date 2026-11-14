@@ -15,7 +15,7 @@ SweetTalk meets the framework in three places. On the web, a domain rule that sa
 3. **A missing aggregate answers 404, a programming error stays a 500, and neither a refusal nor a missing aggregate is reported as an error.**
 4. **Refusal messages are the domain's English.**
 5. **SweetTalk's values and ids are contract field values.** They include core's field-value protocol, and a value's refusal is the field's error. A value with parts is not one.
-6. **The domain names its tenant.** Under tenancy, a domain that does not name the tenant model does not compile.
+6. **The domain names its tenant.** Under tenancy, a domain that does not name the tenant model does not compile, and the refusal says which line to add and where. The framework's tenancy generator leaves domains to their author ([ADR 0025](../0025-tenancy.md)).
 7. **Every context is tenanted unless it says it is central.** A tenanted context's rows, locks and keys belong to the tenant; a central context's rows are shared by every tenant.
 8. **Jobs and channels follow the tenant.** A handler runs in the tenant its event was emitted in, and a deadline in the tenant that armed it.
 9. **References point from a tenant to shared data, not back.** A central context may not refer to a tenanted aggregate or schema.
@@ -40,6 +40,7 @@ SweetTalk meets the framework in three places. On the web, a domain rule that sa
 - Tenancy by default fails closed: a context left unmarked hides its rows from other tenants. Rejected: an opt-in flag per context, since one forgotten flag shares a context's rows between tenants.
 - A bounded context is the unit of language and ownership, so the context decides. Rejected: central per aggregate, since one context's invariants would span tenants.
 - A generated application requires its models before its routes, so a tenant model read from the routes is not yet known when a schema expands, and the domain would compile untenanted. Rejected: requiring the domain after the routes, since any other order compiles untenanted.
+- The refusal carries the edit because it is the only thing that reaches every domain: one written before tenancy, one written after, and one no generator made.
 - A central row that names tenanted rows shows their ids to every tenant. A central event carries no tenant, so a tenanted handler would fail or write into whichever tenant the central command ran in.
 - A refusal can be lifted later without breaking a program; one added after a release would break programs.
 - A column named after the model matches the application's own tenanted tables, so SQL, the schema differ and the plug-in steps read the same.
