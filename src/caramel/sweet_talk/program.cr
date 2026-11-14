@@ -73,7 +73,7 @@ module SweetTalk
   # with a handler of the same event, one that takes no `each:`, and no chain of `after:`
   # runs in a circle; then `__sweettalk_release`, which a handler's job calls with its own
   # key once its body has run, enqueues the handlers that follow it, with the event it
-  # handled (ADR 0048). A handler's event and `after:` are resolved as written, from the
+  # handled (ADR 0041). A handler's event and `after:` are resolved as written, from the
   # owner's scope outwards.
   macro finished
     {% owners = ::SweetTalk::BoundedContext.includers + ::SweetTalk::Projection.all_subclasses +
@@ -176,7 +176,7 @@ module SweetTalk
     end
 
     # The jobs that run before *job* for one event, nearest first, along the after: chain
-    # that leads to it; empty for a handler that says no after: (ADR 0051).
+    # that leads to it; empty for a handler that says no after: (ADR 0048).
     def self.__sweettalk_predecessors(job : String) : Array(String)
       {% if predecessors.empty? %}
         [] of String
@@ -193,7 +193,7 @@ module SweetTalk
   end
 
   # Deletes in chunks until one comes back short; the total. The schedule that
-  # `event_log: 90.days` registers calls it (ADR 0051).
+  # `event_log: 90.days` registers calls it (ADR 0048).
   def self.__sweettalk_pruning(before : Time, chunk : Int32, &) : Int64
     total = 0_i64
     loop do
@@ -214,7 +214,7 @@ module SweetTalk
   # was pruned. It returns a `SweetTalk::Rebuilt`. Under `caramel/tenancy` it rebuilds the
   # bound tenant's rows from the bound tenant's log. A projection whose context keeps no
   # log or keeps it a number of days, or that follows an event the log does not keep, does
-  # not compile (ADR 0051).
+  # not compile (ADR 0048).
   #
   # @word behaviour | Empties a projection and replays its events from the context's event log.
   # @usage SweetTalk.rebuild(PROJECTION)
@@ -340,13 +340,13 @@ module SweetTalk
     SQL
   REBUILD_PAGE = 500
 
-  # What `SweetTalk.rebuild` did (ADR 0051): *replayed*, the logged events the projection's
+  # What `SweetTalk.rebuild` did (ADR 0048): *replayed*, the logged events the projection's
   # handlers ran for; *deferred*, the events it left, in whole or for some elements, to a
   # queued job that applies them once the rebuild commits; *oldest*, when the oldest event
   # the log holds occurred, nil for an empty log.
   record Rebuilt, replayed : Int64, deferred : Int64, oldest : Time?
 
-  # What `Context.reached(event)` found (ADR 0056): *events*, every event that followed from
+  # What `Context.reached(event)` found (ADR 0048): *events*, every event that followed from
   # the one asked about, oldest first, the one asked about excluded.
   record Reached, events : Array(Event) do
     # The events grouped by the aggregate or context they belong to and its id, as
@@ -483,7 +483,7 @@ module SweetTalk
 
   # References every command, factory and service, and every `older:` default of an event,
   # so `crystal build --no-codegen` types their bodies whether or not anything calls them
-  # (ADR 0031 decision 10).
+  # (ADR 0030, bodies typed uncalled).
   def self.__sweettalk_touch : Nil
     {% begin %}
       {% owners = ::SweetTalk::Aggregate.all_subclasses + ::SweetTalk::BoundedContext.includers +
@@ -499,7 +499,7 @@ module SweetTalk
   end
 
   # The context map as {from, to, kind} edges, kind "dependency", "event", "outside" or
-  # "kernel". Reads every block of a context, its header and each `within` (ADR 0065).
+  # "kernel". Reads every block of a context, its header and each `within` (ADR 0030).
   # Refuses unknown contexts, foreign names and calls outside a border, names a context does
   # not publish, `Rows` named in a context, outside borders named like a context, a kernel
   # named, followed or bordered by one that does not share it, a kernel that names a
@@ -723,7 +723,7 @@ module SweetTalk
       {% end %}
     {% end %}
     # A command, a factory or a unit that names an outside border a later block declares
-    # (ADR 0065); one declared before it is refused at its line.
+    # (ADR 0030); one declared before it is refused at its line.
     {% for context in contexts %}
       {% withins = context.constants.select(&.starts_with?("SWEETTALK_WITHIN_"))
            .map { |constant| context.constant(constant) } %}
@@ -747,7 +747,7 @@ module SweetTalk
         {% end %}
       {% end %}
     {% end %}
-    # A follows: or shares: that the context's own text never uses (ADR 0059).
+    # A follows: or shares: that the context's own text never uses (ADR 0036).
     {% for context in contexts %}
       {% short = context.name.split("::").last %}
       {% text = written[short] %}
@@ -839,7 +839,7 @@ module SweetTalk
   # The requirement ids the domain declares with `requirements`, in declaration order across
   # every module that includes SweetTalk and merged when two list one id, each with the
   # `never`, `always`, `specification` and `unit` lines that name it in `assures:`, found in
-  # the contexts, aggregates, entities and values (ADR 0057). It is read when the program
+  # the contexts, aggregates, entities and values (ADR 0035). It is read when the program
   # compiles, as `glossary` is.
   # `requirements` is the macro that declares them, so this is `declared_requirements`.
   def self.declared_requirements : Array(Requirement)

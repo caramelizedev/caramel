@@ -1,4 +1,4 @@
-# The public read of a lifecycle's graph (ADR 0058).
+# The public read of a lifecycle's graph (ADR 0039).
 module SweetTalk
   module Lifecycle
     # Writes `Order.moves_from(state)` and `order.may_become?(state)` from the states of

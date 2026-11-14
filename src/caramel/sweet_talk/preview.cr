@@ -196,7 +196,7 @@ module SweetTalk
 
   # The world moved between a preview and its commit: the same body would now record
   # something else. Nothing was written. It carries the fresh preview, which a form shows
-  # again with its fingerprint; an action that does not rescue it answers 422 (ADR 0034).
+  # again with its fingerprint; an action that does not rescue it answers 422 (ADR 0033).
   class Stale < Refusal
     getter preview : Preview
 

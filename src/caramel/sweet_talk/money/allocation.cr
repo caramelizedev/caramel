@@ -133,7 +133,7 @@ module SweetTalk
   module BoundedContext
     # `allocation split, of: Money::Amount, by: Weight, remainder: :largest_fraction, means:
     # "…"` declares the calculation `split(total : Money::Amount, weights : Hash(Int64,
-    # Weight)) : Hash(Int64, Money::Amount)` (ADR 0062): each key's part of the total in
+    # Weight)) : Hash(Int64, Money::Amount)` (ADR 0035): each key's part of the total in
     # proportion to its weight, exact, with the units the floors leave given out as
     # `remainder:` says, ties going to the smaller key. `per: Owner` keys it by another type,
     # and `remainder: :to` adds a third argument, the key that takes the units left. Its

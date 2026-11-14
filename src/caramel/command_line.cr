@@ -20,7 +20,7 @@ module Caramel
 
   # The application's HTTP handler on a database pool: its router behind
   # CSRF protection, serving *root*/public. It sends Strict-Transport-Security
-  # when CARAMEL_ENV is production or unset (ADR 0037). *previous* holds the
+  # when CARAMEL_ENV is production or unset (ADR 0032). *previous* holds the
   # secrets being rotated out (`APP_SECRET_PREVIOUS`), and *session_max_age*
   # is how long a session cookie reads after its last write.
   def self.build(app : T.class,
@@ -219,7 +219,7 @@ module Caramel
     end
 
     # `work`, once the database holds every migration. The first signal stops it
-    # (ADR 0032 decision 5); a second exits 1 at once.
+    # (the shutdown rule of ADR 0032); a second exits 1 at once.
     private def self.run_workers(app : T.class,
                                  options : WorkOptions,
                                  shutdown : Time::Span) : Int32 forall T
@@ -398,8 +398,8 @@ module Caramel
     # workers, maintenance, schedules and PubSub; specs drain queues instead.
     # Without *workers* it keeps PubSub and maintenance but runs no jobs or
     # schedules. At the first SIGTERM or SIGINT it stops listening, claiming jobs and
-    # streaming, and gives requests and jobs in flight *shutdown* to finish (ADR 0032
-    # decision 5); a second signal exits 1 at once.
+    # streaming, and gives requests and jobs in flight *shutdown* to finish (the shutdown
+    # rule of ADR 0032); a second signal exits 1 at once.
     private def self.serve(app : T.class,
                            db : DB::Database,
                            url : String,
@@ -480,7 +480,7 @@ module Caramel
     end
 
     # CARAMEL_SOCKET and the gid CARAMEL_SOCKET_GROUP names, once their
-    # directory passes the checks ADR 0032 item 10 describes.
+    # directory passes the checks the socket access rule of ADR 0032 describes.
     private def self.application_socket : {String, Int32?}
       path = ENV["CARAMEL_SOCKET"]? || abort("CARAMEL_SOCKET is required; use frappe dev")
       group = socket_group

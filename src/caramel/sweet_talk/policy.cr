@@ -11,8 +11,8 @@ module SweetTalk
   # is named after its owner (the context and its border, the projection or the process)
   # and the event's path, because `caramel_jobs` stores the name. With `after: Owner` the
   # filter is `__sweettalk_follow_*`, which `dispatch` leaves alone and the owner's job
-  # calls through `SweetTalk.__sweettalk_release` once its handler has run (ADR 0048); a
-  # projection's handler takes the rebuild lock, shared, before it runs (ADR 0051);
+  # calls through `SweetTalk.__sweettalk_release` once its handler has run (ADR 0041); a
+  # projection's handler takes the rebuild lock, shared, before it runs (ADR 0048);
   # `SWEETTALK_HANDLER_*` records each handler for that and for a rebuild, and the
   # whole-program check reads it once every name is known.
   macro __sweettalk_policy(scope, event, each, border, kind, key, attempts, backoff, base,

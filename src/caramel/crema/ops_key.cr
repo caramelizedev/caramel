@@ -4,7 +4,7 @@ require "http/request"
 require "random/secure"
 
 module Caramel::Crema
-  # The per-start key every ops request must present (ADR 0028). It lives in
+  # The per-start key every ops request must present (ADR 0027). It lives in
   # `<socket path>.key`, mode 0600, beside the socket in the same private directory.
   module OpsKey
     SUFFIX = ".key"

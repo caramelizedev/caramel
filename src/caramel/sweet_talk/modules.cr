@@ -1,4 +1,4 @@
-# The words of SweetTalk's modules (ADR 0061), as the core sees them: each fails
+# The words of SweetTalk's modules (ADR 0030), as the core sees them: each fails
 # compilation naming the require that defines it, and the module's file redefines it.
 module SweetTalk
   module BoundedContext

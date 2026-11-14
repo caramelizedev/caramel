@@ -1,4 +1,4 @@
-# `entity`, the word an aggregate and an entity share to hold entities (ADR 0050).
+# `entity`, the word an aggregate and an entity share to hold entities (ADR 0039).
 module SweetTalk
   # Included by `Aggregate` and `Entity`: a model that holds entities in child tables.
   module Holding

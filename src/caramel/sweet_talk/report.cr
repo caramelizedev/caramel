@@ -1,5 +1,5 @@
 # `frappe glossary`: the detailed glossary, every term with the facts its declaration
-# holds, and the context map (ADR 0059). The application answers it; Frappé compiles the
+# holds, and the context map (ADR 0036). The application answers it; Frappé compiles the
 # application and asks.
 module SweetTalk
   GLOSSARY_USAGE = "Usage: glossary"

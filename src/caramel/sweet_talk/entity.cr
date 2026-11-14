@@ -9,7 +9,7 @@ module SweetTalk
     @__sweettalk_id : ::SugarORM::Key? = nil
 
     # The constructors, facts, loading and saving, from the attributes declared so far; an
-    # entity that holds entities loads, saves and drops them with its own (ADR 0050).
+    # entity that holds entities loads, saves and drops them with its own (ADR 0039).
     macro __sweettalk_storage
       {% attributes = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
            .map { |constant| @type.constant(constant) }.sort_by { |attribute| attribute[1] } %}

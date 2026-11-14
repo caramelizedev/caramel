@@ -1,5 +1,5 @@
 # Calculations: typed functions of a context whose `never` and `always` lines hold on their
-# result (ADR 0062).
+# result (ADR 0035).
 module SweetTalk
   # A rule on a calculation's result broke: the calculation computed what its own `never`
   # or `always` forbids. The caller did nothing wrong, so it is a defect, not a refusal: it

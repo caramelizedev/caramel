@@ -1,4 +1,4 @@
-# SweetTalk, an opt-in language for Domain-Driven Design (ADRs 0030, 0031, 0033 to 0036 and 0044).
+# SweetTalk, an opt-in language for Domain-Driven Design (ADR 0030).
 #
 # Each word is a macro. An aggregate expands into a SugarORM schema and changeset plus a
 # domain class over them; a command runs in `Repo.transaction` on one aggregate; an event

@@ -322,8 +322,8 @@ module Caramel::Frappe
         Crema::Redact.text(item.message, @secrets, 4096, credentials: false), item.remediation)
     end
 
-    # Takes the build lock, waiting while a command builds (ADR 0013 §5);
-    # false when the session stops or a newer change arrives first.
+    # Takes the build lock, waiting while a command builds (ADR 0013, the shared
+    # development build); false when the session stops or a newer change arrives first.
     private def acquired?(lock : BuildLock) : Bool
       return true if lock.acquire?
       @output.puts("Waiting for another build of #{@project.name}…")

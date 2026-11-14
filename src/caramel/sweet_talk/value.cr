@@ -86,8 +86,8 @@ module SweetTalk
   # `never` and `always`, the invariants of an aggregate or a composite value.
   module Guarded
     # `never "message" { condition }` refuses any change that leaves the condition true.
-    # `assures: "AC-12"` names the requirement ids it answers (ADR 0057), and `on: :stock`
-    # the field the refusal is about (ADR 0058).
+    # `assures: "AC-12"` names the requirement ids it answers (ADR 0035), and `on: :stock`
+    # the field the refusal is about (ADR 0046).
     #
     # @word rule | Refuses any change that leaves its condition true.
     # @usage never MESSAGE[, assures: IDS][, on: FIELD] do CONDITION end

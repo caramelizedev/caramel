@@ -113,7 +113,7 @@ module SweetTalk
   # `__sweettalk_log`, which `SweetTalk.dispatch` calls with every event and which writes
   # one row for an event of this context or of a kernel it shares; `logged`, the typed
   # reader; and `__sweettalk_prune`, which the schedule `event_log: 90.days` registers
-  # loops, once an hour in Cold Brew's scheduler (ADR 0051). Without the keyword
+  # loops, once an hour in Cold Brew's scheduler (ADR 0048). Without the keyword
   # `__sweettalk_log` does nothing. A declaration whose table the log would take is
   # refused; one in a later `within` meets `Rows::Events` already declared, and SugarORM
   # refuses its table.
@@ -203,7 +203,7 @@ module SweetTalk
       end
 
       # `{{ short.id }}.reached(event)`: every event that followed from *event*, across every
-      # context's log, as a `SweetTalk::Reached` (ADR 0056). *event* is one this log keeps.
+      # context's log, as a `SweetTalk::Reached` (ADR 0048). *event* is one this log keeps.
       def self.reached(event : ::SweetTalk::Event) : ::SweetTalk::Reached
         unless SWEETTALK_LOGS.includes?(event.__sweettalk_home)
           raise ArgumentError.new("#{event.class.name} is not logged in {{ table.id }}: " +
@@ -304,7 +304,7 @@ module SweetTalk
     {% end %}
   end
 
-  # The operations table of a context whose units say `once_by:` (ADR 0055): one row per
+  # The operations table of a context whose units say `once_by:` (ADR 0046): one row per
   # unit and key holding a fingerprint of the other arguments and what the first run
   # returned. It is `Rows::Operations`, the `<context>_operations` table, part of the derived
   # schema and tenanted as the context's rows are, and exists only when some unit asks for it.

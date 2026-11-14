@@ -85,8 +85,8 @@ module SweetTalk
         {% end %}
       {% end %}
       {% owner = @type.name.split("::").last.id %}
-      # `has placed : Bool` defines `placed?` too (ADR 0030 decision 4), so a state may not
-      # share its name with a Bool attribute declared above.
+      # `has placed : Bool` defines `placed?` too (ADR 0039, what `has` stores), so a state
+      # may not share its name with a Bool attribute declared above.
       {% for state in states %}
         {% attribute = @type.has_constant?("SWEETTALK_HAS_#{state.upcase.id}") &&
                        @type.constant("SWEETTALK_HAS_#{state.upcase.id}") %}
@@ -109,7 +109,7 @@ module SweetTalk
         {% leaving = leaving + predecessors %}
       {% end %}
       SWEETTALK_FINAL = [{{ states.reject { |state| leaving.includes?(state) }.splat }}] of String
-      # Each move as `moves` allows it, "open >> placed", for the report (ADR 0059)
+      # Each move as `moves` allows it, "open >> placed", for the report (ADR 0036)
       {% steps = [] of Nil %}
       {% for state, predecessors in before %}
         {% for predecessor in predecessors %}
@@ -196,7 +196,7 @@ module SweetTalk
     # cash: [leg]}` on a required closed-set value says which optional attributes each member
     # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
     # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
-    # as a named tuple (ADR 0054).
+    # as a named tuple (ADR 0039).
     #
     # @word attribute | Declares an attribute a noun stores, with a default and constraints.
     # @usage has NAME : TYPE[ = DEFAULT][, unique: TRUE_OR_SENTENCE][, index: true]

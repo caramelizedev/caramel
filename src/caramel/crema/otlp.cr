@@ -5,7 +5,7 @@ require "./otlp_json"
 require "./runtime"
 
 module Caramel::Crema
-  # The opt-in OTLP/HTTP trace exporter (ADR 0028): `require "caramel/crema/otlp"`, then
+  # The opt-in OTLP/HTTP trace exporter (ADR 0027): `require "caramel/crema/otlp"`, then
   # set `OTEL_EXPORTER_OTLP_ENDPOINT`. It sends sampled traces as OTLP JSON to any
   # collector or vendor that accepts it, and nothing at all without an endpoint.
   module Otlp

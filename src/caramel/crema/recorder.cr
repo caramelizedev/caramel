@@ -3,7 +3,7 @@ require "./runtime"
 require "./tally"
 
 module Caramel::Crema
-  # The opt-in recorder (ADR 0028): `require "caramel/crema/recorder"` makes the
+  # The opt-in recorder (ADR 0027): `require "caramel/crema/recorder"` makes the
   # process keep per-minute counts and latency histograms in `caramel_metrics`, for
   # `APP insights` and the console. It records aggregates only: route templates,
   # job classes, schedule names, parameterized SQL and `METHOD host`. No message,

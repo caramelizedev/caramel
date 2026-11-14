@@ -1,7 +1,7 @@
 require "../units"
 
 module Caramel
-  # How a route reads its request (ADR 0020): the body it accepts, the most
+  # How a route reads its request (ADR 0003): the body it accepts, the most
   # bytes of it that are read, whether the browser CSRF check or the
   # action's own authenticator guards it, and whether a tenant route is open
   # to anyone in the tenant (ADR 0025). Actions declare one with `ingress`;

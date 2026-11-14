@@ -8,7 +8,7 @@ module SweetTalk
   # nil for a context's event, whose subject is the bound tenant's id when *tenanted*,
   # and absent otherwise. A field named like the metadata, or like the subject's id, is
   # refused. `older: {till: "front"}` gives a required field the value a stored event
-  # without it reads (ADR 0051); an optional field already reads nil.
+  # without it reads (ADR 0041); an optional field already reads nil.
   macro __sweettalk_event(name, *fields, carried, channel, means, renamed_from, subject,
                           tenanted, older, prefix)
     {% name.raise "#{@type.name.id}::#{name} needs a meaning: add means: \"…\", " +
@@ -184,7 +184,7 @@ module SweetTalk
       end
 
       {% for entry in olders %}
-        # What a stored event without {{ entry[0].id }} reads (ADR 0051).
+        # What a stored event without {{ entry[0].id }} reads (ADR 0041).
         def self.__sweettalk_older_{{ entry[0].id }} : {{ entry[1].id }}
           older : {{ entry[1].id }} = {{ entry[2] }}
           older

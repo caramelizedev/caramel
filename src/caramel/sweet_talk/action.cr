@@ -1,4 +1,4 @@
-# How an action answers SweetTalk's errors (ADR 0034): a refusal is 422 and a missing
+# How an action answers SweetTalk's errors (ADR 0033): a refusal is 422 and a missing
 # aggregate 404. `SweetTalk::Boundary` is a programming error and stays a 500.
 abstract struct Caramel::Action
   # :nodoc:

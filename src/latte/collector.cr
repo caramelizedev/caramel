@@ -20,7 +20,7 @@ module Caramel::Latte
 end
 
 module Caramel::Latte
-  # A local OTLP/HTTP collector (ADR 0029). Any local process may write traces to
+  # A local OTLP/HTTP collector (ADR 0012). Any local process may write traces to
   # `127.0.0.1:4318`, as with any OpenTelemetry collector, and nothing here serves
   # reads: they go through the control API on the owner-only socket. A request whose
   # `Host` is not the loopback address and port it listens on, as a page using DNS
