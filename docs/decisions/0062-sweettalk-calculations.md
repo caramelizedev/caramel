@@ -48,12 +48,22 @@ its identity lived in prose and in hand-written spec loops.
    `spec/sweet_talk/calculations_spec.cr` runs the lots' calculations: a rule that holds,
    one that breaks, a refusal, a `never` line, and a broken rule inside a service that
    rolls back its write.
-7. **Corretto runs a calculation's rules on generated cases.**
-   `Corretto.property(Context.verb)` draws 200 cases from what the argument types declare
-   and fails on the first broken rule, with the seed that `CORRETTO_SEED` gives back
-   ([ADR 0010](0010-corretto-harness.md) decision 11). `spec/sweet_talk/calculations_spec.cr`
-   runs it on the lots: the careless split breaks its rule within the 200 cases, and the
-   same seed fails the same way twice.
+7. **Corretto runs a calculation's rules on generated cases.** A calculation is a class
+   method of its context, so `Corretto.property(Context.verb)` runs it on 200 drawn cases
+   ([ADR 0010](0010-corretto-harness.md) decision 11) in a spec that requires
+   `caramel/sweet_talk/corretto` after the domain. That file gives each value declared
+   before it a generator that draws from what the value declares: its bounds, its
+   `one_of:` members, its day, its decimal precision, scale and bounds, and each part of a
+   value with parts; an amount of `caramel/sweet_talk/money`
+   ([ADR 0063](0063-sweettalk-money.md)) is a whole number of minor units. A value that
+   wraps another type, such as JSON, gets none, so a property with such an argument does
+   not compile unless the value defines `corretto_draw` itself. The file names
+   `SweetTalk::Refusal` as outside the domain, so a case a value or the body refuses is
+   skipped, and `SweetTalk::Broken` as an error whose message says what failed, so a
+   broken rule fails with its own sentence and the seed that `CORRETTO_SEED` gives back.
+   Required before any context is declared, the file does not compile.
+   `spec/sweet_talk/calculations_spec.cr` runs it on the lots: the careless split breaks
+   its rule within the 200 cases, and the same seed fails the same way twice.
 
 ## Reasons
 
@@ -79,6 +89,11 @@ its identity lived in prose and in hand-written spec loops.
   the input lies outside it; only a broken rule is the calculation's fault.
 - The runner needs no database, so it lives in Corretto beside the other spec helpers and
   runs in any example; a fixed count and a printed seed make a failure repeatable.
+- The generators live in a file of SweetTalk's, not in Corretto: the constants they read
+  are SweetTalk's, and Corretto runs any typed class method without naming a library. A
+  value gets its generator when the file is required, not once the program's top level is
+  complete: Corretto refuses an undrawable argument when it reads the property's line, in
+  an example, which is before a `finished` hook runs.
 
 Rejected:
 

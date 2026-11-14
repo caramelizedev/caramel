@@ -4,6 +4,8 @@ Caramel follows semantic versioning. During 0.x a minor release may break compat
 
 ## Unreleased
 
+- **Breaking:** Corretto: `Corretto.property(Owner.method)` runs any class method whose arguments each have a type, and names no library. A spec that runs it on a SweetTalk calculation now adds `require "caramel/sweet_talk/corretto"` after the domain is required; without it the property fails compilation with `Corretto.property cannot draw …`. Corretto draws `Int32`, `Int64`, `Bool`, `String`, nil, unions, arrays and hashes; any other type draws itself with a class method `corretto_draw(random : Random) : self`. A case that raises `Corretto::Property::Skip`, or an exception named with `Corretto::Property.outside`, is skipped. `Corretto::Property::Run#calculation` is now `label`, and `Corretto::Property::Outcome` is removed ([ADR 0010](docs/decisions/0010-corretto-harness.md) decision 11, [ADR 0062](docs/decisions/0062-sweettalk-calculations.md) decision 7).
+
 ## 0.23.0 - 2026-11-08
 
 ### Upgrade notes
