@@ -1,7 +1,7 @@
 require "./support/harness"
 require "uri"
 
-# SweetTalk's jobs worked by `work` in two OS processes (ADRs 0019 and 0030):
+# SweetTalk's jobs worked by `work` in two OS processes (ADRs 0009 and 0030):
 # the rules domain's tally steps each run once, both processes claim them,
 # every Tally total is the sum of its steps, and SIGTERM lets an in-flight step
 # finish. It builds spec/fixtures/sweet_talk_workers.cr and owns a PostgreSQL

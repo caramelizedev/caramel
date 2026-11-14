@@ -142,7 +142,7 @@ module Caramel::ColdBrew
       )
       SQL
     # Runs that maintenance released after their process died, counted apart
-    # from attempts (ADR 0019).
+    # from attempts (ADR 0009).
     SugarORM::Migration.new(20260927000006_i64, "add_caramel_jobs_releases", [
       "ALTER TABLE caramel_jobs ADD COLUMN releases int NOT NULL DEFAULT 0",
     ]),

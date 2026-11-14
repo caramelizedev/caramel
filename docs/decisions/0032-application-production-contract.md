@@ -58,7 +58,7 @@ Before this decision an application could not run on a Linux server: `serve` rea
 - **`preview_mt` left out.** It is untested in Caramel.
 - **`CARAMEL_ROOT`.** It is the smallest change that lets a binary leave its build path.
 - **Separate workers.** Long jobs drain without holding the web process.
-- **Workers stop before cutover.** A row whose class the running binary lacks fails without retry ([ADR 0019](0019-cold-brew-status-hooks-and-work.md) §4).
+- **Workers stop before cutover.** A row whose class the running binary lacks fails without retry ([ADR 0009](0009-cold-brew.md), stored class names).
 - **One shutdown deadline.** A job that never ends would hold a deploy for ever, and a supervisor needs a bound it can wait for. Ending PubSub subscriptions at the first signal stops an open SSE stream from using up the drain. A second signal is the operator's word that the wait is over.
 - **Transaction-mode poolers ruled out.** LISTEN, `migrate`'s session advisory lock and `locked_by = pg_backend_pid()` need a session.
 - **`CARAMEL_SOCKET_GROUP`.** A proxy that terminates TLS holds keys the application must not read, and vice versa. A group that may enter one directory and connect to one socket grants nothing else.

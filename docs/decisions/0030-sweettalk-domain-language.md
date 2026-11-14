@@ -95,7 +95,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      getter on an event loads an aggregate.
    - **Jobs.** The command enqueues one job per `whenever` that follows the event, carrying
      the event as JSON; `enqueue` joins the transaction
-     ([ADR 0009](0009-cold-brew-queue-pubsub-cache.md) decision 2); `each: :lines` enqueues
+     ([ADR 0009](0009-cold-brew.md)); `each: :lines` enqueues
      one job per element. Jobs go in declaration order: the contexts' and borders'
      policies, then the projections' handlers, then the processes' steps; Cold Brew starts
      them in that order and finishes them in any, so no handler assumes another's work
@@ -112,7 +112,7 @@ or a policy, and nothing stops one context from reaching into another's types.
      `whenever Event, attempts: 5, backoff: :linear, base: 2.seconds` and the same keywords
      on `deadline` set the job's rule, as `retry_on ::Exception` after the two refusal
      rules, so a literal Cold Brew refuses does not compile; without them the job follows
-     ADR 0009 decision 2. A failed job releases no `after:` follower.
+     Cold Brew's retry rules (ADR 0009). A failed job releases no `after:` follower.
    - **Notifications.** The command then publishes `{"subject": <id>}` on
      `sweettalk.<context>.<aggregate>.<event>`, each part underscored; a channel over
      its budget (ADR 0033) does not compile.
