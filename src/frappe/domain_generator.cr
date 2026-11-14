@@ -1,5 +1,5 @@
 require "./project"
-require "./publication"
+require "./toolkit"
 require "./resource_generator"
 
 module Caramel::Frappe
@@ -9,13 +9,11 @@ module Caramel::Frappe
   # application has none. In a multi-tenant application the domain names the
   # tenant the routes' tenant block names (ADR 0033).
   class DomainGenerator
-    CONFIG = "config/application.cr"
     ROUTES = "config/routes.cr"
     SKILL  = ".claude/skills/sweettalk/SKILL.md"
     # The release's skill (ADR 0014, a generator's skill), compiled into Frappé.
     SKILL_TEXT = {{ read_file("#{__DIR__}/../../templates/skills/sweettalk/SKILL.md") }}
 
-    CARAMEL_REQUIRE    = %(require "caramel")
     SWEET_TALK_REQUIRE = %(require "caramel/sweet_talk")
     TENANCY_REQUIRE    = %(require "caramel/tenancy")
     JOBS_REQUIRE       = %(require "../app/jobs/*")
@@ -40,8 +38,8 @@ module Caramel::Frappe
                  means : String, *, central : Bool = false) : Array(String)
       validate(name, context, means)
       root = project.root
-      Publication.validate_path(root, CONFIG)
-      original = File.read(File.join(root, CONFIG))
+      Toolkit.validate_path(root, Toolkit::CONFIG)
+      original = File.read(File.join(root, Toolkit::CONFIG))
       lines = original.lines
       tenanted = lines.includes?(TENANCY_REQUIRE)
       raise Error.new(CENTRAL_UNTENANTED) if central && !tenanted
@@ -50,14 +48,14 @@ module Caramel::Frappe
       originals = {} of String => String
       wired = wired(original, lines)
       if wired != original
-        originals[CONFIG] = original
-        files[CONFIG] = wired
+        originals[Toolkit::CONFIG] = original
+        files[Toolkit::CONFIG] = wired
       end
       singular = name.underscore
       files["app/domain/#{singular}.cr"] = domain(name, context, means, tenant, central)
       files["spec/domain/#{singular}_spec.cr"] = spec(name, context, means)
       files[SKILL] = SKILL_TEXT if skill_missing?(root)
-      Publication.publish(project, files, originals)
+      Toolkit.publish(root, files, originals)
       files.keys.sort!
     end
 
@@ -71,9 +69,9 @@ module Caramel::Frappe
     end
 
     # An existing skill, edited or not, is the application's own, and a
-    # symlink on its path is left alone too: Publication refuses to follow it.
+    # symlink on its path is left alone too: Toolkit refuses to follow it.
     private def skill_missing?(root : String) : Bool
-      Publication.validate_path(root, SKILL)
+      Toolkit.validate_path(root, SKILL)
       !File.info?(File.join(root, SKILL), follow_symlinks: false)
     rescue Error
       false
@@ -91,13 +89,10 @@ module Caramel::Frappe
     private def wired(config : String, lines : Array(String)) : String
       present = [SWEET_TALK_REQUIRE, DOMAIN_REQUIRE, BOOT].all? { |line| lines.includes?(line) }
       return config if present
-      unless lines.count(CARAMEL_REQUIRE) == 1 && lines.count(JOBS_REQUIRE) == 1
+      unless lines.count(Toolkit::CARAMEL_REQUIRE) == 1 && lines.count(JOBS_REQUIRE) == 1
         raise Error.new(MISSING_ANCHORS)
       end
-      unless lines.includes?(SWEET_TALK_REQUIRE)
-        config = config.sub(/^#{Regex.escape(CARAMEL_REQUIRE)}$/m,
-          "#{CARAMEL_REQUIRE}\n#{SWEET_TALK_REQUIRE}")
-      end
+      config = Toolkit.required(config, SWEET_TALK_REQUIRE)
       unless lines.includes?(DOMAIN_REQUIRE)
         config = config.sub(/^#{Regex.escape(JOBS_REQUIRE)}$/m,
           "#{DOMAIN_REQUIRE}\n#{JOBS_REQUIRE}")

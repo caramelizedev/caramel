@@ -27,7 +27,7 @@ module Caramel::Frappe
       found = found.select { |event| event.duration_ms >= slow } if slow
       shown = found.first(limit)
       shown.each { |event| @output.puts(line(event, agent)) }
-      @output.puts("OK traces #{shown.size}") if agent
+      MRDP.ok(@output, "traces", shown.size.to_s) if agent
       0
     end
 
@@ -65,7 +65,11 @@ module Caramel::Frappe
       groups = @store.error_groups(since)
       repeats = repeated_queries(since)
       if groups.empty? && repeats.empty?
-        agent ? @output.puts("OK errors 0") : @output.puts("No errors or repeated queries yet.")
+        if agent
+          MRDP.ok(@output, "errors", "0")
+        else
+          @output.puts("No errors or repeated queries yet.")
+        end
         return 0
       end
       groups.each { |group| agent ? runtime_mrdp(group) : runtime_text(group) }

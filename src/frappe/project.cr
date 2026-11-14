@@ -1,14 +1,12 @@
 require "yaml"
 require "json"
 require "random/secure"
+require "./error"
 require "../caramel/version"
 require "../latte/site"
 require "../latte/paths"
 
 module Caramel::Frappe
-  class Error < Exception
-  end
-
   # Environment metadata is versioned application source. Credentials belong
   # in the separate private .env file, never in this manifest.
   struct EnvironmentManifest
