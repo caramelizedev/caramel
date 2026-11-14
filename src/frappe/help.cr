@@ -12,7 +12,7 @@ module Caramel::Frappe
     EXAMPLES = ["new my-app", "make resource Book title:string author:string",
                 "db branch create spike", "dev --branch spike"]
 
-    # Every command grouped by task.
+    # Every command grouped by task, then one group for each shard that contributes some.
     def self.overview(table : Commands::Table, color : Bool) : String
       width = table.groups.max_of { |group| group.names.max_of(&.size) } + 2
       String.build do |io|
@@ -62,25 +62,43 @@ module Caramel::Frappe
         end
         io << '\n'
         heading(io, "LEARN MORE", color)
-        io << "  " << commands_page << '\n'
+        io << "  " << source(command) << '\n'
       end
     end
 
-    # A run of command words that two or more commands share: its subcommands.
+    # A run of command words that begins longer commands: its subcommands.
     def self.family(table : Commands::Table, words : Array(String), color : Bool) : String
       commands = table.matching(words)
+      deeper = commands.find { |command| command.words.size > words.size }
+      listing(table.families[words.join(' ')], commands, deeper, source(commands.first), color)
+    end
+
+    # The commands a shard contributes, for `frappe help SHARD`.
+    def self.shard(table : Commands::Table, shard : String, color : Bool) : String
+      commands = table.contributed(shard)
+      line = "The commands the #{shard} shard contributes"
+      listing(line, commands, commands.first?, nil, color)
+    end
+
+    # *line*, then *commands* with their briefs, the command whose help shows a usage
+    # and examples, and where to read more.
+    private def self.listing(line : String,
+                             commands : Array(Commands::Command),
+                             example : Commands::Command?,
+                             more : String?,
+                             color : Bool) : String
       width = commands.max_of(&.name.size) + 2
       String.build do |io|
-        io << table.families[words.join(' ')] << ".\n"
+        io << line << ".\n"
         io << '\n'
         heading(io, "COMMANDS", color)
         rows(io, commands.map { |command| {command.name, command.brief} }, width)
         io << '\n'
         heading(io, "LEARN MORE", color)
-        if deeper = commands.find { |command| command.words.size > words.size }
-          io << "  Use frappe help " << deeper.name << " for a command's usage and examples.\n"
+        if example
+          io << "  Use frappe help " << example.name << " for a command's usage and examples.\n"
         end
-        io << "  " << commands_page << '\n'
+        io << "  " << more << '\n' if more
       end
     end
 
@@ -92,8 +110,12 @@ module Caramel::Frappe
       rows.each { |name, brief| io << "  " << name.ljust(width) << brief << '\n' }
     end
 
-    private def self.commands_page : String
-      "#{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/commands/"
+    # Where to read more about *command*: the guides' commands page for one Frappé
+    # defines, its shard's list for one a shard contributes.
+    private def self.source(command : Commands::Command) : String
+      shard = command.shard
+      return "#{Caramel::WEBSITE}/docs/#{Caramel::VERSION}/commands/" unless shard
+      "Use frappe help #{shard} for the #{shard} shard's commands."
     end
 
     # `frappe` and the syntax's tokens, continued on a deeper-indented line

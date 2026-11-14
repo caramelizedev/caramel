@@ -10,7 +10,7 @@ module Caramel::Frappe
   # positional, `a|b` a literal choice, `X...` one or more, `[...]` optional.
   # `--flag`, `--flag VALUE` and `--flag=VALUE` are options; `--a|--b`
   # excludes one another; a `=LOW..HIGH` value must be an integer in range.
-  # The first word of a command a shard contributes is `shard:name`.
+  # The first word of a command a shard contributes is `shard:name` (ShardCommands).
   module Commands
     # A malformed invocation. `commands` are the intended commands, whose
     # syntax the error prints; `subject` names what was invoked.
@@ -98,6 +98,13 @@ module Caramel::Frappe
       def summary : String
         replacement = @deprecated || return @description
         "#{@description} Deprecated: #{replacement}"
+      end
+
+      # The shard that contributes the command, which its first word names; nil for a
+      # command Frappé defines.
+      def shard : String?
+        namespace, colon, _ = @words.first.partition(':')
+        namespace unless colon.empty?
       end
 
       # Whether `text` continues the command's words; only the first may be namespaced.
@@ -558,13 +565,30 @@ module Caramel::Frappe
         @families[words.join(' ')]? || @commands.find!(&.words.==(words)).brief
       end
 
-      # The longest leading run of `args` that names a command or family, or nil.
+      # The shards that contribute commands, in the table's order.
+      def shards : Array(String)
+        @commands.compact_map(&.shard).uniq!
+      end
+
+      # The commands *shard* contributes.
+      def contributed(shard : String) : Array(Command)
+        @commands.select(&.shard.==(shard))
+      end
+
+      # This table with *other*'s commands, family lines and help groups after its own.
+      def +(other : Table) : Table
+        families = @families.merge(other.families)
+        Table.new(@commands + other.commands, families, @groups + other.groups)
+      end
+
+      # The longest leading run of `args` that names a command or family; else the
+      # contributing shard that `args` start with, for `frappe help SHARD`; else nil.
       def help_words(args : Array(String)) : Array(String)?
         args.size.downto(1) do |size|
           words = args[0, size]
           return words unless matching(words).empty?
         end
-        nil
+        args[0, 1] if args.first?.try { |word| shards.includes?(word) }
       end
 
       # Whether `args` name a project command, which a project pinned to another

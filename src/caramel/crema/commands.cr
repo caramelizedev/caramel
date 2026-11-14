@@ -3,10 +3,19 @@ module Caramel::Crema
 
   @@commands = {} of String => {String, CommandBlock}
 
-  # Adds an application command named by its first word, such as `ops` or `jobs`. The
-  # block receives the remaining words and flags and returns the exit status; a later
-  # registration of the same name replaces an earlier one. `usage` lists *syntax*.
-  def self.command(name : String, syntax : String, &block : Array(String) -> Int32) : Nil
+  # Adds an application command named by its first word, such as `ops` or `jobs`; a
+  # command that a shard declares to Frappé in its frappe.yml is named `shard:name`. The
+  # block receives the remaining words and flags and returns the exit status. `usage`
+  # lists *syntax*. Raises ArgumentError when *name* is already registered, unless
+  # *replace* is true: the recorder takes `insights` over from the stub that says it is off.
+  def self.command(name : String,
+                   syntax : String,
+                   *,
+                   replace : Bool = false,
+                   &block : Array(String) -> Int32) : Nil
+    if @@commands.has_key?(name) && !replace
+      raise ArgumentError.new("The command #{name} is already registered")
+    end
     @@commands[name] = {syntax, block}
   end
 

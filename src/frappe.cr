@@ -8,11 +8,12 @@ end
 
 executable = Process.executable_path || abort("Cannot locate the Frappé installation")
 root = ENV["CARAMEL_FRAMEWORK_ROOT"]? || File.expand_path("..", File.dirname(executable))
-cli = Caramel::Frappe::CLI.new(root)
 
+# Dispatch to the pinned release reads the built-ins alone: a first word with a colon
+# always belongs to the project, whose release then reads its shards' commands.
 begin
   target = begin
-    Caramel::Frappe::Dispatch.target(cli.table, ARGV)
+    Caramel::Frappe::Dispatch.target(Caramel::Frappe::Commands.builtin, ARGV)
   rescue ex : Caramel::Frappe::Dispatch::NotInstalled
     # On a terminal, offer to install the release the project pins; agents
     # and pipes get the command instead (ADR 0016).
@@ -38,4 +39,4 @@ rescue ex : Caramel::Frappe::Error
   exit 1
 end
 
-exit cli.run(ARGV)
+exit Caramel::Frappe::CLI.new(root).run(ARGV)

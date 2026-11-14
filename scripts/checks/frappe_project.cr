@@ -61,6 +61,7 @@ module Caramel::Checks
         tenancy
         translations
         agent_tooling
+        shard_commands
         sweet_talk_diff
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
@@ -956,6 +957,7 @@ module Caramel::Checks
 end
 
 require "./frappe_project/benchmark"
+require "./frappe_project/shard_commands"
 
 begin
   Caramel::Checks::FrappeProject.new.execute(ARGV)

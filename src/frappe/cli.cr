@@ -25,33 +25,38 @@ require "./words"
 require "./terminal"
 require "./help"
 require "./completion"
+require "./shard_commands"
 require "./corretto_runner"
 require "../caramel/database"
 require "../latte/postgres"
 
 module Caramel::Frappe
   class CLI
-    # The commands this run answers to.
-    getter table : Commands::Table
+    # The commands this run answers to, and the shards whose manifests were refused.
+    @table : Commands::Table
+    @problems : Array(ShardCommands::Problem)
 
-    def initialize(@framework_root : String,
-                   @output : IO = STDOUT,
-                   @error : IO = STDERR,
-                   @table : Commands::Table = Commands.builtin)
+    def initialize(@framework_root : String, @output : IO = STDOUT, @error : IO = STDERR)
+      @table = Commands.builtin
+      @problems = [] of ShardCommands::Problem
     end
 
     def run(arguments : Array(String)) : Int32
       args = arguments.empty? ? ["help"] : arguments.dup
       args[0] = "help" if {"--help", "-h"}.includes?(args[0])
       args[0] = "version" if {"--version", "-v"}.includes?(args[0])
+      read_shards(args)
       if words = help_target(args)
         return show_help(words)
       end
       invocation = @table.parse(args)
-      invocation.command.deprecated.try do |replacement|
-        @error.puts("Warning: frappe #{invocation.command.name} is deprecated " \
+      command = invocation.command
+      command.deprecated.try do |replacement|
+        @error.puts("Warning: frappe #{command.name} is deprecated " \
                     "and will be removed in the next minor release. #{replacement}")
       end
+      shard = command.shard
+      return contributed(command, shard, args) if shard
       execute(invocation)
     rescue ex : Commands::Usage
       usage(ex, arguments)
@@ -265,15 +270,84 @@ module Caramel::Frappe
       end
     end
 
+    # Chooses the commands this run answers to. Inside a project, which is the current
+    # directory, help, the agent manifest and the project's own commands read the table
+    # its shards add to; every other command reads the built-ins alone. Asking for the
+    # commands of a shard whose manifest was refused reports why.
+    private def read_shards(args : Array(String)) : Nil
+      builtin = Commands.builtin
+      @table = builtin
+      @problems = [] of ShardCommands::Problem
+      help = args.first == "help" || {"--help", "-h"}.includes?(args.last)
+      return unless help || args.first == "agent-manifest" || builtin.project?(args)
+      loaded = ShardCommands.load(Dir.current, builtin)
+      @table = loaded.table
+      @problems = loaded.problems
+      problem = broken(args, help) || return
+      raise Error.new(problem.message)
+    end
+
+    # The refused manifest of the shard whose commands *args* ask for, if there is one:
+    # `shard:name`, or in a request for help the shard's own name.
+    private def broken(args : Array(String), help : Bool) : ShardCommands::Problem?
+      asked = (args.first == "help" ? args[1]? : args.first) || return
+      shard, colon, _ = asked.partition(':')
+      named = !colon.empty? || (help && @table.help_words([asked]).nil?)
+      @problems.find(&.shard.==(shard)) if named
+    end
+
+    # Says on standard error which shards' commands are absent, and why.
+    private def warn_broken : Nil
+      @problems.each { |problem| @error.puts(problem.message) }
+    end
+
+    # Runs the command *shard* contributes as the application's own command of that
+    # name, and returns the application's status. An application that registers no such
+    # command answers with its usage and status 2.
+    private def contributed(command : Commands::Command,
+                            shard : String,
+                            arguments : Array(String)) : Int32
+      project = Project.load
+      tools = Tools.new(@framework_root, @output, @error)
+      binary = tools.compile(project)
+      errors = IO::Memory.new
+      development = {"CARAMEL_ENV" => "development"}
+      status, printed = tools.capture(binary, arguments, project.root, development, errors)
+      usage = "Usage: #{File.basename(binary)} "
+      answers = {printed, errors.to_s}
+      if status.exit_code? == 2 && answers.any?(&.starts_with?(usage))
+        raise Error.new(unregistered(command, shard))
+      end
+      @output.print(printed)
+      @error.print(errors.to_s)
+      status.exit_code? || 1
+    end
+
+    # What to say when a manifest declares a command its shard's code does not register.
+    private def unregistered(command : Commands::Command, shard : String) : String
+      word = command.words.first
+      "#{ShardCommands.file(shard)} declares #{command.name}, which the #{shard} shard's " \
+      "code does not register in the application.\n" \
+      "Register it with Caramel::Crema.command(#{word.inspect}, …) in the shard, " \
+      "and require the shard in config/application.cr."
+    end
+
     private def show_help(words : Array(String)) : Int32
       color = Terminal.color?(@output)
       if words.empty?
         @output.print(Help.overview(@table, color))
+        warn_broken
         return 0
       end
       matches = @table.matching(words)
       command = matches.find(&.words.==(words)) || (matches.first if matches.size == 1)
-      page = command ? Help.command(@table, command, color) : Help.family(@table, words, color)
+      page = if command
+               Help.command(@table, command, color)
+             elsif matches.empty?
+               Help.shard(@table, words.first, color)
+             else
+               Help.family(@table, words, color)
+             end
       @output.print(page)
       0
     end
@@ -318,6 +392,7 @@ module Caramel::Frappe
       end
       @output.puts
       @output.puts(MRDP::GRAMMAR)
+      warn_broken
     end
 
     private def create(name : String) : Nil

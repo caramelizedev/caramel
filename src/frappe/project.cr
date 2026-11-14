@@ -123,14 +123,22 @@ module Caramel::Frappe
     # The Caramel release a project pins (ADR 0016): the version of the caramel
     # entry in its shard.lock, without build metadata.
     def self.pin(root : String) : String?
+      entry = locked(root)["caramel"]?.try(&.as_h?)
+      entry.try(&.[YAML::Any.new("version")]?).try(&.as_s?).try(&.split('+').first)
+    end
+
+    # Each shard a project's shard.lock locks, by name; none where no lock can be read.
+    def self.locked(root : String) : Hash(String, YAML::Any)
+      locked = {} of String => YAML::Any
       path = File.join(root, "shard.lock")
       info = File.info?(path, follow_symlinks: false)
-      return unless info && info.file? && info.size <= 1_048_576
-      shards = YAML.parse(File.read(path))["shards"]?.try(&.as_h?)
-      entry = shards.try(&.[YAML::Any.new("caramel")]?).try(&.as_h?)
-      entry.try(&.[YAML::Any.new("version")]?).try(&.as_s?).try(&.split('+').first)
-    rescue YAML::ParseException
-      nil
+      return locked unless info && info.file? && info.size <= 1_048_576
+      document = YAML.parse(File.read(path)).as_h?
+      shards = document.try(&.[YAML::Any.new("shards")]?).try(&.as_h?) || return locked
+      shards.each { |name, entry| name.as_s?.try { |shard| locked[shard] = entry } }
+      locked
+    rescue YAML::ParseException | File::Error
+      {} of String => YAML::Any
     end
 
     def name : String
