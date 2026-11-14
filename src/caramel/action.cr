@@ -386,10 +386,11 @@ module Caramel
       @context.wants_json? ? json(outcome) : render(outcome)
     end
 
-    # :nodoc:
     # The router answers a valid *contract* through this hook, which only yields. An
     # opt-in require replaces it to answer errors of its own, as `caramel/sweet_talk`
-    # answers a refusal with 422 (ADR 0003).
+    # answers a refusal with 422 (ADR 0003). Libraries outside the framework redefine
+    # it, so changing its name, arguments or meaning, or how the router calls it,
+    # breaks them.
     def __caramel_answer(contract : RequestContract, & : -> Response) : Response
       yield
     end
@@ -429,16 +430,18 @@ module Caramel
       Egress.html_headers(@context)
     end
 
-    # :nodoc:
     # The egress work that does not depend on the action, compiled once instead
-    # of once per action struct; the instance methods above forward to it.
+    # of once per action struct; the instance methods above forward to it. Libraries
+    # outside the framework call `text` and `errors_text`, and nothing else here.
     module Egress
       extend self
 
+      # :nodoc:
       def html(context : RequestContext, status : Int32, body : String) : Response
         Response.new(status, body, html_headers(context))
       end
 
+      # :nodoc:
       def html_headers(context : RequestContext) : HTTP::Headers
         headers = HTTP::Headers{
           "Content-Type"  => "text/html; charset=utf-8",
@@ -449,10 +452,12 @@ module Caramel
         headers
       end
 
+      # :nodoc:
       def fragment(title : String, body : String) : String
         "<title>#{HTML.escape(title)}</title>#{body}"
       end
 
+      # :nodoc:
       def json(status : Int32, body : String) : Response
         headers = HTTP::Headers{
           "Content-Type"  => "application/json",
@@ -462,10 +467,13 @@ module Caramel
         Response.new(status, body, headers)
       end
 
+      # A plain-text response of *status* with *body*. Libraries outside the framework
+      # call it, so changing its name, arguments or meaning breaks them.
       def text(status : Int32, body : String) : Response
         Response.new(status, body, HTTP::Headers{"Content-Type" => "text/plain; charset=utf-8"})
       end
 
+      # :nodoc:
       def errors_html(errors : Hash(String, Array(String))) : String
         String.build do |io|
           io << %(<section class="contract-errors" role="alert">)
@@ -480,6 +488,9 @@ module Caramel
         end
       end
 
+      # The MRDP text of a refused request: its *status*, *method* and *path*, then a
+      # `FIELD` line for each message in *errors*. Libraries outside the framework call
+      # it, so changing its name, arguments or meaning breaks them.
       def errors_text(errors : Hash(String, Array(String)),
                       status : Int32,
                       method : String,

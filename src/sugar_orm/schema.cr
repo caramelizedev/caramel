@@ -778,7 +778,9 @@ module SugarORM
       # database assigns.
       alias PrimaryKey = ::{{ key_column[:scalar].id }}
 
-      # The primary key's type by name, "UUID" or "Int64", for macros.
+      # The primary key's type by name, "UUID" or "Int64", for macros. Libraries outside
+      # the framework read it at compile time, so changing its name, its value's form or
+      # its meaning breaks them.
       SUGAR_KEY = {{ key_column[:scalar] }}
 
       # :nodoc:
@@ -827,7 +829,9 @@ module SugarORM
       end
 
       {% if tenant %}
-        # The column that names each row's tenant.
+        # The column that names each row's tenant; a schema with no tenant has no such
+        # constant. Libraries outside the framework test for it at compile time, so
+        # changing its name, its presence or its meaning breaks them.
         SUGAR_TENANT = {{ tenant[:column] }}
 
         def self.__sugar_tenant_column : String
@@ -986,7 +990,10 @@ module SugarORM
       {% for column in columns %}
         {% if column[:codec] %}
           {% sugar = "::#{@type}::SugarType#{column[:name].camelcase.id}" %}
-          # :nodoc:
+          # Encodes a value of this codec column as the text its column stores, and nil
+          # as nil; a column with no codec passes its value through. Every column has
+          # one. Libraries outside the framework call it, so changing its name, arguments
+          # or meaning breaks them.
           def self.__sugar_encode_{{ column[:name].id }}(
             value : {{ sugar.id }} | ::Nil
           ) : ::String?
@@ -994,7 +1001,9 @@ module SugarORM
           end
 
           {% if column[:orderable] %}
-            # :nodoc:
+            # Encodes both ends of a range of this orderable codec column. Libraries
+            # outside the framework call it, so changing its name, arguments or meaning
+            # breaks them.
             def self.__sugar_encode_{{ column[:name].id }}(
               value : ::Range({{ sugar.id }}, {{ sugar.id }})
             ) : ::Range(::String, ::String)
@@ -1005,14 +1014,18 @@ module SugarORM
               )
             end
 
-            # :nodoc:
+            # Encodes the start of a range with no end of this orderable codec column.
+            # Libraries outside the framework call it, so changing its name, arguments
+            # or meaning breaks them.
             def self.__sugar_encode_{{ column[:name].id }}(
               value : ::Range({{ sugar.id }}, ::Nil)
             ) : ::Range(::String, ::Nil)
               ::Range.new({{ column[:codec] }}.encode(value.begin), nil, value.excludes_end?)
             end
 
-            # :nodoc:
+            # Encodes the end of a range with no start of this orderable codec column.
+            # Libraries outside the framework call it, so changing its name, arguments
+            # or meaning breaks them.
             def self.__sugar_encode_{{ column[:name].id }}(
               value : ::Range(::Nil, {{ sugar.id }})
             ) : ::Range(::Nil, ::String)
@@ -1020,7 +1033,9 @@ module SugarORM
             end
           {% end %}
         {% else %}
-          # :nodoc:
+          # Passes a value of this column through, as it has no codec; a codec column
+          # encodes its value here. Every column has one. Libraries outside the
+          # framework call it, so changing its name, arguments or meaning breaks them.
           def self.__sugar_encode_{{ column[:name].id }}(value)
             value
           end
@@ -1046,6 +1061,8 @@ module SugarORM
         end
       end
 
+      # This record's primary key, whatever its field is named. Libraries outside the
+      # framework call it, so changing its name, arguments or meaning breaks them.
       def __sugar_primary_value : PrimaryKey
         @{{ primary_key.id }}
       end

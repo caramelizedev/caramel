@@ -45,7 +45,9 @@ module Caramel::Tenancy
         ::SugarORM::Tenancy::Tenant.query.where({{ by.id }}: slug).first
       end
 
-      # :nodoc:
+      # The tenant whose primary key is *id*, or nil when there is none. Libraries
+      # outside the framework call it, so changing its name, arguments or meaning
+      # breaks them.
       def self.find(id : ::{{ resolved }}::PrimaryKey) : ::SugarORM::Tenancy::Tenant?
         ::SugarORM::Tenancy::Tenant.query.find(id)
       end
