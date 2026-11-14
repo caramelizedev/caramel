@@ -1,15 +1,35 @@
 require "spec"
 require "../../src/frappe/commands"
 require "../../src/frappe/help"
+require "../../src/frappe/completion"
 
 private def parse(*args : String) : Caramel::Frappe::Commands::Invocation
-  Caramel::Frappe::Commands.parse(args.to_a)
+  Caramel::Frappe::Commands.builtin.parse(args.to_a)
 end
 
 private MIGRATE = "frappe migrate [--dev-override] [--agent|--human]"
 
 private def refusal(*args : String) : Caramel::Frappe::Commands::Usage
-  expect_raises(Caramel::Frappe::Commands::Usage) { Caramel::Frappe::Commands.parse(args.to_a) }
+  expect_raises(Caramel::Frappe::Commands::Usage) do
+    Caramel::Frappe::Commands.builtin.parse(args.to_a)
+  end
+end
+
+private GREET_SYNTAX = "demo:greet NAME [--loud] [--times=1..3]"
+private GREET        = Caramel::Frappe::Commands::Command.new(GREET_SYNTAX, "Greet NAME.",
+  brief: "Greet someone")
+
+# The built-ins and the one command a shard named demo contributes.
+private def extended : Caramel::Frappe::Commands::Table
+  builtin = Caramel::Frappe::Commands.builtin
+  groups = builtin.groups + [Caramel::Frappe::Commands::Group.new("DEMO", ["demo:greet"])]
+  Caramel::Frappe::Commands::Table.new(builtin.commands + [GREET], builtin.families, groups)
+end
+
+# The error *table* raises for *args*.
+private def refused(table : Caramel::Frappe::Commands::Table,
+                    *args : String) : Caramel::Frappe::Commands::Usage
+  expect_raises(Caramel::Frappe::Commands::Usage) { table.parse(args.to_a) }
 end
 
 describe Caramel::Frappe::Commands do
@@ -97,7 +117,7 @@ describe Caramel::Frappe::Commands do
     refusals.each do |syntax, messages|
       messages.each do |arguments, message|
         error = expect_raises(Caramel::Frappe::Commands::Usage) do
-          Caramel::Frappe::Commands.parse(arguments)
+          Caramel::Frappe::Commands.builtin.parse(arguments)
         end
         {error.message, error.syntax}.should eq({message, syntax})
       end
@@ -127,13 +147,14 @@ describe Caramel::Frappe::Commands do
   end
 
   it "knows which invocations belong to a project" do
-    Caramel::Frappe::Commands.project?(["lsp", "crystalline"]).should be_true
-    Caramel::Frappe::Commands.project?(["lsp", "install"]).should be_false
-    Caramel::Frappe::Commands.project?(["sites", "remove", "x"]).should be_false
-    Caramel::Frappe::Commands.project?(["db"]).should be_true
-    Caramel::Frappe::Commands.project?(["bogus"]).should be_false
+    builtin = Caramel::Frappe::Commands.builtin
+    builtin.project?(["lsp", "crystalline"]).should be_true
+    builtin.project?(["lsp", "install"]).should be_false
+    builtin.project?(["sites", "remove", "x"]).should be_false
+    builtin.project?(["db"]).should be_true
+    builtin.project?(["bogus"]).should be_false
     branches = ["db branch create", "db branch list", "db branch delete"]
-    Caramel::Frappe::Commands.matching(["db", "branch"]).map(&.name).should eq(branches)
+    builtin.matching(["db", "branch"]).map(&.name).should eq(branches)
   end
 
   it "declares every command only once" do
@@ -148,7 +169,7 @@ describe Caramel::Frappe::Commands do
   end
 
   it "names every shared run of command words" do
-    commands = Caramel::Frappe::Commands
+    commands = Caramel::Frappe::Commands.builtin
     prefixes = Caramel::Frappe::Commands::TABLE.flat_map do |command|
       (1..command.words.size).map { |size| command.words[0, size] }
     end.uniq!
@@ -160,7 +181,7 @@ describe Caramel::Frappe::Commands do
   end
 
   it "gives every command a brief and examples that parse as it" do
-    commands = Caramel::Frappe::Commands
+    commands = Caramel::Frappe::Commands.builtin
     Caramel::Frappe::Commands::TABLE.each do |command|
       command.brief.should_not be_empty
       command.brief.size.should be <= 54
@@ -178,11 +199,72 @@ describe Caramel::Frappe::Commands do
   end
 
   it "finds the words a help request names" do
-    commands = Caramel::Frappe::Commands
+    commands = Caramel::Frappe::Commands.builtin
     commands.help_words(%w[db branch create extra]).should eq(%w[db branch create])
     commands.help_words(%w[db bogus]).should eq(%w[db])
     commands.help_words(%w[bogus db]).should be_nil
-    commands.prefix(commands.matching(%w[db branch])).should eq(%w[db branch])
-    commands.prefix(commands.matching(%w[db])).should eq(%w[db])
+    prefix = ->(words : Array(String)) do
+      Caramel::Frappe::Commands.prefix(commands.matching(words))
+    end
+    prefix.call(%w[db branch]).should eq(%w[db branch])
+    prefix.call(%w[db]).should eq(%w[db])
+  end
+
+  it "keeps the colon out of every built-in command's first word" do
+    firsts = Caramel::Frappe::Commands::TABLE.map(&.words.first)
+    firsts.select(&.includes?(':')).should be_empty
+  end
+
+  it "parses a namespaced command with its positionals and flags" do
+    greeting = extended.parse(["demo:greet", "Ada", "--loud", "--times=2"])
+    greeting.command.should be(GREET)
+    GREET.words.should eq(["demo:greet"])
+    bound = {greeting["NAME"], greeting.flag?("--loud"), greeting["--times"]}
+    bound.should eq({"Ada", true, "2"})
+    missing = refused(extended, "demo:greet")
+    {missing.message, missing.syntax}.should eq({"missing NAME", "frappe #{GREET_SYNTAX}"})
+    refused(extended, "demo:greet", "Ada", "--lod").suggestion.should eq("--loud")
+  end
+
+  it "lists, suggests and matches a namespaced command like any other" do
+    table = extended
+    table.matching(["demo:greet"]).should eq([GREET])
+    table.brief(["demo:greet"]).should eq("Greet someone")
+    table.help_words(["demo:greet", "Ada"]).should eq(["demo:greet"])
+    mistyped = refused(table, "demo:gret", "Ada")
+    suggested = {mistyped.suggestion, mistyped.syntax}
+    suggested.should eq({"demo:greet", "frappe #{GREET_SYNTAX}"})
+    overview = Caramel::Frappe::Help.overview(table, false)
+    overview.should contain("\nDEMO\n  demo:greet      Greet someone\n")
+    roots = Caramel::Frappe::Completion.nodes(table)[""].map(&.word)
+    roots.last.should eq("demo:greet")
+    Caramel::Frappe::Completion.nodes(table)["demo:greet"].map(&.word)
+      .should eq(["--loud", "--times="])
+  end
+
+  it "refuses an unknown namespaced word as it does any unknown command" do
+    absent = refused(Caramel::Frappe::Commands.builtin, "something:else")
+    found = {absent.message, absent.subject, absent.suggestion, absent.syntax}
+    found.should eq({"unknown command something:else", "frappe something:else", nil, nil})
+    other = refused(extended, "demo:other", "Ada")
+    {other.message, other.subject}.should eq({"unknown command demo:other", "frappe demo:other"})
+  end
+
+  it "counts a first word with a colon as a project invocation, in the table or not" do
+    builtin = Caramel::Frappe::Commands.builtin
+    extended.project?(["demo:greet", "Ada"]).should be_true
+    builtin.project?(["demo:greet", "Ada"]).should be_true
+    extended.project?(["other:thing"]).should be_true
+    builtin.project?(["something:else"]).should be_true
+  end
+
+  it "refuses a malformed namespaced word when the command is defined" do
+    malformed = ["Demo:greet", "demo:Greet", ":greet", "demo:", "demo:greet:x", "demo::greet"]
+    malformed.each do |word|
+      refused(extended, word, "Ada").message.should eq("unknown command #{word}")
+      expect_raises(ArgumentError, "must start with a word") do
+        Caramel::Frappe::Commands::Command.new("#{word} NAME", "Greet NAME.", brief: "Greet")
+      end
+    end
   end
 end

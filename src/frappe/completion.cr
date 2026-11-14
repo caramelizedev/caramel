@@ -3,21 +3,21 @@ require "./commands"
 
 module Caramel::Frappe
   # `frappe completion zsh|bash|fish`: a script that completes commands,
-  # subcommands, options and choices, generated from Commands::TABLE.
+  # subcommands, options and choices, generated from a command table.
   module Completion
     # What may follow a run of command words: a word (with its line), or an option.
     # value: the option takes a value; joined: it is written --name=VALUE, so no space follows.
     record Candidate, word : String, description : String, value : Bool, joined : Bool
 
-    # Each run of command words ("" for none) with its candidates, in TABLE order.
+    # Each run of command words ("" for none) with its candidates, in the table's order.
     # Every command is a node, even one with no candidates, so that the walk
     # stops at `db restore` and offers file names instead of db's subcommands.
-    def self.nodes : Hash(String, Array(Candidate))
+    def self.nodes(table : Commands::Table) : Hash(String, Array(Candidate))
       nodes = {"" => [] of Candidate}
-      Commands::TABLE.each do |command|
+      table.commands.each do |command|
         command.words.each_index do |depth|
           add(nodes, command.words[0, depth].join(' '),
-            Candidate.new(command.words[depth], Commands.brief(command.words[0, depth + 1]),
+            Candidate.new(command.words[depth], table.brief(command.words[0, depth + 1]),
               false, false))
         end
         nodes[command.name] ||= [] of Candidate
@@ -42,8 +42,8 @@ module Caramel::Frappe
       nodes
     end
 
-    def self.script(shell : String) : String
-      nodes = self.nodes
+    def self.script(table : Commands::Table, shell : String) : String
+      nodes = self.nodes(table)
       case shell
       when "zsh"  then zsh(nodes)
       when "bash" then bash(nodes)

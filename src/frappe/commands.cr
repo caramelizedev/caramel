@@ -3,12 +3,14 @@ require "../latte/postgres"
 
 module Caramel::Frappe
   # Frappé's command line, stated once. Help, family help, completion, usage,
-  # argument validation, project dispatch and `frappe agent-manifest` all read TABLE.
+  # argument validation, project dispatch and `frappe agent-manifest` all read a Table;
+  # TABLE, FAMILIES and GROUPS define the built-in one.
   #
   # Syntax grammar: leading lowercase words name the command; `NAME` is a
   # positional, `a|b` a literal choice, `X...` one or more, `[...]` optional.
   # `--flag`, `--flag VALUE` and `--flag=VALUE` are options; `--a|--b`
   # excludes one another; a `=LOW..HIGH` value must be an integer in range.
+  # The first word of a command a shard contributes is `shard:name`.
   module Commands
     # A malformed invocation. `commands` are the intended commands, whose
     # syntax the error prints; `subject` names what was invoked.
@@ -34,6 +36,10 @@ module Caramel::Frappe
 
     record Flag, names : Array(String), value : String?, equals : Bool, optional : Bool
     record Positional, name : String, choices : Array(String)?, optional : Bool, repeat : Bool
+
+    WORD = /\A[a-z][a-z-]*\z/
+    # A contributed command's first word: the shard's name, a colon, the command's name.
+    NAMESPACED_WORD = /\A[a-z][a-z0-9_-]*:[a-z][a-z0-9-]*\z/
 
     class Command
       getter syntax : String
@@ -69,8 +75,7 @@ module Caramel::Frappe
             name, equals, assigned = head.partition('=')
             value = space.empty? ? (equals.empty? ? nil : assigned) : spaced
             @flags << Flag.new(name.split('|'), value, !equals.empty?, optional)
-          elsif !optional && @flags.empty? && @positionals.empty? &&
-                text.matches?(/\A[a-z][a-z-]*\z/)
+          elsif !optional && word?(text)
             @words << text
           else
             name = text.rchop("...")
@@ -81,6 +86,8 @@ module Caramel::Frappe
               repeat: text.ends_with?("..."))
           end
         end
+        return unless @words.empty?
+        raise ArgumentError.new("command syntax #{@syntax.inspect} must start with a word")
       end
 
       def name : String
@@ -91,6 +98,12 @@ module Caramel::Frappe
       def summary : String
         replacement = @deprecated || return @description
         "#{@description} Deprecated: #{replacement}"
+      end
+
+      # Whether `text` continues the command's words; only the first may be namespaced.
+      private def word?(text : String) : Bool
+        return false unless @flags.empty? && @positionals.empty?
+        text.matches?(WORD) || (@words.empty? && text.matches?(NAMESPACED_WORD))
       end
     end
 
@@ -390,52 +403,95 @@ module Caramel::Frappe
       Group.new("ABOUT FRAPPÉ", %w[help version completion agent-manifest]),
     ]
 
-    def self.parse(args : Array(String)) : Invocation
-      first = args.first? || raise Usage.new("missing command", "frappe", [TABLE.first])
-      family = TABLE.select { |command| command.words.first == first }
-      raise unknown(first) if family.empty?
-      depth = family.max_of { |command| shared(command.words, args) }
-      group = family.select { |command| shared(command.words, args) == depth }
-      subject = "frappe #{args[0, depth].join(' ')}"
-      if command = group.find(&.words.size.==(depth))
-        begin
-          return bind(command, args[depth..])
-        rescue ex : Usage
-          raise ex if group.size == 1
-          # `sites bogus`: the word after the prefix may be a mistyped subcommand.
-          word = args[depth]?
-          suggestion = ex.suggestion || (word && nearest(word, group.compact_map(&.words[depth]?)))
-          raise Usage.new(ex.message || "invalid arguments", subject, group, suggestion)
+    # The commands one Frappé answers to, with the family lines and help groups that
+    # describe them: the built-ins, or the built-ins and what a project's shards contribute.
+    class Table
+      getter commands : Array(Command)
+      # The line for each run of words that two or more commands share.
+      getter families : Hash(String, String)
+      getter groups : Array(Group)
+
+      def initialize(@commands : Array(Command),
+                     @families : Hash(String, String),
+                     @groups : Array(Group))
+      end
+
+      def parse(args : Array(String)) : Invocation
+        first = args.first? || raise Usage.new("missing command", "frappe", [@commands.first])
+        family = @commands.select { |command| command.words.first == first }
+        raise unknown(first) if family.empty?
+        depth = family.max_of { |command| Commands.shared(command.words, args) }
+        group = family.select { |command| Commands.shared(command.words, args) == depth }
+        subject = "frappe #{args[0, depth].join(' ')}"
+        if command = group.find(&.words.size.==(depth))
+          begin
+            return Commands.bind(command, args[depth..])
+          rescue ex : Usage
+            raise ex if group.size == 1
+            # `sites bogus`: the word after the prefix may be a mistyped subcommand.
+            word = args[depth]?
+            subcommands = group.compact_map(&.words[depth]?)
+            suggestion = ex.suggestion || (word && Commands.nearest(word, subcommands))
+            raise Usage.new(ex.message || "invalid arguments", subject, group, suggestion)
+          end
+        end
+        # `frappe db --human` names no subcommand: the mode flags select the output only.
+        if (word = args[depth]?) && !{"--agent", "--human"}.includes?(word)
+          message = "unknown #{subject.lchop("frappe ")} subcommand #{word}"
+          subcommands = group.compact_map(&.words[depth]?).uniq!
+          raise Usage.new(message, subject, group, Commands.nearest(word, subcommands))
+        end
+        raise Usage.new("#{subject} needs a subcommand", subject, group, bare: true)
+      end
+
+      # The error for a first word that names no command, with the nearest command's
+      # family as the intended commands.
+      def unknown(first : String) : Usage
+        suggestion = Commands.nearest(first, @commands.map(&.words.first).uniq!)
+        intended = suggestion ? @commands.select(&.words.first.==(suggestion)) : [] of Command
+        Usage.new("unknown command #{first}", "frappe #{first}", intended, suggestion)
+      end
+
+      # The commands whose words start with `words`, for `frappe db --help`.
+      def matching(words : Array(String)) : Array(Command)
+        @commands.select do |command|
+          command.words.size >= words.size && command.words[0, words.size] == words
         end
       end
-      # `frappe db --human` names no subcommand: the mode flags select the output only.
-      if (word = args[depth]?) && !{"--agent", "--human"}.includes?(word)
-        message = "unknown #{subject.lchop("frappe ")} subcommand #{word}"
-        subcommands = group.compact_map(&.words[depth]?).uniq!
-        raise Usage.new(message, subject, group, nearest(word, subcommands))
+
+      # The line for a run of command words: a family's, or a single command's.
+      def brief(words : Array(String)) : String
+        @families[words.join(' ')]? || @commands.find!(&.words.==(words)).brief
       end
-      raise Usage.new("#{subject} needs a subcommand", subject, group, bare: true)
-    end
 
-    # The error for a first word that names no command, with the nearest command's
-    # family as the intended commands.
-    def self.unknown(first : String) : Usage
-      suggestion = nearest(first, TABLE.map(&.words.first).uniq!)
-      intended = suggestion ? TABLE.select(&.words.first.==(suggestion)) : [] of Command
-      Usage.new("unknown command #{first}", "frappe #{first}", intended, suggestion)
-    end
+      # The longest leading run of `args` that names a command or family, or nil.
+      def help_words(args : Array(String)) : Array(String)?
+        args.size.downto(1) do |size|
+          words = args[0, size]
+          return words unless matching(words).empty?
+        end
+        nil
+      end
 
-    # The commands whose words start with `words`, for `frappe db --help`.
-    def self.matching(words : Array(String)) : Array(Command)
-      TABLE.select do |command|
-        command.words.size >= words.size && command.words[0, words.size] == words
+      # Whether `args` name a project command, which a project pinned to another
+      # Caramel release must run through that release's Frappé. Malformed
+      # project commands also dispatch, so the pinned release validates them.
+      # So does every `shard:name`, in this table or not: the pinned release's
+      # Frappé is the one that loads the project's commands.
+      def project?(args : Array(String)) : Bool
+        first = args.first? || return false
+        return true if first.includes?(':')
+        family = @commands.select { |command| command.words.first == first }
+        return false if family.empty?
+        matched = family
+          .select { |command| Commands.shared(command.words, args) == command.words.size }
+          .max_by?(&.words.size)
+        matched ? matched.project? : family.any?(&.project?)
       end
     end
 
-    # The line for a run of command words: a family's, or a single command's.
-    def self.brief(words : Array(String)) : String
-      FAMILIES[words.join(' ')]? || TABLE.find!(&.words.==(words)).brief
-    end
+    # The table of the commands Frappé itself defines.
+    class_getter(builtin : Table) { Table.new(TABLE, FAMILIES, GROUPS) }
 
     # The longest run of leading words that all of `commands` share.
     def self.prefix(commands : Array(Command)) : Array(String)
@@ -443,27 +499,6 @@ module Caramel::Frappe
       count = first.size
       commands.each { |command| count = {count, shared(first, command.words)}.min }
       first[0, count]
-    end
-
-    # The longest leading run of `args` that names a command or family, or nil.
-    def self.help_words(args : Array(String)) : Array(String)?
-      args.size.downto(1) do |size|
-        words = args[0, size]
-        return words unless matching(words).empty?
-      end
-      nil
-    end
-
-    # Whether `args` name a project command, which a project pinned to another
-    # Caramel release must run through that release's Frappé. Malformed
-    # project commands also dispatch, so the pinned release validates them.
-    def self.project?(args : Array(String)) : Bool
-      family = TABLE.select { |command| command.words.first == args.first? }
-      return false if family.empty?
-      matched = family
-        .select { |command| shared(command.words, args) == command.words.size }
-        .max_by?(&.words.size)
-      matched ? matched.project? : family.any?(&.project?)
     end
 
     # Splits on top-level spaces; `[...]` groups and a required `--flag VALUE`
@@ -512,7 +547,8 @@ module Caramel::Frappe
       previous.last
     end
 
-    private def self.shared(words : Array(String), args : Array(String)) : Int32
+    # How many leading `words` the leading `args` repeat.
+    def self.shared(words : Array(String), args : Array(String)) : Int32
       count = 0
       while count < words.size && words[count] == args[count]?
         count += 1
@@ -520,8 +556,9 @@ module Caramel::Frappe
       count
     end
 
+    # *args*, the arguments after the command's words, validated against its syntax.
     # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
-    private def self.bind(command : Command, args : Array(String)) : Invocation
+    def self.bind(command : Command, args : Array(String)) : Invocation
       values = {} of String => String
       lists = {} of String => Array(String)
       given = Set(String).new
