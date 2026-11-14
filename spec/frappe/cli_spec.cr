@@ -213,7 +213,9 @@ describe Caramel::Frappe::CLI do
 
       DEMO
         demo:greet      Greet someone by name
-        demo:notes      List or add notes\n
+        demo:notes      List or add notes
+        demo:database   Name the application's database
+        demo:install    Add the shard to the application\n
       TEXT
     help.should contain(group)
     help.index!(group).should be > help.index!("\nABOUT FRAPPÉ\n")
@@ -229,6 +231,8 @@ describe Caramel::Frappe::CLI do
         demo:greet       Greet someone by name
         demo:notes list  List the notes
         demo:notes add   Add a note
+        demo:database    Name the application's database
+        demo:install     Add the shard to the application
 
       LEARN MORE
         Use frappe help demo:greet for a command's usage and examples.\n
@@ -258,7 +262,10 @@ describe Caramel::Frappe::CLI do
       "frappe demo:greet NAME [--loud]  # Print a greeting for NAME; " \
       "--loud prints it in capitals.",
       "frappe demo:notes list  # Print each note on its own line.",
-      "frappe demo:notes add TEXT  # Add the note TEXT.",
+      "frappe demo:notes add TEXT  # Add the note TEXT; - reads it from standard input.",
+      "frappe demo:database  # Print the name of the database the application connects to.",
+      "frappe demo:install NOTE [--agent|--human]  # Write config/demo.cr, which requires " \
+      "the shard and adds NOTE to its notes, and require it in config/application.cr.",
     ])
   end
 
@@ -272,6 +279,16 @@ describe Caramel::Frappe::CLI do
       MRDP
     _, _, mistyped = in_project(["demo:gret", "Ada"])
     mistyped.should contain("SUGGEST: demo:greet\n")
+  end
+
+  it "validates a tool command's arguments against its syntax before it builds the program" do
+    status, output, errors = in_project(["demo:install", "--agent"])
+    {status, output}.should eq({1, ""})
+    errors.should eq(<<-MRDP)
+      ERR USAGE at frappe demo:install
+      MSG: missing NOTE
+      SYNTAX: frappe demo:install NOTE [--agent|--human]\n
+      MRDP
   end
 
   it "shows none of a shard's commands outside a project" do

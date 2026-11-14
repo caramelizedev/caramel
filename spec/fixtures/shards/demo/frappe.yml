@@ -13,9 +13,20 @@ commands:
     run: application
   - syntax: notes add TEXT
     brief: Add a note
-    description: Add the note TEXT.
+    description: Add the note TEXT; - reads it from standard input.
     examples:
       - notes add "Post the letter"
     run: application
+  - syntax: database
+    brief: Name the application's database
+    description: Print the name of the database the application connects to.
+    run: application
+  - syntax: install NOTE [--agent|--human]
+    brief: Add the shard to the application
+    description: Write config/demo.cr, which requires the shard and adds NOTE to its notes, and require it in config/application.cr.
+    examples:
+      - install "Read the guides"
+    run: tool
 families:
   notes: List or add notes
+tool: src/demo/frappe.cr

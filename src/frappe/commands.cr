@@ -41,6 +41,14 @@ module Caramel::Frappe
     # A contributed command's first word: the shard's name, a colon, the command's name.
     NAMESPACED_WORD = /\A[a-z][a-z0-9_-]*:[a-z][a-z0-9-]*\z/
 
+    # How a command that a shard contributes runs (ShardCommands).
+    enum Run
+      # As a command of the built application, which the shard's code registers there.
+      Application
+      # As the program its shard ships, which Frappé builds and runs (ShardTool).
+      Tool
+    end
+
     class Command
       getter syntax : String
       getter description : String
@@ -55,6 +63,8 @@ module Caramel::Frappe
       # A command kept for one release before its removal (ADR 0016): what
       # replaces it. Invoking it warns with this text.
       getter deprecated : String?
+      # How the command runs when a shard contributes it; nil for one Frappé defines.
+      getter run : Run?
       getter words = [] of String
       getter flags = [] of Flag
       getter positionals = [] of Positional
@@ -66,7 +76,8 @@ module Caramel::Frappe
                      @examples : Array(String) = [] of String,
                      @project : Bool = true,
                      @passthrough : Bool = false,
-                     @deprecated : String? = nil)
+                     @deprecated : String? = nil,
+                     @run : Run? = nil)
         Commands.tokens(@syntax).each do |token|
           optional = token.starts_with?('[')
           text = optional ? token[1...-1] : token

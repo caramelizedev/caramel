@@ -19,10 +19,11 @@ private def problem(manifest : String) : Caramel::Frappe::ShardCommands::Problem
   end
 end
 
-# The rule broken by a manifest of *entries* and *families*.
+# The rule broken by a manifest of *entries* and *families* that names *tool*.
 private def rule(entries : Array(Hash(String, String | Array(String))),
-                 families : Hash(String, String) = {} of String => String) : String
-  problem(ShardProject.manifest(entries, families)).rule
+                 families : Hash(String, String) = {} of String => String,
+                 tool : String? = nil) : String
+  problem(ShardProject.manifest(entries, families, tool: tool)).rule
 end
 
 private def entry(syntax : String, **fields) : Hash(String, String | Array(String))
@@ -37,9 +38,10 @@ describe Caramel::Frappe::ShardCommands do
       table = loaded.table
       table.commands.first(BUILTIN.commands.size).should eq(BUILTIN.commands)
       contributed = table.contributed("demo")
-      contributed.should eq(table.commands.last(3))
+      contributed.should eq(table.commands.last(5))
       contributed.map(&.syntax).should eq([
         "demo:greet NAME [--loud]", "demo:notes list", "demo:notes add TEXT",
+        "demo:database", "demo:install NOTE [--agent|--human]",
       ])
       greet = contributed.first
       greet.brief.should eq("Greet someone by name")
@@ -54,7 +56,8 @@ describe Caramel::Frappe::ShardCommands do
       groups = load(root).table.groups
       groups.first(BUILTIN.groups.size).should eq(BUILTIN.groups)
       group = groups.last
-      {group.title, group.names}.should eq({"DEMO", ["demo:greet", "demo:notes"]})
+      names = ["demo:greet", "demo:notes", "demo:database", "demo:install"]
+      {group.title, group.names}.should eq({"DEMO", names})
     end
   end
 
@@ -154,11 +157,88 @@ describe Caramel::Frappe::ShardCommands do
     end
   end
 
-  it "refuses a command that runs any way but as the application's, naming the value" do
+  it "refuses a command that runs any way but as application or tool, naming the value" do
     expected = "the command \"greet\" runs as \"binary\", " \
-               "and this Frappé runs a command as application"
+               "and this Frappé runs a command as application or tool"
     rule([entry("greet", run: "binary")]).should eq(expected)
     rule([entry("greet", run: nil)]).should eq(%(the command "greet" does not say how it runs))
+  end
+
+  it "records how each command runs, and the program that runs a shard's tool commands" do
+    ShardProject.create({"demo" => ShardProject.fixture}) do |root|
+      loaded = load(root)
+      runs = loaded.table.contributed("demo").to_h { |command| {command.name, command.run} }
+      runs["demo:greet"].should eq(Caramel::Frappe::Commands::Run::Application)
+      runs["demo:install"].should eq(Caramel::Frappe::Commands::Run::Tool)
+      loaded.tools.should eq({"demo" => "src/demo/frappe.cr"})
+      BUILTIN.commands.compact_map(&.run).should be_empty
+    end
+  end
+
+  it "names no program for a shard whose commands all run as the application's" do
+    ShardProject.create({"demo" => ShardProject.manifest([entry("greet")])}) do |root|
+      loaded = load(root)
+      loaded.problems.should be_empty
+      loaded.tools.should be_empty
+    end
+  end
+
+  it "refuses a tool command without a tool program, and a tool program without one" do
+    unnamed = rule([entry("install", run: "tool")])
+    unnamed.should eq("the command \"install\" runs as tool, " \
+                      "and the manifest names no tool program")
+    unused = rule([entry("greet")], tool: "src/demo/frappe.cr")
+    unused.should eq("the manifest names the tool program \"src/demo/frappe.cr\", " \
+                     "and no command runs as tool")
+  end
+
+  it "refuses a tool program that is not a Crystal file under the shard's src/" do
+    install = [entry("install", run: "tool")]
+    ["tools/frappe.cr", "src/frappe.rb", "/src/frappe.cr", "src/../../frappe.cr"].each do |path|
+      expected = "the tool program #{path.inspect} is not a Crystal file under the shard's src/"
+      rule(install, tool: path).should eq(expected)
+    end
+  end
+
+  it "refuses a tool program that the shard does not ship" do
+    install = [entry("install", run: "tool")]
+    manifest = ShardProject.manifest(install, tool: "src/demo/frappe.cr")
+    ShardProject.create({"demo" => manifest}) do |root|
+      File.delete(File.join(root, "lib/demo/src/demo/frappe.cr"))
+      found = load(root).problems.first
+      found.rule.should eq(%(the tool program "src/demo/frappe.cr" is not a file of the shard))
+      found.remedy.should eq("Ship the file with the shard, at that path.")
+    end
+  end
+
+  it "refuses a tool program that is a link out of the shard" do
+    install = [entry("install", run: "tool")]
+    manifest = ShardProject.manifest(install, tool: "src/demo/frappe.cr")
+    ShardProject.create({"demo" => manifest}) do |root|
+      program = File.join(root, "lib/demo/src/demo/frappe.cr")
+      File.delete(program)
+      File.symlink(File.join(root, "shard.lock"), program)
+      found = load(root).problems.first
+      found.rule.should eq(%(the tool program "src/demo/frappe.cr" is not a file of the shard))
+    end
+  end
+
+  it "reports a shard whose name cannot prefix a command, when it has a manifest" do
+    manifests = {
+      "9lives" => ShardProject.manifest([entry("purr")]),
+      "demo"   => ShardProject.fixture,
+    }
+    ShardProject.create(manifests, locked: ["9lives", "demo", "Loud"]) do |root|
+      Dir.mkdir_p(File.join(root, "lib/Loud"))
+      loaded = load(root)
+      loaded.table.shards.should eq(["demo"])
+      loaded.problems.size.should eq(1)
+      found = loaded.problems.first
+      found.file.should eq("lib/9lives/frappe.yml")
+      found.rule.should eq(%(the shard's name, "9lives", cannot prefix a command))
+      found.remedy.should start_with("Name the shard with a lowercase letter")
+      found.message.should contain("Frappé did not load the 9lives shard's commands.")
+    end
   end
 
   it "refuses a command declared twice" do

@@ -224,7 +224,7 @@ module Caramel::Frappe
       builds = File.join(@project.root, ".caramel/dev")
       directory = Latte::StateSecurity.ensure_owned_directory(builds)
       slot = BuildSlot.development(@project.root, fingerprint, @tools.toolchain.root)
-      lock = BuildLock.new(@project.root)
+      lock = BuildLock.application(@project.root)
       begin
         return unless acquired?(lock)
         cached = slot.holds?(fingerprint)
