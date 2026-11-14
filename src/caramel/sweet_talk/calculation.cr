@@ -47,7 +47,7 @@ module SweetTalk
     # A `never` or `always` line in the body is a rule on `result`, checked after the body;
     # a broken one raises `SweetTalk::Broken`. `SWEETTALK_CALCULATION_<NAME>` records {name,
     # means, line, [{argument, type}], returns, [{"never" or "always", sentence}]}, each type
-    # its full name, for `SweetTalk.calculations` and `Corretto.property`.
+    # its full name, for `SweetTalk.calculations`.
     #
     # @word noun | Declares a typed function of a context that changes nothing.
     # @usage calculation VERB(ARG : TYPE, ...), returns: TYPE, means: TEXT do ... end

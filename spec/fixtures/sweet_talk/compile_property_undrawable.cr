@@ -1,5 +1,4 @@
 require "../../../src/caramel/sweet_talk"
-require "../../../src/caramel/corretto/property"
 
 module Shop
   include SweetTalk
@@ -21,4 +20,8 @@ module Shop
 end
 
 SweetTalk.boot
+require "../../../src/caramel/sweet_talk/corretto"
+
+# Cents has a generator, so share is drawn; Note wraps JSON and has none.
+Corretto.property(Shop::Billing.share)
 Corretto.property(Shop::Billing.annotate)
