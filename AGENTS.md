@@ -13,8 +13,9 @@ under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
   description; other agents must open it.
 - Before filing or labelling a GitHub issue, read `.claude/skills/caramel-triage/SKILL.md`:
   it fixes the type, priority, effort and area labels and the issue's shape.
-- Decisions live in `docs/decisions`. Read the one that governs a change; a change that
-  alters a decision edits that ADR in the same commit.
+- Decisions live in `docs/decisions`, one ADR per subject, SweetTalk's in `sweettalk/`.
+  Read the one that governs a change; a change that alters a decision edits that ADR in
+  the same commit.
 - Status, measurements, investigations and history never go in this repository
   (CONTRIBUTING.md, Writing).
 - History, research and measurements live in

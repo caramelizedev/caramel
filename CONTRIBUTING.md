@@ -15,7 +15,7 @@ scripts/build-frappe && scripts/build-latte
 scripts/check all
 ```
 
-`scripts/check all` builds everything, then runs the spec suite and every check in lanes side by side, as many as the machine allows ([ADR 0022](docs/decisions/0022-parallel-check-lanes.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one, and `scripts/check` alone lists them. No check needs your own Latte stopped: each starts its services on free ports of its own.
+`scripts/check all` builds everything, then runs the spec suite and every check in lanes side by side, as many as the machine allows ([ADR 0017](docs/decisions/0017-style-and-checks.md)), and keeps the full output of any failure in a log named on its FAIL line. Each lane beyond the first uses its own toolchain prefix, `lanes/lane-N` inside the toolchain, with its own compiler caches. `--lanes 1` runs everything in turn. Outside `check all` the checks share one compiler cache, so never run two `scripts/check` at once. Inside one step, compiles may run side by side: a type check (`--no-codegen`) creates no program cache directory and never runs the compiler's keep-10 cache cleanup, and `scripts/crystal build` marks its program's cache directory as used before compiling, so another build's cleanup keeps it. Keep a lane's full builds to two at a time to bound memory. `scripts/check NAME` runs one, and `scripts/check` alone lists them. No check needs your own Latte stopped: each starts its services on free ports of its own.
 
 What the checks need:
 
@@ -31,11 +31,11 @@ Editor tools: build Frappé first (`scripts/build-frappe`), then run `bin/frappe
 
 ## Formatting and linting
 
-Code follows Caramel's rule set ([ADR 0017](docs/decisions/0017-formatting-and-linting.md)): `crystal tool format` for layout, and Ameba 1.7.0 plus `Caramel/ServiceNoun` for the rest. `scripts/check lint` builds `bin/frappe-lint` and lints the framework. `bin/frappe-lint --fix` applies Ameba's corrections, but review every one: some change behaviour, and ADR 0017 lists those that are not adopted. An inline `# ameba:disable Rule -- reason` goes on its own line above the code it covers and always names its reason.
+Code follows Caramel's rule set ([ADR 0017](docs/decisions/0017-style-and-checks.md)): `crystal tool format` for layout, and Ameba 1.7.0 plus `Caramel/ServiceNoun` for the rest. `scripts/check lint` builds `bin/frappe-lint` and lints the framework. `bin/frappe-lint --fix` applies Ameba's corrections, but review every one: some change behaviour, and ADR 0017 lists those that are not adopted. An inline `# ameba:disable Rule -- reason` goes on its own line above the code it covers and always names its reason.
 
 ## Style
 
-The formatter owns layout, and the linter owns what it can check ([ADR 0017](docs/decisions/0017-formatting-and-linting.md), [ADR 0021](docs/decisions/0021-line-length.md)). The rest is judgment. It is written down here so that people and agents make the same calls. Code reads as short sentences, one thought each.
+The formatter owns layout, and the linter owns what it can check ([ADR 0017](docs/decisions/0017-style-and-checks.md)). The rest is judgment. It is written down here so that people and agents make the same calls. Code reads as short sentences, one thought each.
 
 - **Keep lines short.** The framework's limit is 100 characters for every file, with no exclusions or inline disables, and most lines should be well under it. When a line grows, name its parts instead of nesting them:
 
@@ -77,21 +77,24 @@ The formatter owns layout, and the linter owns what it can check ([ADR 0017](doc
 
 ## Writing
 
-Every piece of writing has one home, chosen by what it is ([ADR 0026](docs/decisions/0026-writing-homes.md)):
+Every piece of writing has one home, chosen by what it is ([ADR 0014](docs/decisions/0014-repository-and-writing.md)):
 
 - What application authors need: the website (`website/source/site.html`). API detail
   goes in doc comments at the code.
 - What contributors must do: this file; pages of the website: `.claude/skills/caramel-docs`.
 - How to report a vulnerability: `SECURITY.md`.
-- A decision: an ADR in `docs/decisions` with Context (optional, the problem), Decision
-  (the rules in force, present tense) and Reasons (why, and what was rejected). When a
-  change alters a decision, edit its ADR in the same commit.
+- A decision: one ADR per subject in `docs/decisions`, SweetTalk's in `sweettalk/`:
+  Context (optional, the problem), Decision (the rules in force, present tense) and
+  Reasons (why, and what was rejected). Edit an ADR in the commit that alters its
+  decision; none amends another. An ADR cites what the site or a doc comment states
+  (`site#c-coldbrew-run`), not restating it. Cite ADR rules in words, not numbers.
 - Status, measurements, investigations, incident timelines and history: not this
   repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
   pull request description or the CHANGELOG.
 
 State a fact once and link to it. `scripts/check prose` checks where markdown lives,
-the ADR sections, relative links and each file's size; `scripts/check website` the pages.
+the ADR sections, relative links and each file's size; `scripts/check website` the pages
+and the cited anchors.
 
 ## Principles
 
