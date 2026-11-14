@@ -22,7 +22,7 @@ The rules an application relies on are stated on the website ([site.html](../../
 
 ## Reasons
 
-- A foreign-key violation, a serialization failure and a deadlock are conditions an application handles, each in its own way: a 409, a retry. A raw `PQ::PQError` made every caller match SQLSTATE strings. Mapping them follows the two codes already mapped.
+- A foreign-key violation, a serialization failure and a deadlock are conditions an application handles, each in its own way: a 409, a retry. A raw `PQ::PQError` makes every caller match SQLSTATE strings. They are mapped as the unique and the check violation are.
 - A retry that runs without being asked would repeat work the author never marked as safe, so `retries:` defaults to 0. It runs only outermost: PostgreSQL has rolled the whole transaction back, and a savepoint cannot rerun what the transaction around it did.
 - Text keeps a PostgreSQL sum exact without a Crystal type per column pair: `sum(int)` is a `bigint`, `sum(bigint)` and `sum(numeric)` are `numeric`, and only the caller knows which value to build.
 - `where_in` says the join without naming a table or a column, and carries the parent's own conditions and tenant, so rows the parent query excludes are excluded from the child's read too.

@@ -1,4 +1,4 @@
-# ADR 0031: A process keeps one row per key, and its steps, compensations and deadlines are Cold Brew jobs that each change one aggregate
+# ADR 0031: A process keeps one row per key, and its steps, compensations and deadlines are Cold Brew jobs that each change one aggregate or run one unit
 
 Date: 2026-10-09
 
