@@ -48,3 +48,6 @@ end
 Caramel::Crema.command("requirements", "requirements [ID|--ids]") do |arguments|
   SweetTalk.__sweettalk_print_requirements(arguments, STDOUT, STDERR)
 end
+
+# A full spec run must name every requirement id (`frappe corretto`).
+Caramel::SpecIds.declare { SweetTalk.declared_requirements.map(&.id) }

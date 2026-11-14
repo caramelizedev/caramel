@@ -112,7 +112,7 @@ module Corretto
 
   # Appends the example's full description, its groups' and its own joined by spaces, to the
   # file `frappe corretto` names in CORRETTO_EXAMPLES, so a full run can check that each
-  # requirement id is named by an example.
+  # id it must name (`Caramel::SpecIds`) is named by an example.
   private def self.record_example(item : ::Spec::Example) : Nil
     path = ENV["CORRETTO_EXAMPLES"]? || return
     names = [item.description]
