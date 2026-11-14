@@ -32,6 +32,22 @@ private def refused(table : Caramel::Frappe::Commands::Table,
   expect_raises(Caramel::Frappe::Commands::Usage) { table.parse(args.to_a) }
 end
 
+# The commands with *syntaxes*, each with a description and a brief.
+private def commands_of(syntaxes : Array(String)) : Array(Caramel::Frappe::Commands::Command)
+  syntaxes.map do |syntax|
+    Caramel::Frappe::Commands::Command.new(syntax, "Does it.", brief: "Do it")
+  end
+end
+
+# A table of the commands with *syntaxes* and the lines *families*, with one help group
+# that lists every first word once.
+private def table_of(syntaxes : Array(String),
+                     families = {} of String => String) : Caramel::Frappe::Commands::Table
+  commands = commands_of(syntaxes)
+  group = Caramel::Frappe::Commands::Group.new("GROUP", commands.map(&.words.first).uniq!)
+  Caramel::Frappe::Commands::Table.new(commands, families, [group])
+end
+
 describe Caramel::Frappe::Commands do
   it "binds positionals, choices, repeated values and every option form" do
     dev = parse("dev", "--branch", "feature_x", "--no-open")
@@ -157,27 +173,37 @@ describe Caramel::Frappe::Commands do
     builtin.matching(["db", "branch"]).map(&.name).should eq(branches)
   end
 
-  it "declares every command only once" do
-    names = Caramel::Frappe::Commands::TABLE.map(&.name)
-    names.uniq.size.should eq(names.size)
-  end
-
-  it "lists every command family in help exactly once" do
-    listed = Caramel::Frappe::Commands::GROUPS.flat_map(&.names)
-    families = Caramel::Frappe::Commands::TABLE.map(&.words.first).uniq!
-    listed.sort!.should eq(families.sort!)
-  end
-
-  it "names every shared run of command words" do
-    commands = Caramel::Frappe::Commands.builtin
-    prefixes = Caramel::Frappe::Commands::TABLE.flat_map do |command|
-      (1..command.words.size).map { |size| command.words[0, size] }
-    end.uniq!
-    shared = prefixes.select { |words| commands.matching(words).size >= 2 }
-    shared.map(&.join(' ')).to_set.should eq(Caramel::Frappe::Commands::FAMILIES.keys.to_set)
-    (prefixes - shared).each do |words|
-      commands.matching(words).map(&.words).should eq([words])
+  it "refuses a table that declares a command twice" do
+    expect_raises(ArgumentError, "command table: brew is declared twice") do
+      table_of(["brew", "brew NAME"])
     end
+  end
+
+  it "refuses a table whose first words are not each in exactly one help group" do
+    commands = commands_of(["brew", "pour"])
+    group = ->(names : Array(String)) { Caramel::Frappe::Commands::Group.new("GROUP", names) }
+    groupings = [
+      {[group.call(["brew"])], "pour is in no help group"},
+      {[group.call(["brew", "pour", "serve"])], "help lists serve, no command's word"},
+      {[group.call(["brew", "pour"]), group.call(["brew"])], "brew is listed twice in help"},
+    ]
+    groupings.each do |groups, message|
+      expect_raises(ArgumentError, "command table: #{message}") do
+        Caramel::Frappe::Commands::Table.new(commands, {} of String => String, groups)
+      end
+    end
+  end
+
+  it "refuses a run of words that begins a command without its line, and any other line" do
+    notes = ["notes list", "notes add TEXT"]
+    expect_raises(ArgumentError, "command table: notes begins a command and has no line") do
+      table_of(notes)
+    end
+    expect_raises(ArgumentError, "command table: brew has a line and begins no command") do
+      table_of(notes + ["brew"], {"notes" => "List or add notes", "brew" => "Brew"})
+    end
+    lined = table_of(notes, {"notes" => "List or add notes"})
+    lined.brief(["notes"]).should eq("List or add notes")
   end
 
   it "gives every command a brief and examples that parse as it" do

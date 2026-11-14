@@ -105,6 +105,96 @@ module Caramel::Frappe
         return false unless @flags.empty? && @positionals.empty?
         text.matches?(WORD) || (@words.empty? && text.matches?(NAMESPACED_WORD))
       end
+
+      # *args*, the arguments after the command's words, validated against its syntax.
+      # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
+      def bind(args : Array(String)) : Invocation
+        values = {} of String => String
+        lists = {} of String => Array(String)
+        given = Set(String).new
+        subject = "frappe #{name}"
+        fail = ->(message : String, suggestion : String?) do
+          Usage.new(message, subject, [self], suggestion)
+        end
+        position = 0
+        index = 0
+        while index < args.size
+          arg = args[index]
+          index += 1
+          slot = @positionals[position]?
+          if @passthrough && slot && slot.repeat
+            lists[slot.name] = args[(index - 1)..]
+            break
+          end
+          if arg.size > 1 && arg.starts_with?('-')
+            option, equals, value = arg.partition('=')
+            flag = @flags.find(&.names.includes?(option))
+            unless flag
+              spellings = @flags.flat_map(&.names)
+              raise fail.call("unknown option #{option}", Commands.nearest(option, spellings))
+            end
+            if flag.names.any? { |other| given.includes?(other) }
+              repeated = if flag.names.size > 1
+                           "#{flag.names.join(" and ")} exclude each other"
+                         else
+                           "#{option} is given more than once"
+                         end
+              raise fail.call(repeated, nil)
+            end
+            if placeholder = flag.value
+              if flag.equals
+                if equals.empty? || value.empty?
+                  raise fail.call("#{option} needs a value: #{option}=#{placeholder}", nil)
+                end
+              else
+                missing = "#{option} needs a value: #{option} #{placeholder}"
+                raise fail.call(missing, nil) unless equals.empty?
+                value = args[index]?
+                if value.nil? || value.empty? || value.starts_with?('-')
+                  raise fail.call(missing, nil)
+                end
+                index += 1
+              end
+              if range = placeholder.match(/\A(\d+)\.\.(\d+)\z/)
+                number = value.to_i?
+                unless number && value.matches?(/\A\d+\z/) &&
+                       (range[1].to_i..range[2].to_i).includes?(number)
+                  message = "#{option} must be a whole number from #{range[1]} to #{range[2]}"
+                  raise fail.call(message, nil)
+                end
+              end
+              values[option] = value
+            else
+              raise fail.call("#{option} takes no value", nil) unless equals.empty?
+            end
+            given << option
+          else
+            raise fail.call("unexpected argument #{arg.inspect}", nil) unless slot
+            raise fail.call("empty argument for #{slot.name}", nil) if arg.empty?
+            if (choices = slot.choices) && !choices.includes?(arg)
+              suggestion = Commands.nearest(arg, choices)
+              raise fail.call("unknown #{arg}; expected #{slot.name}", suggestion)
+            end
+            if slot.repeat
+              (lists[slot.name] ||= [] of String) << arg
+            else
+              values[slot.name] = arg
+              position += 1
+            end
+          end
+        end
+        @positionals.each do |positional|
+          next if positional.optional
+          next if values.has_key?(positional.name) || lists.has_key?(positional.name)
+          raise fail.call("missing #{positional.name}", nil)
+        end
+        @flags.each do |required|
+          next if required.optional
+          next if required.names.any? { |spelling| given.includes?(spelling) }
+          raise fail.call("missing #{required.names.first} #{required.value}", nil)
+        end
+        Invocation.new(self, values, lists, given)
+      end
     end
 
     # A validated invocation: positional values by placeholder, repeated
@@ -377,11 +467,11 @@ module Caramel::Frappe
     ]
 
     # `frappe help`'s rows, in the order a newcomer needs them: each name is a
-    # command's first word, listed once (commands_spec holds every first word to one group).
+    # command's first word, listed once.
     record Group, title : String, names : Array(String)
 
-    # The line for each run of words that two or more commands share, shown in help,
-    # family help and completion; commands_spec holds this to exactly those runs.
+    # The line for each run of words that begins longer commands, and for no other run,
+    # shown in help, family help and completion.
     FAMILIES = {
       "make"          => "Generate code: resource, locale, tenancy, domain",
       "db"            => "Dump, restore, diff, branch or diagnose the database",
@@ -405,27 +495,31 @@ module Caramel::Frappe
 
     # The commands one Frappé answers to, with the family lines and help groups that
     # describe them: the built-ins, or the built-ins and what a project's shards contribute.
+    # A table that help, completion and dispatch could not read one way is refused when it
+    # is built: a command declared twice, a first word outside exactly one help group, a
+    # run of words that begins a longer command without its line, or a line for another run.
     class Table
       getter commands : Array(Command)
-      # The line for each run of words that two or more commands share.
+      # The line for each run of words that begins longer commands.
       getter families : Hash(String, String)
       getter groups : Array(Group)
 
       def initialize(@commands : Array(Command),
                      @families : Hash(String, String),
                      @groups : Array(Group))
+        inconsistency.try { |found| raise ArgumentError.new("command table: #{found}") }
       end
 
       def parse(args : Array(String)) : Invocation
         first = args.first? || raise Usage.new("missing command", "frappe", [@commands.first])
         family = @commands.select { |command| command.words.first == first }
         raise unknown(first) if family.empty?
-        depth = family.max_of { |command| Commands.shared(command.words, args) }
-        group = family.select { |command| Commands.shared(command.words, args) == depth }
+        depth = family.max_of { |command| shared(command, args) }
+        group = family.select { |command| shared(command, args) == depth }
         subject = "frappe #{args[0, depth].join(' ')}"
         if command = group.find(&.words.size.==(depth))
           begin
-            return Commands.bind(command, args[depth..])
+            return command.bind(args[depth..])
           rescue ex : Usage
             raise ex if group.size == 1
             # `sites bogus`: the word after the prefix may be a mistyped subcommand.
@@ -484,9 +578,40 @@ module Caramel::Frappe
         family = @commands.select { |command| command.words.first == first }
         return false if family.empty?
         matched = family
-          .select { |command| Commands.shared(command.words, args) == command.words.size }
+          .select { |command| shared(command, args) == command.words.size }
           .max_by?(&.words.size)
         matched ? matched.project? : family.any?(&.project?)
+      end
+
+      # How many of *command*'s leading words the leading *args* repeat.
+      private def shared(command : Command, args : Array(String)) : Int32
+        words = command.words
+        count = 0
+        while count < words.size && words[count] == args[count]?
+          count += 1
+        end
+        count
+      end
+
+      # What keeps the table from being read one way, or nil.
+      private def inconsistency : String?
+        firsts = @commands.map(&.words.first).uniq!
+        listed = @groups.flat_map(&.names)
+        runs = Commands.family_runs(@commands)
+        lines = @families.keys
+        repeated(@commands.map(&.name)).try { |name| return "#{name} is declared twice" }
+        repeated(listed).try { |word| return "#{word} is listed twice in help" }
+        (firsts - listed).first?.try { |word| return "#{word} is in no help group" }
+        (listed - firsts).first?.try { |word| return "help lists #{word}, no command's word" }
+        (runs - lines).first?.try { |run| return "#{run} begins a command and has no line" }
+        (lines - runs).first?.try { |run| return "#{run} has a line and begins no command" }
+        nil
+      end
+
+      # The first of *words* that occurs twice, or nil.
+      private def repeated(words : Array(String)) : String?
+        words.tally.each { |word, count| return word if count > 1 }
+        nil
       end
     end
 
@@ -496,9 +621,19 @@ module Caramel::Frappe
     # The longest run of leading words that all of `commands` share.
     def self.prefix(commands : Array(Command)) : Array(String)
       first = commands.first.words
-      count = first.size
-      commands.each { |command| count = {count, shared(first, command.words)}.min }
-      first[0, count]
+      differing = (0...first.size).find do |index|
+        commands.any? { |command| command.words[index]? != first[index] }
+      end
+      first[0, differing || first.size]
+    end
+
+    # Each run of leading words that begins a longer command of *commands*, joined by
+    # spaces: the runs that help lists with a line of their own.
+    def self.family_runs(commands : Array(Command)) : Array(String)
+      runs = commands.flat_map do |command|
+        (1...command.words.size).map { |size| command.words[0, size].join(' ') }
+      end
+      runs.uniq!
     end
 
     # Splits on top-level spaces; `[...]` groups and a required `--flag VALUE`
@@ -545,103 +680,6 @@ module Caramel::Frappe
         previous = current
       end
       previous.last
-    end
-
-    # How many leading `words` the leading `args` repeat.
-    def self.shared(words : Array(String), args : Array(String)) : Int32
-      count = 0
-      while count < words.size && words[count] == args[count]?
-        count += 1
-      end
-      count
-    end
-
-    # *args*, the arguments after the command's words, validated against its syntax.
-    # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
-    def self.bind(command : Command, args : Array(String)) : Invocation
-      values = {} of String => String
-      lists = {} of String => Array(String)
-      given = Set(String).new
-      fail = ->(message : String, suggestion : String?) do
-        Usage.new(message, "frappe #{command.name}", [command], suggestion)
-      end
-      position = 0
-      index = 0
-      while index < args.size
-        arg = args[index]
-        index += 1
-        slot = command.positionals[position]?
-        if command.passthrough? && slot && slot.repeat
-          lists[slot.name] = args[(index - 1)..]
-          break
-        end
-        if arg.size > 1 && arg.starts_with?('-')
-          name, equals, value = arg.partition('=')
-          flag = command.flags.find(&.names.includes?(name))
-          unless flag
-            spellings = command.flags.flat_map(&.names)
-            raise fail.call("unknown option #{name}", nearest(name, spellings))
-          end
-          if flag.names.any? { |other| given.includes?(other) }
-            repeated = if flag.names.size > 1
-                         "#{flag.names.join(" and ")} exclude each other"
-                       else
-                         "#{name} is given more than once"
-                       end
-            raise fail.call(repeated, nil)
-          end
-          if placeholder = flag.value
-            if flag.equals
-              if equals.empty? || value.empty?
-                raise fail.call("#{name} needs a value: #{name}=#{placeholder}", nil)
-              end
-            else
-              missing = "#{name} needs a value: #{name} #{placeholder}"
-              raise fail.call(missing, nil) unless equals.empty?
-              value = args[index]?
-              if value.nil? || value.empty? || value.starts_with?('-')
-                raise fail.call(missing, nil)
-              end
-              index += 1
-            end
-            if range = placeholder.match(/\A(\d+)\.\.(\d+)\z/)
-              number = value.to_i?
-              unless number && value.matches?(/\A\d+\z/) &&
-                     (range[1].to_i..range[2].to_i).includes?(number)
-                message = "#{name} must be a whole number from #{range[1]} to #{range[2]}"
-                raise fail.call(message, nil)
-              end
-            end
-            values[name] = value
-          else
-            raise fail.call("#{name} takes no value", nil) unless equals.empty?
-          end
-          given << name
-        else
-          raise fail.call("unexpected argument #{arg.inspect}", nil) unless slot
-          raise fail.call("empty argument for #{slot.name}", nil) if arg.empty?
-          if (choices = slot.choices) && !choices.includes?(arg)
-            raise fail.call("unknown #{arg}; expected #{slot.name}", nearest(arg, choices))
-          end
-          if slot.repeat
-            (lists[slot.name] ||= [] of String) << arg
-          else
-            values[slot.name] = arg
-            position += 1
-          end
-        end
-      end
-      command.positionals.each do |positional|
-        next if positional.optional
-        next if values.has_key?(positional.name) || lists.has_key?(positional.name)
-        raise fail.call("missing #{positional.name}", nil)
-      end
-      command.flags.each do |option|
-        next if option.optional
-        next if option.names.any? { |spelling| given.includes?(spelling) }
-        raise fail.call("missing #{option.names.first} #{option.value}", nil)
-      end
-      Invocation.new(command, values, lists, given)
     end
   end
 end
