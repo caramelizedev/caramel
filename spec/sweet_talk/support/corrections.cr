@@ -1,4 +1,4 @@
-# Corrections to books, for SweetTalk's reached events and pinned references (ADRs 0048 and 0041): a
+# Corrections to books, for SweetTalk's reached events and pinned references (ADR 0041): a
 # chain of events across three contexts that all keep a log, and a journal that copies the
 # rules it was opened under when it is sealed.
 require "../../../src/caramel/sweet_talk"

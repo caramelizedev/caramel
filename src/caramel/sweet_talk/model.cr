@@ -22,7 +22,7 @@ module SweetTalk
     {{ constant.id }} = { {{ items.splat }} }
   end
 
-  # Raises the refusal *refusals* gives the constraint *error* names (ADR 0045), or
+  # Raises the refusal *refusals* gives the constraint *error* names (ADR 0039), or
   # *error* itself when SweetTalk did not declare that constraint. The parameter is the
   # parent class: a rescue of two sibling violations types its variable so.
   def self.__sweettalk_refuse(error : ::SugarORM::Error,
@@ -103,7 +103,7 @@ module SweetTalk
       {% too_long = "moves would check #{owner}'s states as @name, longer than PostgreSQL's 63 " +
                     "bytes: shorten the context or the #{owner} name\n  --> #{at.id}" %}
       SWEETTALK_MOVES = [{{ states.splat }}]
-      # The states no move leaves (ADR 0060)
+      # The states no move leaves (ADR 0046)
       {% leaving = [] of Nil %}
       {% for state, predecessors in before %}
         {% leaving = leaving + predecessors %}
@@ -192,7 +192,7 @@ module SweetTalk
     # reference to rows that belong to one tenant (ADR 0033); an index name over
     # PostgreSQL's 63 bytes is SugarORM's to shorten. `unique: true` or `unique: "…"`,
     # `index: true` and `check: {"sql", "…"}` are database constraints on the attribute's
-    # columns (ADR 0045), recorded by `__sweettalk_constraint`. `parts: {payment: [payee],
+    # columns (ADR 0039), recorded by `__sweettalk_constraint`. `parts: {payment: [payee],
     # cash: [leg]}` on a required closed-set value says which optional attributes each member
     # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
     # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
@@ -780,7 +780,7 @@ module SweetTalk
     end
 
     # `unique :source_key, :bundle, otherwise: "…"` is a unique index over the columns of
-    # those attributes (ADR 0045); in an entity it is unique within the aggregate, so the
+    # those attributes (ADR 0039); in an entity it is unique within the aggregate, so the
     # parent's column leads it. `otherwise:` is the sentence a duplicate is refused with;
     # without it, `Adjustment source_key and bundle must be unique`.
     #
@@ -813,7 +813,7 @@ module SweetTalk
     end
 
     # `index :owner, :state` is a plain index over the columns of those attributes, for
-    # the reads that look rows up by them (ADR 0045).
+    # the reads that look rows up by them (ADR 0039).
     #
     # @word rule | Adds a database index over one or more attributes for the reads that look
     #   rows up by them.
@@ -838,7 +838,7 @@ module SweetTalk
 
     # `check :pending_is_zero, "state <> 'pending' OR debit = 0", otherwise: "…"` is a
     # CHECK every row keeps, written against the stored columns, named by its name and the
-    # hash of its SQL (ADR 0045); `otherwise:` is the sentence a row that breaks it is
+    # hash of its SQL (ADR 0039); `otherwise:` is the sentence a row that breaks it is
     # refused with.
     #
     # @word rule | Keeps a SQL condition true of every row and refuses with a sentence when a

@@ -1,8 +1,8 @@
 # What `Corretto.property` draws SweetTalk's types from, and how it reads their errors
-# (ADR 0062 decision 7). A spec requires this file, after the domain, to run a property on
-# a calculation: it gives each value declared before it its generator, the `corretto_draw`
-# of ADR 0010 decision 11, names `SweetTalk::Refusal` as outside the domain, and lets
-# `SweetTalk::Broken` say what failed.
+# (ADR 0035, calculations as property cases). A spec requires this file, after the domain, to run
+# a property on a calculation: it gives each value declared before it its generator, the
+# `corretto_draw` of the property runner of ADR 0010, names `SweetTalk::Refusal` as outside the
+# domain, and lets `SweetTalk::Broken` say what failed.
 require "../corretto/property"
 require "../sweet_talk"
 

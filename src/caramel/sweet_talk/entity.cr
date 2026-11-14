@@ -252,7 +252,7 @@ module SweetTalk
       {% constraints = @type.constants.select(&.starts_with?("SWEETTALK_CONSTRAINT_"))
            .map { |constant| @type.constant(constant) }.sort_by { |constraint| constraint[1] } %}
       # The sentence each unique index and check this entity declared refuses with, by the
-      # constraint's name (ADR 0045); a violation of any other constraint stays raw.
+      # constraint's name (ADR 0039); a violation of any other constraint stays raw.
       SWEETTALK_REFUSALS = {
         {% for constraint in constraints %}
           {% if constraint[4] %}

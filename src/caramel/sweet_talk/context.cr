@@ -54,7 +54,7 @@ module SweetTalk
     # is checked in Crystal only, because PostgreSQL reads regular expressions differently.
     # `otherwise: "A balance cannot go below zero."` is the sentence a value outside its
     # bounds, length, pattern or list is refused with, in place of the generated one
-    # (ADR 0045); the database check is unchanged.
+    # (ADR 0039); the database check is unchanged.
     # `SWEETTALK_CHECK` records {"range", "lo..hi"}, {"length", name suffix, SQL condition}
     # or {"column", name suffix, SQL condition}, or nil. A whole number or decimal value also
     # records `SWEETTALK_BOUNDS = {least, most}`, each its source text or nil.
@@ -1066,7 +1066,7 @@ module SweetTalk
     # `locks:` names, in table then id order. A `never` or `always` line in its body is a
     # rule over the set, checked after the body; `SweetTalk.preview` runs every one and
     # lists those that fail as blockers. A `warn "…" { … }` line, checked with them, refuses
-    # a plain call and is listed by `SweetTalk.preview` (ADR 0060). It is a glossary
+    # a plain call and is listed by `SweetTalk.preview` (ADR 0046). It is a glossary
     # entry, timed as a domain span named `Ledger.post`. `once_by: key` makes it run once
     # per operation key: the first run keeps the key, a fingerprint of the other arguments
     # and what it returned in the context's `<context>_operations` table; a repeat with the
@@ -1783,7 +1783,7 @@ module SweetTalk
         {% end %}
       {% end %}
       # A command, a factory or a unit may run dry in a preview that rolls back, and a call to
-      # an outside system cannot be taken back, so none names an outside border (ADR 0060).
+      # an outside system cannot be taken back, so none names an outside border (ADR 0046).
       # This block checks the borders declared by now; the context map, those of later blocks.
       {% systems = outsides.map(&.args[0].names.last.stringify) %}
       {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_OUTSIDE_")) %}
@@ -2531,9 +2531,9 @@ module SweetTalk
       {% key = "SWEETTALK_REQUIREMENTS" %}
       SWEETTALK_REQUIREMENTS = {{ @type.has_constant?(key) ? @type.constant(key) : nil }}
       SWEETTALK_CENTRAL = {{ central ? true : false }}
-      # Whether `<context>_events` keeps every event of this context (ADR 0048)
+      # Whether `<context>_events` keeps every event of this context (ADR 0041)
       SWEETTALK_EVENT_LOG = {{ event_log ? true : false }}
-      # How many days the log keeps an event, or nil to keep every event (ADR 0048)
+      # How many days the log keeps an event, or nil to keep every event (ADR 0041)
       SWEETTALK_EVENT_DAYS = {{ days }}
       SWEETTALK_SUBDOMAIN = {{ subdomain.is_a?(NilLiteral) ? nil : subdomain.id.stringify }}
       SWEETTALK_FOLLOWS = [{{ followed.map(&.names.last.stringify).splat }}] of String

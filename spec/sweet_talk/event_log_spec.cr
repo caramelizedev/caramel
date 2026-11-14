@@ -1,4 +1,4 @@
-# The event log on PostgreSQL (ADR 0048): one row per event in the command's or the
+# The event log on PostgreSQL (ADR 0041): one row per event in the command's or the
 # service's transaction, the typed reader, pruning on a schedule, a projection rebuilt from
 # the log under its lock that leaves an event to the job still to apply it, an old event
 # read with older:, and a policy that runs after a projection's handler, enqueued by it.

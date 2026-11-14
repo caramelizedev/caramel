@@ -3,7 +3,7 @@
 # words too, and every lifecycle one on its state column, so a write that goes around the
 # domain is refused too; an optional value with parts has one that keeps its columns all
 # set or all nil, named by its parts so that a part added is a new constraint; a declared
-# `check` is one named by the hash of its SQL (ADR 0045); a pattern, and a value with
+# `check` is one named by the hash of its SQL (ADR 0039); a pattern, and a value with
 # database_check: false, are checked in Crystal only. And the tables as PostgreSQL holds
 # them match the declared ones, so `frappe db diff` derives no further migration.
 require "./support/app"

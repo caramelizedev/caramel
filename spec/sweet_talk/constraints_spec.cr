@@ -1,4 +1,4 @@
-# SweetTalk's database constraints (ADR 0045): a unique index, a plain index and a check
+# SweetTalk's database constraints (ADR 0039): a unique index, a plain index and a check
 # declared on an attribute or over an aggregate are PostgreSQL's, a violation is the
 # refusal the declaration says, the first row stands, a refused command is rolled back and
 # the aggregate reloaded, an entity is unique within its aggregate and may be replaced by

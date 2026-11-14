@@ -1,7 +1,7 @@
 require "./support/harness"
 require "../../src/frappe/word_drift"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0035, 0036, 0039 to 0041, 0045, 0046, 0048, 0060
+# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0035, 0036, 0039 to 0041, 0046
 # and 0063). Each declaration mistake fails to compile with a fixed problem text, naming
 # its file where the mistake has a line; a valid domain compiles, with and without
 # caramel/tenancy; the example of each word `frappe words` prints compiles; and an

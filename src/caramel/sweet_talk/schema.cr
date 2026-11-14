@@ -108,12 +108,12 @@ module SweetTalk
     {% end %}
   end
 
-  # A context's event log (ADR 0048). With `event_log: true` it is `Rows::Events`, the
+  # A context's event log (ADR 0041). With `event_log: true` it is `Rows::Events`, the
   # `<context>_events` table, append-only and tenanted as the context's rows are;
   # `__sweettalk_log`, which `SweetTalk.dispatch` calls with every event and which writes
   # one row for an event of this context or of a kernel it shares; `logged`, the typed
   # reader; and `__sweettalk_prune`, which the schedule `event_log: 90.days` registers
-  # loops, once an hour in Cold Brew's scheduler (ADR 0048). Without the keyword
+  # loops, once an hour in Cold Brew's scheduler (ADR 0041). Without the keyword
   # `__sweettalk_log` does nothing. A declaration whose table the log would take is
   # refused; one in a later `within` meets `Rows::Events` already declared, and SugarORM
   # refuses its table.
@@ -203,7 +203,7 @@ module SweetTalk
       end
 
       # `{{ short.id }}.reached(event)`: every event that followed from *event*, across every
-      # context's log, as a `SweetTalk::Reached` (ADR 0048). *event* is one this log keeps.
+      # context's log, as a `SweetTalk::Reached` (ADR 0041). *event* is one this log keeps.
       def self.reached(event : ::SweetTalk::Event) : ::SweetTalk::Reached
         unless SWEETTALK_LOGS.includes?(event.__sweettalk_home)
           raise ArgumentError.new("#{event.class.name} is not logged in {{ table.id }}: " +

@@ -1,4 +1,4 @@
-# SweetTalk's preview and commit (ADR 0060): a preview runs the body and rolls it back,
+# SweetTalk's preview and commit (ADR 0046): a preview runs the body and rolls it back,
 # leaving no receipt, job or log row; two previews of the same change agree, though the
 # clock and the id sequence moved; a commit against that fingerprint keeps the change, and
 # one against a world that moved raises Stale and writes nothing; a warn line refuses a

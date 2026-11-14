@@ -1,5 +1,5 @@
 # A sale previewed on GET and committed on POST against the fingerprint the form carried
-# in a hidden field (ADR 0060).
+# in a hidden field (ADR 0046).
 module PreviewWeb
   # The form that confirms a sale: what it would record, and the fingerprint to commit.
   def self.form(preview : SweetTalk::Preview, status : Int32 = 200) : Caramel::Response

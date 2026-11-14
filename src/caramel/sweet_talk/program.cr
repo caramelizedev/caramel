@@ -176,7 +176,7 @@ module SweetTalk
     end
 
     # The jobs that run before *job* for one event, nearest first, along the after: chain
-    # that leads to it; empty for a handler that says no after: (ADR 0048).
+    # that leads to it; empty for a handler that says no after: (ADR 0041).
     def self.__sweettalk_predecessors(job : String) : Array(String)
       {% if predecessors.empty? %}
         [] of String
@@ -193,7 +193,7 @@ module SweetTalk
   end
 
   # Deletes in chunks until one comes back short; the total. The schedule that
-  # `event_log: 90.days` registers calls it (ADR 0048).
+  # `event_log: 90.days` registers calls it (ADR 0041).
   def self.__sweettalk_pruning(before : Time, chunk : Int32, &) : Int64
     total = 0_i64
     loop do
@@ -214,7 +214,7 @@ module SweetTalk
   # was pruned. It returns a `SweetTalk::Rebuilt`. Under `caramel/tenancy` it rebuilds the
   # bound tenant's rows from the bound tenant's log. A projection whose context keeps no
   # log or keeps it a number of days, or that follows an event the log does not keep, does
-  # not compile (ADR 0048).
+  # not compile (ADR 0041).
   #
   # @word behaviour | Empties a projection and replays its events from the context's event log.
   # @usage SweetTalk.rebuild(PROJECTION)
@@ -340,13 +340,13 @@ module SweetTalk
     SQL
   REBUILD_PAGE = 500
 
-  # What `SweetTalk.rebuild` did (ADR 0048): *replayed*, the logged events the projection's
+  # What `SweetTalk.rebuild` did (ADR 0041): *replayed*, the logged events the projection's
   # handlers ran for; *deferred*, the events it left, in whole or for some elements, to a
   # queued job that applies them once the rebuild commits; *oldest*, when the oldest event
   # the log holds occurred, nil for an empty log.
   record Rebuilt, replayed : Int64, deferred : Int64, oldest : Time?
 
-  # What `Context.reached(event)` found (ADR 0048): *events*, every event that followed from
+  # What `Context.reached(event)` found (ADR 0041): *events*, every event that followed from
   # the one asked about, oldest first, the one asked about excluded.
   record Reached, events : Array(Event) do
     # The events grouped by the aggregate or context they belong to and its id, as
