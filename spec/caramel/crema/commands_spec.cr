@@ -11,6 +11,12 @@ describe "Caramel::Crema.command" do
     Caramel::Crema.run_command("spec:absent", ["Ada"]).should be_nil
   end
 
+  it "names each registered command, for Frappé to ask which ones a shard's code added" do
+    Caramel::Crema.command("spec:named", "spec:named NAME") { |_| 0 }
+    Caramel::Crema.command_names.should contain("spec:named")
+    Caramel::Crema.command_names.should_not contain("spec:named NAME")
+  end
+
   it "refuses a second registration of a name, naming the command" do
     Caramel::Crema.command("spec:once", "spec:once") { |_| 3 }
     expect_raises(ArgumentError, "The command spec:once is already registered") do

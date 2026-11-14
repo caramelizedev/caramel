@@ -125,4 +125,12 @@ module Caramel::Crema
                 "Add require \"caramel/crema/recorder\" to config/application.cr.")
     1
   end
+
+  # The name of each registered command, one per line. Frappé reads it before it runs
+  # a command that a shard's frappe.yml declares, so that a command the shard's code
+  # never registered is told from one that fails.
+  command("commands", "commands") do |_|
+    command_names.each { |name| puts name }
+    0
+  end
 end
