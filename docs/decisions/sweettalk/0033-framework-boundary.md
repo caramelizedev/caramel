@@ -1,4 +1,4 @@
-# ADR 0033: SweetTalk answers refusals with 422, binds its values and ids as contract fields, keeps every context per tenant unless it says central, and keys a domain as its tenant is keyed
+# ADR 0033: SweetTalk answers refusals with 422, binds its values and ids as contract fields, and keeps every context per tenant unless it says central
 
 Date: 2026-10-11
 
@@ -6,65 +6,47 @@ Status: accepted.
 
 ## Context
 
-SweetTalk meets the framework in three places, and each needed a rule.
-
-- **The web.** A SweetTalk command that says no raises `SweetTalk::Refusal`. Raised in an action's `handle` and left to the application's last rescue, it is a 500 with a reference and an unhandled error in Crema, although a domain rule saying no is an answer, not a fault. A contract field of a plain type makes an action read an `Int32` and build a `Quantity` in `handle`, where its refusal names no field. A refusal that reaches a form under `_base` only makes an application map sentences back to fields by comparing strings.
-- **Tenancy.** A multi-tenant application needs its domain in SweetTalk too. SweetTalk stores every row through SugarORM schemas, and SugarORM and Cold Brew already follow the bound tenant once a schema declares `tenant`. What remains is which rows belong to a tenant, and which combinations would leak across tenants.
-- **Ids.** Core keys a record by a UUIDv7 the application mints, with `Int64` as an opt-in ([ADR 0007](../0007-sugarorm.md)), and a tenant is keyed either way ([ADR 0025](../0025-tenancy.md)). A domain needs one answer for the key of its aggregates and entities, and for the tables whose order or counter is the point.
+SweetTalk meets the framework in three places. On the web, a domain rule that says no is an answer, yet an unrescued refusal would be a 500 with an error report. Under tenancy, SugarORM and Cold Brew follow the bound tenant once a schema declares it ([ADR 0025](../0025-tenancy.md)); what remains is which rows belong to a tenant and which combinations would leak. For ids, core offers UUIDv7 or Int64 keys ([ADR 0007](../0007-sugarorm.md)), and a domain needs one answer.
 
 ## Decision
 
-The rules an application relies on are stated on the website ([site.html](../../../website/source/site.html)), chiefly its SweetTalk guide, in the sections cited below by anchor, and in the doc comments under [src/caramel/sweet_talk](../../../src/caramel/sweet_talk). This record states what was chosen.
-
-1. **Requiring `caramel/sweet_talk` redefines the action's answer hook.** Core answers a valid contract through a hook whose body only yields ([ADR 0003](../0003-routing-and-ingress.md)). SweetTalk's definition (`Caramel::Action#__caramel_answer` in `src/caramel/sweet_talk/action.cr`) rescues `SweetTalk::Stale`, `SweetTalk::Refusal` and `SweetTalk::Missing` around `handle` and `respond`. A refusal raised by an authenticator, or inside a streamed body, is not answered this way.
-2. **A refusal that `handle` does not rescue answers 422, the way a failed contract does.** The hook answers it through `render_refusal(contract, refusal)`. The message joins the contract's errors under the field the refusal names with `on:` ([ADR 0046](0046-transactions.md)) when the contract declares that field, which core answers with `contract.field?(name)`, and under `_base` otherwise. What each client gets, and the overrides (`contract_failure_page` to show the form again with the refusal, `render_refusal` to answer otherwise), are in `site#c-sweettalk-actions` and on `Caramel::Action#render_refusal`.
-3. **A `SweetTalk::Stale` answers 422 with the fresh preview.** It is a refusal, answered through `render_stale(contract, stale)`, which gives a JSON client the fresh preview under `preview` too and every other client what `render_refusal` answers (`Caramel::Action#render_stale`, `site#c-sweettalk-preview`). Preview, commit and `Stale` are [ADR 0060](0060-preview-and-commit.md)'s.
-4. **A `SweetTalk::Missing` answers 404, and a programming error stays a 500.** `Missing` answers 404 with `Not found`, as a route parameter that does not convert does. `find`, and a command whose aggregate is gone, raise it. Asking an aggregate for an id it does not have yet (under `ids Int64`, before `create`), or an event for its subject before it is emitted, raises `NilAssertionError` instead, since that is a programming error. `SweetTalk::Boundary` is a programming error too: it stays a 500 with an unhandled report.
-5. **Neither a refusal nor `Missing` is reported to Crema as an error.** The command's domain span still records the refusal.
-6. **Refusal messages are the domain's English.** `caramel/i18n` ([ADR 0024](../0024-internationalization.md)) does not translate them (`site#c-sweettalk-limits`).
-7. **SweetTalk's values and ids are field values.** They include core's `Caramel::FieldValue` protocol ([ADR 0003](../0003-routing-and-ingress.md)). A value that wraps `Int32`, `Int64` or `String` binds from it, and its refusal is the field's error, under the field's key. `Name::Id` binds from its domain's id type (`UUID` by default, `Int64` under `ids Int64`) and never refuses; its summary reads `order:Order::Id(UUID)`; a route parameter that does not bind as that type answers 404. A value with parts is not a field value: an action builds it from one field per part (`site#c-sweettalk-actions`; what any field value may take is in `site#c-routing-contract`). How the other kinds of value bind is [ADR 0040](0040-values.md)'s, and a preview's `SweetTalk::Fingerprint` is a field value by [ADR 0060](0060-preview-and-commit.md).
-8. **The domain names its tenant.** In a program that requires `caramel/tenancy`, the module that includes `SweetTalk` says `tenant App::Account` before its first context. The model is the one the routes' `tenant` block names, and SugarORM refuses another. A domain without it does not compile; the other refusals of `tenant` are in `site#c-sweettalk-tenancy`. `frappe make tenancy` names the tenant in each domain in `app/domain/` (`site#c-tenancy-enable`), and `frappe make domain` in a multi-tenant application names it in the new domain; `--central` marks its first context `central: true` (`site#c-commands-frappe`).
-9. **Every context is tenanted unless it says `central: true`.** A tenanted context's aggregates, entities, projections and processes declare SugarORM's `tenant account : App::Account`, the tenant declaration of [ADR 0025](../0025-tenancy.md); the attribute is named after the model's last segment. Their reads, locks, keys and unique indexes are per tenant: a projection or a process keeps one row per tenant per key, and an entity's parent key is composite. `context Name, central: true` keeps its rows shared by every tenant, as `frappe make resource --central` does. What `central:` takes is in `site#c-sweettalk-tenancy`. A shared kernel's rows belong to the tenant as a tenanted context's do, and `central:` stays a context's word ([ADR 0036](0036-strategic-design.md)).
-10. **Jobs and channels follow the tenant.** A policy, projection or process step runs in the tenant its event was emitted in, and a deadline in the tenant that armed it; either fails with `Caramel::Tenancy::Gone` once that tenant is gone, the rule [ADR 0025](../0025-tenancy.md) gives every job. A notification is published on the tenant's prefixed channel.
-11. **References point from a tenant to shared data, not back.** A tenanted aggregate may `has` a central aggregate, through a plain foreign key. A central context may not `has` a tenanted aggregate or a tenanted application schema.
-12. **Shared events do not drive a tenant's rows.** A `whenever` in a tenanted context or border that follows a central context's event does not compile. A central context may follow a tenanted context's events; its handler runs in the event's tenant and writes shared rows.
-13. **The tenant's column is reserved, and the aggregate names it.** A `has` or a composite part that would store `<model>_id` (`account_id` for `App::Account`), and an entity whose aggregate is named like the tenant model, do not compile. Every aggregate of a tenanted context has `tenant_id` and `tenant`, and may declare neither with `has`; their types and values are in `site#c-sweettalk-tenancy`.
-14. **Names fit PostgreSQL.** An event channel holds at most 63 characters less the tenant's `t<id>:` prefix, whose length [ADR 0025](../0025-tenancy.md) sets: 42 under an Int64 tenant (a 21-character prefix), 36 under a UUID tenant (a 27-character prefix), 63 without `caramel/tenancy`. A longer channel does not compile (`site#c-sweettalk-tenancy`, `site#c-sweettalk-refusals`). A tenanted table's tenant index, `index_<table>_on_<model>_id_and_id` (`account_id` for `App::Account`), is shortened by SugarORM over 63 bytes, as every index name is.
-15. **A domain's ids follow its tenant's key type, and `ids Int64` opts a domain out of UUID.** `ids Int64`, before the first context, keys a domain's aggregates and entities by an Int64 the database assigns. Otherwise a domain's ids follow its tenant's key type, or are UUID without a tenant. A domain whose `ids` differ from its tenant's key fails compilation (`ids` in `src/caramel/sweet_talk/context.cr`, `site#c-sweettalk-aggregates`). `has x : UUID` is a stored column, and the `subject_id` of the event log ([ADR 0048](0048-event-log.md)) takes the context's id type. `frappe make domain` writes no `ids` line.
-16. **In a UUID domain an id exists when its aggregate or entity is built.** So `id`, `==` and `hash` work before `create`, and entities come back in creation order (`site#c-sweettalk-aggregates`). A copied or rolled-back entity inserted again takes a fresh id. The key types and how an id is minted are [ADR 0007](../0007-sugarorm.md)'s.
-17. **The tables whose order or counter is the point stay bigint.** `<context>_operations` ([ADR 0046](0046-transactions.md)), the id of each context's event log ([ADR 0048](0048-event-log.md)), projection rows ([ADR 0041](0041-events.md)) and process rows ([ADR 0031](0031-processes.md)) keep `field id : Int64, primary: true`, whatever the domain's ids are.
-18. **Plugging in on existing data follows the framework's steps.** They are the steps of [ADR 0025](../0025-tenancy.md) (`site#c-tenancy-existing`), and `frappe db diff` halts on each SweetTalk table they apply to. Every queue is drained before the first deploy with tenancy, because a job enqueued without a tenant runs with none.
-19. **Tenancy has a spec program of its own.** `scripts/check integration` runs `spec/sweet_talk_tenancy`, whose domain mixes tenanted and central contexts, while `spec/sweet_talk` keeps running without tenancy. Every tenancy refusal above has a `sweet-talk-compilation` fixture, and `compile_with_tenancy` is a valid case.
+1. **Requiring SweetTalk redefines the action's answer hook.** Core answers a valid contract through a hook whose body only yields ([ADR 0003](../0003-routing-and-ingress.md)). Core never names SweetTalk.
+2. **A refusal the action does not rescue answers 422, the way a failed contract does.** Its message goes under the field the refusal names when the contract has it, and form-wide otherwise.
+3. **A missing aggregate answers 404, a programming error stays a 500, and neither a refusal nor a missing aggregate is reported as an error.**
+4. **Refusal messages are the domain's English.**
+5. **SweetTalk's values and ids are contract field values.** They include core's field-value protocol, and a value's refusal is the field's error. A value with parts is not one.
+6. **The domain names its tenant.** Under tenancy, a domain that does not name the tenant model does not compile.
+7. **Every context is tenanted unless it says it is central.** A tenanted context's rows, locks and keys belong to the tenant; a central context's rows are shared by every tenant.
+8. **Jobs and channels follow the tenant.** A handler runs in the tenant its event was emitted in, and a deadline in the tenant that armed it.
+9. **References point from a tenant to shared data, not back.** A central context may not refer to a tenanted aggregate or schema.
+10. **Shared events do not drive a tenant's rows.** A tenanted context that follows a central context's event does not compile. A central context may follow a tenanted context's events, and its handler runs in the event's tenant.
+11. **The tenant's column is named after the tenant model and reserved.**
+12. **A channel name that does not fit PostgreSQL with the tenant's prefix does not compile.**
+13. **A domain's ids follow its tenant's key type, and are UUIDv7 without a tenant.** A domain opts into Int64 ids explicitly, and one whose ids differ from its tenant's key does not compile. A UUID id exists when its aggregate or entity is built.
+14. **The tables whose order or counter is the point stay bigint, whatever the domain's ids are.**
+15. **Plugging tenancy into existing data follows the framework's steps.** SweetTalk adds no migration generator of its own.
 
 ## Reasons
 
-- A refusal is the domain's answer to a valid request, so it is answered like an invalid one: 422, in the shapes [ADR 0003](../0003-routing-and-ingress.md) gives contract failures, without an error report that would page someone. A boundary error is a bug, so it stays a 500.
-- Redefining an identity hook keeps the mapping out of every program that does not require `caramel/sweet_talk`, and `scripts/check sweet-talk-compilation` proves it on the binary. Core never names SweetTalk.
-- Answering a browser with `contract_failure_page` lets one override serve both failures, and generated forms already list `_base` messages.
-- Binding a value in the contract gives its refusal the field's key, which a form shows beside its input, and a route parameter typed `Order::Id` keeps a `Tea::Id` out.
-- The domain does not know the contract, so the field is checked when the refusal is answered, and a contract without it keeps the refusal under `_base`, which every generated form lists.
-- **Rejected: answering refusals in `Application#failure`.** It knows the request, not the action, so it can neither re-render the action's form nor use its layout.
-- **Rejected: a module each action includes.** It needs the same hook, and an action that forgets it answers 500 again.
-- **Rejected: `rescue SweetTalk::Refusal` in each `handle`.** One forgotten rescue is a 500.
-- **Rejected: a SweetTalk branch in the contract macro.** Core would name SweetTalk, and no other type could bind.
-- **Rejected: 409 for a refusal.** Caramel answers errors found after the contract with 422 (`render_errors`); one status keeps a client's handling to one shape.
-- Deferred: refusal messages translated by `caramel/i18n` ([ADR 0024](../0024-internationalization.md)); a refusal's text is the domain's English.
-- Tenancy by default fails closed, as [ADR 0025](../0025-tenancy.md) requires: a context left unmarked hides its rows from other tenants instead of sharing them. A bounded context is the unit of language and ownership, so the context decides.
-- A generated application requires its models before its routes. Read from the routes while a schema expands, the tenant model is not yet known in that order, and the domain compiles untenanted. Schemas generated in `macro finished` would see it, but every SweetTalk schema would expand last and a clash would point into generated code. The explicit word works in any order, and SugarORM already checks the duplicated name.
-- One `tenant` line per schema is the whole run-time change: SugarORM scopes reads, locks, upserts and keys, and Cold Brew carries the tenant into jobs and deadlines.
-- A central row that names tenanted rows shows their ids to every tenant. A central event carries no tenant, so its tenanted handler fails with `SugarORM::Tenancy::Missing`, or writes into whichever tenant the central command happened to run in. A refusal can be lifted later without breaking a program; one added after a release would break programs.
-- The channel budget subtracts the longest prefix of the tenant's key type: an Int64 id holds at most 19 digits and a UUID always takes 25 base-36 characters. PostgreSQL truncates an index name over 63 bytes, so SugarORM shortens one itself, keeping the `index_<table>_on_` prefix it owns, and the differ sees the name it declared.
-- A column named after the model matches the application's own tenanted tables, so SQL, `frappe db diff` and the plug-in steps of [ADR 0025](../0025-tenancy.md) read the same.
-- `tenant_id` and `tenant` let rows read under `Caramel::Tenancy.without` still say whose they are.
-- Each opt-in already has a spec program of its own, and `spec/sweet_talk` keeps proving SweetTalk without tenancy.
-- **Rejected: opt-in `tenanted: true`.** One forgotten flag shares a context's rows between tenants.
-- **Rejected: `central:` per aggregate.** One context's invariants would span tenants.
-- **Rejected: requiring the domain after the routes.** Any other order compiles untenanted.
-- **Rejected: hashed channel names.** Live pages and `renamed_from:` rely on readable channels.
-- **Rejected: a generator for the plug-in migrations.** It would cover only a one-tenant backfill.
-- Deferred: a central event delivered to every tenant, and an `as:` name for the tenant attribute.
-- An id the application holds before the insert lets SweetTalk aggregates compare and hash before they are saved.
-- Entity order relies on a process's ids strictly increasing, which the sub-millisecond bits and the per-process floor of `SugarORM.uuid7` keep. Rejected: the stdlib `UUID.v7`, which has no counter, so two ids in one millisecond order at random ([ADR 0007](../0007-sugarorm.md)).
-- SweetTalk ids follow the tenant because an event keeps the tenant's id where its aggregate ids go; a mismatch is refused at compile time rather than at the first write.
-- Bigint stays where order or a counter is the point. The event log's id is the rebuild cursor, read in order; projection and process rows are named by their key, never their id.
-- **Rejected: switching existing domains silently.** A SweetTalk domain without a tenant defaults to UUID; `frappe db diff` halts on the changed key and its remediation names `ids Int64`, so no table is rewritten by accident.
+- A refusal is the domain's answer to a valid request, so it is answered like an invalid one, without an error report that would page someone. A boundary violation is a bug, so it stays a 500.
+- Redefining the hook keeps the mapping out of every program that does not require SweetTalk.
+- The domain does not know the contract, so the field is checked when the refusal is answered.
+- Binding a value in the contract gives its refusal the field's key, which a form shows beside its input. A route parameter typed as one aggregate's id keeps another aggregate's id out.
+- Rejected: answering refusals in the application's failure handler. It knows the request, not the action, so it can neither re-render the action's form nor use its layout.
+- Rejected: a module each action includes, or a rescue in each action. One forgotten action answers 500 again.
+- Rejected: a SweetTalk branch in the contract macro. Core would name SweetTalk, and no other type could bind.
+- Rejected: 409 for a refusal. Caramel answers errors found after the contract with 422; one status keeps a client's handling to one shape.
+- Deferred: refusal messages translated by the internationalization opt-in ([ADR 0024](../0024-internationalization.md)).
+- Tenancy by default fails closed: a context left unmarked hides its rows from other tenants. Rejected: an opt-in flag per context, since one forgotten flag shares a context's rows between tenants.
+- A bounded context is the unit of language and ownership, so the context decides. Rejected: central per aggregate, since one context's invariants would span tenants.
+- A generated application requires its models before its routes, so a tenant model read from the routes is not yet known when a schema expands, and the domain would compile untenanted. Rejected: requiring the domain after the routes, since any other order compiles untenanted.
+- A central row that names tenanted rows shows their ids to every tenant. A central event carries no tenant, so a tenanted handler would fail or write into whichever tenant the central command ran in.
+- A refusal can be lifted later without breaking a program; one added after a release would break programs.
+- A column named after the model matches the application's own tenanted tables, so SQL, the schema differ and the plug-in steps read the same.
+- Rejected: hashed channel names. Live pages and renames rely on readable channels.
+- Rejected: a generator for the plug-in migrations. It would cover only a one-tenant backfill.
+- Deferred: a central event delivered to every tenant.
+- An id the application holds before the insert lets aggregates compare and hash before they are saved.
+- Ids follow the tenant because an event keeps the tenant's id where its aggregate ids go. A mismatch is refused at compile time rather than at the first write.
+- The event log's id is the rebuild cursor, read in order, and projection and process rows are named by their key, never their id.
+- Rejected: switching existing domains to UUID silently. The schema differ halts on the changed key, so no table is rewritten by accident.
