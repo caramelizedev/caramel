@@ -61,6 +61,7 @@ module Caramel::Checks
         tenancy
         translations
         agent_tooling
+        shard_commands
         sweet_talk_diff
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
@@ -265,11 +266,15 @@ module Caramel::Checks
     end
 
     # Makes the application multi-tenant: Note belongs to an Account, Tag is
-    # shared by every tenant.
+    # shared by every tenant. The Shop domain, written before tenancy, gets its
+    # tenant line by hand, as SweetTalk's refusal tells its author.
     def tenancy : Nil
       command([@frappe, "make", "tenancy", "Account"], chdir: @project)
-      shop = File.read(File.join(@project, "app/domain/shop.cr"))
-      assert!(shop.includes?("  include SweetTalk\n  tenant App::Account\n"), shop)
+      path = File.join(@project, "app/domain/shop.cr")
+      shop = File.read(path)
+      assert!(!shop.includes?("tenant App::Account"), shop)
+      named = "  include SweetTalk\n  tenant App::Account\n"
+      File.write(path, shop.sub("  include SweetTalk\n", named))
       command([@frappe, "make", "domain", "Catalogue", "Shelf",
                "--means=the teas on our shelves", "--central"], chdir: @project)
       catalogue = File.read(File.join(@project, "app/domain/catalogue.cr"))
@@ -289,9 +294,9 @@ module Caramel::Checks
       expected.each do |route|
         assert!(routes.lines.any? { |line| line.split == route }, routes)
       end
-      puts "PASS: frappe make tenancy wires caramel/tenancy and names the tenant in the " \
-           "SweetTalk domain; tenant resources route under /:tenant beside central ones, " \
-           "and frappe make domain --central writes a shared context"
+      puts "PASS: frappe make tenancy wires caramel/tenancy and leaves the SweetTalk " \
+           "domain to its author; tenant resources route under /:tenant beside central " \
+           "ones, and frappe make domain --central writes a shared context"
     end
 
     # Starts the Shop domain before tenancy, then gives it P5's Ordering context
@@ -299,8 +304,8 @@ module Caramel::Checks
     def domain : Nil
       made = command([@frappe, "make", "domain", "Shop", "Ordering",
                       "--means=choosing teas and checking out"], chdir: @project)
-      %w[.claude/skills/sweettalk/SKILL.md app/domain/shop.cr config/application.cr
-        spec/domain/shop_spec.cr].each do |path|
+      %w[.ameba.yml .claude/skills/sweettalk/SKILL.md AGENTS.md app/domain/shop.cr
+        config/application.cr spec/domain/shop_spec.cr].each do |path|
         assert!(made.stdout.includes?("Generated #{path}\n"), made.stdout)
       end
       File.write(File.join(@project, "app/domain/shop.cr"), SHOP_DOMAIN)
@@ -956,6 +961,7 @@ module Caramel::Checks
 end
 
 require "./frappe_project/benchmark"
+require "./frappe_project/shard_commands"
 
 begin
   Caramel::Checks::FrappeProject.new.execute(ARGV)

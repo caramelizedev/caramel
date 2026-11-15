@@ -10,7 +10,7 @@ module Caramel::Frappe
   # positional, `a|b` a literal choice, `X...` one or more, `[...]` optional.
   # `--flag`, `--flag VALUE` and `--flag=VALUE` are options; `--a|--b`
   # excludes one another; a `=LOW..HIGH` value must be an integer in range.
-  # The first word of a command a shard contributes is `shard:name`.
+  # The first word of a command a shard contributes is `shard:name` (ShardCommands).
   module Commands
     # A malformed invocation. `commands` are the intended commands, whose
     # syntax the error prints; `subject` names what was invoked.
@@ -41,6 +41,14 @@ module Caramel::Frappe
     # A contributed command's first word: the shard's name, a colon, the command's name.
     NAMESPACED_WORD = /\A[a-z][a-z0-9_-]*:[a-z][a-z0-9-]*\z/
 
+    # How a command that a shard contributes runs (ShardCommands).
+    enum Run
+      # As a command of the built application, which the shard's code registers there.
+      Application
+      # As the program its shard ships, which Frappé builds and runs (ShardTool).
+      Tool
+    end
+
     class Command
       getter syntax : String
       getter description : String
@@ -55,6 +63,8 @@ module Caramel::Frappe
       # A command kept for one release before its removal (ADR 0016): what
       # replaces it. Invoking it warns with this text.
       getter deprecated : String?
+      # How the command runs when a shard contributes it; nil for one Frappé defines.
+      getter run : Run?
       getter words = [] of String
       getter flags = [] of Flag
       getter positionals = [] of Positional
@@ -66,7 +76,8 @@ module Caramel::Frappe
                      @examples : Array(String) = [] of String,
                      @project : Bool = true,
                      @passthrough : Bool = false,
-                     @deprecated : String? = nil)
+                     @deprecated : String? = nil,
+                     @run : Run? = nil)
         Commands.tokens(@syntax).each do |token|
           optional = token.starts_with?('[')
           text = optional ? token[1...-1] : token
@@ -100,10 +111,107 @@ module Caramel::Frappe
         "#{@description} Deprecated: #{replacement}"
       end
 
+      # The shard that contributes the command, which its first word names; nil for a
+      # command Frappé defines.
+      def shard : String?
+        namespace, colon, _ = @words.first.partition(':')
+        namespace unless colon.empty?
+      end
+
       # Whether `text` continues the command's words; only the first may be namespaced.
       private def word?(text : String) : Bool
         return false unless @flags.empty? && @positionals.empty?
         text.matches?(WORD) || (@words.empty? && text.matches?(NAMESPACED_WORD))
+      end
+
+      # *args*, the arguments after the command's words, validated against its syntax.
+      # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
+      def bind(args : Array(String)) : Invocation
+        values = {} of String => String
+        lists = {} of String => Array(String)
+        given = Set(String).new
+        subject = "frappe #{name}"
+        fail = ->(message : String, suggestion : String?) do
+          Usage.new(message, subject, [self], suggestion)
+        end
+        position = 0
+        index = 0
+        while index < args.size
+          arg = args[index]
+          index += 1
+          slot = @positionals[position]?
+          if @passthrough && slot && slot.repeat
+            lists[slot.name] = args[(index - 1)..]
+            break
+          end
+          if arg.size > 1 && arg.starts_with?('-')
+            option, equals, value = arg.partition('=')
+            flag = @flags.find(&.names.includes?(option))
+            unless flag
+              spellings = @flags.flat_map(&.names)
+              raise fail.call("unknown option #{option}", Commands.nearest(option, spellings))
+            end
+            if flag.names.any? { |other| given.includes?(other) }
+              repeated = if flag.names.size > 1
+                           "#{flag.names.join(" and ")} exclude each other"
+                         else
+                           "#{option} is given more than once"
+                         end
+              raise fail.call(repeated, nil)
+            end
+            if placeholder = flag.value
+              if flag.equals
+                if equals.empty? || value.empty?
+                  raise fail.call("#{option} needs a value: #{option}=#{placeholder}", nil)
+                end
+              else
+                missing = "#{option} needs a value: #{option} #{placeholder}"
+                raise fail.call(missing, nil) unless equals.empty?
+                value = args[index]?
+                if value.nil? || value.empty? || value.starts_with?('-')
+                  raise fail.call(missing, nil)
+                end
+                index += 1
+              end
+              if range = placeholder.match(/\A(\d+)\.\.(\d+)\z/)
+                number = value.to_i?
+                unless number && value.matches?(/\A\d+\z/) &&
+                       (range[1].to_i..range[2].to_i).includes?(number)
+                  message = "#{option} must be a whole number from #{range[1]} to #{range[2]}"
+                  raise fail.call(message, nil)
+                end
+              end
+              values[option] = value
+            else
+              raise fail.call("#{option} takes no value", nil) unless equals.empty?
+            end
+            given << option
+          else
+            raise fail.call("unexpected argument #{arg.inspect}", nil) unless slot
+            raise fail.call("empty argument for #{slot.name}", nil) if arg.empty?
+            if (choices = slot.choices) && !choices.includes?(arg)
+              suggestion = Commands.nearest(arg, choices)
+              raise fail.call("unknown #{arg}; expected #{slot.name}", suggestion)
+            end
+            if slot.repeat
+              (lists[slot.name] ||= [] of String) << arg
+            else
+              values[slot.name] = arg
+              position += 1
+            end
+          end
+        end
+        @positionals.each do |positional|
+          next if positional.optional
+          next if values.has_key?(positional.name) || lists.has_key?(positional.name)
+          raise fail.call("missing #{positional.name}", nil)
+        end
+        @flags.each do |required|
+          next if required.optional
+          next if required.names.any? { |spelling| given.includes?(spelling) }
+          raise fail.call("missing #{required.names.first} #{required.value}", nil)
+        end
+        Invocation.new(self, values, lists, given)
       end
     end
 
@@ -146,7 +254,7 @@ module Caramel::Frappe
       Command.new("completion zsh|bash|fish",
         "Print the shell completion script for zsh, bash or fish; it completes commands, " \
         "subcommands, options and their choices. For zsh, add source <(frappe completion zsh) " \
-        "to ~/.zshrc after compinit; for bash, add source <(frappe completion bash) to " \
+        "to ~/.zshrc after compinit; for bash, add eval \"$(frappe completion bash)\" to " \
         "~/.bashrc; for fish, run frappe completion fish > ~/.config/fish/completions/frappe.fish.",
         brief: "Print a shell completion script for zsh, bash or fish",
         examples: ["completion zsh", "completion fish"],
@@ -253,12 +361,13 @@ module Caramel::Frappe
         examples: ["make tenancy Account"]),
       Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
         "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
-        "which means TEXT, and spec/domain/NAME_spec.cr; on first use also " \
-        "require \"caramel/sweet_talk\", require \"../app/domain/*\" and SweetTalk.boot " \
-        "in config/application.cr. When the application has no SweetTalk skill for agents, " \
-        "it also writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application " \
-        "the domain names the tenant, and --central makes the context one every tenant " \
-        "shares.",
+        "which means TEXT, and spec/domain/NAME_spec.cr. The first domain also edits " \
+        "three files: it adds require \"caramel/sweet_talk\", require \"../app/domain/*\" " \
+        "and SweetTalk.boot to config/application.cr, the app/domain/** exclusion of " \
+        "Lint/UnusedArgument to .ameba.yml, and the Domain: and Domain rules: lines to " \
+        "AGENTS.md. When the application has no SweetTalk skill for agents, it also " \
+        "writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application the " \
+        "domain names the tenant, and --central makes the context one every tenant shares.",
         brief: "Start a SweetTalk domain with its first context",
         examples: ["make domain Library Lending --means=\"Members borrow and return books\""]),
       Command.new("translations",
@@ -377,11 +486,11 @@ module Caramel::Frappe
     ]
 
     # `frappe help`'s rows, in the order a newcomer needs them: each name is a
-    # command's first word, listed once (commands_spec holds every first word to one group).
+    # command's first word, listed once.
     record Group, title : String, names : Array(String)
 
-    # The line for each run of words that two or more commands share, shown in help,
-    # family help and completion; commands_spec holds this to exactly those runs.
+    # The line for each run of words that begins longer commands, and for no other run,
+    # shown in help, family help and completion.
     FAMILIES = {
       "make"          => "Generate code: resource, locale, tenancy, domain",
       "db"            => "Dump, restore, diff, branch or diagnose the database",
@@ -405,27 +514,31 @@ module Caramel::Frappe
 
     # The commands one Frappé answers to, with the family lines and help groups that
     # describe them: the built-ins, or the built-ins and what a project's shards contribute.
+    # A table that help, completion and dispatch could not read one way is refused when it
+    # is built: a command declared twice, a first word outside exactly one help group, a
+    # run of words that begins a longer command without its line, or a line for another run.
     class Table
       getter commands : Array(Command)
-      # The line for each run of words that two or more commands share.
+      # The line for each run of words that begins longer commands.
       getter families : Hash(String, String)
       getter groups : Array(Group)
 
       def initialize(@commands : Array(Command),
                      @families : Hash(String, String),
                      @groups : Array(Group))
+        inconsistency.try { |found| raise ArgumentError.new("command table: #{found}") }
       end
 
       def parse(args : Array(String)) : Invocation
         first = args.first? || raise Usage.new("missing command", "frappe", [@commands.first])
         family = @commands.select { |command| command.words.first == first }
         raise unknown(first) if family.empty?
-        depth = family.max_of { |command| Commands.shared(command.words, args) }
-        group = family.select { |command| Commands.shared(command.words, args) == depth }
+        depth = family.max_of { |command| shared(command, args) }
+        group = family.select { |command| shared(command, args) == depth }
         subject = "frappe #{args[0, depth].join(' ')}"
         if command = group.find(&.words.size.==(depth))
           begin
-            return Commands.bind(command, args[depth..])
+            return command.bind(args[depth..])
           rescue ex : Usage
             raise ex if group.size == 1
             # `sites bogus`: the word after the prefix may be a mistyped subcommand.
@@ -464,13 +577,30 @@ module Caramel::Frappe
         @families[words.join(' ')]? || @commands.find!(&.words.==(words)).brief
       end
 
-      # The longest leading run of `args` that names a command or family, or nil.
+      # The shards that contribute commands, in the table's order.
+      def shards : Array(String)
+        @commands.compact_map(&.shard).uniq!
+      end
+
+      # The commands *shard* contributes.
+      def contributed(shard : String) : Array(Command)
+        @commands.select(&.shard.==(shard))
+      end
+
+      # This table with *other*'s commands, family lines and help groups after its own.
+      def +(other : Table) : Table
+        families = @families.merge(other.families)
+        Table.new(@commands + other.commands, families, @groups + other.groups)
+      end
+
+      # The longest leading run of `args` that names a command or family; else the
+      # contributing shard that `args` start with, for `frappe help SHARD`; else nil.
       def help_words(args : Array(String)) : Array(String)?
         args.size.downto(1) do |size|
           words = args[0, size]
           return words unless matching(words).empty?
         end
-        nil
+        args[0, 1] if args.first?.try { |word| shards.includes?(word) }
       end
 
       # Whether `args` name a project command, which a project pinned to another
@@ -484,9 +614,40 @@ module Caramel::Frappe
         family = @commands.select { |command| command.words.first == first }
         return false if family.empty?
         matched = family
-          .select { |command| Commands.shared(command.words, args) == command.words.size }
+          .select { |command| shared(command, args) == command.words.size }
           .max_by?(&.words.size)
         matched ? matched.project? : family.any?(&.project?)
+      end
+
+      # How many of *command*'s leading words the leading *args* repeat.
+      private def shared(command : Command, args : Array(String)) : Int32
+        words = command.words
+        count = 0
+        while count < words.size && words[count] == args[count]?
+          count += 1
+        end
+        count
+      end
+
+      # What keeps the table from being read one way, or nil.
+      private def inconsistency : String?
+        firsts = @commands.map(&.words.first).uniq!
+        listed = @groups.flat_map(&.names)
+        runs = Commands.family_runs(@commands)
+        lines = @families.keys
+        repeated(@commands.map(&.name)).try { |name| return "#{name} is declared twice" }
+        repeated(listed).try { |word| return "#{word} is listed twice in help" }
+        (firsts - listed).first?.try { |word| return "#{word} is in no help group" }
+        (listed - firsts).first?.try { |word| return "help lists #{word}, no command's word" }
+        (runs - lines).first?.try { |run| return "#{run} begins a command and has no line" }
+        (lines - runs).first?.try { |run| return "#{run} has a line and begins no command" }
+        nil
+      end
+
+      # The first of *words* that occurs twice, or nil.
+      private def repeated(words : Array(String)) : String?
+        words.tally.each { |word, count| return word if count > 1 }
+        nil
       end
     end
 
@@ -496,9 +657,19 @@ module Caramel::Frappe
     # The longest run of leading words that all of `commands` share.
     def self.prefix(commands : Array(Command)) : Array(String)
       first = commands.first.words
-      count = first.size
-      commands.each { |command| count = {count, shared(first, command.words)}.min }
-      first[0, count]
+      differing = (0...first.size).find do |index|
+        commands.any? { |command| command.words[index]? != first[index] }
+      end
+      first[0, differing || first.size]
+    end
+
+    # Each run of leading words that begins a longer command of *commands*, joined by
+    # spaces: the runs that help lists with a line of their own.
+    def self.family_runs(commands : Array(Command)) : Array(String)
+      runs = commands.flat_map do |command|
+        (1...command.words.size).map { |size| command.words[0, size].join(' ') }
+      end
+      runs.uniq!
     end
 
     # Splits on top-level spaces; `[...]` groups and a required `--flag VALUE`
@@ -545,103 +716,6 @@ module Caramel::Frappe
         previous = current
       end
       previous.last
-    end
-
-    # How many leading `words` the leading `args` repeat.
-    def self.shared(words : Array(String), args : Array(String)) : Int32
-      count = 0
-      while count < words.size && words[count] == args[count]?
-        count += 1
-      end
-      count
-    end
-
-    # *args*, the arguments after the command's words, validated against its syntax.
-    # ameba:disable Metrics/CyclomaticComplexity -- one branch per argument form
-    def self.bind(command : Command, args : Array(String)) : Invocation
-      values = {} of String => String
-      lists = {} of String => Array(String)
-      given = Set(String).new
-      fail = ->(message : String, suggestion : String?) do
-        Usage.new(message, "frappe #{command.name}", [command], suggestion)
-      end
-      position = 0
-      index = 0
-      while index < args.size
-        arg = args[index]
-        index += 1
-        slot = command.positionals[position]?
-        if command.passthrough? && slot && slot.repeat
-          lists[slot.name] = args[(index - 1)..]
-          break
-        end
-        if arg.size > 1 && arg.starts_with?('-')
-          name, equals, value = arg.partition('=')
-          flag = command.flags.find(&.names.includes?(name))
-          unless flag
-            spellings = command.flags.flat_map(&.names)
-            raise fail.call("unknown option #{name}", nearest(name, spellings))
-          end
-          if flag.names.any? { |other| given.includes?(other) }
-            repeated = if flag.names.size > 1
-                         "#{flag.names.join(" and ")} exclude each other"
-                       else
-                         "#{name} is given more than once"
-                       end
-            raise fail.call(repeated, nil)
-          end
-          if placeholder = flag.value
-            if flag.equals
-              if equals.empty? || value.empty?
-                raise fail.call("#{name} needs a value: #{name}=#{placeholder}", nil)
-              end
-            else
-              missing = "#{name} needs a value: #{name} #{placeholder}"
-              raise fail.call(missing, nil) unless equals.empty?
-              value = args[index]?
-              if value.nil? || value.empty? || value.starts_with?('-')
-                raise fail.call(missing, nil)
-              end
-              index += 1
-            end
-            if range = placeholder.match(/\A(\d+)\.\.(\d+)\z/)
-              number = value.to_i?
-              unless number && value.matches?(/\A\d+\z/) &&
-                     (range[1].to_i..range[2].to_i).includes?(number)
-                message = "#{name} must be a whole number from #{range[1]} to #{range[2]}"
-                raise fail.call(message, nil)
-              end
-            end
-            values[name] = value
-          else
-            raise fail.call("#{name} takes no value", nil) unless equals.empty?
-          end
-          given << name
-        else
-          raise fail.call("unexpected argument #{arg.inspect}", nil) unless slot
-          raise fail.call("empty argument for #{slot.name}", nil) if arg.empty?
-          if (choices = slot.choices) && !choices.includes?(arg)
-            raise fail.call("unknown #{arg}; expected #{slot.name}", nearest(arg, choices))
-          end
-          if slot.repeat
-            (lists[slot.name] ||= [] of String) << arg
-          else
-            values[slot.name] = arg
-            position += 1
-          end
-        end
-      end
-      command.positionals.each do |positional|
-        next if positional.optional
-        next if values.has_key?(positional.name) || lists.has_key?(positional.name)
-        raise fail.call("missing #{positional.name}", nil)
-      end
-      command.flags.each do |option|
-        next if option.optional
-        next if option.names.any? { |spelling| given.includes?(spelling) }
-        raise fail.call("missing #{option.names.first} #{option.value}", nil)
-      end
-      Invocation.new(command, values, lists, given)
     end
   end
 end

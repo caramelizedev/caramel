@@ -21,7 +21,7 @@ An application that serves several organizations must keep each one's rows apart
 9. **A tenant is keyed by UUID, or by Int64 as an opt-in.** The tenant column of every tenanted table follows the tenant's key type.
 10. **A job runs in the tenant it was enqueued in.** Its payload carries the tenant's id in the id's own JSON type. A job whose tenant is gone fails; it does not run unscoped.
 11. **Cache keys and PubSub channels carry the bound tenant's prefix.** A UUID is written in base 36 inside the prefix. With no tenant bound, a name that reads as prefixed is refused.
-12. **Frappé generates the tenant, then resources that belong to it.** After the tenancy generator has run, a generated resource belongs to the tenant unless it is asked to be central, shared by every tenant.
+12. **Frappé generates the tenant, then resources that belong to it.** After the tenancy generator has run, a generated resource belongs to the tenant unless it is asked to be central, shared by every tenant. The tenancy generator edits no library's code: a library whose code must name the tenant refuses to compile until it does.
 13. **Tenancy plugs into existing data, and out again, by hand.** The differ halts on a populated table that gains a tenant; it does not guess which tenant owns existing rows. No command removes tenancy.
 
 ## Reasons
@@ -33,6 +33,7 @@ An application that serves several organizations must keep each one's rows apart
 - The tenant is bound per fiber and restored, as `Log.with_context` is, because HTTP::Server serves keep-alive requests on one fiber. A reused fiber must carry no tenant into the next request.
 - A path prefix needs no DNS or certificates in development, and the slug is a DNS label, so subdomains can follow without changing application code.
 - A job carries each tenant id in its own JSON type so that a payload reads the same whichever key type the tenant has.
+- A generator that edited a library's files would have to know each library's layout, and it would miss code written after it ran. A compile error reaches every such file, whenever it was written, and names the edit.
 - Rejected: the hyphenated UUID as the tenant prefix. It leaves too little of PostgreSQL's channel name; base 36 is shorter and keeps the prefix to digits and lowercase letters, so cache patterns stay exact.
 - Rejected: subdomains as the first way to name a tenant. They need wildcard DNS and certificates before the first page works.
 - Rejected: a schema per tenant. SugarORM checks out a pooled connection per statement and caches prepared statements; introspection, migrations, Corretto, Latte and Cold Brew all assume one schema; and signing up would run DDL inside a request.

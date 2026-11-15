@@ -1,5 +1,6 @@
 require "spec"
 require "file_utils"
+require "./support/shard_project"
 require "../../src/frappe/cli"
 
 private def cli(root = "/missing-framework") : {Caramel::Frappe::CLI, IO::Memory, IO::Memory}
@@ -11,6 +12,26 @@ end
 private def filtered(listing : String, filter : String) : Array(String)
   Caramel::Frappe::CLI.filter_routes(listing, filter).lines
 end
+
+# Runs frappe with *arguments* in a project whose demo shard has *manifest*, and
+# returns its status, standard output and standard error.
+private def in_project(arguments : Array(String),
+                       manifest : String = ShardProject.fixture) : {Int32, String, String}
+  frappe, output, errors = cli
+  status = ShardProject.create({"demo" => manifest}) do |root|
+    Dir.cd(root) { frappe.run(arguments) }
+  end
+  {status, output.to_s, errors.to_s}
+end
+
+# A manifest Frappé refuses: its one command has no brief.
+private BRIEFLESS = ShardProject.manifest([ShardProject.entry("greet NAME", brief: nil)])
+# What Frappé says about it.
+private BRIEFLESS_PROBLEM = <<-TEXT
+  lib/demo/frappe.yml: the command "greet NAME" has no brief. \
+  Frappé did not load the demo shard's commands.
+  Add brief: with one line of text to the command.\n
+  TEXT
 
 describe Caramel::Frappe::CLI do
   it "shows help, per-command usage and the version without touching a toolchain or service" do
@@ -183,5 +204,138 @@ describe Caramel::Frappe::CLI do
     ensure
       FileUtils.rm_rf(project)
     end
+  end
+
+  it "lists a contributing shard's group after the built-in groups in help" do
+    status, help, errors = in_project(["help"])
+    {status, errors}.should eq({0, ""})
+    group = <<-TEXT
+
+      DEMO
+        demo:greet      Greet someone by name
+        demo:notes      List or add notes
+        demo:database   Name the application's database
+        demo:install    Add the shard to the application\n
+      TEXT
+    help.should contain(group)
+    help.index!(group).should be > help.index!("\nABOUT FRAPPÉ\n")
+  end
+
+  it "lists a shard's commands for frappe help SHARD" do
+    status, page, errors = in_project(["help", "demo"])
+    {status, errors}.should eq({0, ""})
+    page.should eq(<<-TEXT)
+      The commands the demo shard contributes.
+
+      COMMANDS
+        demo:greet       Greet someone by name
+        demo:notes list  List the notes
+        demo:notes add   Add a note
+        demo:database    Name the application's database
+        demo:install     Add the shard to the application
+
+      LEARN MORE
+        Use frappe help demo:greet for a command's usage and examples.\n
+      TEXT
+    in_project(["demo", "--help"]).should eq({0, page, ""})
+  end
+
+  it "shows a contributed command's usage and examples, and a contributed family's commands" do
+    _, command, _ = in_project(["help", "demo:greet"])
+    command.should start_with("Print a greeting for NAME; --loud prints it in capitals.\n")
+    command.should contain("\nUSAGE\n  frappe demo:greet NAME [--loud]\n")
+    examples = "\nEXAMPLES\n  $ frappe demo:greet Ada\n  $ frappe demo:greet Ada --loud\n"
+    command.should contain(examples)
+    command.should end_with("  Use frappe help demo for the demo shard's commands.\n")
+    in_project(["demo:greet", "Ada", "--help"]).should eq({0, command, ""})
+    _, family, _ = in_project(["help", "demo:notes"])
+    family.should start_with("List or add notes.\n\nCOMMANDS\n  demo:notes list  List the notes\n")
+  end
+
+  it "lists contributed commands in the agent manifest, after the built-ins" do
+    status, manifest, errors = in_project(["agent-manifest"])
+    {status, errors}.should eq({0, ""})
+    lines = manifest.lines
+    commands = lines[4...lines.index!("")]
+    builtin = Caramel::Frappe::Commands::TABLE.size
+    commands[builtin..].should eq([
+      "frappe demo:greet NAME [--loud]  # Print a greeting for NAME; " \
+      "--loud prints it in capitals.",
+      "frappe demo:notes list  # Print each note on its own line.",
+      "frappe demo:notes add TEXT  # Add the note TEXT; - reads it from standard input.",
+      "frappe demo:database  # Print the name of the database the application connects to.",
+      "frappe demo:install NOTE [--agent|--human]  # Write config/demo.cr, which requires " \
+      "the shard and adds NOTE to its notes, and require it in config/application.cr.",
+    ])
+  end
+
+  it "validates a contributed command's arguments against its syntax before it builds" do
+    status, output, errors = in_project(["demo:greet"])
+    {status, output}.should eq({1, ""})
+    errors.should eq(<<-MRDP)
+      ERR USAGE at frappe demo:greet
+      MSG: missing NAME
+      SYNTAX: frappe demo:greet NAME [--loud]\n
+      MRDP
+    _, _, mistyped = in_project(["demo:gret", "Ada"])
+    mistyped.should contain("SUGGEST: demo:greet\n")
+  end
+
+  it "validates a tool command's arguments against its syntax before it builds the program" do
+    status, output, errors = in_project(["demo:install", "--agent"])
+    {status, output}.should eq({1, ""})
+    errors.should eq(<<-MRDP)
+      ERR USAGE at frappe demo:install
+      MSG: missing NOTE
+      SYNTAX: frappe demo:install NOTE [--agent|--human]\n
+      MRDP
+  end
+
+  it "shows none of a shard's commands outside a project" do
+    directory = File.tempname("caramel-no-project-")
+    Dir.mkdir_p(File.join(directory, "lib/demo"))
+    begin
+      File.write(File.join(directory, "lib/demo/frappe.yml"), ShardProject.fixture)
+      frappe, output, errors = cli
+      Dir.cd(directory) { frappe.run(["help"]) }.should eq(0)
+      Dir.cd(directory) { frappe.run(["agent-manifest"]) }.should eq(0)
+      output.to_s.should_not contain("demo:")
+      errors.to_s.should eq("")
+      Dir.cd(directory) { frappe.run(["demo:greet", "Ada", "--human"]) }.should eq(1)
+      errors.to_s.should start_with("frappe demo:greet: unknown command demo:greet\n")
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+
+  it "reports a refused manifest in help and the agent manifest, beside every built-in" do
+    status, help, errors = in_project(["help"], BRIEFLESS)
+    {status, errors}.should eq({0, BRIEFLESS_PROBLEM})
+    help.should contain("\nGET STARTED\n")
+    help.should_not contain("demo")
+    status, manifest, errors = in_project(["agent-manifest"], BRIEFLESS)
+    {status, errors}.should eq({0, BRIEFLESS_PROBLEM})
+    manifest.should contain("\nfrappe routes [FILTER]  # ")
+  end
+
+  it "reports a refused manifest when its shard's commands are asked for" do
+    asked = [["demo:greet", "Ada"], ["demo:greet", "--help"], ["help", "demo:greet"],
+             ["help", "demo"], ["demo", "--help"]]
+    asked.each do |arguments|
+      in_project(arguments, BRIEFLESS).should eq({1, "", BRIEFLESS_PROBLEM})
+    end
+  end
+
+  it "runs built-in commands beside a refused manifest without a word about it" do
+    status, family, errors = in_project(["help", "db", "branch"], BRIEFLESS)
+    {status, errors}.should eq({0, ""})
+    family.should contain("  db branch create ")
+    in_project(["version"], BRIEFLESS).should eq({0, "Frappé #{Caramel::VERSION}\n", ""})
+    _, _, usage = in_project(["routes", "--verbose"], BRIEFLESS)
+    usage.should eq(<<-MRDP)
+      ERR USAGE at frappe routes
+      MSG: unknown option --verbose
+      SYNTAX: frappe routes [FILTER]\n
+      MRDP
   end
 end

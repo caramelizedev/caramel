@@ -1,41 +1,35 @@
 require "./project"
-require "./publication"
+require "./toolkit"
 require "./resource_generator"
 require "./schema_diff"
 
 module Caramel::Frappe
   # Makes an application multi-tenant (ADR 0025): the tenant model with its
   # sign-up and home pages, `require "caramel/tenancy"`, the routes' tenant
-  # block, the membership check every tenant route needs, and the tenant
-  # named in each SweetTalk domain (ADR 0033).
+  # block and the membership check every tenant route needs.
   class TenancyGenerator
-    CONFIG      = "config/application.cr"
     ROUTES      = "config/routes.cr"
     PATHS       = "config/paths.cr"
     ACTION      = "app/actions/application_action.cr"
     SPEC_HELPER = "spec/spec_helper.cr"
 
-    CARAMEL_REQUIRE = %(require "caramel")
     TENANCY_REQUIRE = %(require "caramel/tenancy")
     ROUTES_MARKER   = "    # Frappé resource routes"
     PATHS_MARKER    = "  # Frappé resource paths"
     PATHS_INCLUDE   = "    include App::Paths"
     CORRETTO        = "Corretto.configure(App)"
-    DOMAIN_ANCHOR   = "  include SweetTalk"
 
     # The line each edited file must hold exactly once.
     ANCHORS = {
-      CONFIG      => CARAMEL_REQUIRE,
-      ROUTES      => ROUTES_MARKER,
-      PATHS       => PATHS_MARKER,
-      ACTION      => PATHS_INCLUDE,
-      SPEC_HELPER => CORRETTO,
+      Toolkit::CONFIG => Toolkit::CARAMEL_REQUIRE,
+      ROUTES          => ROUTES_MARKER,
+      PATHS           => PATHS_MARKER,
+      ACTION          => PATHS_INCLUDE,
+      SPEC_HELPER     => CORRETTO,
     }
 
     ALREADY_TENANTED = "This application is already multi-tenant: " \
                        "config/application.cr requires caramel/tenancy"
-    UNANCHORED_DOMAIN = "%s needs exactly one include SweetTalk line, indented two spaces; " \
-                        "add tenant App::%s after it by hand (ADR 0033)"
 
     def initialize(@framework_root : String)
     end
@@ -49,16 +43,16 @@ module Caramel::Frappe
       plural = ResourceGenerator.pluralize(singular)
       originals = originals(project.root)
       files = templates(model, singular, plural, int64)
-      files[CONFIG] = tenanted_config(originals[CONFIG])
+      config = originals[Toolkit::CONFIG]
+      files[Toolkit::CONFIG] = Toolkit.required(config, TENANCY_REQUIRE)
       files[ROUTES] = tenanted_routes(originals[ROUTES], model, plural)
       files[PATHS] = originals[PATHS].sub(PATHS_MARKER, path_helpers(singular, plural))
       files[ACTION] = originals[ACTION].sub(PATHS_INCLUDE, member_check(singular, plural))
       files[SPEC_HELPER] = originals[SPEC_HELPER] + spec_helpers(model, singular, plural)
-      tenanted_domains(project.root, model, files, originals)
       migration = create_migration(project.root, plural, version, int64)
       migration_path = "db/migrations/#{migration.version}_#{migration.name}.cr"
       files[migration_path] = SchemaDiff.source(migration)
-      Publication.publish(project, files, originals)
+      Toolkit.publish(project.root, files, originals)
       files.keys.sort!
     end
 
@@ -67,12 +61,13 @@ module Caramel::Frappe
     private def originals(root : String) : Hash(String, String)
       originals = {} of String => String
       ANCHORS.each do |relative, anchor|
-        Publication.validate_path(root, relative)
+        Toolkit.validate_path(root, relative)
         path = File.join(root, relative)
         raise unanchored(relative, anchor) unless File.file?(path)
         original = File.read(path)
         lines = original.lines
-        raise Error.new(ALREADY_TENANTED) if relative == CONFIG && lines.includes?(TENANCY_REQUIRE)
+        tenanted = relative == Toolkit::CONFIG && lines.includes?(TENANCY_REQUIRE)
+        raise Error.new(ALREADY_TENANTED) if tenanted
         raise unanchored(relative, anchor) unless lines.count(anchor) == 1
         originals[relative] = original
       end
@@ -81,29 +76,6 @@ module Caramel::Frappe
 
     private def unanchored(relative : String, anchor : String) : Error
       Error.new("#{relative} needs exactly one #{anchor}; wire caramel/tenancy by hand (ADR 0025)")
-    end
-
-    # Names the tenant after the `include SweetTalk` of every domain in
-    # app/domain/: a program that requires caramel/tenancy refuses a domain
-    # that does not name it (ADR 0033).
-    private def tenanted_domains(root : String, model : String,
-                                 files : Hash(String, String),
-                                 originals : Hash(String, String)) : Nil
-      Dir.glob(File.join(root, "app/domain/*.cr")).sort.each do |path|
-        relative = Path[path].relative_to(root).to_s
-        Publication.validate_path(root, relative)
-        original = File.read(path)
-        unless original.lines.count(DOMAIN_ANCHOR) == 1
-          raise Error.new(UNANCHORED_DOMAIN % {relative, model})
-        end
-        originals[relative] = original
-        files[relative] = original.sub(/^#{DOMAIN_ANCHOR}$/m,
-          "#{DOMAIN_ANCHOR}\n  tenant App::#{model}")
-      end
-    end
-
-    private def tenanted_config(config : String) : String
-      config.sub(/^#{Regex.escape(CARAMEL_REQUIRE)}$/m, "#{CARAMEL_REQUIRE}\n#{TENANCY_REQUIRE}")
     end
 
     # The sign-up routes before the resource marker, and the tenant block

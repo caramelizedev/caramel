@@ -207,7 +207,7 @@ module Caramel::Frappe
       @output.puts("Corretto: #{results.size - failed.size} of #{results.size} workers passed " \
                    "in #{total}")
       if failed.empty?
-        check_requirements(tools, groups.size) if full
+        check_named_ids(tools, groups.size) if full
         return
       end
 
@@ -218,23 +218,21 @@ module Caramel::Frappe
     end
 
     # `.caramel/corretto/w<N>.examples`: the descriptions of the examples worker N ran, one
-    # a line, which a full run reads to see every requirement named.
+    # a line, which a full run reads to see every id it must name.
     private def examples_path(index : Int32) : String
       File.join(@project.root, ".caramel/corretto/w#{index}.examples")
     end
 
-    # After a full run in which every worker passed: each requirement id the application
-    # declares must be named by an example that ran. An application that does not require
-    # caramel/sweet_talk declares none, and is not checked.
-    private def check_requirements(tools : Tools, workers : Int32) : Nil
+    # After a full run in which every worker passed: each id the application's `spec-ids`
+    # command prints, those its libraries declare with `Caramel::SpecIds`, must be named by
+    # an example that ran. An application that declares none is not checked.
+    private def check_named_ids(tools : Tools, workers : Int32) : Nil
       binary = tools.compile(@project)
       errors = IO::Memory.new
       development = {"CARAMEL_ENV" => "development"}
-      arguments = ["requirements", "--ids"]
-      status, listing = tools.capture(binary, arguments, @project.root, development, errors)
-      return if status.exit_code == 2 && errors.to_s.starts_with?("Usage:")
+      status, listing = tools.capture(binary, ["spec-ids"], @project.root, development, errors)
       unless status.success?
-        raise Error.new("The application's requirements command failed: #{errors.to_s.strip}")
+        raise Error.new("The application's spec-ids command failed: #{errors.to_s.strip}")
       end
       ids = listing.lines.map(&.strip).reject(&.empty?)
       descriptions = (1..workers).flat_map do |index|
@@ -243,7 +241,7 @@ module Caramel::Frappe
       end
       missing = self.class.uncovered(ids, descriptions)
       return if missing.empty?
-      raise Error.new("No example names requirement #{missing.join(", ")}: put each id in " \
+      raise Error.new("No example names #{missing.join(", ")}: put each id in " \
                       "the name of an example that proves it, as in " \
                       "it \"refuses an unbalanced journal (AC-12)\"")
     end

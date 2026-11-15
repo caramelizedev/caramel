@@ -124,3 +124,23 @@ Caramel::Tenancy.without { Fixture::Book.query.delete_all }
 Caramel::Tenancy.each { |each_account| each_account.slug }
 Fixture::AccountChangeset.new(name: "Acme", slug: "acme").valid?
 puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
+
+# What libraries outside the framework use of tenancy; each declaration's comment says so.
+# A tenanted schema names its tenant's column in SUGAR_TENANT, and the tenant has none.
+{% unless Fixture::Book.has_constant?(:SUGAR_TENANT) &&
+            Fixture::Book.constant(:SUGAR_TENANT) == "account_id" %}
+  {% raise "Fixture::Book::SUGAR_TENANT must be \"account_id\"" %}
+{% end %}
+{% if Fixture::Account.has_constant?(:SUGAR_TENANT) %}
+  {% raise "Fixture::Account has no tenant, so it must have no SUGAR_TENANT" %}
+{% end %}
+# Caramel::Tenancy.find takes the tenant's primary key as *id* and returns the tenant or nil.
+{% begin %}
+  {% finds = Caramel::Tenancy.class.methods.select { |method| method.name == "find" } %}
+  {% signatures = finds.map { |method| "#{method.args.splat} : #{method.return_type}" } %}
+  {% by_id = "id : ::Fixture::Account::PrimaryKey : ::SugarORM::Tenancy::Tenant | ::Nil" %}
+  {% unless signatures.includes?(by_id) %}
+    {% raise "Caramel::Tenancy.find must be declared as (#{by_id.id}), not as #{signatures}" %}
+  {% end %}
+{% end %}
+Caramel::Tenancy.find(id: account.id).try(&.slug)

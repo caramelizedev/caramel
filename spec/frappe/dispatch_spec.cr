@@ -64,4 +64,17 @@ describe Caramel::Frappe::Dispatch do
   ensure
     FileUtils.rm_rf(root) if root
   end
+
+  it "leaves a completion request to this release, whatever release the project pins" do
+    root = "/private/tmp/caramel-dispatch-spec-#{Random::Secure.hex(8)}"
+    Dir.mkdir(root, 0o700)
+    env = {"CARAMEL_HOME" => File.join(root, "state")}
+    pin(root, "9.9.9")
+    table = Caramel::Frappe::Commands.builtin
+    [["__complete", ""], ["__complete", "routes", ""], ["__complete", "demo:"]].each do |asked|
+      Caramel::Frappe::Dispatch.target(table, asked, root, env).should be_nil
+    end
+  ensure
+    FileUtils.rm_rf(root) if root
+  end
 end

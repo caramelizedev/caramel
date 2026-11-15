@@ -18,7 +18,7 @@ module Caramel::Frappe
       status = type_check(entrypoint, compiler)
       if status.success?
         if agent
-          @output.puts("OK check #{files} files")
+          MRDP.ok(@output, "check", "#{files} files")
         else
           @output.puts(color ? "\e[1;32m✓ Type check passed\e[0m" : "✓ Type check passed")
         end

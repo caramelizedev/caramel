@@ -356,11 +356,11 @@ module Caramel::ColdBrew
       {% end %}
     end
 
-    # :nodoc:
     # The compile-time registry: every concrete job by the name it is stored
     # under in `caramel_jobs.class_name`, its current fully qualified name,
     # and by each name it declares in `renamed_from`. Returns the current
-    # name, or nil when no compiled job has *class_name*.
+    # name, or nil when no compiled job has *class_name*. Libraries outside the
+    # framework call it, so changing its name, arguments or meaning breaks them.
     def self.__cold_brew_canonical(class_name : String) : String?
       __cold_brew_check_claims
       {% begin %}
@@ -380,10 +380,10 @@ module Caramel::ColdBrew
       {% end %}
     end
 
-    # :nodoc:
     # Every name a job of the current class *class_name* may be stored under in
     # `caramel_jobs.class_name`: its own and each one it declares in `renamed_from`;
-    # `[class_name]` when no compiled job has that name.
+    # `[class_name]` when no compiled job has that name. Libraries outside the
+    # framework call it, so changing its name, arguments or meaning breaks them.
     def self.__cold_brew_stored_names(class_name : String) : Array(String)
       {% begin %}
         case class_name

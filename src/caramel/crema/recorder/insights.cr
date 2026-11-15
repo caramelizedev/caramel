@@ -93,7 +93,8 @@ module Caramel::Crema
     end
   end
 
-  command("insights", Insights::USAGE) do |arguments|
+  # Takes `insights` over from core_commands.cr's stub, which says the recorder is off.
+  command("insights", Insights::USAGE, replace: true) do |arguments|
     CommandLine.with_database(false) { |db, _| Insights.run(arguments, db) }
   end
 

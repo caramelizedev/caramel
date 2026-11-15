@@ -4,6 +4,7 @@ require "./csrf"
 require "./database"
 require "./cold_brew"
 require "./crema/runtime"
+require "./spec_ids"
 require "../sugar_orm"
 require "system/group"
 
@@ -51,7 +52,7 @@ module Caramel
     USAGE = [
       "serve [--no-workers]",
       "work [--queues=NAMES] [--concurrency=N] [--no-scheduler]",
-      "seed", "routes", "schema", "drift", "translations",
+      "seed", "routes", "schema", "drift", "translations", "spec-ids",
       "migrate [--dev-override]",
       "lint [--dev-override]",
     ].join('|')
@@ -145,7 +146,7 @@ module Caramel
       shutdown = shutdown_for(command) || return 1
 
       case command
-      when "routes", "schema", "translations"
+      when "routes", "schema", "translations", "spec-ids"
         describe(app, command, root)
       when "serve", "seed", "migrate", "lint", "drift"
         name = command == "serve" ? "caramel-web" : "caramel"
@@ -159,17 +160,26 @@ module Caramel
     end
 
     # Answers from the compiled application alone, without a database: its
-    # routes, its declared schema or the keys its locales lack.
+    # routes, its declared schema, the keys its locales lack or the ids a full
+    # spec run must name.
     private def self.describe(app : T.class, command : String, root : String) : Int32 forall T
       case command
-      when "routes" then routes(T::AppRouter.routes)
-      when "schema" then schema
-      else               translations(root)
+      when "routes"   then routes(T::AppRouter.routes)
+      when "schema"   then schema
+      when "spec-ids" then spec_ids
+      else                 translations(root)
       end
     end
 
     private def self.schema : Int32
       puts SugarORM::Catalog.to_json(SugarORM::Catalog.declared)
+      0
+    end
+
+    # Prints the ids a full spec run must name (`SpecIds`), one a line; nothing
+    # when the application declares none. `frappe corretto` reads it.
+    def self.spec_ids(output : IO = STDOUT) : Int32
+      SpecIds.all.each { |id| output.puts id }
       0
     end
 

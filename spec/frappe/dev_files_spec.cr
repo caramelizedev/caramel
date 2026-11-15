@@ -53,6 +53,47 @@ describe Caramel::Frappe::DevFiles do
     end
   end
 
+  it "rebuilds after an edit to the source of any path dependency" do
+    root = File.tempname("caramel-watch-shard-")
+    checkout = File.tempname("caramel-watch-demo-")
+    FileUtils.mkdir_p(File.join(root, "lib/pg/src"))
+    FileUtils.mkdir_p(File.join(checkout, "src"))
+    File.write(File.join(checkout, "src/demo.cr"), "module Demo; end\n")
+    File.write(File.join(root, "lib/pg/src/pg.cr"), "module PG; end\n")
+    begin
+      File.symlink(checkout, File.join(root, "lib/demo"))
+      watcher = Caramel::Frappe::DevFiles.new(File.realpath(root))
+      before = watcher.snapshot
+      Caramel::Frappe::DevFiles.path_sources(root).keys.should eq(["lib/demo"])
+      File.write(File.join(checkout, "README.md"), "Not a source.\n")
+      File.write(File.join(root, "lib/pg/src/pg.cr"), "module PG; VERSION = 2; end\n")
+      watcher.snapshot.source.should eq(before.source)
+      File.write(File.join(checkout, "src/demo.cr"), "module Demo; VERSION = 2; end\n")
+      watcher.snapshot.source.should_not eq(before.source)
+    ensure
+      FileUtils.rm_rf(root)
+      FileUtils.rm_rf(checkout)
+    end
+  end
+
+  it "gives a path dependency's sources one signature wherever its checkout is" do
+    root = File.tempname("caramel-watch-copies-")
+    FileUtils.mkdir_p(File.join(root, "lib"))
+    begin
+      %w[first second].each do |name|
+        FileUtils.mkdir_p(File.join(root, name, "src"))
+        File.write(File.join(root, name, "src/demo.cr"), "module Demo; end\n")
+        File.symlink(File.join(root, name), File.join(root, "lib", name))
+      end
+      File.symlink(File.join(root, "missing"), File.join(root, "lib/broken"))
+      sources = Caramel::Frappe::DevFiles.path_sources(root)
+      sources.keys.should eq(["lib/first", "lib/second"])
+      sources["lib/first"].should eq(sources["lib/second"])
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "publishes source assets, handles deletions and preserves conflicting public edits" do
     root = File.tempname("caramel-assets-")
     FileUtils.mkdir_p(File.join(root, "app/assets/stylesheets"))

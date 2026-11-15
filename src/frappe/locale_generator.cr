@@ -1,16 +1,14 @@
 require "./project"
-require "./publication"
+require "./toolkit"
 
 module Caramel::Frappe
   # Adds a locale to an application, turning on internationalization the
   # first time.
   class LocaleGenerator
-    CODE   = /\A[a-z]{2,3}(-[A-Z]{2}|-[A-Z][a-z]{3})?\z/
-    CONFIG = "config/application.cr"
+    CODE = /\A[a-z]{2,3}(-[A-Z]{2}|-[A-Z][a-z]{3})?\z/
 
-    CARAMEL_REQUIRE = %(require "caramel")
-    VIEWS_REQUIRE   = %(require "../app/views/application_view")
-    I18N_REQUIRE    = %(require "caramel/i18n")
+    VIEWS_REQUIRE = %(require "../app/views/application_view")
+    I18N_REQUIRE  = %(require "caramel/i18n")
 
     # Inserted before the views, which call `t`.
     I18N_LINES = %(require "../app/locales/*"\nCaramel.locales default: "en"\n\n)
@@ -54,7 +52,7 @@ module Caramel::Frappe
         later_locale(project.root, code)
       end
       files["app/locales/#{code}.cr"] = catalog(code) unless code == "en"
-      Publication.publish(project, files, originals)
+      Toolkit.publish(project.root, files, originals)
       files.keys.sort!
     end
 
@@ -62,21 +60,20 @@ module Caramel::Frappe
     private def first_locale(root : String,
                              files : Hash(String, String),
                              originals : Hash(String, String)) : Nil
-      Publication.validate_path(root, CONFIG)
-      original = File.read(File.join(root, CONFIG))
+      Toolkit.validate_path(root, Toolkit::CONFIG)
+      original = File.read(File.join(root, Toolkit::CONFIG))
       lines = original.lines
-      unless lines.count(CARAMEL_REQUIRE) == 1 && lines.count(VIEWS_REQUIRE) == 1
+      unless lines.count(Toolkit::CARAMEL_REQUIRE) == 1 && lines.count(VIEWS_REQUIRE) == 1
         raise Error.new(MISSING_ANCHORS)
       end
-      originals[CONFIG] = original
-      files[CONFIG] = wired(original)
+      originals[Toolkit::CONFIG] = original
+      files[Toolkit::CONFIG] = wired(original)
       files["app/locales/en.cr"] = ENGLISH
     end
 
     private def wired(config : String) : String
-      config
-        .sub(/^#{Regex.escape(CARAMEL_REQUIRE)}$/m, "#{CARAMEL_REQUIRE}\n#{I18N_REQUIRE}")
-        .sub(/^#{Regex.escape(VIEWS_REQUIRE)}$/m, "#{I18N_LINES}#{VIEWS_REQUIRE}")
+      required = Toolkit.required(config, I18N_REQUIRE)
+      required.sub(/^#{Regex.escape(VIEWS_REQUIRE)}$/m, "#{I18N_LINES}#{VIEWS_REQUIRE}")
     end
 
     private def later_locale(root : String, code : String) : Nil
@@ -84,7 +81,8 @@ module Caramel::Frappe
       if File.exists?(File.join(root, relative))
         raise Error.new("Locale #{code} already exists: #{relative}")
       end
-      return if File.read(File.join(root, CONFIG)).lines.includes?(I18N_REQUIRE)
+      config = File.read(File.join(root, Toolkit::CONFIG))
+      return if config.lines.includes?(I18N_REQUIRE)
 
       raise Error.new("Run frappe make locale on an application " \
                       "whose config/application.cr requires caramel/i18n")

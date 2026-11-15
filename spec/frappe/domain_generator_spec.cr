@@ -43,12 +43,41 @@ private def refuses(project, generator, message : String, name = "Shop",
   snapshot(project).should eq(before)
 end
 
+private LINT = ".ameba.yml"
+
+# What the first domain adds to a rule set with no Lint/UnusedArgument section.
+private LINT_SECTION = <<-YAML
+
+  # SweetTalk's whenever and compensate blocks are macro arguments: their
+  # parameters name what the handler the macro writes receives, and a process
+  # step's key: reads them outside the block (ADR 0030).
+  Lint/UnusedArgument:
+    Excluded:
+      - "app/domain/**"
+
+  YAML
+
+# Appends *section* to the project's rule set and returns the whole of it.
+private def with_rules(project : Caramel::Frappe::Project, section : String) : String
+  File.write(File.join(project.root, LINT), section, mode: "a")
+  read(project, LINT)
+end
+
+private GUIDE = "AGENTS.md"
+# The line of the guide `frappe new` writes that the first domain's lines follow.
+private GUIDE_DATA = "Data: app/models/ and app/changesets/\n"
+# What the first domain adds to that guide.
+private GUIDE_LINES = "Domain: app/domain/ in SweetTalk (add one with frappe make domain " \
+                      "NAME CONTEXT --means=TEXT)\n" \
+                      "Domain rules: .claude/skills/sweettalk/SKILL.md\n"
+
 describe Caramel::Frappe::DomainGenerator do
   it "writes the domain, its spec and the require lines" do
     domain_project do |project, generator|
       written = generator.generate(project, "Shop", "Ordering", MEANS)
-      written.should eq([".claude/skills/sweettalk/SKILL.md", "app/domain/shop.cr",
-                         "config/application.cr", "spec/domain/shop_spec.cr"])
+      written.should eq([".ameba.yml", ".claude/skills/sweettalk/SKILL.md", "AGENTS.md",
+                         "app/domain/shop.cr", "config/application.cr",
+                         "spec/domain/shop_spec.cr"])
     end
   end
 
@@ -89,7 +118,8 @@ describe Caramel::Frappe::DomainGenerator do
       begin
         File.symlink(target, File.join(project.root, ".claude"))
         written = generator.generate(project, "Shop", "Ordering", MEANS)
-        written.should eq(%w[app/domain/shop.cr config/application.cr spec/domain/shop_spec.cr])
+        written.should eq(%w[.ameba.yml AGENTS.md app/domain/shop.cr config/application.cr
+          spec/domain/shop_spec.cr])
         Dir.children(target).should be_empty
       ensure
         FileUtils.rm_rf(target)
@@ -165,6 +195,140 @@ describe Caramel::Frappe::DomainGenerator do
       written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
       written.should eq(%w[app/domain/ledger.cr spec/domain/ledger_spec.cr])
       read(project, "config/application.cr").should eq(config)
+    end
+  end
+
+  it "excludes app/domain/ from Lint/UnusedArgument with the first domain" do
+    domain_project do |project, generator|
+      rules = read(project, LINT)
+      rules.should_not contain("Lint/UnusedArgument")
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      read(project, LINT).should eq(rules + LINT_SECTION)
+    end
+  end
+
+  it "leaves .ameba.yml alone for a second domain" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      rules = read(project, LINT).sub(LINT_SECTION, "")
+      File.write(File.join(project.root, LINT), rules)
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should_not contain(LINT)
+      read(project, LINT).should eq(rules)
+    end
+  end
+
+  it "leaves alone a rule set that excludes app/domain/ already, however it lists it" do
+    domain_project do |project, generator|
+      rules = with_rules(project, %(Lint/UnusedArgument: {Excluded: ["app/domain/**"]}\n))
+      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written.should_not contain(LINT)
+      read(project, LINT).should eq(rules)
+    end
+  end
+
+  it "adds the item after the last one of an Excluded list, indented as it is" do
+    domain_project do |project, generator|
+      section = <<-YAML
+        Lint/UnusedArgument:
+          Excluded:
+              - "app/jobs/**"
+          Enabled: true
+
+        Lint/UselessAssign:
+          Enabled: true
+
+        YAML
+      rules = with_rules(project, section)
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      listed = %(      - "app/jobs/**"\n      - "app/domain/**"\n  Enabled: true\n)
+      read(project, LINT).should eq(rules.sub(%(      - "app/jobs/**"\n  Enabled: true\n), listed))
+    end
+  end
+
+  it "adds the Excluded list to a Lint/UnusedArgument section without one" do
+    domain_project do |project, generator|
+      rules = with_rules(project, "Lint/UnusedArgument:\n  Enabled: true")
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      listed = %(Lint/UnusedArgument:\n  Excluded:\n    - "app/domain/**"\n  Enabled: true\n)
+      read(project, LINT).should eq(rules.sub("Lint/UnusedArgument:\n  Enabled: true", listed))
+    end
+  end
+
+  it "refuses a rule set it cannot edit with the line to add, writing nothing" do
+    remedy = ".ameba.yml is not in a shape frappe make domain can edit: add " \
+             "- \"app/domain/**\" to Excluded: under Lint/UnusedArgument: by hand, " \
+             "then make the domain again"
+    unreadable = [
+      "Lint/UnusedArgument: {Enabled: true}\n",
+      "Lint/UnusedArgument:\n  Excluded: [\"app/jobs/**\"]\n",
+      "\"Lint/UnusedArgument\":\n  Enabled: true\n",
+      "Lint/UnusedArgument: [\n",
+    ]
+    unreadable.each do |section|
+      domain_project do |project, generator|
+        with_rules(project, section)
+        refuses(project, generator, remedy)
+      end
+    end
+    domain_project do |project, generator|
+      File.delete(File.join(project.root, LINT))
+      refuses(project, generator, remedy)
+    end
+  end
+
+  it "adds the domain's two lines to AGENTS.md with the first domain, after the data line" do
+    domain_project do |project, generator|
+      guide = read(project, GUIDE)
+      guide.should_not contain("Domain")
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      read(project, GUIDE).should eq(guide.sub(GUIDE_DATA, GUIDE_DATA + GUIDE_LINES))
+    end
+  end
+
+  it "leaves AGENTS.md alone for a second domain" do
+    domain_project do |project, generator|
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      guide = read(project, GUIDE).sub(GUIDE_LINES, "")
+      File.write(File.join(project.root, GUIDE), guide)
+      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written.should_not contain(GUIDE)
+      read(project, GUIDE).should eq(guide)
+    end
+  end
+
+  it "leaves alone a guide that has both lines already, however they end" do
+    domain_project do |project, generator|
+      own = "Domain: app/domain/, ours\nDomain rules: docs/domain.md\n"
+      guide = read(project, GUIDE).sub(GUIDE_DATA, GUIDE_DATA + own)
+      File.write(File.join(project.root, GUIDE), guide)
+      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written.should_not contain(GUIDE)
+      read(project, GUIDE).should eq(guide)
+    end
+  end
+
+  it "adds the one line a guide lacks, after its domain line" do
+    domain_project do |project, generator|
+      own = "Domain: app/domain/, ours"
+      File.write(File.join(project.root, GUIDE), own)
+      generator.generate(project, "Shop", "Ordering", MEANS)
+      read(project, GUIDE).should eq("#{own}\n#{GUIDE_LINES.lines(chomp: false).last}")
+    end
+  end
+
+  it "refuses a guide it cannot edit with the lines to add, writing nothing" do
+    remedy = "AGENTS.md is not in a shape frappe make domain can edit: add the lines " \
+             "Domain: app/domain/ in SweetTalk and Domain rules: " \
+             ".claude/skills/sweettalk/SKILL.md by hand, then make the domain again"
+    domain_project do |project, generator|
+      path = File.join(project.root, GUIDE)
+      File.write(path, File.read(path).sub(GUIDE_DATA, ""))
+      refuses(project, generator, remedy)
+    end
+    domain_project do |project, generator|
+      File.delete(File.join(project.root, GUIDE))
+      refuses(project, generator, remedy)
     end
   end
 
