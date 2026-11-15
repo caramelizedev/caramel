@@ -1,6 +1,7 @@
 # A domain after a rename: every kind that stores a name takes `renamed_from:`, so the
 # tables, the channel and queued jobs of the old names keep working.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Renamed
   include SweetTalk

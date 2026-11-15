@@ -2,7 +2,8 @@
 # broken rule a defect that rolls back what it ran in, and Corretto's property cases
 # (ADR 0010, the property runner), which run it on drawn arguments without a database.
 require "./support/app"
-require "../../src/caramel/sweet_talk/corretto"
+require "../../src/caramel/corretto/property"
+require "../../sweettalk/src/sweettalk/corretto"
 
 private alias Carrying = Lots::Carrying
 

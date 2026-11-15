@@ -92,9 +92,9 @@ Every piece of writing has one home, chosen by what it is ([ADR 0014](docs/decis
   repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
   pull request description or the CHANGELOG.
 
-State a fact once and link to it. `scripts/check prose` checks where markdown lives,
-the ADR sections, relative links and each file's size; `scripts/check website` the pages
-and the cited anchors.
+State a fact once and link to it. `scripts/check prose` checks markdown's homes, ADR
+sections, links, sizes and the `sweettalk/` shard's boundary; `scripts/check website`
+the pages and anchors.
 
 ## Principles
 

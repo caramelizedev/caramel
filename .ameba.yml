@@ -5,6 +5,7 @@ Version: "1.7.0"
 
 Globs:
   - "src/**/*.cr"
+  - "sweettalk/src/**/*.cr"
   - "spec/**/*.cr"
   - "scripts/**/*.cr"
 

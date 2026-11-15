@@ -1,17 +1,18 @@
 require "compiler/crystal/syntax"
 require "json"
-require "./commands"
 require "./word_doc"
-require "./terminal"
 
-module Caramel::Frappe
-  # `frappe words`: SweetTalk's vocabulary as its own macros state it. Each word's macro
-  # (or method) in `src/caramel/sweet_talk` carries a block of tags in its doc comment
+module SweetTalk::Tool
+  # `frappe sweettalk:words`: SweetTalk's vocabulary as its own macros state it. Each
+  # word's macro (or method) in `src/sweettalk` carries a block of tags in its doc comment
   # (`WordDoc`), and Crystal's parser reads the macro's parameters beside it, so the
   # reference cannot name an option the word lacks or leave one out (`WordDrift` holds it
-  # to that). Frappé reads the sources of its own release, so no application is needed.
+  # to that). The tool program reads the sources of the shard the application installed.
+  #
+  # Whatever compiles this file requires the framework's `frappe/toolkit` and
+  # `caramel/version` first (ADR 0030).
   class Words
-    # What a word does for the author, in the order `frappe words` lists them.
+    # What a word does for the author, in the order `frappe sweettalk:words` lists them.
     KINDS = {
       "noun"      => "declares a thing the glossary lists",
       "attribute" => "says what a noun holds",
@@ -40,7 +41,10 @@ module Caramel::Frappe
     # Macros the compiler calls itself: not words.
     HOOKS = %w[finished]
 
-    SOURCE = "src/caramel/sweet_talk"
+    # Where the shard keeps the macros, from its root, and beside them the directory and
+    # the entry file of this tool program, which hold no word.
+    SOURCE = "src/sweettalk"
+    TOOL   = "tool"
 
     record Param, name : String, default : String?, kind : Symbol
 
@@ -100,14 +104,23 @@ module Caramel::Frappe
     getter untagged = [] of Untagged
     getter notes = [] of String
 
-    def self.load(root : String) : Words
-      directory = File.join(root, SOURCE)
+    # The words of the shard at *shard*, its root directory, each located from *base*.
+    def self.load(shard : String, base : String = shard) : Words
+      directory = File.join(shard, SOURCE)
       unless Dir.exists?(directory)
-        raise Error.new("This Frappé has no SweetTalk source: #{directory} does not exist")
+        raise Caramel::Frappe::Error.new("SweetTalk's source is missing: #{directory} does " \
+                                         "not exist. Run frappe setup to install it.")
       end
-      words = new(root)
-      Dir.glob(File.join(directory, "**/*.cr")).sort!.each { |file| words.read(file) }
+      words = new(base)
+      files = Dir.glob(File.join(directory, "**/*.cr")).sort!
+      files.reject! { |file| tool?(file.lchop(directory).lstrip('/')) }
+      files.each { |file| words.read(file) }
       words
+    end
+
+    # Whether *relative*, a path under SOURCE, is a file of the tool program.
+    private def self.tool?(relative : String) : Bool
+      relative == "#{TOOL}.cr" || relative.starts_with?("#{TOOL}/")
     end
 
     def initialize(@root : String)
@@ -128,7 +141,7 @@ module Caramel::Frappe
 
     # Up to three words close to *name*, nearest first.
     def nearest(name : String) : Array(String)
-      scored = words.map { |word| {Commands.distance(name, word), word} }
+      scored = words.map { |word| {Words.distance(name, word), word} }
       limit = name.size >= 5 ? 2 : 1
       near = scored.select { |(distance, _)| distance <= limit }
       near.sort_by!(&.first).first(3).map(&.last)
@@ -264,7 +277,7 @@ module Caramel::Frappe
     def to_text : String
       String.build do |io|
         io << "SweetTalk words in Caramel " << Caramel::VERSION << ": " << words.size
-        io << ". frappe words WORD prints a word's usage, options and example.\n"
+        io << ". frappe sweettalk:words WORD prints a word's usage, options and example.\n"
         KINDS.each do |kind, meaning|
           listed = words.select { |word| first(word).kind == kind }.sort!
           next if listed.empty?
@@ -305,7 +318,8 @@ module Caramel::Frappe
       io << "    " << option.name << (option.positional ? "" : ":") << "  " << option.forms
       io << "; default " << option.default if option.default
       io << "\n"
-      Terminal.wrap(option.does, 88).each { |line| io << "        " << line << "\n" }
+      lines = Caramel::Frappe::Terminal.wrap(option.does, 88)
+      lines.each { |line| io << "        " << line << "\n" }
     end
 
     def to_json(json : JSON::Builder) : Nil
@@ -361,6 +375,20 @@ module Caramel::Frappe
 
     def self.capitalized(text : String) : String
       text.empty? ? text : text[0].upcase + text[1..]
+    end
+
+    # How many letters to add, drop or change to turn *left* into *right*.
+    def self.distance(left : String, right : String) : Int32
+      previous = (0..right.size).to_a
+      left.each_char.with_index(1) do |a, row|
+        current = [row]
+        right.each_char.with_index(1) do |b, column|
+          substitution = previous[column - 1] + (a == b ? 0 : 1)
+          current << {current[column - 1] + 1, previous[column] + 1, substitution}.min
+        end
+        previous = current
+      end
+      previous.last
     end
   end
 end

@@ -329,7 +329,7 @@ module Caramel::ColdBrew
     # Fails to compile when two jobs claim one stored name. It is typed with the
     # registry and with every `enqueue`, once the whole program is known, so it
     # also sees the names a `macro finished` declares after
-    # `__cold_brew_check_names` has run, as SweetTalk's jobs do.
+    # `__cold_brew_check_names` has run, as a library's jobs may.
     def self.__cold_brew_check_claims : Nil
       {% begin %}
         {% owners = {} of Nil => Nil %}

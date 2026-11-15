@@ -1,29 +1,42 @@
 require "yaml"
-require "./project"
-require "./toolkit"
-require "./resource_generator"
 
-module Caramel::Frappe
-  # Adds a SweetTalk domain (ADR 0030): the module with its first
-  # context, its spec, on first use the require lines and `SweetTalk.boot` in
-  # config/application.cr, and the SweetTalk skill for Claude Code when the
-  # application has none. The first domain also excludes app/domain/ from
-  # Lint/UnusedArgument in the application's .ameba.yml and adds the domain's
-  # two lines to its AGENTS.md. In a multi-tenant application the domain names
-  # the tenant the routes' tenant block names (ADR 0033).
+module SweetTalk::Tool
+  # `frappe sweettalk:make domain`: adds a SweetTalk domain (ADR 0030): the module with
+  # its first context, its spec, on first use the require lines and `SweetTalk.boot` in
+  # config/application.cr, and the SweetTalk skill for Claude Code when the application
+  # has none. The first domain also excludes app/domain/ from Lint/UnusedArgument in the
+  # application's .ameba.yml and adds the domain's two lines to its AGENTS.md. In a
+  # multi-tenant application the domain names the tenant the routes' tenant block names
+  # (ADR 0033).
+  #
+  # Whatever compiles this file requires the framework's `frappe/toolkit` first (ADR 0030).
   class DomainGenerator
+    alias Kit = Caramel::Frappe::Toolkit
+    alias Error = Caramel::Frappe::Error
+
     ROUTES = "config/routes.cr"
     SKILL  = ".claude/skills/sweettalk/SKILL.md"
-    # The release's skill (ADR 0014, a generator's skill), compiled into Frappé.
-    SKILL_TEXT = {{ read_file("#{__DIR__}/../../templates/skills/sweettalk/SKILL.md") }}
+    # The release's skill (ADR 0014, a generator's skill), compiled into the tool program.
+    SKILL_TEXT = {{ read_file("#{__DIR__}/../../../templates/SKILL.md") }}
 
-    SWEET_TALK_REQUIRE = %(require "caramel/sweet_talk")
-    TENANCY_REQUIRE    = %(require "caramel/tenancy")
-    JOBS_REQUIRE       = %(require "../app/jobs/*")
-    DOMAIN_REQUIRE     = %(require "../app/domain/*")
+    SWEETTALK_REQUIRE = %(require "sweettalk")
+    TENANCY_REQUIRE   = %(require "caramel/tenancy")
+    JOBS_REQUIRE      = %(require "../app/jobs/*")
+    DOMAIN_REQUIRE    = %(require "../app/domain/*")
     # Types every command, factory and service, called or not, so `frappe check`
     # sees their bodies (ADR 0030, bodies typed uncalled).
     BOOT = "SweetTalk.boot"
+
+    # A name the domain or its first context may take: a class name, at most this long,
+    # that neither the application nor the framework already uses.
+    CLASS_NAME = /\A[A-Z][A-Za-z0-9]*\z/
+    LONGEST    = 40
+    RESERVED   = %w[
+      App ApplicationAction ApplicationView Home Health Caramel SugarORM
+      Object String Time Int32 Int64 Bool Float64
+    ]
+    # The tenant block that `frappe make tenancy` writes in config/routes.cr.
+    TENANT_BLOCK = /^    tenant App::([A-Z][A-Za-z0-9]*), by: :[a-z][a-z0-9_]* do$/m
 
     DOMAINS   = "app/domain"
     LINT      = ".ameba.yml"
@@ -43,7 +56,7 @@ module Caramel::Frappe
       YAML
 
     MISSING_ANCHORS = "config/application.cr needs exactly one require \"caramel\" " \
-                      "and one require \"../app/jobs/*\"; add require \"caramel/sweet_talk\" " \
+                      "and one require \"../app/jobs/*\"; add require \"sweettalk\" " \
                       "after the first and require \"../app/domain/*\" before the second by hand"
     NAMES = "Use class names such as Shop and Ordering for the domain and its first " \
             "context; the two must differ, and application and framework names are reserved"
@@ -51,32 +64,31 @@ module Caramel::Frappe
                  "as in --means=\"choosing teas and checking out\""
     CENTRAL_UNTENANTED = "--central is for multi-tenant applications; " \
                          "config/application.cr does not require caramel/tenancy"
-    UNEDITABLE_LINT = ".ameba.yml is not in a shape frappe make domain can edit: add " \
-                      "- \"app/domain/**\" to Excluded: under Lint/UnusedArgument: by hand, " \
-                      "then make the domain again"
+    UNEDITABLE_LINT = ".ameba.yml is not in a shape frappe sweettalk:make domain can edit: " \
+                      "add - \"app/domain/**\" to Excluded: under Lint/UnusedArgument: by " \
+                      "hand, then make the domain again"
 
     GUIDE = "AGENTS.md"
     # What the first domain tells agents, each line after the one it follows in
     # the guide `frappe new` writes: where data lives, then where the domain does.
     GUIDE_LINES = [
-      "Domain: app/domain/ in SweetTalk (add one with frappe make domain NAME CONTEXT " \
-      "--means=TEXT)",
+      "Domain: app/domain/ in SweetTalk (add one with frappe sweettalk:make domain NAME " \
+      "CONTEXT --means=TEXT)",
       "Domain rules: .claude/skills/sweettalk/SKILL.md",
     ]
     GUIDE_ANCHORS    = ["Data: ", "Domain: "]
-    UNEDITABLE_GUIDE = "AGENTS.md is not in a shape frappe make domain can edit: add " \
-                       "the lines Domain: app/domain/ in SweetTalk and Domain rules: " \
+    UNEDITABLE_GUIDE = "AGENTS.md is not in a shape frappe sweettalk:make domain can edit: " \
+                       "add the lines Domain: app/domain/ in SweetTalk and Domain rules: " \
                        ".claude/skills/sweettalk/SKILL.md by hand, then make the domain again"
 
-    # Writes app/domain/NAME.cr, spec/domain/NAME_spec.cr and, when missing,
-    # the skill; the first domain also edits .ameba.yml and AGENTS.md. Returns
-    # the written paths.
-    def generate(project : Project, name : String, context : String,
+    # Writes app/domain/NAME.cr, spec/domain/NAME_spec.cr and, when missing, the skill in
+    # the application at *root*; the first domain also edits .ameba.yml and AGENTS.md.
+    # Returns the written paths.
+    def generate(root : String, name : String, context : String,
                  means : String, *, central : Bool = false) : Array(String)
       validate(name, context, means)
-      root = project.root
-      Toolkit.validate_path(root, Toolkit::CONFIG)
-      original = File.read(File.join(root, Toolkit::CONFIG))
+      Kit.validate_path(root, Kit::CONFIG)
+      original = File.read(File.join(root, Kit::CONFIG))
       lines = original.lines
       tenanted = lines.includes?(TENANCY_REQUIRE)
       raise Error.new(CENTRAL_UNTENANTED) if central && !tenanted
@@ -85,8 +97,8 @@ module Caramel::Frappe
       originals = {} of String => String
       wired = wired(original, lines)
       if wired != original
-        originals[Toolkit::CONFIG] = original
-        files[Toolkit::CONFIG] = wired
+        originals[Kit::CONFIG] = original
+        files[Kit::CONFIG] = wired
       end
       if rules = lint_edit(root)
         originals[LINT], files[LINT] = rules
@@ -98,14 +110,13 @@ module Caramel::Frappe
       files["app/domain/#{singular}.cr"] = domain(name, context, means, tenant, central)
       files["spec/domain/#{singular}_spec.cr"] = spec(name, context, means)
       files[SKILL] = SKILL_TEXT if skill_missing?(root)
-      Toolkit.publish(root, files, originals)
+      Kit.publish(root, files, originals)
       files.keys.sort!
     end
 
     private def validate(name : String, context : String, means : String) : Nil
       valid = [name, context].all? do |word|
-        word.matches?(ResourceGenerator::MODEL_NAME) && word.size <= 40 &&
-          ResourceGenerator::RESERVED_NAMES.none?(word)
+        word.matches?(CLASS_NAME) && word.size <= LONGEST && RESERVED.none?(word)
       end
       raise Error.new(NAMES) unless valid && name != context
       raise Error.new(NO_MEANING) if means.blank? || means.each_char.any?(&.control?)
@@ -121,7 +132,7 @@ module Caramel::Frappe
     # the rules exclude it already.
     private def lint_edit(root : String) : {String, String}?
       return unless first_domain?(root)
-      Toolkit.validate_path(root, LINT)
+      Kit.validate_path(root, LINT)
       path = File.join(root, LINT)
       raise Error.new(UNEDITABLE_LINT) unless File.file?(path)
       rules = File.read(path)
@@ -135,7 +146,7 @@ module Caramel::Frappe
     # line stays as it is.
     private def guide_edit(root : String) : {String, String}?
       return unless first_domain?(root)
-      Toolkit.validate_path(root, GUIDE)
+      Kit.validate_path(root, GUIDE)
       path = File.join(root, GUIDE)
       raise Error.new(UNEDITABLE_GUIDE) unless File.file?(path)
       guide = File.read(path)
@@ -203,9 +214,9 @@ module Caramel::Frappe
     end
 
     # An existing skill, edited or not, is the application's own, and a
-    # symlink on its path is left alone too: Toolkit refuses to follow it.
+    # symlink on its path is left alone too: the toolkit refuses to follow it.
     private def skill_missing?(root : String) : Bool
-      Toolkit.validate_path(root, SKILL)
+      Kit.validate_path(root, SKILL)
       !File.info?(File.join(root, SKILL), follow_symlinks: false)
     rescue Error
       false
@@ -214,19 +225,19 @@ module Caramel::Frappe
     # The tenant block's model, as `frappe make resource` reads it.
     private def tenant_model(root : String) : String
       routes = File.read(File.join(root, ROUTES))
-      model = routes.match(ResourceGenerator::TENANT_BLOCK).try(&.[1])
+      model = routes.match(TENANT_BLOCK).try(&.[1])
       raise Error.new("config/routes.cr has no tenant App::Model, by: :field do line") unless model
       model
     end
 
     # Adds whichever of the two require lines and the boot line is missing.
     private def wired(config : String, lines : Array(String)) : String
-      present = [SWEET_TALK_REQUIRE, DOMAIN_REQUIRE, BOOT].all? { |line| lines.includes?(line) }
+      present = [SWEETTALK_REQUIRE, DOMAIN_REQUIRE, BOOT].all? { |line| lines.includes?(line) }
       return config if present
-      unless lines.count(Toolkit::CARAMEL_REQUIRE) == 1 && lines.count(JOBS_REQUIRE) == 1
+      unless lines.count(Kit::CARAMEL_REQUIRE) == 1 && lines.count(JOBS_REQUIRE) == 1
         raise Error.new(MISSING_ANCHORS)
       end
-      config = Toolkit.required(config, SWEET_TALK_REQUIRE)
+      config = Kit.required(config, SWEETTALK_REQUIRE)
       unless lines.includes?(DOMAIN_REQUIRE)
         config = config.sub(/^#{Regex.escape(JOBS_REQUIRE)}$/m,
           "#{DOMAIN_REQUIRE}\n#{JOBS_REQUIRE}")

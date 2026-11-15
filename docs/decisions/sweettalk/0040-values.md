@@ -47,7 +47,7 @@ A domain's quantities and words were raw integers and strings: tins could be add
 - Rejected: integer minor units for rates. A rate has no unit to count in; money counts them with its currency beside them ([ADR 0063](0063-money.md)).
 - Rejected: bounds as number literals. A fractional literal is a `Float64` in Crystal and would round before it reached the `CHECK`.
 - GMP is a link-time dependency, and a program that stores no decimal does not carry it. One require is cheaper than a flag.
-- Rejected: linking GMP in `caramel/sweet_talk`. Every application would pay for a value most do not declare.
+- Rejected: linking GMP in the core. Every application would pay for a value most do not declare.
 - PostgreSQL orders `jsonb` by its own rules, which no domain means, so a document has no order.
 - Deferred: querying inside a document, a query feature of its own ([#280](https://github.com/caramelizedev/caramel/issues/280)).
 - Rejected: one case per raw type. The macros that load, save, bind and compare a value already pass its raw form, so only the field declaration must know a codec.

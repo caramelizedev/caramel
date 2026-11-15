@@ -32,7 +32,7 @@ module Caramel::Checks::All
   EXEMPT = %w[all compiler-profile]
   SPECS  = %w[
     spec/caramel spec/frappe spec/latte spec/sugar_orm
-    spec/cold_brew spec/corretto spec/release
+    spec/cold_brew spec/corretto spec/release spec/sweet_talk_tool
   ]
   USAGE = "usage: scripts/check all [--lanes N] [--except NAME ...]"
   # The most lanes --lanes takes, and the default's ceiling (ADR 0017).

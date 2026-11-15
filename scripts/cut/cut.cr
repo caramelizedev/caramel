@@ -5,13 +5,17 @@ require "../../src/latte/process"
 
 # Cuts a Caramel release (ADR 0016): the next version from the Conventional
 # Commits since the last tag, CHANGELOG.md from those commits and the
-# hand-written notes under Unreleased, the version in shard.yml, a guard that
-# released framework migrations are unchanged, and an annotated tag once the
-# full check suite passes. Pushing and publishing stay manual.
+# hand-written notes under Unreleased, the version in shard.yml and in the
+# sweettalk shard's, a guard that released framework migrations are unchanged,
+# and an annotated tag once the full check suite passes. Pushing and publishing
+# stay manual.
 module Caramel::Cut
   REPO = File.expand_path("../..", __DIR__)
   # The framework migrations, relative to a tree's root.
   MIGRATIONS_SOURCE = "src/caramel/cold_brew/migrations.cr"
+  # The sweettalk shard's shard.yml, relative to a tree's root: it states the
+  # release's version as its own and as the framework's it depends on (ADR 0030).
+  SHARD_MANIFEST = "sweettalk/shard.yml"
 
   # Framework migrations by version: each one's name and checksum.
   alias Migrations = Hash(Int64, {String, String})
@@ -175,15 +179,17 @@ module Caramel::Cut
       raise Refused.new("website/source/site.html does not name Caramel #{version}; " \
                         "update its release labels, commit them and run scripts/release again")
     end
-    lines = File.read_lines(manifest).map do |line|
-      line.starts_with?("version:") ? "version: #{version}" : line
+    manifests = ["shard.yml"]
+    stamp(manifest, version)
+    if File.exists?(File.join(repository, SHARD_MANIFEST))
+      manifests << SHARD_MANIFEST
+      stamp(File.join(repository, SHARD_MANIFEST), version, depends_on: "caramel")
     end
-    File.write(manifest, lines.join('\n') + '\n')
     File.write(path, "#{head}\n#{section}#{older.empty? ? "" : "\n#{older}"}")
     checked = Process.run(check.first, check[1..],
       chdir: repository, output: output, error: output)
     unless checked.success?
-      git(repository, "checkout", "--", "shard.yml")
+      manifests.each { |name| git(repository, "checkout", "--", name) }
       if git(repository, "ls-files", "CHANGELOG.md").empty?
         File.delete(path)
       else
@@ -191,7 +197,8 @@ module Caramel::Cut
       end
       raise Refused.new("the check suite failed; nothing was committed or tagged")
     end
-    git(repository, "add", "shard.yml", "CHANGELOG.md")
+    manifests.each { |name| git(repository, "add", name) }
+    git(repository, "add", "CHANGELOG.md")
     git(repository, "commit", "--quiet", "--message", "chore(release): v#{version}")
     git(repository, "tag", "--annotate", "--cleanup=verbatim",
       "v#{version}", "--message", "Caramel #{version}\n\n#{section}")
@@ -327,6 +334,23 @@ module Caramel::Cut
     ensure
       FileUtils.rm_rf(work)
     end
+  end
+
+  # Writes *version* as the version the shard.yml at *path* states, and as the one
+  # it asks of its dependency *depends_on*, when it names one.
+  private def self.stamp(path : String,
+                         version : SemanticVersion,
+                         depends_on : String? = nil) : Nil
+    entry = nil
+    lines = File.read_lines(path).map do |line|
+      indent = line.size - line.lstrip.size
+      entry = line.strip.rchop(':') if indent == 2
+      entry = nil if indent == 0
+      own = indent == 0 || (indent == 4 && !depends_on.nil? && entry == depends_on)
+      next line unless own && line.lstrip.starts_with?("version:")
+      "#{" " * indent}version: #{version}"
+    end
+    File.write(path, lines.join('\n') + '\n')
   end
 
   private def self.git(repository : String, *arguments : String) : String

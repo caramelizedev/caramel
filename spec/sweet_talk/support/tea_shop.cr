@@ -2,7 +2,8 @@
 # factories, queries, removal, a domain service, projections, a process with a deadline and
 # a compensation, a reference to the application's own schema, and events that record who
 # acted and when, or carry the aggregate's attributes.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module TeaShop
   include SweetTalk

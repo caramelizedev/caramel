@@ -1,4 +1,5 @@
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 require "../../../src/caramel/tenancy"
 
 module Shop

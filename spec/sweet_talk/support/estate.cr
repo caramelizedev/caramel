@@ -2,7 +2,8 @@
 # its own, each aggregate in its own file inside `within`, a specification in a later
 # block than the query that reads it, a once_by unit in a `within`, and events logged from
 # both a header and a `within`.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Estate
   include SweetTalk

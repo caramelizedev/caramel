@@ -22,7 +22,7 @@ build time. `markdown.mjs` turns each page into Markdown, written as `index.md` 
 
 - Every command, framework catalog key, Crema metric, environment variable and editor
   preset in the source is on its page; the SweetTalk skill
-  (`templates/skills/sweettalk/SKILL.md`) and each ADR cite only sections the edition has; no
+  (`sweettalk/templates/SKILL.md`) and each ADR cite only sections the edition has; no
   page or skill still calls something planned for a release the edition has reached.
 - A page that shows application code keeps those files, at their in-app paths, under
   `spec/fixtures/pages/<key>/`; `scripts/checks/page_<key>.cr` builds them with the page's
@@ -57,7 +57,7 @@ compiled HTML to the `gh-pages` branch with existing Git credentials.
 
 The publisher refuses to run unless `HEAD` is the commit on origin's `main` and the
 files the build reads (`website/`, `shard.yml`, `templates/application/AGENTS.md` and
-`templates/skills/sweettalk/SKILL.md`) are committed, so every `gh-pages` commit names
+`sweettalk/templates/SKILL.md`) are committed, so every `gh-pages` commit names
 a `main` commit that holds its source. Publish after the release push. It uses a temporary
 Git index and touches neither the working branch nor the working index. It adds the
 current edition and keeps every earlier `/docs/X.Y.Z/` and `/cookbook/X.Y.Z/` from

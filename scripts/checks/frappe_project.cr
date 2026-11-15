@@ -57,12 +57,14 @@ module Caramel::Checks
         [show, update, create].each do |route|
           assert!(routes.lines.any? { |line| line.split == route }, routes)
         end
+        sweet_talk_shard
         domain
         tenancy
         translations
         agent_tooling
         shard_commands
         sweet_talk_diff
+        sweet_talk_commands
         migrated = command([@frappe, "migrate"], chdir: @project)
         assert!(migrated.stdout.includes?(MATCHED), migrated.stdout)
         # The generated create_* migrations must be exactly what the differ
@@ -275,7 +277,7 @@ module Caramel::Checks
       assert!(!shop.includes?("tenant App::Account"), shop)
       named = "  include SweetTalk\n  tenant App::Account\n"
       File.write(path, shop.sub("  include SweetTalk\n", named))
-      command([@frappe, "make", "domain", "Catalogue", "Shelf",
+      command([@frappe, "sweettalk:make", "domain", "Catalogue", "Shelf",
                "--means=the teas on our shelves", "--central"], chdir: @project)
       catalogue = File.read(File.join(@project, "app/domain/catalogue.cr"))
       shelf = %(context Shelf, central: true, means: "the teas on our shelves" do)
@@ -296,20 +298,23 @@ module Caramel::Checks
       end
       puts "PASS: frappe make tenancy wires caramel/tenancy and leaves the SweetTalk " \
            "domain to its author; tenant resources route under /:tenant beside central " \
-           "ones, and frappe make domain --central writes a shared context"
+           "ones, and frappe sweettalk:make domain --central writes a shared context"
     end
 
     # Starts the Shop domain before tenancy, then gives it P5's Ordering context
     # with a policy and a compensation whose parameters go unread.
     def domain : Nil
-      made = command([@frappe, "make", "domain", "Shop", "Ordering",
+      made = command([@frappe, "sweettalk:make", "domain", "Shop", "Ordering",
                       "--means=choosing teas and checking out"], chdir: @project)
       %w[.ameba.yml .claude/skills/sweettalk/SKILL.md AGENTS.md app/domain/shop.cr
         config/application.cr spec/domain/shop_spec.cr].each do |path|
         assert!(made.stdout.includes?("Generated #{path}\n"), made.stdout)
       end
+      application = File.read(File.join(@project, "config/application.cr"))
+      assert!(application.includes?(%(require "caramel"\nrequire "sweettalk"\n)), application)
       File.write(File.join(@project, "app/domain/shop.cr"), SHOP_DOMAIN)
-      puts "PASS: frappe make domain writes a SweetTalk domain, its spec and the require lines"
+      puts "PASS: frappe sweettalk:make domain writes a SweetTalk domain, its spec and the " \
+           "require lines, the shard's after the framework's"
     end
 
     # Derives the Shop domain's tables, tenanted by now, in one migration.
@@ -962,6 +967,7 @@ end
 
 require "./frappe_project/benchmark"
 require "./frappe_project/shard_commands"
+require "./frappe_project/sweet_talk"
 
 begin
   Caramel::Checks::FrappeProject.new.execute(ARGV)

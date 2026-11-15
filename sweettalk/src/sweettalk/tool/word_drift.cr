@@ -1,17 +1,25 @@
 require "./words"
 
-module Caramel::Frappe
-  # What keeps `frappe words`, the SweetTalk guide and the SweetTalk skill true to the
-  # macros: each method returns the problems it finds, one sentence each, naming the file
-  # and line to change. `scripts/check sweet-talk-compilation` compiles the examples and
-  # `scripts/check website` reads the guide with `prose`; the specs read the rest.
+module SweetTalk::Tool
+  # What keeps `frappe sweettalk:words`, the SweetTalk guide and the SweetTalk skill true to
+  # the macros: each method returns the problems it finds, one sentence each, naming the
+  # file and line to change. In the framework's repository, `scripts/check
+  # sweet-talk-compilation` compiles the examples and `scripts/check website` reads the guide
+  # with `prose`; the specs read the rest. No command of the tool program uses it.
   struct WordDrift
     # Keywords the prose uses that no word takes: `logged` reads `subject:`, `since:`,
     # `before:` and `limit:`, and `state:` is a key of `where:` in a query.
     OTHER_KEYWORDS = %w[before limit since state subject]
 
-    # A summary is one line of the listing `frappe words` prints.
+    # A summary is one line of the listing `frappe sweettalk:words` prints.
     SUMMARY_LIMIT = 100
+
+    # What a program of the framework's repository requires before a module of the shard:
+    # the file of the framework that an application gets from the module itself.
+    BEFORE = {
+      "sweettalk/decimal" => "src/sugar_orm/decimal",
+      "sweettalk/money"   => "src/sugar_orm/decimal",
+    }
 
     def initialize(@words : Words)
     end
@@ -266,8 +274,9 @@ module Caramel::Frappe
     end
 
     # Every example, grouped by the requires it needs, as one program each: the example
-    # of each form in a module of its own, then `SweetTalk.boot`. *prefix* is the path
-    # from the program's directory to the repository root.
+    # of each form in a module of its own, then `SweetTalk.boot`. A program requires the
+    # framework and then the shard as the framework's repository holds them: *prefix* is
+    # the path from the program's directory to that repository's root.
     def programs(prefix : String) : Hash(Array(String), String)
       groups = {} of Array(String) => Array(Words::Form)
       @words.forms.each do |form|
@@ -280,8 +289,15 @@ module Caramel::Frappe
     private def program(forms : Array(Words::Form), requires : Array(String),
                         prefix : String) : String
       String.build do |io|
-        io << "require \"" << prefix << "/src/caramel/sweet_talk\"\n"
-        requires.each { |path| io << "require \"" << prefix << "/src/" << path << "\"\n" }
+        io << "require \"" << prefix << "/src/caramel\"\n"
+        requires.compact_map { |path| BEFORE[path]? }.uniq!.each do |path|
+          io << "require \"" << prefix << "/" << path << "\"\n"
+        end
+        io << "require \"" << prefix << "/sweettalk/src/sweettalk\"\n"
+        requires.each do |path|
+          home = path.starts_with?("sweettalk") ? "/sweettalk/src/" : "/src/"
+          io << "require \"" << prefix << home << path << "\"\n"
+        end
         forms.each_with_index(1) do |form, number|
           io << "\n# " << form.name << ", " << form.location << "\n"
           io << "module Example" << number << "\n  include SweetTalk\n\n"

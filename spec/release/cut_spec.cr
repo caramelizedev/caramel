@@ -260,4 +260,44 @@ describe Caramel::Cut do
       git(repository, "tag", "--list").should eq("v0.1.0\n")
     end
   end
+
+  it "gives the sweettalk shard the release's version, as its own and as the one it " \
+     "asks of caramel, and restores it when the checks fail" do
+    release_repository do |repository|
+      shard = File.join(repository, "sweettalk/shard.yml")
+      Dir.mkdir_p(File.dirname(shard))
+      File.write(shard, <<-YAML)
+        name: sweettalk
+        version: 0.1.0
+        dependencies:
+          other:
+            version: 9.9.9
+          caramel:
+            github: caramelizedev/caramel-shard
+            version: 0.1.0
+
+        YAML
+      commit(repository, "feat: first light")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "feat: second light")
+      expect_raises(Caramel::Cut::Refused, "the check suite failed") do
+        Caramel::Cut.run(repository, check: ["/usr/bin/false"], output: IO::Memory.new)
+      end
+      git(repository, "status", "--porcelain").should be_empty
+      Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: IO::Memory.new)
+      File.read(shard).should eq(<<-YAML)
+        name: sweettalk
+        version: 0.2.0
+        dependencies:
+          other:
+            version: 9.9.9
+          caramel:
+            github: caramelizedev/caramel-shard
+            version: 0.2.0
+
+        YAML
+      git(repository, "status", "--porcelain").should be_empty
+      git(repository, "show", "--stat", "--format=", "HEAD").should contain("sweettalk/shard.yml")
+    end
+  end
 end

@@ -1,6 +1,6 @@
 # Money: `currencies %w[USD EUR], means: "…"` and `quote Rate, rounding: :half_up, means:
 # "…"` in a context or a kernel, and `allocation` in a context (ADR 0063). Opt-in, a module
-# under ADR 0030: it requires caramel/sweet_talk/decimal, and a program that declares no
+# under ADR 0030: it requires sweettalk/decimal, and a program that declares no
 # currency holds none of this file.
 require "./decimal"
 require "./money/iso4217"
@@ -175,7 +175,7 @@ module SweetTalk
     #   minor-unit digits, 0 to 9, of a code ISO 4217 lists none for. Refused for a code it lists.
     # @option means | text | - | What a currency is, in a line the glossary shows. Required.
     # @guide c-sweettalk-money
-    # @example requires caramel/sweet_talk/money
+    # @example requires sweettalk/money
     #   kernel Mint, shared_by: [Strongbox, Salon], means: "how the mint counts money" do
     #     currencies %w[USD EUR XAU], exponent: {XAU: 4}, means: "a currency the mint holds"
     #   end
@@ -198,7 +198,7 @@ module SweetTalk
     # @option block positional | block of two arguments | - | The block receives both amounts as one
     #   currency's `Minor`; what it returns is what `same` returns.
     # @guide c-sweettalk-money
-    # @example requires caramel/sweet_talk/money
+    # @example requires sweettalk/money
     #   kernel Reckoning, shared_by: [Abacus, Slate], means: "how the abacus counts money" do
     #     currencies %w[USD EUR], means: "a currency the abacus counts"
     #   end
@@ -524,7 +524,7 @@ module SweetTalk
     #   whole minor units. Required.
     # @option means | text | - | What the rate is, in a line the glossary shows. Required.
     # @guide c-sweettalk-money
-    # @example requires caramel/sweet_talk/money
+    # @example requires sweettalk/money
     #   kernel Bourse, shared_by: [Rostrum, Pit], means: "how the exchange counts money" do
     #     currencies %w[USD EUR], means: "a currency the exchange holds"
     #     quote Rate, rounding: :half_up, means: "one dated rate from a named source"

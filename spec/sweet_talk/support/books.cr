@@ -4,8 +4,10 @@
 # projection, carried by an event and asked for by a finder and a specification; an amount
 # whose currency is a type; rates read exactly and stored part by part; allocations with
 # each remainder; and a split with an off-by-one seeded, for the property case.
-require "../../../src/caramel/sweet_talk"
-require "../../../src/caramel/sweet_talk/money"
+require "../../../src/caramel"
+require "../../../src/sugar_orm/decimal"
+require "../../../sweettalk/src/sweettalk"
+require "../../../sweettalk/src/sweettalk/money"
 
 module Books
   include SweetTalk

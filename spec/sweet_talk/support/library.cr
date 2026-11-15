@@ -2,7 +2,8 @@
 # in an aggregate, in an entity, as a part of a value with parts and as a projection's key;
 # queries over a range of days, sorted by day, counted and read by a specification; and
 # events that carry days.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Library
   include SweetTalk

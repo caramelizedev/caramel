@@ -21,7 +21,7 @@ An application with a rich domain has no word for a bounded context, and nothing
 9. **Only sharers name a kernel.** No other context names, follows or borders it, and a kernel names no context and calls no outside system.
 10. **Every word of a kernel is shared.** A value or aggregate that fewer than two sharers name does not compile.
 11. **A kernel stores like a context.** With tenancy its rows belong to the tenant ([ADR 0033](0033-framework-boundary.md)).
-12. **The glossary and the context map are derived from the compiled application.** The application binary answers with them, and Frappé prints the answer. No copy is committed.
+12. **The glossary and the context map are derived from the compiled application.** The application binary prints them, through the commands the shard declares to Frappé. No copy is committed or kept.
 
 ## Reasons
 

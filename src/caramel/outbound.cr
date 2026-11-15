@@ -48,8 +48,8 @@ module Caramel
     class Refused < Exception
     end
 
-    # Runs the block with every request refused with *reason*, as `Refused`; a SweetTalk
-    # preview runs its body this way. Returns the block's value.
+    # Runs the block with every request refused with *reason*, as `Refused`; a library runs
+    # the body of a preview this way. Returns the block's value.
     def self.refusing(reason : String, &)
       fiber = Fiber.current
       previous = fiber.__caramel_outbound_refused

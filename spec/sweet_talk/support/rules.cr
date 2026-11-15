@@ -7,7 +7,8 @@
 # stores again as its own, a two-word state, a jar that specifications sort, a service
 # that emits the shelf's own event, which a second context follows, and units that change
 # two boxes, or a box and a crate, in one transaction under ordered locks.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Rules
   include SweetTalk

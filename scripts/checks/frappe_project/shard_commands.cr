@@ -34,7 +34,10 @@ module Caramel::Checks
       # A source no earlier run built, so that this run builds the tool program once.
       program = File.join(shard, "src/demo/frappe.cr")
       File.write(program, File.read(program) + "\n# Check run #{Random::Secure.hex(8)}.\n")
-      depend_on_shard(shard)
+      # The application does not require the shard: the shard's tool command does that.
+      depend_on_shard(@project, shard)
+      application = File.read(File.join(@project, "config/application.cr"))
+      assert!(!application.includes?(%(require "./demo")), application)
       command([@frappe, "setup", "--no-migrate"], chdir: @project)
       second = second_project
       installed_shard
@@ -49,18 +52,6 @@ module Caramel::Checks
       refused_shard_manifest(manifest, declared)
       File.write(manifest, declared)
       insights_replaced
-    end
-
-    # Adds the shard at *path* to the application's dependencies and its lock. The
-    # application does not require it: the shard's tool command does that.
-    private def depend_on_shard(path : String) : Nil
-      manifest = File.join(@project, "shard.yml")
-      dependency = "\ndependencies:\n  demo:\n    path: #{path}\n"
-      File.write(manifest, File.read(manifest).sub("\ndependencies:\n", dependency))
-      lock = File.join(@project, "shard.lock")
-      File.write(lock, File.read(lock) + "\n  demo:\n    path: #{path}\n    version: 0.1.0\n")
-      application = File.read(File.join(@project, "config/application.cr"))
-      assert!(!application.includes?(%(require "./demo")), application)
     end
 
     # A second project that locks and holds the same shards: a copy of the application
@@ -128,7 +119,11 @@ module Caramel::Checks
           demo:database   Name the application's database
           demo:install    Add the shard to the application\n
         TEXT
-      assert!(help.stdout.includes?(group) && help.stderr.empty?, help.stdout + help.stderr)
+      rows = group.lines.reject(&.blank?).skip(1).map(&.strip.split(/\s{2,}/))
+      listed = help.stdout.includes?("\nDEMO\n") && rows.all? do |row|
+        help.stdout.lines.any?(&.strip.split(/\s{2,}/).==(row))
+      end
+      assert!(listed && help.stderr.empty?, help.stdout + help.stderr)
       listing = command([@frappe, "help", "demo"], chdir: @project, echo: false).stdout
       rows = ["  demo:greet       Greet someone by name\n", "  demo:notes list  List the notes\n",
               "  demo:notes add   Add a note\n",
@@ -180,7 +175,7 @@ module Caramel::Checks
       refused = attempt(asked, chdir: @project)
       File.write(manifest, declared)
       silent = refused.status.exit_code == 0 && refused.stderr.empty? &&
-               refused.stdout == outside.stdout
+               refused.stdout.starts_with?(outside.stdout) && !refused.stdout.includes?("demo:")
       assert!(silent, refused.stdout + refused.stderr)
       puts "PASS: frappe __complete offers the shard's commands and their options in the " \
            "application and the built-ins outside it, bash completes demo:greet as one " \

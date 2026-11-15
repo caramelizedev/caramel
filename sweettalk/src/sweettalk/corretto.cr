@@ -2,9 +2,13 @@
 # (ADR 0035, calculations as property cases). A spec requires this file, after the domain, to run
 # a property on a calculation: it gives each value declared before it its generator, the
 # `corretto_draw` of the property runner of ADR 0010, names `SweetTalk::Refusal` as outside the
-# domain, and lets `SweetTalk::Broken` say what failed.
-require "../corretto/property"
-require "../sweet_talk"
+# domain, and lets `SweetTalk::Broken` say what failed. The program requires `caramel/corretto`
+# first, as a generated application's spec helper does.
+{% unless @top_level.has_constant?("Corretto") && ::Corretto.has_constant?("Property") %}
+  {% raise "sweettalk/corretto needs Corretto first: write require \"caramel/corretto\" " +
+           "before require \"sweettalk/corretto\"" %}
+{% end %}
+require "../sweettalk"
 
 module SweetTalk
   # How far the drawn values reach, and the raw types they wrap.
@@ -78,7 +82,7 @@ module SweetTalk
   end
 
   {% if ::SweetTalk::BoundedContext.includers.empty? %}
-    {% raise "require \"caramel/sweet_talk/corretto\" after the domain: it gives the " +
+    {% raise "require \"sweettalk/corretto\" after the domain: it gives the " +
              "values declared before it their generators, and no context is declared yet" %}
   {% end %}
 
@@ -95,7 +99,7 @@ module SweetTalk
     {% end %}
   {% end %}
 
-  # Each amount of `caramel/sweet_talk/money`, when the program required it, is drawn as a
+  # Each amount of `sweettalk/money`, when the program required it, is drawn as a
   # whole number of minor units.
   {% if @type.has_constant?("Money") %}
     {% for minor in ::SweetTalk::Money::Units.includers %}

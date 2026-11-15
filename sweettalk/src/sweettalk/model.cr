@@ -327,7 +327,7 @@ module SweetTalk
                    marker = member.type_vars.size == 1 && member.type_vars[0]
                    marker.is_a?(TypeNode) && marker.has_constant?("SWEETTALK_LOADER")
                  end %}
-          # An amount (caramel/sweet_talk/money, ADR 0063): its currency in `<name>_currency`
+          # An amount (sweettalk/money, ADR 0063): its currency in `<name>_currency`
           # under the currencies' CHECK, its minor units in `<name>`, rebuilt by the loader
           # its currency marker names.
           {% kind = "composite" %}

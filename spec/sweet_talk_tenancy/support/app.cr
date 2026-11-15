@@ -1,7 +1,8 @@
 require "spec"
 require "random/secure"
+require "../../../src/caramel"
 require "../../../src/caramel/tenancy"
-require "../../../src/caramel/sweet_talk"
+require "../../../sweettalk/src/sweettalk"
 require "./tenant_shop"
 require "./routes"
 

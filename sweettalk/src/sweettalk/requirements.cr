@@ -1,9 +1,11 @@
-# `frappe requirements`: the requirement ids a SweetTalk domain declares, each with what
-# assures it (ADR 0035). The application answers it; Frappé compiles the application and asks.
+# `frappe sweettalk:requirements`: the requirement ids a SweetTalk domain declares, each with
+# what assures it (ADR 0035). The application answers it: Frappé compiles it and runs its
+# command, which prints what the person or the agent reads.
 module SweetTalk
-  REQUIREMENTS_USAGE = "Usage: requirements [ID|--ids]"
+  REQUIREMENTS_USAGE = "Usage: sweettalk:requirements [ID|--ids]"
 
-  # Prints the requirements for `requirements`, `requirements --ids` or `requirements ID`;
+  # Prints the requirements for `sweettalk:requirements`, only their ids with `--ids`, or
+  # the one an ID names;
   # returns the exit status: 0, 1 for an ID that is no requirement, 2 for anything else.
   def self.__sweettalk_print_requirements(arguments : Array(String),
                                           output : IO,
@@ -45,7 +47,8 @@ module SweetTalk
   end
 end
 
-Caramel::Crema.command("requirements", "requirements [ID|--ids]") do |arguments|
+Caramel::Crema.command("sweettalk:requirements",
+  "sweettalk:requirements [ID|--ids]") do |arguments|
   SweetTalk.__sweettalk_print_requirements(arguments, STDOUT, STDERR)
 end
 

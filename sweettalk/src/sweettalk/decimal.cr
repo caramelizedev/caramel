@@ -1,9 +1,17 @@
 # Decimal values: `value Rate, Decimal(20, 8), at_least: "0", means: "…"` in a context.
 # Opt-in, because a `BigDecimal` links GMP: a program that declares no decimal value
-# requires only `caramel/sweet_talk`, and one that does requires this file as well.
+# requires only `sweettalk`, and one that does requires this file as well.
+#
+# `SugarORM::DecimalCodec` is the one part of the framework this shard needs that no require
+# an application already writes loads. So this file loads it, by the framework's shard
+# name, for a program that has not: an application. The framework's repository requires
+# `src/sugar_orm/decimal` before this file, so the line below never runs there, and no
+# file is loaded by two paths.
 require "big"
-require "../../sugar_orm/decimal"
-require "../sweet_talk"
+require "../sweettalk"
+{% unless ::SugarORM.has_constant?("DecimalCodec") %}
+  require "caramel/sugar_orm/decimal"
+{% end %}
 
 module SweetTalk
   # The words every decimal value shares.

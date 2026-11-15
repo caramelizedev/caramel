@@ -2,7 +2,8 @@
 # kernel that Pricing and Billing share, a published language that a follower and a border
 # read, and a border with an outside card gateway, which the specs fake at the wire with
 # Corretto.stub_wire.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module TeaHouse
   include SweetTalk

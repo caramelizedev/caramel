@@ -1,4 +1,4 @@
-module Caramel::Frappe
+module SweetTalk::Tool
   # The block of tags that describes a SweetTalk word, written once in the doc comment of
   # the macro (or method) that defines it, after the prose for contributors:
   #
@@ -9,7 +9,7 @@ module Caramel::Frappe
   #     #   A continuation line starts with two spaces.
   #     # @internal border
   #     # @guide c-sweettalk-values
-  #     # @example requires caramel/sweet_talk/money
+  #     # @example requires sweettalk/money
   #     #   context Till, means: "money taken" do
   #     #   end
   #

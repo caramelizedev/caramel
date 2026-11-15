@@ -387,10 +387,9 @@ module Caramel
     end
 
     # The router answers a valid *contract* through this hook, which only yields. An
-    # opt-in require replaces it to answer errors of its own, as `caramel/sweet_talk`
-    # answers a refusal with 422 (ADR 0003). Libraries outside the framework redefine
-    # it, so changing its name, arguments or meaning, or how the router calls it,
-    # breaks them.
+    # opt-in library replaces it to answer errors of its own, such as a refusal with 422
+    # (ADR 0003). Libraries outside the framework redefine it, so changing its name,
+    # arguments or meaning, or how the router calls it, breaks them.
     def __caramel_answer(contract : RequestContract, & : -> Response) : Response
       yield
     end

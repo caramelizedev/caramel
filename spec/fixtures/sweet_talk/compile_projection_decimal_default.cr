@@ -1,5 +1,7 @@
-require "../../../src/caramel/sweet_talk"
-require "../../../src/caramel/sweet_talk/decimal"
+require "../../../src/caramel"
+require "../../../src/sugar_orm/decimal"
+require "../../../sweettalk/src/sweettalk"
+require "../../../sweettalk/src/sweettalk/decimal"
 
 module Shop
   include SweetTalk

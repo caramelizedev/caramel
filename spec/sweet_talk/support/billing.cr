@@ -3,7 +3,8 @@
 # effect on the row while the log keeps what was known before it, a projection rebuilt from
 # the log, a policy and a second projection, Nudges, that run after that projection's
 # handler of the same event, and a receipts context whose log keeps an event for a month.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Billing
   include SweetTalk

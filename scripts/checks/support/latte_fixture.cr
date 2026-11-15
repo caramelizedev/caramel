@@ -1,3 +1,4 @@
+require "yaml"
 require "./unix_http"
 
 module Caramel::Checks
@@ -106,6 +107,33 @@ module Caramel::Checks
         values[key] = JSON.parse(value).as_s
       end
       values
+    end
+
+    # Adds the shard at *path*, a directory, to the dependencies and the lock of the
+    # application at *project*, under the name and version its shard.yml states;
+    # `frappe setup` then installs it.
+    def depend_on_shard(project : String, path : String) : Nil
+      shard = YAML.parse(File.read(File.join(path, "shard.yml")))
+      name = shard["name"].as_s
+      manifest = File.join(project, "shard.yml")
+      dependency = "\ndependencies:\n  #{name}:\n    path: #{path}\n"
+      File.write(manifest, File.read(manifest).sub("\ndependencies:\n", dependency))
+      locked = "\n  #{name}:\n    path: #{path}\n    version: #{shard["version"].as_s}\n"
+      lock = File.join(project, "shard.lock")
+      File.write(lock, File.read(lock) + locked)
+    end
+
+    # Adds this checkout's sweettalk shard to the application at *project*, beside its
+    # path dependency on the framework, and installs it with `frappe setup`, which
+    # migrates unless *migrate* is false. The shard names the framework by its published
+    # source, so the application's shard.override.yml gives every shard this checkout's.
+    def add_sweettalk(project : String, migrate : Bool = true) : Nil
+      depend_on_shard(project, File.join(@repo, "sweettalk"))
+      override = "dependencies:\n  caramel:\n    path: #{@repo.to_json}\n"
+      File.write(File.join(project, "shard.override.yml"), override)
+      setup = migrate ? [@frappe, "setup"] : [@frappe, "setup", "--no-migrate"]
+      command(setup, chdir: project)
+      assert!(File.file?(File.join(project, "lib/sweettalk/frappe.yml")), "no lib/sweettalk")
     end
 
     def site(name : String) : JSON::Any

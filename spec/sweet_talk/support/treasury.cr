@@ -3,8 +3,10 @@
 # counted; a JSON value over a JSON::Serializable type and one over any document, kept in
 # jsonb columns, optional in an aggregate and in a projection; and an event that carries
 # both.
-require "../../../src/caramel/sweet_talk"
-require "../../../src/caramel/sweet_talk/decimal"
+require "../../../src/caramel"
+require "../../../src/sugar_orm/decimal"
+require "../../../sweettalk/src/sweettalk"
+require "../../../sweettalk/src/sweettalk/decimal"
 
 module Treasury
   include SweetTalk

@@ -1,15 +1,19 @@
 require "spec"
 require "file_utils"
-require "../../src/frappe/cli"
-require "../../src/frappe/word_drift"
+require "../../src/frappe/toolkit"
+require "../../src/caramel/version"
+require "../../sweettalk/src/sweettalk/tool/commands"
+require "../../sweettalk/src/sweettalk/tool/word_drift"
 
-private REPO = File.expand_path("../..", __DIR__)
+private REPO  = File.expand_path("../..", __DIR__)
+private SHARD = File.join(REPO, "sweettalk")
+private SKILL = "sweettalk/templates/SKILL.md"
 
 # A SweetTalk source tree of one word, `thing`, and a refusal for it, as the macros write them.
 private THING = <<-CRYSTAL
   module SweetTalk
     module BoundedContext
-      # Prose for contributors, which `frappe words` ignores.
+      # Prose for contributors, which `frappe sweettalk:words` ignores.
       #
       # @word noun | Declares a thing the glossary lists.
       # @usage thing NAME[, size: N], means: TEXT
@@ -36,29 +40,37 @@ private THING = <<-CRYSTAL
   end
   CRYSTAL
 
-# Loads the words of a source tree holding *source*.
-private def vocabulary(source : String = THING) : Caramel::Frappe::Words
+# Loads the words of a shard whose source tree holds *source*.
+private def vocabulary(source : String = THING) : SweetTalk::Tool::Words
   root = File.tempname("words-spec")
-  directory = File.join(root, Caramel::Frappe::Words::SOURCE)
+  directory = File.join(root, SweetTalk::Tool::Words::SOURCE)
   FileUtils.mkdir_p(directory)
   File.write(File.join(directory, "thing.cr"), source)
-  Caramel::Frappe::Words.load(root)
+  SweetTalk::Tool::Words.load(root)
 ensure
   FileUtils.rm_rf(root) if root
 end
 
 private def problems(source : String) : Array(String)
-  Caramel::Frappe::WordDrift.new(vocabulary(source)).source
+  SweetTalk::Tool::WordDrift.new(vocabulary(source)).source
 end
 
-private def cli : {Caramel::Frappe::CLI, IO::Memory, IO::Memory}
+# Runs the tool program's command *arguments* in an application whose lib/ holds this
+# checkout's shard, for an agent or a person, and yields its status, output and errors.
+private def tool(arguments : Array(String), agent : Bool = true, installed : Bool = true, &)
+  root = File.tempname("words-application")
+  Dir.mkdir_p(File.join(root, "lib"))
+  File.symlink(SHARD, File.join(root, SweetTalk::Tool::SHARD)) if installed
   output, errors = IO::Memory.new, IO::Memory.new
-  {Caramel::Frappe::CLI.new(REPO, output, errors), output, errors}
+  status = SweetTalk::Tool.run(arguments, output, errors, root, agent)
+  yield status, output.to_s, errors.to_s
+ensure
+  FileUtils.rm_rf(root) if root
 end
 
-describe Caramel::Frappe::WordDoc do
+describe SweetTalk::Tool::WordDoc do
   it "reads the tags of a block and ignores the prose before it" do
-    section = Caramel::Frappe::WordDoc.new(<<-DOC).sections.first
+    section = SweetTalk::Tool::WordDoc.new(<<-DOC).sections.first
       Prose.
 
       @word noun | A thing,
@@ -89,13 +101,13 @@ describe Caramel::Frappe::WordDoc do
   end
 
   it "reads an explicit name before the kind as a word the macro's body reads" do
-    sections = Caramel::Frappe::WordDoc.new("@word noun | One.\n@word b rule | Two.").sections
+    sections = SweetTalk::Tool::WordDoc.new("@word noun | One.\n@word b rule | Two.").sections
     sections.map(&.name).should eq([nil, "b"])
     sections.map(&.kind).should eq(["noun", "rule"])
   end
 
   it "names a line that is no tag, a malformed option and a repeated tag" do
-    section = Caramel::Frappe::WordDoc.new(<<-DOC).sections.first
+    section = SweetTalk::Tool::WordDoc.new(<<-DOC).sections.first
       @word noun | A thing.
       @usage a
       @usage b
@@ -111,11 +123,11 @@ describe Caramel::Frappe::WordDoc do
   end
 
   it "finds no block in a comment without @word" do
-    Caramel::Frappe::WordDoc.new("Only prose.\n@usage x").blocks?.should be_false
+    SweetTalk::Tool::WordDoc.new("Only prose.\n@usage x").blocks?.should be_false
   end
 end
 
-describe Caramel::Frappe::Words do
+describe SweetTalk::Tool::Words do
   it "reads a word, its parameters and its block, and sets its refusal apart" do
     words = vocabulary
     words.words.should eq(["thing"])
@@ -149,7 +161,7 @@ describe Caramel::Frappe::Words do
   end
 end
 
-describe Caramel::Frappe::WordDrift do
+describe SweetTalk::Tool::WordDrift do
   it "finds nothing wrong with a word whose block matches its macro" do
     problems(THING).should be_empty
   end
@@ -167,7 +179,7 @@ describe Caramel::Frappe::WordDrift do
   it "names a macro that has no block and is no refusal" do
     untagged = THING.lines.reject(&.includes?("# @")).join('\n')
     text = problems(untagged)
-    text.join("\n").should contain("macro thing (src/caramel/sweet_talk/thing.cr:")
+    text.join("\n").should contain("macro thing (src/sweettalk/thing.cr:")
     text.join("\n").should contain(") has no @word block")
   end
 
@@ -187,14 +199,14 @@ describe Caramel::Frappe::WordDrift do
   end
 
   it "names a @guide that is no section of the guide" do
-    drift = Caramel::Frappe::WordDrift.new(vocabulary)
+    drift = SweetTalk::Tool::WordDrift.new(vocabulary)
     drift.sections("## Values {#c-sweettalk-values}", "the guide").should be_empty
     drift.sections("## Other {#c-sweettalk-other}", "the guide").first
       .should contain("@guide c-sweettalk-values is no section of the guide")
   end
 
   it "reads the guide and the skill for options and words that do not exist" do
-    drift = Caramel::Frappe::WordDrift.new(vocabulary)
+    drift = SweetTalk::Tool::WordDrift.new(vocabulary)
     ok = "Use `thing Jar, size: 3, means: \"x\"` and `size:` and `means:`; thing is a word."
     drift.prose(ok, "guide.md", guide: true).should be_empty
     text = drift.prose("`thing Jar, sise: 3`, `colour:` and thing, size: and means:",
@@ -208,60 +220,112 @@ describe Caramel::Frappe::WordDrift do
   end
 
   it "builds one program from the examples, a module for each" do
-    program = Caramel::Frappe::WordDrift.new(vocabulary).programs("../..")[[] of String]
-    program.should start_with("require \"../../src/caramel/sweet_talk\"\n")
+    program = SweetTalk::Tool::WordDrift.new(vocabulary).programs("../..")[[] of String]
+    requires = "require \"../../src/caramel\"\nrequire \"../../sweettalk/src/sweettalk\"\n\n"
+    program.should start_with(requires)
     program.should contain("module Example1\n  include SweetTalk\n\n  context Pantry")
     program.should end_with("\nSweetTalk.boot\n")
   end
+
+  it "requires the framework's decimal before a module that needs it" do
+    money = THING.sub("# @example\n", "# @example requires sweettalk/money\n")
+    program = SweetTalk::Tool::WordDrift.new(vocabulary(money)).programs("..")[["sweettalk/money"]]
+    program.should start_with(<<-CRYSTAL)
+      require "../src/caramel"
+      require "../src/sugar_orm/decimal"
+      require "../sweettalk/src/sweettalk"
+      require "../sweettalk/src/sweettalk/money"
+
+      CRYSTAL
+  end
 end
 
-describe "frappe words" do
-  it "lists every word of this release without an application" do
-    frappe, output, errors = cli
-    frappe.run(["words"]).should eq(0)
-    output.to_s.should contain("SweetTalk words in Caramel #{Caramel::VERSION}: ")
-    output.to_s.should contain("noun: declares a thing the glossary lists")
-    errors.to_s.should eq("")
+describe "frappe sweettalk:words" do
+  it "lists every word of the shard the application installed" do
+    tool(["words"]) do |status, output, errors|
+      status.should eq(0)
+      output.should contain("SweetTalk words in Caramel #{Caramel::VERSION}: ")
+      output.should contain("noun: declares a thing the glossary lists")
+      errors.should eq("")
+    end
   end
 
   it "prints a word's usage, options and example, and the same as JSON" do
-    frappe, output, _ = cli
-    frappe.run(["words", "value"]).should eq(0)
-    output.to_s.should contain("  value NAME, TYPE")
-    output.to_s.should contain("    at_least:  ")
-    output.to_s.should contain("    context ")
-    output.clear
-    frappe.run(["words", "value", "--json"]).should eq(0)
-    JSON.parse(output.to_s)["word"].should eq("value")
-    output.clear
-    frappe.run(["words", "--json"]).should eq(0)
-    document = JSON.parse(output.to_s)
-    document["version"].should eq(Caramel::VERSION)
-    document["words"].as_a.map(&.["word"].as_s).should contain("whenever")
+    tool(["words", "value"]) do |status, output, _|
+      status.should eq(0)
+      output.should contain("  value NAME, TYPE")
+      output.should contain("    at_least:  ")
+      output.should contain("    context ")
+    end
+    tool(["words", "value", "--json"]) do |status, output, _|
+      status.should eq(0)
+      document = JSON.parse(output)
+      document["word"].should eq("value")
+      document["forms"][0]["source"].as_s.should start_with("lib/sweettalk/src/sweettalk/")
+    end
+    tool(["words", "--json"]) do |status, output, _|
+      status.should eq(0)
+      document = JSON.parse(output)
+      document["version"].should eq(Caramel::VERSION)
+      document["words"].as_a.map(&.["word"].as_s).should contain("whenever")
+    end
   end
 
   it "names the nearest words of an unknown word and exits 1" do
-    frappe, _, errors = cli
-    frappe.run(["words", "valeu"]).should eq(1)
-    errors.to_s.should contain("MSG: unknown word valeu; nearest: value")
-    errors.to_s.should contain("SUGGEST: value")
+    tool(["words", "valeu"]) do |status, output, errors|
+      status.should eq(1)
+      output.should eq("")
+      errors.should eq(<<-MRDP)
+        ERR USAGE at frappe sweettalk:words
+        MSG: unknown word valeu; nearest: value
+        SYNTAX: frappe sweettalk:words [WORD] [--json]
+        SUGGEST: value
+
+        MRDP
+    end
+    tool(["words", "valeu"], agent: false) do |status, _, errors|
+      status.should eq(1)
+      errors.should eq(<<-TEXT)
+        frappe sweettalk:words: unknown word valeu; nearest: value
+        Usage: frappe sweettalk:words [WORD] [--json]
+        Did you mean value?
+        Run frappe sweettalk:words --help for details.
+
+        TEXT
+    end
   end
 
-  it "answers beside an unreadable source with a message, not a trace" do
-    output, errors = IO::Memory.new, IO::Memory.new
-    Caramel::Frappe::CLI.new("/missing-framework", output, errors).run(["words"]).should eq(1)
-    errors.to_s.should contain("This Frappé has no SweetTalk source")
+  it "answers where lib/ holds no shard with a message, not a trace" do
+    tool(["words"], installed: false) do |status, _, errors|
+      status.should eq(1)
+      errors.should contain("MSG: SweetTalk's source is missing: ")
+      errors.should contain("Run frappe setup to install it.")
+    end
+  end
+
+  it "refuses a command the manifest does not declare" do
+    tool(["glossary"]) do |status, _, errors|
+      status.should eq(2)
+      errors.should eq("ERR USAGE at frappe sweettalk:glossary\nMSG: unknown command\n")
+    end
   end
 end
 
 describe "SweetTalk's macros" do
   it "state every word's block, and the block matches the macro" do
-    Caramel::Frappe::WordDrift.new(Caramel::Frappe::Words.load(REPO)).source.should be_empty
+    words = SweetTalk::Tool::Words.load(SHARD, REPO)
+    SweetTalk::Tool::WordDrift.new(words).source.should be_empty
+    words.forms.first.file.should start_with("sweettalk/src/sweettalk/")
+  end
+
+  it "hold no word in the tool program's own files" do
+    files = SweetTalk::Tool::Words.load(SHARD, REPO).forms.map(&.file).uniq!
+    files.select(&.includes?("/tool")).should be_empty
   end
 
   it "give the skill no option a word lacks" do
-    skill = File.read(File.join(REPO, "templates/skills/sweettalk/SKILL.md"))
-    drift = Caramel::Frappe::WordDrift.new(Caramel::Frappe::Words.load(REPO))
-    drift.prose(skill, "templates/skills/sweettalk/SKILL.md").should be_empty
+    skill = File.read(File.join(REPO, SKILL))
+    drift = SweetTalk::Tool::WordDrift.new(SweetTalk::Tool::Words.load(SHARD, REPO))
+    drift.prose(skill, SKILL).should be_empty
   end
 end

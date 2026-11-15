@@ -285,7 +285,7 @@ module SweetTalk
     # wraps a whole number or a decimal, takes 0 and has no upper bound. The sum comes back
     # as that type, zero when nothing matches. With `of: Line.price`, `where:` also takes
     # conditions on each line it adds up, under the name of their list, as in `lines: {tea:
-    # tea}`. An amount (caramel/sweet_talk/money) adds up too: a `Minor(USD)` as a number, and
+    # tea}`. An amount (sweettalk/money) adds up too: a `Minor(USD)` as a number, and
     # an `Amount`, whose currency is data, as a `Hash(Currency, Amount)` with a total for each
     # currency that has rows, in code order.
     #
@@ -294,7 +294,7 @@ module SweetTalk
     #   [, satisfying: SPECIFICATION]
     # @option of | an attribute symbol, or Entity.attribute | - | The attribute to add up: an
     #   Int32, Int64 or Float64, or a value that wraps a number, or an amount
-    #   (caramel/sweet_talk/money). It is required.
+    #   (sweettalk/money). It is required.
     # @option where | a hash of attribute: expression | - | Keeps the rows whose columns equal
     #   the expressions, as in finds. state: inside it takes a state or a list of states. With
     #   of: Entity.attribute, the name of the list that holds those entities takes their
@@ -509,7 +509,7 @@ module SweetTalk
     # @usage groups NAME[(ARG : TYPE, ...)], of: ATTRIBUTE, by: ATTRIBUTE[, where: CONDITIONS]
     #   [, satisfying: SPECIFICATION]
     # @option of | an attribute symbol, or Entity.attribute | - | The number to add up, as in sums,
-    #   but an amount (caramel/sweet_talk/money) only when its currency is a type, as in
+    #   but an amount (sweettalk/money) only when its currency is a type, as in
     #   Minor(USD). It is required.
     # @option by | an attribute symbol, :state, :id, or Entity.attribute | - | The attribute that
     #   splits the rows into groups, of the same model as of:; :id gives one row per aggregate

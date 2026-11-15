@@ -1,8 +1,10 @@
 require "spec"
 require "file_utils"
 require "../../src/frappe/new_project"
-require "../../src/frappe/domain_generator"
+require "../../src/frappe/toolkit"
 require "../../src/frappe/tenancy_generator"
+require "../../src/caramel/version"
+require "../../sweettalk/src/sweettalk/tool/commands"
 
 private VERSION = 20261003000001_i64
 private MEANS   = "choosing teas and checking out"
@@ -13,7 +15,7 @@ private def domain_project(&)
   package = File.expand_path("../..", __DIR__)
   target = File.join(parent, "bookshelf")
   project = Caramel::Frappe::NewProject.new(package).create("bookshelf", target)
-  yield project, Caramel::Frappe::DomainGenerator.new, package
+  yield project, SweetTalk::Tool::DomainGenerator.new, package
 ensure
   FileUtils.rm_rf(parent) if parent
 end
@@ -38,7 +40,7 @@ private def refuses(project, generator, message : String, name = "Shop",
                     context = "Ordering", means = MEANS, central = false) : Nil
   before = snapshot(project)
   expect_raises(Caramel::Frappe::Error, message) do
-    generator.generate(project, name, context, means, central: central)
+    generator.generate(project.root, name, context, means, central: central)
   end
   snapshot(project).should eq(before)
 end
@@ -67,14 +69,14 @@ private GUIDE = "AGENTS.md"
 # The line of the guide `frappe new` writes that the first domain's lines follow.
 private GUIDE_DATA = "Data: app/models/ and app/changesets/\n"
 # What the first domain adds to that guide.
-private GUIDE_LINES = "Domain: app/domain/ in SweetTalk (add one with frappe make domain " \
-                      "NAME CONTEXT --means=TEXT)\n" \
+private GUIDE_LINES = "Domain: app/domain/ in SweetTalk (add one with frappe sweettalk:make " \
+                      "domain NAME CONTEXT --means=TEXT)\n" \
                       "Domain rules: .claude/skills/sweettalk/SKILL.md\n"
 
-describe Caramel::Frappe::DomainGenerator do
+describe SweetTalk::Tool::DomainGenerator do
   it "writes the domain, its spec and the require lines" do
     domain_project do |project, generator|
-      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written = generator.generate(project.root, "Shop", "Ordering", MEANS)
       written.should eq([".ameba.yml", ".claude/skills/sweettalk/SKILL.md", "AGENTS.md",
                          "app/domain/shop.cr", "config/application.cr",
                          "spec/domain/shop_spec.cr"])
@@ -83,19 +85,19 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "writes the SweetTalk skill from the template" do
     domain_project do |project, generator, package|
-      generator.generate(project, "Shop", "Ordering", MEANS)
-      template = File.read(File.join(package, "templates/skills/sweettalk/SKILL.md"))
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
+      template = File.read(File.join(package, "sweettalk/templates/SKILL.md"))
       read(project, ".claude/skills/sweettalk/SKILL.md").should eq(template)
     end
   end
 
   it "keeps an edited skill" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       skill = File.join(project.root, ".claude/skills/sweettalk/SKILL.md")
       File.write(skill, "\n- Our own rule.\n", mode: "a")
       edited = File.read(skill)
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should eq(%w[app/domain/ledger.cr spec/domain/ledger_spec.cr])
       File.read(skill).should eq(edited)
     end
@@ -103,9 +105,9 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "adds the skill to an application with a domain but no skill" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       FileUtils.rm_rf(File.join(project.root, ".claude"))
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should eq([".claude/skills/sweettalk/SKILL.md", "app/domain/ledger.cr",
                          "spec/domain/ledger_spec.cr"])
     end
@@ -117,7 +119,7 @@ describe Caramel::Frappe::DomainGenerator do
       Dir.mkdir(target)
       begin
         File.symlink(target, File.join(project.root, ".claude"))
-        written = generator.generate(project, "Shop", "Ordering", MEANS)
+        written = generator.generate(project.root, "Shop", "Ordering", MEANS)
         written.should eq(%w[.ameba.yml AGENTS.md app/domain/shop.cr config/application.cr
           spec/domain/shop_spec.cr])
         Dir.children(target).should be_empty
@@ -127,11 +129,11 @@ describe Caramel::Frappe::DomainGenerator do
     end
   end
 
-  it "requires caramel/sweet_talk after caramel, the domain before the jobs, and boots" do
+  it "requires sweettalk after caramel, the domain before the jobs, and boots" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       config = read(project, "config/application.cr")
-      opening = %(require "caramel"\nrequire "caramel/sweet_talk"\n) +
+      opening = %(require "caramel"\nrequire "sweettalk"\n) +
                 %(require "caramel/crema/recorder"\n)
       config.should start_with(opening)
       jobs = %(require "../app/changesets/*"\nrequire "../app/domain/*"\nSweetTalk.boot\n) +
@@ -142,10 +144,10 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "adds SweetTalk.boot to an application whose domain is already required" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       path = File.join(project.root, "config/application.cr")
       File.write(path, File.read(path).sub("SweetTalk.boot\n", ""))
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should eq(%w[app/domain/ledger.cr config/application.cr spec/domain/ledger_spec.cr])
       booted = %(require "../app/domain/*"\nSweetTalk.boot\nrequire "../app/jobs/*"\n)
       read(project, "config/application.cr").should contain(booted)
@@ -154,7 +156,7 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "writes the module with its first context" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       read(project, "app/domain/shop.cr").should eq(<<-CRYSTAL)
         # The Shop domain, in SweetTalk (ADR 0030). Its words, such as
         # context, value, aggregate, event and whenever, exist only inside this module.
@@ -171,7 +173,7 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "writes a spec that reads the context's meaning" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       read(project, "spec/domain/shop_spec.cr").should eq(<<-CRYSTAL)
         require "../spec_helper"
 
@@ -190,9 +192,9 @@ describe Caramel::Frappe::DomainGenerator do
 
   it "leaves config/application.cr alone for a second domain" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       config = read(project, "config/application.cr")
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should eq(%w[app/domain/ledger.cr spec/domain/ledger_spec.cr])
       read(project, "config/application.cr").should eq(config)
     end
@@ -202,17 +204,17 @@ describe Caramel::Frappe::DomainGenerator do
     domain_project do |project, generator|
       rules = read(project, LINT)
       rules.should_not contain("Lint/UnusedArgument")
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       read(project, LINT).should eq(rules + LINT_SECTION)
     end
   end
 
   it "leaves .ameba.yml alone for a second domain" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       rules = read(project, LINT).sub(LINT_SECTION, "")
       File.write(File.join(project.root, LINT), rules)
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should_not contain(LINT)
       read(project, LINT).should eq(rules)
     end
@@ -221,7 +223,7 @@ describe Caramel::Frappe::DomainGenerator do
   it "leaves alone a rule set that excludes app/domain/ already, however it lists it" do
     domain_project do |project, generator|
       rules = with_rules(project, %(Lint/UnusedArgument: {Excluded: ["app/domain/**"]}\n))
-      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written = generator.generate(project.root, "Shop", "Ordering", MEANS)
       written.should_not contain(LINT)
       read(project, LINT).should eq(rules)
     end
@@ -240,7 +242,7 @@ describe Caramel::Frappe::DomainGenerator do
 
         YAML
       rules = with_rules(project, section)
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       listed = %(      - "app/jobs/**"\n      - "app/domain/**"\n  Enabled: true\n)
       read(project, LINT).should eq(rules.sub(%(      - "app/jobs/**"\n  Enabled: true\n), listed))
     end
@@ -249,14 +251,14 @@ describe Caramel::Frappe::DomainGenerator do
   it "adds the Excluded list to a Lint/UnusedArgument section without one" do
     domain_project do |project, generator|
       rules = with_rules(project, "Lint/UnusedArgument:\n  Enabled: true")
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       listed = %(Lint/UnusedArgument:\n  Excluded:\n    - "app/domain/**"\n  Enabled: true\n)
       read(project, LINT).should eq(rules.sub("Lint/UnusedArgument:\n  Enabled: true", listed))
     end
   end
 
   it "refuses a rule set it cannot edit with the line to add, writing nothing" do
-    remedy = ".ameba.yml is not in a shape frappe make domain can edit: add " \
+    remedy = ".ameba.yml is not in a shape frappe sweettalk:make domain can edit: add " \
              "- \"app/domain/**\" to Excluded: under Lint/UnusedArgument: by hand, " \
              "then make the domain again"
     unreadable = [
@@ -281,17 +283,17 @@ describe Caramel::Frappe::DomainGenerator do
     domain_project do |project, generator|
       guide = read(project, GUIDE)
       guide.should_not contain("Domain")
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       read(project, GUIDE).should eq(guide.sub(GUIDE_DATA, GUIDE_DATA + GUIDE_LINES))
     end
   end
 
   it "leaves AGENTS.md alone for a second domain" do
     domain_project do |project, generator|
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       guide = read(project, GUIDE).sub(GUIDE_LINES, "")
       File.write(File.join(project.root, GUIDE), guide)
-      written = generator.generate(project, "Ledger", "Booking", "recording what was sold")
+      written = generator.generate(project.root, "Ledger", "Booking", "recording what was sold")
       written.should_not contain(GUIDE)
       read(project, GUIDE).should eq(guide)
     end
@@ -302,7 +304,7 @@ describe Caramel::Frappe::DomainGenerator do
       own = "Domain: app/domain/, ours\nDomain rules: docs/domain.md\n"
       guide = read(project, GUIDE).sub(GUIDE_DATA, GUIDE_DATA + own)
       File.write(File.join(project.root, GUIDE), guide)
-      written = generator.generate(project, "Shop", "Ordering", MEANS)
+      written = generator.generate(project.root, "Shop", "Ordering", MEANS)
       written.should_not contain(GUIDE)
       read(project, GUIDE).should eq(guide)
     end
@@ -312,14 +314,14 @@ describe Caramel::Frappe::DomainGenerator do
     domain_project do |project, generator|
       own = "Domain: app/domain/, ours"
       File.write(File.join(project.root, GUIDE), own)
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       read(project, GUIDE).should eq("#{own}\n#{GUIDE_LINES.lines(chomp: false).last}")
     end
   end
 
   it "refuses a guide it cannot edit with the lines to add, writing nothing" do
-    remedy = "AGENTS.md is not in a shape frappe make domain can edit: add the lines " \
-             "Domain: app/domain/ in SweetTalk and Domain rules: " \
+    remedy = "AGENTS.md is not in a shape frappe sweettalk:make domain can edit: add the " \
+             "lines Domain: app/domain/ in SweetTalk and Domain rules: " \
              ".claude/skills/sweettalk/SKILL.md by hand, then make the domain again"
     domain_project do |project, generator|
       path = File.join(project.root, GUIDE)
@@ -335,7 +337,7 @@ describe Caramel::Frappe::DomainGenerator do
   it "names the tenant in a multi-tenant application" do
     domain_project do |project, generator, package|
       tenanted(project, package)
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       expected = "  include SweetTalk\n  tenant App::Account\n\n  context Ordering, means:"
       read(project, "app/domain/shop.cr").should contain(expected)
     end
@@ -344,7 +346,8 @@ describe Caramel::Frappe::DomainGenerator do
   it "marks the first context central with --central" do
     domain_project do |project, generator, package|
       tenanted(project, package)
-      generator.generate(project, "Catalogue", "Shelf", "the teas on our shelves", central: true)
+      means = "the teas on our shelves"
+      generator.generate(project.root, "Catalogue", "Shelf", means, central: true)
       expected = %(context Shelf, central: true, means: "the teas on our shelves" do)
       read(project, "app/domain/catalogue.cr").should contain(expected)
     end
@@ -359,7 +362,7 @@ describe Caramel::Frappe::DomainGenerator do
       [" ", "a\nb"].each do |means|
         refuses(project, generator, "Give the context a meaning", means: means)
       end
-      generator.generate(project, "Shop", "Ordering", MEANS)
+      generator.generate(project.root, "Shop", "Ordering", MEANS)
       refuses(project, generator, "File already exists: app/domain/shop.cr")
     end
     domain_project do |project, generator|
@@ -372,6 +375,36 @@ describe Caramel::Frappe::DomainGenerator do
       path = File.join(project.root, "config/routes.cr")
       File.write(path, File.read(path).sub("tenant App::Account, by: :slug do", "scope do"))
       refuses(project, generator, "has no tenant App::Model")
+    end
+  end
+end
+
+describe "frappe sweettalk:make domain" do
+  it "writes the domain, says what to run next, and refuses to write it twice" do
+    domain_project do |project, _|
+      output, errors = IO::Memory.new, IO::Memory.new
+      arguments = ["make", "domain", "Shop", "Ordering", "--means=#{MEANS}"]
+      SweetTalk::Tool.run(arguments, output, errors, project.root, true).should eq(0)
+      output.to_s.should start_with("Generated .ameba.yml\n")
+      steps = "  Write the domain in app/domain/shop.cr.\n" \
+              "  frappe db diff --name create_shop  derive its tables\n" \
+              "  #{"frappe migrate".ljust(33)}  apply them\n"
+      output.to_s.should end_with("Generated spec/domain/shop_spec.cr\n\nNext:\n#{steps}")
+      errors.to_s.should eq("")
+      SweetTalk::Tool.run(arguments, output, errors, project.root, true).should eq(1)
+      errors.to_s.should eq("ERR USAGE at frappe sweettalk:make domain\n" \
+                            "MSG: File already exists: app/domain/shop.cr; source was preserved\n")
+    end
+  end
+
+  it "takes --central and the meaning in any place" do
+    domain_project do |project, _, package|
+      tenanted(project, package)
+      output, errors = IO::Memory.new, IO::Memory.new
+      arguments = ["make", "domain", "--central", "Catalogue", "--means=the teas", "Shelf"]
+      SweetTalk::Tool.run(arguments, output, errors, project.root, false).should eq(0)
+      expected = %(context Shelf, central: true, means: "the teas" do)
+      read(project, "app/domain/catalogue.cr").should contain(expected)
     end
   end
 end

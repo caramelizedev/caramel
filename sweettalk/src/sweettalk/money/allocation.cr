@@ -159,7 +159,7 @@ module SweetTalk
     #   Required.
     # @option per | a type | Int64 | The type that keys the weights and the parts.
     # @guide c-sweettalk-money
-    # @example requires caramel/sweet_talk/money
+    # @example requires sweettalk/money
     #   kernel Payroll, shared_by: [Wages, Stub], means: "how payroll counts money" do
     #     currencies %w[USD EUR], means: "a currency payroll pays in"
     #   end

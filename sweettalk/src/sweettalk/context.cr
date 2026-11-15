@@ -44,8 +44,8 @@ module SweetTalk
     # that is one of a closed list, `value Day, Date, means: "…"` a real calendar day (a
     # `SugarORM::Date`, stored in a `date` column through `SugarORM::DateCodec`), `value
     # Rate, Decimal(20, 8), at_least: "0", means: "…"` a `BigDecimal` kept in a
-    # `numeric(20,8)` column through `SugarORM::DecimalCodec` (with `caramel/sweet_talk/
-    # decimal` required), `value Evidence, Json(Snapshot), means: "…"` a JSON document, a
+    # `numeric(20,8)` column through `SugarORM::DecimalCodec` (with `sweettalk/decimal`
+    # required), `value Evidence, Json(Snapshot), means: "…"` a JSON document, a
     # `JSON::Serializable` type or `JSON::Any` for `Json` alone, kept in a `jsonb` column
     # through `SugarORM::JSONB`, and `value Address, means: "…" do part street : String; …
     # end` is a value of several parts. Bounds, lengths and lists are also CHECK constraints
@@ -437,7 +437,7 @@ module SweetTalk
       {% elsif wraps.is_a?(Generic) && wraps.name.stringify == "Decimal" %}
         {% unless ::SugarORM.has_constant?("DecimalCodec") %}
           {% wraps.raise "value #{name} wraps Decimal, which needs require " +
-                         "\"caramel/sweet_talk/decimal\" before this domain: a program that " +
+                         "\"sweettalk/decimal\" before this domain: a program that " +
                          "declares no decimal value never links GMP" %}
         {% end %}
         {% digits = wraps.type_vars %}

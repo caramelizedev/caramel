@@ -1,8 +1,10 @@
-# `frappe glossary`: the detailed glossary, every term with the facts its declaration
-# holds, and the context map (ADR 0036). The application answers it; Frappé compiles the
-# application and asks.
+# `frappe sweettalk:glossary` and `frappe sweettalk:contexts`: the detailed glossary, every
+# term with the facts its declaration holds, and the context map (ADR 0036). The
+# application answers both: Frappé compiles it and runs its command, which prints what the
+# person or the agent reads.
 module SweetTalk
-  GLOSSARY_USAGE = "Usage: glossary"
+  GLOSSARY_USAGE = "Usage: sweettalk:glossary [--json]"
+  CONTEXTS_USAGE = "Usage: sweettalk:contexts [--mermaid]"
 
   # A glossary term with the facts its declaration holds, by name: a context's `follows`
   # and `shares`, a kernel's `shared_by`, a value's `wraps`, `at_least`, `at_most` and
@@ -25,13 +27,140 @@ module SweetTalk
     end
   end
 
-  # Prints the report and the context map as one JSON document for `glossary`; returns the
-  # exit status: 0, or 2 for any argument.
-  def self.__sweettalk_print_glossary(arguments : Array(String), output : IO, errors : IO) : Int32
-    unless arguments.empty?
+  # Prints the glossary for `sweettalk:glossary`: as Markdown, or with `--json` the report
+  # and the context map as one JSON document. Returns the exit status: 0, or 2 for any
+  # other argument.
+  def self.__sweettalk_print_glossary(arguments : Array(String),
+                                      output : IO,
+                                      errors : IO) : Int32
+    if arguments.empty?
+      output.print(__sweettalk_glossary_markdown(report))
+    elsif arguments == ["--json"]
+      __sweettalk_glossary_json(output)
+    else
       errors.puts GLOSSARY_USAGE
       return 2
     end
+    0
+  end
+
+  # Prints the context map for `sweettalk:contexts`: each context and kernel with the edges
+  # that leave it, or with `--mermaid` a Mermaid flowchart. Returns the exit status: 0, or
+  # 2 for any other argument.
+  def self.__sweettalk_print_contexts(arguments : Array(String),
+                                      output : IO,
+                                      errors : IO) : Int32
+    if arguments.empty?
+      output.print(__sweettalk_map_text(report, context_map))
+    elsif arguments == ["--mermaid"]
+      output.print(__sweettalk_map_mermaid(report, context_map))
+    else
+      errors.puts CONTEXTS_USAGE
+      return 2
+    end
+    0
+  end
+
+  # *entries* as Markdown: one section per context or kernel, its meaning, its follows: and
+  # shares:, then a table of its terms with their facts.
+  def self.__sweettalk_glossary_markdown(entries : Array(Entry)) : String
+    String.build do |io|
+      io << "# Glossary\n"
+      entries.group_by(&.term.context).each do |name, held|
+        __sweettalk_glossary_section(io, name, held)
+      end
+    end
+  end
+
+  # The context map as text: each context and kernel of *entries* with the *edges* that
+  # leave it.
+  def self.__sweettalk_map_text(entries : Array(Entry),
+                                edges : Array({String, String, String})) : String
+    String.build do |io|
+      __sweettalk_modules(entries).each do |name|
+        io << name << "\n"
+        edges.each do |(from, to, kind)|
+          io << "  " << __sweettalk_edge_verb(kind) << " " << to << "\n" if from == name
+        end
+      end
+    end
+  end
+
+  # The context map as a Mermaid flowchart: a dependency is an arrow, an event a dotted
+  # arrow, a shared kernel a line and an outside system a hexagon.
+  def self.__sweettalk_map_mermaid(entries : Array(Entry),
+                                   edges : Array({String, String, String})) : String
+    String.build do |io|
+      io << "flowchart LR\n"
+      __sweettalk_modules(entries).each { |name| io << "  " << name << "\n" }
+      edges.each do |(from, to, kind)|
+        verb = __sweettalk_edge_verb(kind)
+        case kind
+        when "dependency" then io << "  " << from << " -->|" << verb << "| " << to << "\n"
+        when "event"      then io << "  " << from << " -.->|" << verb << "| " << to << "\n"
+        when "kernel"     then io << "  " << from << " ---|" << verb << "| " << to << "\n"
+        else
+          io << "  " << from << " -->|" << verb << "| " << to << "{{" << to << "}}\n"
+        end
+      end
+    end
+  end
+
+  # What an edge of the context map says of the module it leaves, by its kind.
+  private def self.__sweettalk_edge_verb(kind : String) : String
+    case kind
+    when "dependency" then "depends on"
+    when "event"      then "reacts to"
+    when "kernel"     then "shares"
+    else                   "calls"
+    end
+  end
+
+  # The name of each context and kernel among *entries*, in their order.
+  private def self.__sweettalk_modules(entries : Array(Entry)) : Array(String)
+    entries.select { |entry| __sweettalk_module?(entry) }.map(&.term.name)
+  end
+
+  private def self.__sweettalk_module?(entry : Entry) : Bool
+    {"context", "kernel"}.includes?(entry.term.kind)
+  end
+
+  # One section of the Markdown glossary: the context or kernel *name* with the terms it
+  # holds, or the terms outside any context.
+  private def self.__sweettalk_glossary_section(io : IO, name : String, held : Array(Entry)) : Nil
+    head = held.find { |entry| __sweettalk_module?(entry) }
+    io << "\n## " << (name.empty? ? "Outside any context" : name)
+    if head
+      term = head.term
+      subdomain = term.subdomain
+      io << " (" << term.kind << (subdomain ? ", #{subdomain}" : "") << ")"
+      io << "\n\n" << term.means << "\n"
+      facts = __sweettalk_facts_text(head.facts)
+      io << "\n" << facts << "\n" unless facts.empty?
+    else
+      io << "\n"
+    end
+    rows = head ? held.reject { |entry| entry == head } : held
+    return if rows.empty?
+    io << "\n| Term | Kind | Means | Facts |\n| --- | --- | --- | --- |\n"
+    rows.each do |entry|
+      io << "| " << __sweettalk_cell(entry.term.name) << " | " << entry.term.kind << " | "
+      io << __sweettalk_cell(entry.term.means) << " | "
+      io << __sweettalk_cell(__sweettalk_facts_text(entry.facts)) << " |\n"
+    end
+  end
+
+  private def self.__sweettalk_facts_text(facts : Hash(String, Array(String))) : String
+    listed = facts.reject { |_, values| values.empty? }
+    listed.join("; ") { |name, values| "#{name}: #{values.join(", ")}" }
+  end
+
+  private def self.__sweettalk_cell(text : String) : String
+    text.gsub('|', "\\|").gsub('\n', ' ')
+  end
+
+  # The report and the context map as one JSON document, on a line of its own.
+  private def self.__sweettalk_glossary_json(output : IO) : Nil
     JSON.build(output) do |json|
       json.object do
         json.field("terms") { __sweettalk_report_json(json) }
@@ -43,7 +172,6 @@ module SweetTalk
       end
     end
     output.puts
-    0
   end
 
   private def self.__sweettalk_report_json(json : JSON::Builder) : Nil
@@ -191,6 +319,10 @@ module SweetTalk
   end
 end
 
-Caramel::Crema.command("glossary", "glossary") do |arguments|
+Caramel::Crema.command("sweettalk:glossary", "sweettalk:glossary [--json]") do |arguments|
   SweetTalk.__sweettalk_print_glossary(arguments, STDOUT, STDERR)
+end
+
+Caramel::Crema.command("sweettalk:contexts", "sweettalk:contexts [--mermaid]") do |arguments|
+  SweetTalk.__sweettalk_print_contexts(arguments, STDOUT, STDERR)
 end

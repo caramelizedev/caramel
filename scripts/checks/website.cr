@@ -1,5 +1,7 @@
 require "./support/harness"
-require "../../src/frappe/word_drift"
+require "../../src/frappe/toolkit"
+require "../../src/caramel/version"
+require "../../sweettalk/src/sweettalk/tool/word_drift"
 
 # The website builds and passes its own checks (ADR 0014). website/build.mjs
 # refuses a site that does not name the version in shard.yml, so during
@@ -28,14 +30,16 @@ version = File.read_lines(File.join(Caramel::Checks::REPO, "shard.yml"))
 puts "PASS: the website builds Caramel #{version}'s edition and passes website/check.mjs"
 
 # The SweetTalk guide's Markdown edition and the skill name no option that a word lacks, the
-# guide names every word and option, and each word's @guide is a section of the guide.
+# guide names every word and option, and each word's @guide is a section of the guide. The
+# shard's own file compares them: it is what reads the words.
 repo = Caramel::Checks::REPO
-words = Caramel::Frappe::Words.load(repo)
-drift = Caramel::Frappe::WordDrift.new(words)
+skill_path = "sweettalk/templates/SKILL.md"
+words = SweetTalk::Tool::Words.load(File.join(repo, "sweettalk"), repo)
+drift = SweetTalk::Tool::WordDrift.new(words)
 guide = File.read(File.join(repo, "website/dist/docs/#{version}/sweettalk/index.md"))
-skill = File.read(File.join(repo, "templates/skills/sweettalk/SKILL.md"))
+skill = File.read(File.join(repo, skill_path))
 problems = drift.prose(guide, "the SweetTalk guide", guide: true) +
-           drift.prose(skill, "templates/skills/sweettalk/SKILL.md") +
+           drift.prose(skill, skill_path) +
            drift.sections(guide, "the SweetTalk guide")
 unless problems.empty?
   Caramel::Checks.fail("SweetTalk's words and its prose differ:\n#{problems.join("\n")}")
