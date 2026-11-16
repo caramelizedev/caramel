@@ -278,6 +278,26 @@ cases = {
     "to 'User::QueryOf(NamedTuple())#order_by_joined' to match a member of enum",
     "field : Team::Field",
   ],
+  "compile_band_symbol_unknown" => [
+    "compile_band_symbol_unknown.cr:3:",
+    "seats: Symbol",
+  ],
+  "compile_band_unknown_field" => [
+    "compile_band_unknown_field.cr:7:5",
+    "band references 'stoc', which is not a column of Shelf",
+  ],
+  "compile_band_not_numeric" => [
+    "compile_band_not_numeric.cr:8:5",
+    "band label: needs an Int32, Int64 or Float64 field, but 'label' is String.",
+  ],
+  "compile_band_not_range" => [
+    "compile_band_not_range.cr:7:5",
+    "band stock: many takes a range literal, like `many: 1..3`.",
+  ],
+  "compile_band_overlap" => [
+    "compile_band_overlap.cr:7:5",
+    "band stock: few and many overlap.",
+  ],
 }
 sources = cases.keys.map { |name| "spec/fixtures/sugar_orm/#{name}.cr" }
 results = Caramel::Checks.type_check(sources)

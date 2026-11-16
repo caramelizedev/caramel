@@ -30,6 +30,7 @@ An application needs pure schemas, association safety at compile time, explicit 
 18. **Joins go through `belongs_to` only.** `where(<belongs_to>: parent_query)` narrows by a parent query without a join, and `not(parent_query)` leaves its rows out. Either way the parent query brings its own conditions and tenant.
 19. **Batches and pages read by primary key.** The cursor is the last row's key, typed, with no encoding.
 20. **`rest` is a query's complement.** Its conditions become one `IS NOT TRUE`, so the rows a query matches and the rows its `rest` matches are every row; it refuses joins, a limit and an offset.
+21. **A band names a range of a numeric field once.** `band copies, scarce: 1..3, plenty: 4..` makes an enum keyword `where` takes; bands of one field may not overlap.
 
 ## Reasons
 
@@ -60,3 +61,4 @@ An application needs pure schemas, association safety at compile time, explicit 
 - Rejected: operator hashes (`{not: …}`), which accept their keys in any order, and block predicates (`where { copies > 3 }`), where Crystal cannot refuse `&&` or `||` between two conditions, so half of one is dropped silently.
 - Rejected: keeping `where_null` and `where_in`; `where(field: nil)` and `where(<belongs_to>: parent)` say the same in the one `where`.
 - `IS NOT TRUE` keeps the rows where a condition is NULL; `NOT` would leave them out of both halves.
+- A range named once cannot drift between the queries that use it; an overlap would put one value in two bands.

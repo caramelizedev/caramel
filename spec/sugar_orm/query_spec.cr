@@ -47,6 +47,18 @@ describe SugarORM::Query do
     end
   end
 
+  it "takes a band of a field as its named range" do
+    teams = SugarUnit::Team.query
+    many = teams.where(seats: :many)
+    many.to_sql.should end_with(%(WHERE "seats" >= $1))
+    many.binds.should eq([4] of SugarORM::Value)
+    few = teams.where(seats: :few)
+    few.to_sql.should end_with(%(WHERE "seats" BETWEEN $1 AND $2))
+    few.binds.should eq([1, 3] of SugarORM::Value)
+    SugarUnit::Team.seats_band(2).should eq(SugarUnit::Team::SeatsBand::Few)
+    SugarUnit::Team.seats_band(0).should be_nil
+  end
+
   it "takes a value narrowed from a nilable one" do
     email = ["billing@acme.test", nil].first
     query = SugarUnit::Team.query
