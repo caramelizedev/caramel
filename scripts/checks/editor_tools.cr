@@ -11,7 +11,7 @@ module EditorCheck
                          "and bin/frappe lsp install first")
   end
   ROOT     = File.read(POINTER).lines.first.strip
-  CRYSTAL  = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.22.1")
+  CRYSTAL  = File.join(ROOT, "data/installs/github-crystal-lang-crystal/1.22.3")
   MANIFEST = JSON.parse(File.read(File.join(REPO, "tools/editor-darwin-arm64.json")))
   VERSIONS = {"ameba-ls"    => MANIFEST["ameba-ls"]["version"].as_s,
               "crystalline" => MANIFEST["crystalline"]["reported_version"].as_s}
@@ -59,6 +59,32 @@ module EditorCheck
     end
   end
 
+  def self.expect_stdlib_definition(client : LSPClient, path : String, text : String) : Nil
+    stdlib = File.realpath(File.join(CRYSTAL, "src")) + "/"
+    at_puts = LSPClient.position(text, "puts", 1)
+    client.definition_until(path, at_puts, 180.seconds) do |item|
+      item.starts_with?(stdlib)
+    end
+  end
+
+  # crystalline's first session on a toolchain has no index of the standard
+  # library and builds it in the background. Removing the cached index, which
+  # the next session rebuilds, makes this session that one whatever ran before.
+  def self.first_session(env : Hash(String, String?), navigation : String) : Nil
+    cached = File.join(ROOT, "editor/cache/crystalline")
+    names = Dir.exists?(cached) ? Dir.children(cached) : [] of String
+    names.each do |name|
+      File.delete(File.join(cached, name)) if name.starts_with?("prelude_index-")
+    end
+    client = LSPClient.new("crystalline", REPO, env)
+    begin
+      expect_stdlib_definition(client, navigation, client.open(navigation))
+      puts "PASS: crystalline definition into the stdlib in its first session"
+    ensure
+      client.close
+    end
+  end
+
   def self.framework_phase : Nil
     scratch = Caramel::Checks.private_temp("caramel-editor-env-")
     begin
@@ -73,6 +99,7 @@ module EditorCheck
       navigation = File.join(REPO, "spec/fixtures/editor/navigation.cr")
       label = "ameba-ls #{VERSIONS["ameba-ls"]} lint diagnostics"
       check_ameba(REPO, env, ".caramel-toolchain", navigation, label)
+      first_session(env, navigation)
       client = LSPClient.new("crystalline", REPO, env)
       begin
         expect_startup(client, ".caramel-toolchain")
@@ -83,12 +110,8 @@ module EditorCheck
           item == response
         end
         puts "PASS: crystalline definition into project source"
-        stdlib = File.realpath(File.join(CRYSTAL, "src")) + "/"
-        at_puts = LSPClient.position(text, "puts", 1)
-        client.definition_until(navigation, at_puts, 180.seconds) do |item|
-          item.starts_with?(stdlib)
-        end
-        puts "PASS: crystalline definition into pinned Crystal 1.22.1 stdlib"
+        expect_stdlib_definition(client, navigation, text)
+        puts "PASS: crystalline definition into pinned Crystal 1.22.3 stdlib"
         at_argument = LSPClient.position(text, "puts response", 6)
         hover = client.at("textDocument/hover", navigation, at_argument, 60.seconds)
         unless hover.to_json.includes?("Response")

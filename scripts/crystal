@@ -32,8 +32,13 @@ EOF
 fi
 
 BASE=$(/bin/realpath -- "$CARAMEL_TOOLCHAIN_ROOT")
-CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.22.1
-COMPILER=$CRYSTAL_ROOT/embedded/bin/crystal
+# The official archive supplies the standard library, Shards and the
+# collector. The compiler, and the PCRE2 the programs it builds link, are
+# Caramel's build of the same release, which generates code on several
+# threads (ADR 0001).
+CRYSTAL_ROOT=$BASE/data/installs/github-crystal-lang-crystal/1.22.3
+CRYSTAL_BUILD=$BASE/data/installs/github-caramelizedev-caramel-crystal/1.22.3-caramel.1
+COMPILER=$CRYSTAL_BUILD/crystal
 OPENSSL=$BASE/data/installs/conda-openssl/3.6.5
 GMP=$BASE/data/installs/conda-gmp/6.3.0
 
@@ -162,7 +167,7 @@ if [ -z "$FRESH" ]; then
 fi
 
 CRYSTAL_PATH=${CRYSTAL_PATH-lib:$CRYSTAL_ROOT/src}
-CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$RUNTIME:$CRYSTAL_ROOT/embedded/lib
+CRYSTAL_LIBRARY_PATH=${CRYSTAL_LIBRARY_PATH:+$CRYSTAL_LIBRARY_PATH:}$RUNTIME:$CRYSTAL_BUILD/lib:$CRYSTAL_ROOT/embedded/lib
 PATH=$BASE/bin:${PATH-}
 unset PKG_CONFIG_PATH
 PKG_CONFIG_LIBDIR=$RUNTIME

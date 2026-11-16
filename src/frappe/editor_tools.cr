@@ -16,7 +16,7 @@ module Caramel::Frappe
   # explicitly, so an editor never reaches a different Crystal.
   class EditorTools
     SERVERS                 = %w[crystalline ameba-ls]
-    BUILD_RECIPE            = 4 # bump whenever the crystalline build flags or steps change
+    BUILD_RECIPE            = 5 # bump whenever the crystalline build flags or steps change
     LLVM_VERSION            = "15.0.7"
     MAX_BINARY              = 128 * 1024 * 1024
     DYLD_LINE               = /^dyld\[\d+\]: <[0-9A-Fa-f-]+> (\/.+)$/
@@ -273,6 +273,7 @@ module Caramel::Frappe
         tools.run(shards, ["install", "--production"], source)
         verify_crystalline_dependencies(source, pin)
         enable_save_notifications(source)
+        cache_queries_after_prelude(source)
         Dir.mkdir(File.join(source, "bin"), 0o700)
         extras = {
           "CRYSTAL_PATH" => "lib:#{build}/crystal-src",
@@ -339,6 +340,23 @@ module Caramel::Frappe
         "    text_document_sync: LSP::TextDocumentSyncKind::Incremental,\n",
         "    text_document_sync: LSP::TextDocumentSyncOptions.new(open_close: true, " \
         "change: LSP::TextDocumentSyncKind::Incremental, save: true),\n")
+    end
+
+    # The pinned crystalline caches a document's lightweight query until the
+    # document changes. Its first session on a toolchain indexes the standard
+    # library in the background, and a query built before that index exists
+    # lacks it, so go-to-definition into the standard library answered nothing
+    # for the file. Such a query is no longer cached: the next request builds
+    # one with the index. BUILD_RECIPE fingerprints this local build change.
+    private def cache_queries_after_prelude(source : String) : Nil
+      workspace = File.join(source, "src/crystalline/workspace.cr")
+      patch_once(workspace,
+        "    cache_key = document.uri.to_s\n",
+        "    prelude_ready = !Crystalline::Lightweight::PreludeIndex.get.nil?\n" \
+        "    cache_key = document.uri.to_s\n")
+      patch_once(workspace,
+        "      if query\n        @query_cache[cache_key] = ",
+        "      if query && prelude_ready\n        @query_cache[cache_key] = ")
     end
 
     private def patch_once(path : String, original : String, replacement : String) : Nil

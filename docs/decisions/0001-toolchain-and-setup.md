@@ -15,14 +15,15 @@ Caramel needs Crystal, Shards, Caddy, PostgreSQL and their native libraries at k
 3. **The selection is one authored file and one lock with checksums.** Changing a tool version or a backend is a reviewed dependency change.
 4. **mise owns tool installation and nothing else.** Frappé is the developer's interface, Shards owns Crystal dependencies, and Latte ([ADR 0012](0012-latte.md)) owns databases, services, DNS, certificates and the proxy. Database data lives outside tool installations, so installing, upgrading or removing a tool never creates or removes a database.
 5. **What the Crystal archive lacks comes from the managed toolchain, never from the host.** The archive's bundled Shards is used, and OpenSSL and GMP are managed tools. The PostgreSQL library directory is never a compiler search path.
-6. **Installed tools work offline; offline reinstallation is not promised.** A consumer adapter retains verified artifacts or defines its supported cache, and tests recovery from missing or corrupt files.
-7. **mise runs on Caramel-owned configuration and a filtered environment.** System and global mise configuration are overridden, and the discovered configuration is validated before any installation hook or task runs. The adapter is not a security boundary for untrusted projects.
-8. **The installer records the toolchain once per checkout, and nothing falls back to `PATH`.** Every component finds the toolchain through one lookup. The installer is the only writer of the record. The record and the toolchain root must be owned by the user and writable by no one else.
-9. **A toolchain is named by the digest of its selection.** A changed selection installs beside the old one. The compiler launcher scripts are outside the digest, so a release that changes only them reuses the toolchain.
-10. **`frappe` and `latte` are marked launcher scripts in `~/.local/bin`.** Each runs the newest installed release ([ADR 0016](0016-versioning-and-releases.md)). Registration refuses when a name is taken by a file Caramel did not create or when the directory is writable by others.
-11. **A new project starts migrated.** Creating or setting up a project applies its pending migrations unless the developer opts out.
-12. **Browser acceptance drives a pinned headless Chrome over WebDriver, from Crystal.** The check runs a generated application behind Latte's real proxy on a `.localhost` site. It never downloads the browser or its driver, and verifies both executables before it starts them.
-13. **A check never adds trust.** The browser session accepts Latte's untrusted local authority for that session only. A run fails, and its fixture authority keys are deleted, if the proxy installs a root certificate.
+6. **On macOS the compiler is Caramel's own build of the pinned Crystal release.** It is built from the unpatched tag with pinned inputs, published prebuilt and pinned by checksum like every other tool, and it carries the PCRE2 that programs link. The official archive of the same release supplies the standard library, Shards and the collector.
+7. **Installed tools work offline; offline reinstallation is not promised.** A consumer adapter retains verified artifacts or defines its supported cache, and tests recovery from missing or corrupt files.
+8. **mise runs on Caramel-owned configuration and a filtered environment.** System and global mise configuration are overridden, and the discovered configuration is validated before any installation hook or task runs. The adapter is not a security boundary for untrusted projects.
+9. **The installer records the toolchain once per checkout, and nothing falls back to `PATH`.** Every component finds the toolchain through one lookup. The installer is the only writer of the record. The record and the toolchain root must be owned by the user and writable by no one else.
+10. **A toolchain is named by the digest of its selection.** A changed selection installs beside the old one. The compiler launcher scripts are outside the digest, so a release that changes only them reuses the toolchain.
+11. **`frappe` and `latte` are marked launcher scripts in `~/.local/bin`.** Each runs the newest installed release ([ADR 0016](0016-versioning-and-releases.md)). Registration refuses when a name is taken by a file Caramel did not create or when the directory is writable by others.
+12. **A new project starts migrated.** Creating or setting up a project applies its pending migrations unless the developer opts out.
+13. **Browser acceptance drives a pinned headless Chrome over WebDriver, from Crystal.** The check runs a generated application behind Latte's real proxy on a `.localhost` site. It never downloads the browser or its driver, and verifies both executables before it starts them.
+14. **A check never adds trust.** The browser session accepts Latte's untrusted local authority for that session only. A run fails, and its fixture authority keys are deleted, if the proxy installs a root certificate.
 
 ## Reasons
 
@@ -31,6 +32,12 @@ Caramel needs Crystal, Shards, Caddy, PostgreSQL and their native libraries at k
 - Separate prefixes let several Crystal versions coexist and leave the host's shell and tools untouched.
 - Bundling GMP lets an application use the standard library's exact arithmetic in every managed build, without a link annotation of its own.
 - Rejected: the whole PostgreSQL library directory on the compiler search path. It causes an iconv ABI mismatch with Crystal's macOS bindings.
+- The official macOS compiler is built without threads and generates code on one core. The same release built with threads takes less than half the time for a first build and for a rebuild after an edit that reaches many modules.
+- An unpatched tag built from inputs pinned by hash stays auditable, and a prebuilt archive keeps setup free of a compile.
+- Programs link PCRE2 statically from the toolchain, and the official archive's copy is several security releases behind, so the build ships the one it was linked with.
+- Rejected: waiting for a threaded official macOS build. Its date is not Caramel's to set.
+- Rejected: Homebrew's compiler. It is threaded, but it loads Homebrew's libraries, and the toolchain takes nothing from the host.
+- Rejected: building the compiler on each machine. It takes minutes and several gigabytes of memory, where every other tool installs in seconds.
 - The installer is the only component that knows where it installed. Recording that per checkout replaces an environment variable every shell had to carry.
 - Rejected: falling back to a Crystal on `PATH`. The compiler scripts could silently use whatever version is there.
 - The ownership checks keep another local user from redirecting the compiler this user runs.
