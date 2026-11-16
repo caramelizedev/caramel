@@ -98,6 +98,7 @@ module SugarSpec
       field id : Int64, primary: true
       field tea_id : Int64
       field sold : Int32 = 0
+      field closed_at : Time?
       field lock_version : Int32, version: true
       timestamps
       index :tea_id, unique: true
@@ -119,6 +120,17 @@ module SugarSpec
     param tea_id : Int64
     param sold : Int32
     upsert on: :tea_id
+  end
+
+  class Sale::Open < SugarORM::Changeset(Sale)
+    param tea_id : Int64
+    param sold : Int32
+    param closed_at : Time?
+
+    def validate(cs)
+      tea = cs.changes["tea_id"]?.as?(Int64)
+      cs.add_error(:tea_id, "must be positive") if tea && tea <= 0
+    end
   end
 
   alias Preloads = NamedTuple(users: Array(User), owner: User?, profile: Profile?)
@@ -1257,6 +1269,123 @@ describe "SugarORM with PostgreSQL" do
       results.last.record.lock_version.should eq(1)
       SugarSpec::Sale.query.where(tea_id: 9_i64).count.should eq(1)
       SugarSpec::Sale.query.find!(results.first.record.id).sold.should eq(2)
+    end
+  end
+
+  it "inserts many changesets in one statement and gives each its record" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      opened = [1, 2, 3].map { |tea| SugarSpec::Sale::Open.new(tea_id: tea.to_i64, sold: tea) }
+      saved = false
+      delta = SugarSpec.statements { saved = SugarORM::Repo.insert_all(opened) }
+      saved.should be_true
+      delta.should eq(1)
+      opened.map(&.saved?).should eq([true, true, true])
+      opened.map(&.record.tea_id).should eq([1_i64, 2_i64, 3_i64])
+      opened.map(&.record.sold).should eq([1, 2, 3])
+      opened.map(&.record.id).uniq!.size.should eq(3)
+      SugarSpec::Sale.query.count.should eq(3)
+    end
+  end
+
+  it "inserts one statement per set of columns the changesets write" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      opened = [
+        SugarSpec::Sale::Open.new(tea_id: 1_i64, sold: 2),
+        SugarSpec::Sale::Open.new(tea_id: 2_i64),
+        SugarSpec::Sale::Open.new(tea_id: 3_i64, sold: 5),
+      ]
+      delta = SugarSpec.statements { SugarORM::Repo.insert_all(opened).should be_true }
+      delta.should eq(2)
+      opened.map(&.record.tea_id).should eq([1_i64, 2_i64, 3_i64])
+      opened.map(&.record.sold).should eq([2, 0, 5])
+    end
+  end
+
+  it "writes nothing and returns false when one changeset is invalid" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      opened = [
+        SugarSpec::Sale::Open.new(tea_id: 1_i64, sold: 1),
+        SugarSpec::Sale::Open.new(tea_id: 0_i64, sold: 1),
+      ]
+      saved = true
+      delta = SugarSpec.statements { saved = SugarORM::Repo.insert_all(opened) }
+      saved.should be_false
+      delta.should eq(0)
+      opened[1].errors.has_key?("tea_id").should be_true
+      opened.map(&.saved?).should eq([false, false])
+      SugarSpec::Sale.query.count.should eq(0)
+    end
+  end
+
+  it "raises the violation a statement breaks and saves none of the changesets" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      opened = [
+        SugarSpec::Sale::Open.new(tea_id: 5_i64, sold: 1),
+        SugarSpec::Sale::Open.new(tea_id: 5_i64, sold: 2),
+      ]
+      expect_raises(SugarORM::UniqueViolation) { SugarORM::Repo.insert_all(opened) }
+      SugarSpec::Sale.query.count.should eq(0)
+      opened.map(&.saved?).should eq([false, false])
+    end
+  end
+
+  it "upserts many changesets: DO UPDATE answers each with its row" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      first = SugarORM::Repo.insert(SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 1))
+      records = [
+        SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 4),
+        SugarSpec::Sale::Record.new(tea_id: 8_i64, sold: 2),
+      ]
+      SugarORM::Repo.insert_all(records).should be_true
+      records[0].record.id.should eq(first.record.id)
+      records[0].record.sold.should eq(4)
+      records[0].record.lock_version.should eq(1)
+      records[1].record.sold.should eq(2)
+    end
+  end
+
+  it "upserts many changesets: DO NOTHING reads the rows it left alone" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      SugarORM::Repo.insert(SugarSpec::Sale::Seed.new(tea_id: 7_i64, sold: 1))
+      seeds = [
+        SugarSpec::Sale::Seed.new(tea_id: 7_i64, sold: 9),
+        SugarSpec::Sale::Seed.new(tea_id: 9_i64, sold: 3),
+      ]
+      delta = SugarSpec.statements { SugarORM::Repo.insert_all(seeds).should be_true }
+      delta.should eq(2)
+      seeds[0].record.sold.should eq(1)
+      seeds[1].record.sold.should eq(3)
+    end
+  end
+
+  it "refuses two changesets of one upsert key" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      records = [
+        SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 1),
+        SugarSpec::Sale::Record.new(tea_id: 7_i64, sold: 2),
+      ]
+      expect_raises(ArgumentError, "insert_all got two changesets with the same tea_id") do
+        SugarORM::Repo.insert_all(records)
+      end
+    end
+  end
+
+  it "stores a Time column to the microsecond" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      at = Time.utc(2026, 1, 2, 3, 4, 5, nanosecond: 123_456_000)
+      opened = [SugarSpec::Sale::Open.new(tea_id: 4_i64, sold: 1, closed_at: at)]
+      SugarORM::Repo.insert_all(opened).should be_true
+      opened[0].record.closed_at.should eq(at)
+    end
+  end
+
+  it "inserts no changesets with no statement" do
+    SugarSpec.with_tables(owner_url, runtime_url) do
+      none = [] of SugarSpec::Sale::Open
+      saved = false
+      delta = SugarSpec.statements { saved = SugarORM::Repo.insert_all(none) }
+      saved.should be_true
+      delta.should eq(0)
     end
   end
 end

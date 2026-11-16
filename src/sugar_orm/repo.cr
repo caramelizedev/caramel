@@ -13,7 +13,7 @@ module SugarORM
   # Every bind value SugarORM sends: crystal-db scalars, UUIDs and the arrays used by
   # `= ANY($n)`.
   alias Value = ::DB::Any | ::UUID | Array(String) | Array(Int32) | Array(Int64) |
-                Array(::UUID) | Array(Float64) | Array(Bool) | Array(Time)
+                Array(::UUID) | Array(Float64) | Array(Bool) | Array(Time) | Array(String?)
 
   # A primary key's value: a schema is keyed by a UUID or an Int64.
   alias Key = ::Int64 | ::UUID
@@ -280,6 +280,14 @@ module SugarORM
       changeset
     end
 
+    # Inserts every changeset, all of one class, in one statement per set of columns they write,
+    # inside one transaction (a savepoint inside an open one). Each is validated as `insert`
+    # validates it; when one is invalid none is written and false is returned. Each saved
+    # changeset holds its record. A changeset class that declares `upsert` upserts.
+    def self.insert_all(changesets : Array(C)) : Bool forall C
+      C.__sugar_insert_all(changesets)
+    end
+
     # Deletes the changeset's record; a missing row becomes a `_base` error.
     def self.delete(changeset : Changeset)
       changeset.__sugar_delete
@@ -294,7 +302,7 @@ module SugarORM
       exec(sql, args).rows_affected == 1
     end
 
-    {% for name in %w[insert update delete] %}
+    {% for name in %w[insert update delete insert_all] %}
       def self.{{ name.id }}(db : Handle, target)
         using(db) { {{ name.id }}(target) }
       end

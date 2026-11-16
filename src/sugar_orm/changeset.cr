@@ -440,12 +440,7 @@ module SugarORM
           "#{self.class} was built from a record; use SugarORM::Repo.update"
         )
       end
-      if @expected_version
-        raise ArgumentError.new(
-          "#{self.class} sets #{T.__sugar_version_column}, which only an update checks; " \
-          "an insert starts at 0"
-        )
-      end
+      refuse_expected_version
       return if @saved || !valid?
       columns = @changes.keys
       values = @changes.values
@@ -462,7 +457,7 @@ module SugarORM
           io << " (" << columns.map { |column| %("#{column}") }.join(", ") << ") VALUES ("
           io << (1..columns.size).join(", ") { |index| "$#{index}" } << ")"
         end
-        write_conflict(io, upsert) if upsert
+        __sugar_write_conflict(io, upsert) if upsert
         io << " RETURNING " << T.__sugar_select_list
       end
       write do
@@ -470,6 +465,188 @@ module SugarORM
         next stored if stored
         upsert ? existing_row(upsert[:conflict], columns, values) : nil
       end
+    end
+
+    # :nodoc:
+    def __sugar_check_bulk : Nil
+      unless insert?
+        raise ArgumentError.new(
+          "#{self.class} was built from a record; insert_all takes insert changesets"
+        )
+      end
+      refuse_expected_version
+      raise ArgumentError.new("#{self.class} was already inserted") if @saved
+    end
+
+    # :nodoc:
+    def __sugar_saved(record : T) : Nil
+      @record = record
+      @saved = true
+    end
+
+    private def refuse_expected_version : Nil
+      return unless @expected_version
+      raise ArgumentError.new(
+        "#{self.class} sets #{T.__sugar_version_column}, which only an update checks; " \
+        "an insert starts at 0"
+      )
+    end
+
+    # :nodoc:
+    # Writes *changesets*, all of this class, as `Repo.insert_all` says.
+    def self.__sugar_insert_all(changesets : Array(C)) : Bool forall C
+      return true if changesets.empty?
+      changesets.each(&.__sugar_check_bulk)
+      return false unless changesets.all?(&.valid?)
+      groups = {} of Array(String) => Array({C, Hash(String, Value)})
+      changesets.each do |changeset|
+        changes = changeset.changes
+        (groups[changes.keys] ||= [] of {C, Hash(String, Value)}) << {changeset, changes}
+      end
+      if groups.has_key?([] of String)
+        raise ArgumentError.new(
+          "insert_all takes changesets that write at least one column; " \
+          "insert #{self} with SugarORM::Repo.insert"
+        )
+      end
+      upsert = changesets.first.__sugar_upsert
+      if upsert
+        groups.each_value { |group| refuse_duplicate_keys(group, upsert[:conflict]) }
+      end
+      Repo.transaction do
+        groups.each_value { |group| insert_group(group, upsert) }
+      end
+      true
+    end
+
+    # The text a bulk insert sends for *value*: every column travels as an array of texts that
+    # PostgreSQL casts to the column's type. A Time inside an array loses its fraction in
+    # crystal-pg, so it is sent as text.
+    private def self.bulk_text(value : Value) : String?
+      case value
+      when Nil   then nil
+      when Time  then value.to_utc.to_rfc3339(fraction_digits: 6)
+      when Array then raise ArgumentError.new("insert_all writes no array columns")
+      else            value.to_s
+      end
+    end
+
+    # What identifies a row by *conflict*: each column's text, the tenant's from the scope.
+    private def self.change_key(conflict : Array(String),
+                                changes : Hash(String, Value)) : Array(String?)
+      conflict.map do |column|
+        {% if T.has_constant?(:SUGAR_TENANT) %}
+          next bulk_text(T.__sugar_tenant_stamp) if column == T.__sugar_tenant_column
+        {% end %}
+        bulk_text(changes[column]?)
+      end
+    end
+
+    private def self.record_key(conflict : Array(String), record : T) : Array(String?)
+      conflict.map { |column| bulk_text(record.__sugar_get(column)) }
+    end
+
+    private def self.refuse_duplicate_keys(group : Array({C, Hash(String, Value)}),
+                                           conflict : Array(String)) : Nil forall C
+      seen = Set(Array(String?)).new
+      group.each do |(_, changes)|
+        key = change_key(conflict, changes)
+        next if seen.add?(key)
+        raise ArgumentError.new(
+          "insert_all got two changesets with the same #{conflict.join(", ")}: " \
+          "#{key.join(", ")}; an upsert writes each key once"
+        )
+      end
+    end
+
+    # One INSERT of a group of changesets that write the same columns: each column is one
+    # array, unnested into rows in the order of the group, so the SQL text is the same for any
+    # number of rows.
+    private def self.insert_group(group : Array({C, Hash(String, Value)}), upsert) : Nil forall C
+      columns = group.first[1].keys
+      binds = [] of Value
+      arrays = [] of String
+      columns.each do |column|
+        binds << group.map { |(_, changes)| bulk_text(changes[column]) }
+        arrays << "$#{binds.size}::#{T.__sugar_sql_type(column)}[]"
+      end
+      listed = columns.map { |column| %("#{column}") }
+      selected = columns.map { |column| %(sugar_rows."#{column}") }
+      {% if T.has_constant?(:SUGAR_TENANT) %}
+        binds << T.__sugar_tenant_stamp
+        listed << %("#{T.__sugar_tenant_column}")
+        selected << "$#{binds.size}::#{T.__sugar_sql_type(T.__sugar_tenant_column)}"
+      {% end %}
+      sql = String.build do |io|
+        io << "INSERT INTO " << T.__sugar_quoted_table << " (" << listed.join(", ") << ") "
+        io << "SELECT " << selected.join(", ")
+        io << " FROM unnest(" << arrays.join(", ") << ") WITH ORDINALITY AS sugar_rows("
+        io << columns.map { |column| %("#{column}") }.join(", ") << ", sugar_position)"
+        io << " ORDER BY sugar_position"
+        group.first[0].__sugar_write_conflict(io, upsert) if upsert
+        io << " RETURNING " << T.__sugar_select_list
+      end
+      records = Repo.query_all(sql, binds) { |rows| T.from_row(rows) }
+      if upsert
+        save_upserted(group, records, upsert[:conflict], upsert[:update], columns)
+      else
+        unless records.size == group.size
+          raise Error.new(
+            "insert_all wrote #{group.size} rows of #{T} but PostgreSQL returned #{records.size}"
+          )
+        end
+        group.each_with_index { |(changeset, _), index| changeset.__sugar_saved(records[index]) }
+      end
+    end
+
+    # Gives each changeset the row its key names. An upsert returns no row for a key that
+    # DO NOTHING left alone, so those are read in one more statement.
+    private def self.save_upserted(group : Array({C, Hash(String, Value)}),
+                                   records : Array(T),
+                                   conflict : Array(String),
+                                   update : Array(String),
+                                   columns : Array(String)) : Nil forall C
+      found = {} of Array(String?) => T
+      records.each { |record| found[record_key(conflict, record)] = record }
+      left = [] of {C, Array(String?)}
+      group.each do |(changeset, changes)|
+        key = change_key(conflict, changes)
+        if record = found[key]?
+          changeset.__sugar_saved(record)
+        else
+          left << {changeset, key}
+        end
+      end
+      return if left.empty?
+      if update.none? { |column| columns.includes?(column) }
+        read_existing(conflict, left.map { |(_, key)| key }).each do |record|
+          found[record_key(conflict, record)] = record
+        end
+        left.reject! do |(changeset, key)|
+          record = found[key]?
+          changeset.__sugar_saved(record) if record
+          !record.nil?
+        end
+      end
+      return if left.empty?
+      raise Error.new(
+        "insert_all found no row of #{T} for #{conflict.join(", ")} #{left.first[1].join(", ")}"
+      )
+    end
+
+    # The rows whose conflict columns hold *keys*, read in one statement.
+    private def self.read_existing(conflict : Array(String),
+                                   keys : Array(Array(String?))) : Array(T)
+      binds = [] of Value
+      arrays = [] of String
+      conflict.each_with_index do |column, index|
+        binds << keys.map { |key| key[index] }
+        arrays << "$#{binds.size}::#{T.__sugar_sql_type(column)}[]"
+      end
+      names = conflict.map { |column| %("#{column}") }.join(", ")
+      sql = "SELECT #{T.__sugar_select_list} FROM #{T.__sugar_quoted_table} " \
+            "WHERE (#{names}) IN (SELECT * FROM unnest(#{arrays.join(", ")}))"
+      Repo.query_all(sql, binds) { |rows| T.from_row(rows) }
     end
 
     # :nodoc:
@@ -573,9 +750,10 @@ module SugarORM
       end
     end
 
+    # :nodoc:
     # The conflict clause of an upsert insert: update what `update:` names and the changeset
     # writes, or leave the existing row alone.
-    private def write_conflict(io : IO, upsert) : Nil
+    def __sugar_write_conflict(io : IO, upsert) : Nil
       io << " ON CONFLICT (" << upsert[:conflict].map { |column| %("#{column}") }.join(", ")
       io << ")"
       updates = upsert[:update].select { |column| @changes.has_key?(column) }

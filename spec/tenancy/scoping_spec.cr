@@ -172,6 +172,20 @@ describe "An upsert of a tenanted schema" do
     Tenancy.without { Book.query.find!(theirs.record.id).title }.should eq("Globex One")
     Tenancy.without { Book.query.where(isbn: "1").count }.should eq(2)
   end
+
+  it "upserts many changesets in the bound tenant and stamps the new rows" do
+    acme, _ = two_tenants
+    author = Tenancy.with(acme) { Author.query.first! }
+    Tenancy.with(acme) do
+      SugarORM::Repo.insert_all([
+        TenancySpec::BookUpsert.new(isbn: "111", title: "Acme Atlas 2", author_id: author.id),
+        TenancySpec::BookUpsert.new(isbn: "444", title: "Acme Annex", author_id: author.id),
+      ]).should be_true
+      Book.query.order_by(:isbn).to_a.map(&.title).should eq(["Acme Atlas 2", "Acme Annex"])
+    end
+    Tenancy.without { Book.query.where(isbn: "222").first!.title }.should eq("Globex Guide")
+    Tenancy.without { Book.query.where(isbn: "444").first!.account_id }.should eq(acme.id)
+  end
 end
 
 describe "A locking query of a tenanted schema" do

@@ -31,6 +31,7 @@ An application needs pure schemas, association safety at compile time, explicit 
 19. **Batches and pages read by primary key.** The cursor is the last row's key, typed, with no encoding.
 20. **`rest` is a query's complement.** Its conditions become one `IS NOT TRUE`, so the rows a query matches and the rows its `rest` matches are every row; it refuses joins, a limit and an offset.
 21. **A band names a range of a numeric field once.** `band copies, scarce: 1..3, plenty: 4..` makes an enum keyword `where` takes; bands of one field may not overlap.
+22. **`Repo.insert_all` writes many insert changesets of one class in one statement per set of columns.** Each is validated as an insert is, none is written when one is invalid, and each column travels as one array through `unnest`.
 
 ## Reasons
 
@@ -62,3 +63,5 @@ An application needs pure schemas, association safety at compile time, explicit 
 - Rejected: keeping `where_null` and `where_in`; `where(field: nil)` and `where(<belongs_to>: parent)` say the same in the one `where`.
 - `IS NOT TRUE` keeps the rows where a condition is NULL; `NOT` would leave them out of both halves.
 - A range named once cannot drift between the queries that use it; an overlap would put one value in two bands.
+- `unnest` keeps one SQL text for any number of rows, so one prepared statement serves every batch, and no batch reaches PostgreSQL's limit of 65,535 binds.
+- A constraint a statement breaks cannot name its row, so `insert_all` raises it instead of marking a changeset.

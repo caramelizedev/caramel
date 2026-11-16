@@ -1208,6 +1208,26 @@ module SugarORM
         @{{ primary_key.id }}
       end
 
+      # The SQL type of *column*, as `__sugar_table` declares it.
+      def self.__sugar_sql_type(column : String) : String
+        case column
+        {% for column in columns %}
+          {% if column[:codec] %}
+            when {{ column[:name] }}
+              ::SugarORM::Codec.checked_sql_type({{ column[:codec] }}.sql_type)
+          {% elsif column[:references] %}
+            when {{ column[:name] }}
+              {{ column[:references] }}.__sugar_primary_sql_type
+          {% else %}
+            when {{ column[:name] }}
+              {{ column[:sql_type] }}
+          {% end %}
+        {% end %}
+        else
+          raise ArgumentError.new("#{self} has no column '#{column}'")
+        end
+      end
+
       def self.__sugar_table : ::SugarORM::Catalog::Table
         ::SugarORM::Catalog::Table.new(
           name: {{ table }},
