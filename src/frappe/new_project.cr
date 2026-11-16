@@ -2,14 +2,25 @@ require "file_utils"
 require "yaml"
 require "./project"
 require "./dev_files"
+require "./published"
 require "../latte/process"
 
 module Caramel::Frappe
   class NewProject
     # How a generated application depends on the framework (ADR 0016): its
     # shard.yml source lines, its shard.lock source line and the version the
-    # lock records, which from a release tag pins the tag's commit.
-    record Dependency, shard : String, lock : String, version : String
+    # lock records, which from a release tag pins the release's published commit.
+    record Dependency, shard : String, lock : String, version : String do
+      # Its entry under `dependencies:` in shard.yml.
+      def manifest_entry : String
+        "  caramel:\n    #{shard}\n"
+      end
+
+      # Its entry under `shards:` in shard.lock.
+      def lock_entry : String
+        "  caramel:\n    #{lock}\n    version: #{version}\n"
+      end
+    end
 
     def initialize(framework_root : String)
       @framework_root = File.realpath(framework_root)
@@ -79,21 +90,44 @@ module Caramel::Frappe
       result
     end
 
-    # The tagged release on GitHub, locked to the commit the tag points at;
-    # CARAMEL_REPOSITORY, a git URL, for tests and forks; or, from a checkout
-    # that is not exactly its clean release tag, the checkout itself.
+    # The caramel shard this release publishes on GitHub, locked to its published
+    # commit; from CARAMEL_REPOSITORY, a git URL, for tests and forks, locked to the
+    # commit this release's tag names there; or, from a checkout that is not exactly its
+    # clean release tag, the checkout itself.
     def dependency : Dependency
       pin = "\n    version: \"~> #{Caramel::VERSION}\""
       if repository = ENV["CARAMEL_REPOSITORY"]?
         source = "git: #{repository.to_json}"
-        Dependency.new(shard: source + pin, lock: source, version: Caramel::VERSION)
+        version = "#{Caramel::VERSION}+git.commit.#{tagged(repository)}"
+        Dependency.new(shard: source + pin, lock: source, version: version)
       elsif commit = release_commit
-        release = "git: #{"#{Caramel::REPOSITORY}.git".to_json}"
-        Dependency.new(shard: "github: caramelizedev/caramel" + pin, lock: release,
-          version: "#{Caramel::VERSION}+git.commit.#{commit}")
+        release = published(commit)
+        Dependency.new(shard: "github: #{release.repository}" + pin,
+          lock: "git: #{release.url.to_json}", version: release.pin)
       else
         source = "path: #{@framework_root.to_json}"
         Dependency.new(shard: source, lock: source, version: Caramel::VERSION)
+      end
+    end
+
+    # The commit that this release's tag names in the git repository at *url*.
+    private def tagged(url : String) : String
+      tag = "refs/tags/v#{Caramel::VERSION}"
+      listing = ["/usr/bin/git", "ls-remote", url, tag, "#{tag}^{}"]
+      listed = Latte::ProcessRunner.run(listing,
+        env: {"GIT_TERMINAL_PROMPT" => "0"} of String => String?,
+        timeout: 60.seconds)
+      # An annotated tag lists itself, then the commit it names.
+      commit = listed.stdout.lines.last?.try(&.split('\t').first)
+      return commit if listed.success? && commit && commit.matches?(/\A[0-9a-f]{40}\z/)
+      raise Error.new("CARAMEL_REPOSITORY #{url} has no tag v#{Caramel::VERSION}")
+    end
+
+    # The caramel shard the release at *commit* publishes. Its commit id follows from
+    # *commit* alone (Published), so this reads only the checkout.
+    private def published(commit : String) : Published::Shard
+      Published.assembled(@framework_root, commit) do |shards|
+        shards["caramel"]? || raise Error.new("#{Published::DECLARATION} publishes no caramel")
       end
     end
 
@@ -126,8 +160,7 @@ module Caramel::Frappe
                  dependency_names(application, "development_dependencies")
       locked = YAML.parse(File.read(File.join(@framework_root, "shard.lock")))["shards"].as_h
       String.build do |io|
-        io << "version: 2.0\nshards:\n  caramel:\n    " << source.lock
-        io << "\n    version: " << source.version << '\n'
+        io << "version: 2.0\nshards:\n" << source.lock_entry
         locked.each do |name, entry|
           next if development.includes?(name.as_s) && !required.includes?(name.as_s)
           io << "\n  " << name.as_s << ":\n"

@@ -114,7 +114,7 @@ module Caramel::Checks
       failed = true
       begin
         start
-        command([@frappe, "new", "shelf"], chdir: @projects)
+        new_application("shelf")
         values = local_values(@project)
         id = site("shelf")["id"].as_s
         migration_url, runtime_url = values["MIGRATION_DATABASE_URL"], values["DATABASE_URL"]

@@ -1,0 +1,1063 @@
+# The parent of every stored kind, with `has` and `the`, and the lifecycle words.
+module SweetTalk
+  # `__sweettalk_hashed(CONSTANT, {"state_@digest", "…"}, "a,b")` defines CONSTANT as the
+  # tuple with each `@digest` in its strings replaced by the FNV-1a 32-bit hash of the text,
+  # as eight hex digits. A check's name carries it, so a changed list or a changed set of
+  # parts is a new constraint, which the differ replaces. Every hashed check name comes
+  # from here. With a *constraint* name, as in `"check_shop_orders_state_@digest"`, and a
+  # *too_long* message that holds `@name`, it refuses a name over PostgreSQL's 63 bytes.
+  macro __sweettalk_hashed(constant, tuple, text, constraint = nil, too_long = nil)
+    {% hash = 2166136261 %}
+    {% for char in text.chars %}
+      {% hash = ((hash ^ char.ord) * 16777619) % 4294967296 %}
+    {% end %}
+    {% digits = "0123456789abcdef".chars %}
+    {% hex = [28, 24, 20, 16, 12, 8, 4, 0].map { |shift| digits[(hash >> shift) & 15] } %}
+    {% hex = hex.join("") %}
+    {% items = tuple.map { |item| item.is_a?(StringLiteral) ? item.gsub(/@digest/, hex) : item } %}
+    {% unless constraint.is_a?(NilLiteral) %}
+      {% named = constraint.gsub(/@digest/, hex) %}
+      {% raise too_long.gsub(/@name/, named) if named.size > 63 %}
+    {% end %}
+    {{ constant.id }} = { {{ items.splat }} }
+  end
+
+  # Raises the refusal *refusals* gives the constraint *error* names (ADR 0039), or
+  # *error* itself when SweetTalk did not declare that constraint. The parameter is the
+  # parent class: a rescue of two sibling violations types its variable so.
+  def self.__sweettalk_refuse(error : ::SugarORM::Error,
+                              refusals : Hash(String, String)) : NoReturn
+    name = case error
+           when ::SugarORM::UniqueViolation, ::SugarORM::CheckViolation then error.constraint
+           end
+    sentence = name.try { |named| refusals[named]? }
+    raise sentence ? ::SweetTalk::Refusal.new(sentence) : error
+  end
+
+  # `moves`, the lifecycle of an aggregate or a process.
+  module Lifecycle
+    # `moves open >> placed >> shipped, placed >> cancelled` is the lifecycle, stored in a
+    # `state` column. The first state is the initial one; `cancelled?` asks, and
+    # `cancelled!`, private so only a command or a step moves it, refuses unless the
+    # current state comes just before it in a chain. `moves_from` and `may_become?` read
+    # the graph (`__sweettalk_graph`).
+    #
+    # @word attribute | Declares the states of the lifecycle and which state may follow which.
+    # @usage moves STATE >> STATE[ >> STATE...][, STATE >> STATE...]
+    # @guide c-sweettalk-lifecycle
+    # @example
+    #   context Kiln, means: "firing pots" do
+    #     aggregate Pot, means: "one pot in the kiln" do
+    #       has glaze : String
+    #       moves raw >> fired >> glazed, raw >> broken
+    #     end
+    #   end
+    macro moves(*chains)
+      {% states = [] of Nil %}
+      {% nodes = {} of Nil => Nil %}
+      {% before = {} of Nil => Nil %}
+      {% for chain in chains %}
+        {% steps = [] of Nil %}
+        {% node = chain %}
+        {% for step in 0..64 %}
+          {% node = node.expressions[0] if node.is_a?(Expressions) && node.expressions.size == 1 %}
+          {% if node.is_a?(Call) && node.name == ">>" && node.args.size == 1 %}
+            {% steps.unshift(node.args[0]) %}
+            {% node = node.receiver %}
+          {% end %}
+        {% end %}
+        {% steps.unshift(node) %}
+        {% for state, index in steps %}
+          {% bare = state.is_a?(Call) && state.receiver.is_a?(Nop) && state.args.empty? &&
+                    state.named_args.is_a?(Nop) && state.name != ">>" %}
+          {% unless bare %}
+            {% state.raise "moves takes bare state names joined by >>, " +
+                           "as in moves open >> placed" %}
+          {% end %}
+          {% name = state.name.stringify %}
+          {% states << name unless states.includes?(name) %}
+          {% nodes[name] = state unless nodes[name] %}
+          {% if index > 0 %}
+            {% previous = steps[index - 1].name.stringify %}
+            {% before[name] = [] of Nil unless before[name] %}
+            {% before[name] << previous unless before[name].includes?(previous) %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% owner = @type.name.split("::").last.id %}
+      # `has placed : Bool` defines `placed?` too (ADR 0039, what `has` stores), so a state
+      # may not share its name with a Bool attribute declared above.
+      {% for state in states %}
+        {% attribute = @type.has_constant?("SWEETTALK_HAS_#{state.upcase.id}") &&
+                       @type.constant("SWEETTALK_HAS_#{state.upcase.id}") %}
+        {% if attribute && attribute[3] == "Bool" %}
+          {% nodes[state].raise "moves #{state.id} would define #{owner}##{state.id}?, which " +
+                                "#{owner} already has from has #{state.id} : Bool: name the " +
+                                "state or the attribute for what it means" %}
+        {% end %}
+      {% end %}
+      # The check that keeps `state` to these states, named by the hash of the states.
+      {% listed = states.map { |state| "'#{state.id}'" }.join(", ") %}
+      {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_state_@digest" %}
+      {% at = "#{chains[0].filename.id}:#{chains[0].line_number}:#{chains[0].column_number}" %}
+      {% too_long = "moves would check #{owner}'s states as @name, longer than PostgreSQL's 63 " +
+                    "bytes: shorten the context or the #{owner} name\n  --> #{at.id}" %}
+      SWEETTALK_MOVES = [{{ states.splat }}]
+      # The states no move leaves (ADR 0046)
+      {% leaving = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% leaving = leaving + predecessors %}
+      {% end %}
+      SWEETTALK_FINAL = [{{ states.reject { |state| leaving.includes?(state) }.splat }}] of String
+      # Each move as `moves` allows it, "open >> placed", for the report (ADR 0036)
+      {% steps = [] of Nil %}
+      {% for state, predecessors in before %}
+        {% for predecessor in predecessors %}
+          {% steps << "#{predecessor.id} >> #{state.id}" %}
+        {% end %}
+      {% end %}
+      SWEETTALK_STEPS = [{{ steps.splat }}] of String
+      # {constraint suffix, expression} of the check that keeps `state` to these states
+      ::SweetTalk.__sweettalk_hashed(SWEETTALK_STATE_CHECK,
+        {"state_@digest", {{ "\"state\" IN (#{listed.id})" }}}, {{ states.sort.join(",") }},
+        {{ constraint }}, {{ too_long }})
+
+      enum State
+        {% for state in states %}
+          {{ state.camelcase.id }}
+        {% end %}
+      end
+
+      getter state : State = State::{{ states[0].camelcase.id }}
+
+      {% for state in states %}
+        def {{ state.id }}? : Bool
+          @state == State::{{ state.camelcase.id }}
+        end
+      {% end %}
+
+      # The state as `moves` spells it, the text its `state` column stores.
+      def __sweettalk_state : String
+        case @state
+        {% for state in states %}
+        in State::{{ state.camelcase.id }} then {{ state }}
+        {% end %}
+        end
+      end
+
+      {% for state, predecessors in before %}
+        {% allowed = predecessors.map do |predecessor|
+             "@state == State::#{predecessor.camelcase.id}"
+           end %}
+        private def {{ state.id }}! : Nil
+          unless {{ allowed.join(" || ").id }}
+            raise ::SweetTalk::Refusal.new(
+              "{{ owner }} cannot become {{ state.id }} while #{__sweettalk_state}")
+          end
+          @state = State::{{ state.camelcase.id }}
+          __sweettalk_entered(State::{{ state.camelcase.id }})
+        end
+      {% end %}
+
+      __sweettalk_graph({{ states }}, {{ before.empty? ? nil : before }})
+    end
+
+    # Called when a mover enters a state; an aggregate that pins a reference at a state
+    # replaces it, and a process does nothing.
+    private def __sweettalk_entered(state) : Nil
+    end
+  end
+
+  # The parent of aggregates, entities and projections.
+  abstract class Model
+    # `has stock : Tins` is an attribute, and `has held : Tins = Tins.zero` one with a
+    # default. What it is stored as depends on its type: a column, a value's raw column
+    # (through the value's codec for a day, a decimal or a JSON document), one column per
+    # part of a composite value, a reference to another aggregate or to an application's
+    # schema, or a child table of entities, which only an aggregate holds. A
+    # value's bounds and length are also `check` lines on its column, or on each part's
+    # column. A type followed by `?`, as in `has owner : Setup::Owner?`, `has reason :
+    # Reason?` and `has leg : Leg?`, is optional: its column, or every column of a composite
+    # value, is nullable, its getter returns nil when it is not set, and it starts as nil
+    # unless given a default. A composite value that is optional also gets a check that
+    # every part is set or none is. A `Bool` that is not optional reads as `name?` too. In a
+    # projection or a process an attribute other than the key is optional or has a default
+    # its column takes as its SQL default: a literal, or a value built from one.
+    # `SWEETTALK_HAS_<NAME>` records {name, line, kind, declared type, column, schema
+    # lines, raw column type, parts, default, optional, base type, codec} for the storage macros,
+    # the base type being the declared one without its `?`; a composite's parts are {part,
+    # column, raw type, part type, part kind, check, codec}, the raw type ending in `?` when the
+    # composite is optional. An attribute named like the tenant's or the parent aggregate's
+    # column or association is refused, and under caramel/tenancy a central context's
+    # reference to rows that belong to one tenant (ADR 0033); an index name over
+    # PostgreSQL's 63 bytes is SugarORM's to shorten. `unique: true` or `unique: "…"`,
+    # `index: true` and `check: {"sql", "…"}` are database constraints on the attribute's
+    # columns (ADR 0039), recorded by `__sweettalk_constraint`. `parts: {payment: [payee],
+    # cash: [leg]}` on a required closed-set value says which optional attributes each member
+    # holds and which it leaves unset: a CHECK per member keeps PostgreSQL to it, the same
+    # sentence refuses it in Crystal before a save, and `as_payment` reads a member's parts
+    # as a named tuple (ADR 0039).
+    #
+    # @word attribute | Declares an attribute a noun stores, with a default and constraints.
+    # @usage has NAME : TYPE[ = DEFAULT][, unique: TRUE_OR_SENTENCE][, index: true]
+    #   [, check: {SQL, SENTENCE}][, parts: {MEMBER: [ATTRIBUTE, ...]}][, pinned_at: :STATE]
+    # @option unique | true, or a string literal | - | Keeps the attribute unique across rows. A
+    #   string is the sentence a duplicate is refused with. Not in a projection or a process.
+    # @option index | true | - | Adds a database index over the attribute's columns. Not in a
+    #   projection or a process.
+    # @option check | a tuple of two string literals, {SQL, SENTENCE} | - | Keeps the SQL true of
+    #   every row, written against the stored columns, and refuses a row that breaks it with
+    #   the sentence. Not in a projection or a process.
+    # @option parts | a named tuple of member: [attribute, ...] | - | On a required value declared
+    #   with one_of:, lists the optional attributes, declared above, that each member holds;
+    #   the others stay unset. A database check and a refusal before save keep to it, and
+    #   as_MEMBER reads the parts as a named tuple. Not in a projection or a process.
+    # @option pinned_at | a symbol naming a state | - | On a reference to another aggregate in
+    #   an aggregate, copies the referenced aggregate as JSON when a move enters the state.
+    #   pinned_NAME reads the read-only copy, nil before then.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Warehouse, means: "crates and where they stand" do
+    #     value Kind, String, one_of: %w[trade cash], means: "how a crate is paid for"
+    #     aggregate Terms, means: "what a crate is sold under" do
+    #       has rate : Int64
+    #     end
+    #     aggregate Crate, means: "one crate" do
+    #       has code : String, unique: "A crate with this code already exists."
+    #       has bay : String, index: true
+    #       has quantity : Int32 = 0, check: {"quantity >= 0", "A crate cannot hold less."}
+    #       has payee : String?
+    #       has kind : Kind, parts: {trade: [payee]}
+    #       has terms : Terms, pinned_at: :sold
+    #       moves stored >> sold
+    #     end
+    #   end
+    macro has(decl, unique = nil, index = nil, check = nil, parts = nil, pinned_at = nil)
+      {% member_parts = parts %}
+      {% pin = pinned_at %}
+      {% unless decl.is_a?(TypeDeclaration) %}
+        {% decl.raise "has takes a name and a type, as in has stock : Tins" %}
+      {% end %}
+      {% name = decl.var.id %}
+      {% type = decl.type %}
+      {% default = decl.value.is_a?(Nop) ? nil : decl.value.stringify %}
+      {% value = decl.value %}
+      {% literal = value.is_a?(BoolLiteral) || value.is_a?(NumberLiteral) ||
+                   value.is_a?(StringLiteral) || value.is_a?(NilLiteral) %}
+      {% kind = nil %}
+      {% column = name.stringify %}
+      {% lines = nil %}
+      {% raw = nil %}
+      {% codec = nil %}
+      {% parts = nil %}
+      {% nilable = false %}
+      {% optional_check = nil %}
+      {% base = type.stringify %}
+      {% if type.is_a?(Generic) && type.name.stringify == "Array" %}
+        {% kind = "entities" %}
+        {% column = nil %}
+        {% element = type.type_vars[0] %}
+        {% owner = @type.name.split("::").last %}
+        {% found = element.is_a?(Path) && element.resolve? %}
+        {% scalars = %w[String Int32 Int64 UUID Bool Float64 Time] %}
+        {% scalar = found && scalars.includes?(found.stringify) %}
+        {% if scalar || !element.is_a?(Path) %}
+          {% decl.raise "has #{decl} cannot be stored: use a value or an entity; an Array of " +
+                        "scalars is not stored" %}
+        {% elsif element.names.size > 1 || (found && !(found < ::SweetTalk::Entity)) %}
+          {% decl.raise "has #{decl} cannot be stored: an Array holds this " +
+                        "#{@type.constant("SWEETTALK_KIND").id}'s own entity, declared with " +
+                        "entity #{element.names.last.id} inside #{owner.id}" %}
+        {% end %}
+        {% child = "#{@type.constant("SWEETTALK_ROW").id}::#{element}" %}
+        {% foreign = "#{@type.constant("SWEETTALK_STORED").id}_id" %}
+        {% lines = "has_many #{name} : #{child.id}, foreign_key: :#{foreign.id}" %}
+      {% elsif type.is_a?(Generic) && type.name.stringify == "Hash" %}
+        {% decl.raise "has #{decl} cannot be stored: use an entity, " +
+                      "as in has packings : Array(Packing)" %}
+      {% else %}
+        {% resolved = type.resolve? %}
+        {% unless resolved %}
+          {% decl.raise "has #{decl} names a type that is not declared yet: declare a value " +
+                        "or an aggregate before the aggregate that stores it" %}
+        {% end %}
+        {% nilable = resolved.nilable? %}
+        {% members = [resolved] %}
+        {% members = resolved.union_types.reject { |member| member == Nil } if resolved.union? %}
+        # An alias of a union, such as `Money::Amount?`, nests it in the union with Nil.
+        {% flat = [] of Nil %}
+        {% for member in members %}
+          {% flat = flat + (member.union? ? member.union_types : [member]) %}
+        {% end %}
+        {% single = members.size == 1 && (!resolved.union? || nilable) %}
+        {% base = "::#{members[0].name}" if single && nilable %}
+        {% optional = nilable ? "?" : "" %}
+        {% columns = %w[String Int32 Int64 UUID Bool Float64 Time] %}
+        {% if single && members[0] < ::SweetTalk::Value %}
+          {% kind = "value" %}
+          {% raw = "#{members[0].constant("SWEETTALK_WRAPS").id}#{optional.id}" %}
+          {% codec = members[0].constant("SWEETTALK_CODEC") %}
+          {% lines = "field #{name} : #{raw.id}" + (codec ? ", codec: #{codec.id}" : "") %}
+        {% elsif single && members[0] < ::SweetTalk::Composite %}
+          {% kind = "composite" %}
+          {% column = nil %}
+          {% parts = [] of Nil %}
+          {% composite = members[0] %}
+          {% declared = composite.constants.select(&.starts_with?("SWEETTALK_PART_"))
+               .map { |constant| composite.constant(constant) }.sort_by { |part| part[1] } %}
+          {% for part in declared %}
+            {% parts << {part[0], "#{name}_#{part[0].id}", "#{part[3].id}#{optional.id}", part[2],
+                         part[4], part[5], part[6]} %}
+          {% end %}
+          {% lines = parts.map do |part|
+               "field #{part[1].id} : #{part[2].id}" + (part[6] ? ", codec: #{part[6].id}" : "")
+             end.join("\n") %}
+        {% elsif single && members[0] < ::SweetTalk::Aggregate %}
+          {% kind = "reference" %}
+          {% raw = "::#{members[0]}::Id::Raw#{optional.id}" %}
+          {% column = "#{name}_id" %}
+          {% row = members[0].constant("SWEETTALK_ROW") %}
+          {% lines = "belongs_to #{name} : #{row.id}#{optional.id}" %}
+        {% elsif single && members[0] < ::SugarORM::Schema %}
+          {% kind = "record" %}
+          {% raw = "::#{members[0]}::PrimaryKey#{optional.id}" %}
+          {% column = "#{name}_id" %}
+          {% lines = "belongs_to #{name} : ::#{members[0]}#{optional.id}" %}
+        {% elsif flat.all? do |member|
+                   marker = member.type_vars.size == 1 && member.type_vars[0]
+                   marker.is_a?(TypeNode) && marker.has_constant?("SWEETTALK_LOADER")
+                 end %}
+          # An amount (sweettalk/money, ADR 0063): its currency in `<name>_currency`
+          # under the currencies' CHECK, its minor units in `<name>`, rebuilt by the loader
+          # its currency marker names.
+          {% kind = "composite" %}
+          {% column = nil %}
+          {% loader = flat[0].type_vars[0].constant("SWEETTALK_LOADER") %}
+          {% currency = parse_type(loader[1]).resolve %}
+          {% base = flat.size == 1 ? "::#{flat[0]}" : loader[0] %}
+          {% optional_check = {"all_or_none"} %}
+          {% listed = currency.constant("SWEETTALK_CHECK") %}
+          {% parts = [{"currency", "#{name}_currency", "String#{optional.id}", loader[1], "value",
+                       listed, nil},
+                      {"raw", name.stringify, "Int64#{optional.id}", "Int64", "column", nil,
+                       nil}] %}
+          {% lines = parts.map { |part| "field #{part[1].id} : #{part[2].id}" }.join("\n") %}
+        {% elsif members.size == 1 && columns.includes?(members[0].stringify) %}
+          {% kind = "column" %}
+          {% raw = type.stringify %}
+          {% lines = "field #{name} : #{type}" + (literal ? " = #{default.id}" : "") %}
+        {% else %}
+          {% decl.raise "has #{decl} cannot be stored: use String, Int32, Int64, UUID, Bool, " +
+                        "Float64, Time, a value, an aggregate, an application's schema or an " +
+                        "Array of this aggregate's entity" %}
+        {% end %}
+      {% end %}
+      {% keyed = @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+      {% key = @type.has_constant?("SWEETTALK_KEY") && @type.constant("SWEETTALK_KEY") %}
+      {% if keyed && key == name.stringify && nilable %}
+        {% decl.raise "key #{decl.var} cannot be optional: every row has its key" %}
+      {% end %}
+      {% guarded = false %}
+      {% if keyed && key != name.stringify && !((kind == "column" && literal) || nilable) %}
+        {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+        # A value default whose expression names one literal, `Cents.new(0)`, `Tins.zero` or a
+        # closed-set member such as `Kind.payment`, gives the column that literal as its SQL
+        # default; a part, a calendar day, a decimal or a JSON document has no SQL literal
+        # (a codec field takes no default), so it takes none.
+        {% built = kind == "value" && !codec && value.is_a?(Call) && value.receiver.is_a?(Path) &&
+                   value.receiver.resolve? == members[0] && value.named_args.is_a?(Nop) %}
+        {% wraps = built && members[0].constant("SWEETTALK_WRAPS") %}
+        {% given = nil %}
+        {% if built && value.name == "new" && value.args.size == 1 %}
+          {% argument = value.args[0] %}
+          {% whole = argument.is_a?(NumberLiteral) && argument.kind.stringify =~ /\A:[iu]/ %}
+          {% given = argument if whole && %w[Int32 Int64].includes?(wraps) %}
+          {% given = argument if argument.is_a?(StringLiteral) && wraps == "String" %}
+        {% elsif built && value.name == "zero" && value.args.empty? %}
+          {% given = 0 if %w[Int32 Int64].includes?(wraps) %}
+        {% elsif built && value.args.empty? && members[0].has_constant?("SWEETTALK_ONE_OF") %}
+          {% member = members[0].constant("SWEETTALK_ONE_OF")
+               .find { |member| member.underscore == value.name.stringify } %}
+          {% given = member if member %}
+        {% end %}
+        {% if given.is_a?(NilLiteral) %}
+          {% stored = kind == "composite" || codec == "::SugarORM::DateCodec" %}
+          {% if stored %}
+            {% decl.raise "has #{decl} in #{owner.id} cannot have a default: a value with " +
+                          "parts or a calendar day has no SQL default, and its row starts " +
+                          "from its key alone; make it optional, as in has #{name} : #{type}?" %}
+          {% elsif codec %}
+            {% decl.raise "has #{decl} in #{owner.id} cannot have a default: a decimal or a " +
+                          "JSON value is stored through its codec, which takes no SQL " +
+                          "default, and its row starts from its key alone; make it optional, " +
+                          "as in has #{name} : #{type}?" %}
+          {% else %}
+            {% decl.raise "has #{decl} in #{owner.id} needs a literal default, as in has tins : " +
+                          "Int32 = 0, or a value built from one, as in has total : Cents = " +
+                          "Cents.new(0): its row starts from its key alone" %}
+          {% end %}
+        {% end %}
+        {% lines = "#{lines.id} = #{given.stringify.id}" %}
+        {% guarded = true %}
+      {% end %}
+      {% checks = [] of Nil %}
+      {% if kind == "value" && members[0].constant("SWEETTALK_CHECK") %}
+        {% checks << {column, members[0].constant("SWEETTALK_CHECK"),
+                      members[0].name.split("::").last} %}
+      {% elsif kind == "composite" %}
+        {% for part in parts %}
+          {% checks << {part[1], part[5], part[3].split("::").last} if part[5] %}
+        {% end %}
+      {% end %}
+      {% for entry in checks %}
+        {% bound = entry[1] %}
+        {% if bound[0] == "range" %}
+          {% suffix = entry[0] %}
+          {% line = "check #{entry[0].id}: #{bound[1].id}" %}
+        {% else %}
+          {% suffix = "#{entry[0].id}_#{bound[1].id}" %}
+          {% subject = "\"#{entry[0].id}\"" %}
+          {% subject = "char_length(#{subject.id})" if bound[0] == "length" %}
+          {% sql = "#{subject.id} #{bound[2].id}" %}
+          {% line = "check :#{suffix.id}, #{sql.stringify.id}" %}
+        {% end %}
+        {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{suffix.id}" %}
+        {% if constraint.size > 63 %}
+          {% decl.raise "has #{decl} would check #{entry[0].id} as #{constraint.id}, longer " +
+                        "than PostgreSQL's 63 bytes: shorten the attribute, or give " +
+                        "#{entry[2].id} database_check: false" %}
+        {% end %}
+        {% lines = "#{lines.id}\n#{line.id}" %}
+      {% end %}
+      {% if kind == "composite" && nilable && parts.size > 1 %}
+        {% digest = (optional_check || composite.constant("SWEETTALK_OPTIONAL_CHECK"))[0] %}
+        {% suffix = "#{name}_#{digest.id}" %}
+        {% listed = parts.map { |part| "\"#{part[1].id}\"" }.join(", ") %}
+        {% sql = "num_nonnulls(#{listed.id}) IN (0, #{parts.size})" %}
+        {% constraint = "check_#{@type.constant("SWEETTALK_TABLE").id}_#{suffix.id}" %}
+        {% if constraint.size > 63 %}
+          {% decl.raise "has #{decl} would check its parts as #{constraint.id}, longer than " +
+                        "PostgreSQL's 63 bytes: shorten the attribute" %}
+        {% end %}
+        {% lines = "#{lines.id}\ncheck :#{suffix.id}, #{sql.stringify.id}" %}
+      {% end %}
+      {% stored = parts ? parts.map(&.[1]) : [column] %}
+      {% contexts = ::SweetTalk::BoundedContext.includers %}
+      {% home = contexts.find { |context| @type.name.starts_with?("#{context.name}::") } %}
+      {% tenant = home && home.constant("SWEETTALK_TENANT") %}
+      {% taken = tenant &&
+                 [tenant[1], "#{tenant[1].id}_id"].find { |word| stored.includes?(word) } %}
+      {% if taken %}
+        {% decl.raise "has #{decl} would store #{taken.id}, which names each row's tenant " +
+                      "#{tenant[0].id}: name the attribute for its role, as in has owner : " +
+                      "#{type}" %}
+      {% end %}
+      {% if tenant && @type < ::SweetTalk::Aggregate &&
+              %w[tenant tenant_id].includes?(name.stringify) %}
+        {% decl.raise "has #{decl} would replace #{@type.name.split("::").last.id}##{name}, " +
+                      "which names each row's tenant #{tenant[0].id} on an aggregate of a " +
+                      "tenanted context: name the attribute for its role, as in has owner : " +
+                      "#{type}" %}
+      {% end %}
+      {% parent = @type.has_constant?("SWEETTALK_PARENT") && @type.constant("SWEETTALK_PARENT") %}
+      {% taken = parent &&
+                 [parent[0], "#{parent[0].id}_id"].find { |word| stored.includes?(word) } %}
+      {% if taken %}
+        {% decl.raise "has #{decl} would store #{taken.id}, which names the aggregate that " +
+                      "holds each #{@type.name.split("::").last.id}: name the attribute for " +
+                      "its role, as in has owner : #{type}" %}
+      {% end %}
+      {% if home && home.constant("SWEETTALK_CENTRAL") %}
+        {% shared = true %}
+        {% if kind == "reference" %}
+          {% target = members[0].name %}
+          {% there = contexts.find { |context| target.starts_with?("#{context.name}::") } %}
+          {% shared = there && there.constant("SWEETTALK_CENTRAL") %}
+        {% elsif kind == "record" %}
+          {% shared = !members[0].has_constant?(:SUGAR_TENANT) %}
+        {% end %}
+        {% unless shared %}
+          {% decl.raise "has #{decl} would point from central context " +
+                        "#{home.name.split("::").last.id} at rows that belong to one tenant: " +
+                        "keep the reference in a tenanted context" %}
+        {% end %}
+      {% end %}
+      {% unless pin.is_a?(NilLiteral) %}
+        {% unless pin.is_a?(SymbolLiteral) %}
+          {% decl.raise "has #{decl} takes pinned_at: a state, as in pinned_at: :finalized, " +
+                        "not #{pin}" %}
+        {% end %}
+        {% unless @type < ::SweetTalk::Aggregate %}
+          {% decl.raise "has #{decl} takes pinned_at: only in an aggregate, whose moves " +
+                        "enter the state" %}
+        {% end %}
+        {% unless kind == "reference" %}
+          {% decl.raise "has #{decl} takes pinned_at: only as a reference to another " +
+                        "aggregate, which it copies when the state is entered" %}
+        {% end %}
+        {% lines = "#{lines.id}\nfield #{name}_pinned : JSON::Any?, " +
+                   "codec: ::SugarORM::JSONB(JSON::Any)" %}
+      {% end %}
+      {% attribute = {name.stringify, decl.line_number, kind, type.stringify, column, lines, raw,
+                      parts, nilable && !default ? "nil" : default, nilable, base, codec} %}
+      SWEETTALK_HAS_{{ name.upcase }} = {{ attribute }}
+
+      {% unless pin.is_a?(NilLiteral) %}
+        # {name, state, the pinned aggregate, where it was declared}
+        {% at = "#{decl.filename.id}:#{decl.line_number}:#{decl.column_number}" %}
+        SWEETTALK_PINNED_{{ name.upcase }} = {
+          {{ name.stringify }}, {{ pin.id.stringify }}, {{ "::#{members[0].name}" }}, {{ at }}
+        }
+        @{{ name }}_pinned : ::JSON::Any? = nil
+
+        # A copy of the {{ name }} as it was when {{ @type.name.split("::").last.id }} entered
+        # :{{ pin.id }}, read only; nil before that.
+        def pinned_{{ name }} : {{ "::#{members[0].name}".id }}?
+          @{{ name }}_pinned.try { |copy| {{ "::#{members[0].name}".id }}.__sweettalk_unpin(copy) }
+        end
+      {% end %}
+
+      {% unless unique.is_a?(NilLiteral) && index.is_a?(NilLiteral) && check.is_a?(NilLiteral) %}
+        {% if kind == "entities" %}
+          {% decl.raise "has #{decl} takes no unique:, index: or check:: what makes " +
+                        "#{type.type_vars[0]} unique, or what it keeps, is declared inside " +
+                        "entity #{type.type_vars[0]}" %}
+        {% end %}
+      {% end %}
+      {% unless unique.is_a?(NilLiteral) %}
+        {% unless unique.is_a?(BoolLiteral) && unique || unique.is_a?(StringLiteral) %}
+          {% decl.raise "has #{decl} takes unique: true or the sentence a duplicate is " +
+                        "refused with, as in unique: \"A " +
+                        "#{@type.name.split("::").last.underscore.id} with this #{name} " +
+                        "already exists.\"" %}
+        {% end %}
+        {% sentence = unique.is_a?(StringLiteral) ? unique : nil %}
+        __sweettalk_constraint("unique", [{{ name.stringify }}], {{ stored }},
+          {{ name.stringify }}, {{ sentence }}, nil)
+      {% end %}
+      {% unless index.is_a?(NilLiteral) %}
+        {% unless index.is_a?(BoolLiteral) && index %}
+          {% decl.raise "has #{decl} takes index: true" %}
+        {% end %}
+        __sweettalk_constraint("index", [{{ name.stringify }}], {{ stored }},
+          {{ name.stringify }}, nil, nil)
+      {% end %}
+      {% unless check.is_a?(NilLiteral) %}
+        {% shaped = check.is_a?(TupleLiteral) && check.size == 2 &&
+                    check[0].is_a?(StringLiteral) && check[1].is_a?(StringLiteral) %}
+        {% unless shaped %}
+          {% decl.raise "has #{decl} takes check: {\"sql\", \"sentence\"}, the SQL every row " +
+                        "keeps and the sentence a row that breaks it is refused with, as in " +
+                        "check: {\"#{name} >= 0\", \"A " +
+                        "#{@type.name.split("::").last.underscore.id} cannot hold less than " +
+                        "nothing.\"}" %}
+        {% end %}
+        __sweettalk_constraint("check", [{{ name.stringify }}], nil,
+          {{ name.stringify }}, {{ check[1] }}, {{ check[0] }})
+      {% end %}
+
+      {% unless member_parts.is_a?(NilLiteral) %}
+        {% short = @type.name.split("::").last %}
+        {% if @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+          {% decl.raise "parts: belongs on an aggregate's or an entity's closed-set attribute, " +
+                        "not on #{@type.constant("SWEETTALK_KIND").id} #{short.id}'s" %}
+        {% end %}
+        {% unless kind == "value" && !nilable && members[0].has_constant?("SWEETTALK_ONE_OF") %}
+          {% decl.raise "has #{decl} takes parts: only on a required value with one_of:, as " +
+                        "in value Kind, String, one_of: %w[trade cash fee]" %}
+        {% end %}
+        {% listed_members = members[0].constant("SWEETTALK_ONE_OF") %}
+        {% underscored = listed_members.map(&.underscore) %}
+        {% value_name = members[0].name.split("::").last %}
+        {% shaped = member_parts.is_a?(NamedTupleLiteral) && member_parts.size > 0 %}
+        {% if shaped %}
+          {% for key, list in member_parts %}
+            {% shaped = false unless list.is_a?(ArrayLiteral) && list.size > 0 %}
+            {% if list.is_a?(ArrayLiteral) %}
+              {% for item in list %}
+                {% bare = item.is_a?(Var) ||
+                          (item.is_a?(Call) && item.receiver.is_a?(Nop) && item.args.empty?) %}
+                {% shaped = false unless bare %}
+              {% end %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% unless shaped %}
+          {% decl.raise "has #{decl} takes parts: {member: [attribute, …]}, as in parts: " +
+                        "{payment: [payee]}, not #{member_parts}" %}
+        {% end %}
+        {% above = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |found| @type.constant(found) }.sort_by { |attribute| attribute[1] } %}
+        {% sets = [] of Nil %}
+        {% every = [] of Nil %}
+        {% for key, list in member_parts %}
+          {% member = key.id.stringify %}
+          {% found = false %}
+          {% for candidate in underscored %}
+            {% found = true if candidate == member %}
+          {% end %}
+          {% unless found %}
+            {% decl.raise "has #{decl} names parts for #{member.id}, which #{value_name.id} " +
+                          "does not list; it lists #{underscored.join(", ").id}" %}
+          {% end %}
+          {% held = [] of Nil %}
+          {% for item in list %}
+            {% part = item.id.stringify %}
+            {% attribute = above.find { |candidate| candidate[0] == part } %}
+            {% unless attribute %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, which " +
+                            "#{short.id} does not declare above it; it has " +
+                            "#{above.map(&.[0]).join(", ").id}" %}
+            {% end %}
+            {% if attribute[2] == "entities" %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, a list of " +
+                            "entities: a part is one optional attribute" %}
+            {% end %}
+            {% unless attribute[9] %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id}, which is " +
+                            "required: a part some kinds lack is optional, as in has " +
+                            "#{part.id} : #{attribute[3].id}?" %}
+            {% end %}
+            {% if held.includes?(part) %}
+              {% decl.raise "has #{decl} gives #{member.id} the part #{part.id} twice" %}
+            {% end %}
+            {% held << part %}
+            {% every << part unless every.includes?(part) %}
+          {% end %}
+          {% if @type.has_method?("as_#{member.id}") %}
+            {% decl.raise "has #{decl} would define #{short.id}#as_#{member.id}, which " +
+                          "#{short.id} already has: rename that method" %}
+          {% end %}
+          {% sets << {member, held} %}
+        {% end %}
+        {% located = [] of Nil %}
+        {% for part in every %}
+          {% attribute = above.find { |candidate| candidate[0] == part } %}
+          {% cells = [] of Nil %}
+          {% if attribute[2] == "composite" %}
+            {% for piece in attribute[7] %}
+              {% cells << piece[1] %}
+            {% end %}
+          {% else %}
+            {% cells << attribute[4] %}
+          {% end %}
+          {% located << {part, cells} %}
+        {% end %}
+        {% rules = [] of Nil %}
+        {% for raw_member, position in listed_members %}
+          {% member = underscored[position] %}
+          {% set = [] of Nil %}
+          {% for entry in sets %}
+            {% set = entry[1] if entry[0] == member %}
+          {% end %}
+          {% unset = every.reject { |part| set.includes?(part) } %}
+          {% set_cells = [] of Nil %}
+          {% unset_cells = [] of Nil %}
+          {% for entry in located %}
+            {% for cell in entry[1] %}
+              {% if set.includes?(entry[0]) %}
+                {% set_cells << "\"#{cell.id}\"" %}
+              {% else %}
+                {% unset_cells << "\"#{cell.id}\"" %}
+              {% end %}
+            {% end %}
+          {% end %}
+          {% sentence = "#{short.id} #{name.id} #{member.id} holds " %}
+          {% if set.empty? %}
+            {% sentence = sentence + "no #{unset.join(" or ").id}" %}
+          {% else %}
+            {% sentence = sentence + set.join(" and ") %}
+            {% sentence = sentence + " and no #{unset.join(" or ").id}" unless unset.empty? %}
+          {% end %}
+          {% conjuncts = [] of Nil %}
+          {% conjuncts << "num_nulls(#{set_cells.join(", ").id}) = 0" unless set_cells.empty? %}
+          {% unless unset_cells.empty? %}
+            {% conjuncts << "num_nonnulls(#{unset_cells.join(", ").id}) = 0" %}
+          {% end %}
+          {% sql = "\"#{column.id}\" <> '#{raw_member.id}' OR (#{conjuncts.join(" AND ").id})" %}
+          {% tests = set.map { |part| "!#{part.id}.nil?" } +
+                     unset.map { |part| "#{part.id}.nil?" } %}
+          {% rules << {raw_member, sentence, tests.join(" && ")} %}
+          __sweettalk_constraint("check", [{{ name.stringify }}], nil,
+            {{ "#{name.id}_#{member.id}" }}, {{ sentence }}, {{ sql }})
+        {% end %}
+
+        # Refuses a {{ name }} whose parts do not match its member, before a save.
+        private def __sweettalk_never_parts_{{ name }} : Nil
+          case {{ name }}.raw
+          {% for rule in rules %}
+          when {{ rule[0] }}
+            refuse({{ rule[1] }}) unless {{ rule[2].id }}
+          {% end %}
+          end
+        end
+
+        {% for entry in sets %}
+          {% fields = [] of Nil %}
+          {% reads = [] of Nil %}
+          {% for part in entry[1] %}
+            {% attribute = above.find { |candidate| candidate[0] == part } %}
+            {% shown = attribute[10].id %}
+            {% shown = "#{attribute[10].id}::Id" if attribute[2] == "reference" %}
+            {% if attribute[2] == "record" %}
+              {% shown = "::SweetTalk::RecordId(#{attribute[10].id})" %}
+            {% end %}
+            {% fields << "#{part.id}: #{shown.id}" %}
+            {% reads << "#{part.id}: #{part.id}.not_nil!" %}
+          {% end %}
+          # The parts of a {{ entry[0].id }} {{ name }}, each set; raises TypeCastError for any
+          # other member.
+          def as_{{ entry[0].id }} : NamedTuple({{ fields.join(", ").id }})
+            current = {{ name }}.raw
+            unless {{ name }}.{{ entry[0].id }}?
+              raise TypeCastError.new(
+                "{{ short.id }} is {{ name }} #{current}, not {{ entry[0].id }}")
+            end
+            { {{ reads.join(", ").id }} }
+          end
+        {% end %}
+      {% end %}
+
+      {% if kind == "reference" || kind == "record" %}
+        {% target = kind == "record" ? "::SweetTalk::RecordId(#{base.id})" : "#{base.id}::Id" %}
+        {% accepted = "#{base.id} | #{target.id}" %}
+        {% accepted = "#{accepted.id} | Nil" if nilable %}
+        @{{ name }}_id : {{ raw.id }}
+
+        # The referenced id, or nil when it is optional and not set; load what it names when
+        # it is needed.
+        {% if nilable %}
+          def {{ name }} : {{ target.id }}?
+            @{{ name }}_id.try { |raw| {{ target.id }}.new(raw) }
+          end
+        {% else %}
+          def {{ name }} : {{ target.id }}
+            {{ target.id }}.new(@{{ name }}_id)
+          end
+        {% end %}
+
+        # `self.{{ name }} = other` in a command points this attribute at another row, given as
+        # the aggregate, the record or its id, or as nil when the attribute is optional. It is
+        # private, so only the command changes it, except in a projection, whose `whenever`
+        # handler assigns the row it holds (`row.{{ name }} = other`). A key has no writer:
+        # the row is found by it, and the save never writes it.
+        {% unless keyed && key == name.stringify %}
+          {% visibility = @type < ::SweetTalk::Projection ? "" : "private" %}
+          {{ visibility.id }} def {{ name }}=(other : {{ accepted.id }})
+            @{{ name }}_id = ::SweetTalk.raw_id(other)
+          end
+        {% end %}
+      {% elsif @type < ::SweetTalk::Projection && !(keyed && key == name.stringify) %}
+        property {{ decl }}
+      {% else %}
+        getter {{ decl }}
+      {% end %}
+
+      # `has flag : Bool` reads as `flag?` too, so a predicate `moves` or a specification
+      # defines may not share its name.
+      {% if kind == "column" && base == "Bool" && !nilable %}
+        {% owner = @type.name.split("::").last.id %}
+        {% if @type.has_method?("#{name}?") %}
+          {% decl.raise "has #{decl} would define #{owner}##{name}?, which #{owner} already " +
+                        "has: name the attribute for what it means" %}
+        {% end %}
+        def {{ name }}? : Bool
+          @{{ name }}
+        end
+      {% end %}
+
+      # A value default is built once, when the program loads, so one outside the value's
+      # bound stops the program at start rather than the first row.
+      {% if guarded %}
+        {% outside = "has #{decl} in #{owner.id} defaults outside " +
+                     "#{members[0].name.split("::").last.id}'s bound: " %}
+        begin
+          {{ value }}
+        rescue error : ::SweetTalk::Refusal
+          raise ::SweetTalk::Refusal.new({{ outside }} + (error.message || ""))
+        end
+      {% end %}
+    end
+
+    # `unique :source_key, :bundle, otherwise: "…"` is a unique index over the columns of
+    # those attributes (ADR 0039); in an entity it is unique within the aggregate, so the
+    # parent's column leads it. `otherwise:` is the sentence a duplicate is refused with;
+    # without it, `Adjustment source_key and bundle must be unique`.
+    #
+    # @word rule | Keeps the combination of attributes unique across rows and refuses a
+    #   duplicate with a sentence.
+    # @usage unique ATTRIBUTE[, ATTRIBUTE...][, otherwise: SENTENCE]
+    # @in in an aggregate or an entity
+    # @option otherwise | a string literal | the sentence "<Owner> <attributes> must be unique"
+    #   | The sentence a duplicate is refused with.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Anchorage, means: "ships and their berths" do
+    #     aggregate Mooring, means: "one ship tied at one berth" do
+    #       has ship : String
+    #       has berth : String
+    #       unique :ship, :berth, otherwise: "That ship is already moored at that berth."
+    #     end
+    #   end
+    macro unique(*names, otherwise = nil)
+      {% unless otherwise.is_a?(NilLiteral) || otherwise.is_a?(StringLiteral) %}
+        {% otherwise.raise "unique takes otherwise: the sentence a duplicate is refused " +
+                           "with, as in otherwise: \"That bundle already has an adjustment.\"" %}
+      {% end %}
+      {% if names.empty? %}
+        {% raise "unique takes the attributes that are unique together, as in " +
+                 "unique :source_key, :bundle" %}
+      {% end %}
+      __sweettalk_constraint("unique", {{ names.map(&.id.stringify) }}, nil,
+        {{ names.map(&.id.stringify).join("_and_") }}, {{ otherwise }}, nil)
+    end
+
+    # `index :owner, :state` is a plain index over the columns of those attributes, for
+    # the reads that look rows up by them (ADR 0039).
+    #
+    # @word rule | Adds a database index over one or more attributes for the reads that look
+    #   rows up by them.
+    # @usage index ATTRIBUTE[, ATTRIBUTE...]
+    # @in in an aggregate or an entity
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Larder, means: "what is stored where" do
+    #     aggregate Jar, means: "one jar on a shelf" do
+    #       has shelf : String
+    #       moves filled >> opened
+    #       index :shelf, :state
+    #     end
+    #   end
+    macro index(*names)
+      {% if names.empty? %}
+        {% raise "index takes the attributes to index together, as in index :owner, :state" %}
+      {% end %}
+      __sweettalk_constraint("index", {{ names.map(&.id.stringify) }}, nil,
+        {{ names.map(&.id.stringify).join("_and_") }}, nil, nil)
+    end
+
+    # `check :pending_is_zero, "state <> 'pending' OR debit = 0", otherwise: "…"` is a
+    # CHECK every row keeps, written against the stored columns, named by its name and the
+    # hash of its SQL (ADR 0039); `otherwise:` is the sentence a row that breaks it is
+    # refused with.
+    #
+    # @word rule | Keeps a SQL condition true of every row and refuses with a sentence when a
+    #   row breaks it.
+    # @usage check NAME, SQL, otherwise: SENTENCE
+    # @in in an aggregate or an entity
+    # @option otherwise | a string literal | - | The sentence a row that breaks the check is
+    #   refused with. It is required.
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Ledger, means: "money in and out" do
+    #     aggregate Posting, means: "one line of the ledger" do
+    #       has debit : Int32 = 0
+    #       has credit : Int32 = 0
+    #       check :one_side, "debit = 0 OR credit = 0",
+    #         otherwise: "A posting is a debit or a credit, not both."
+    #     end
+    #   end
+    macro check(name, sql, otherwise = nil)
+      {% unless name.is_a?(SymbolLiteral) && sql.is_a?(StringLiteral) %}
+        {% raise "check takes a name and the SQL every row keeps, as in check " +
+                 ":pending_is_zero, \"state <> 'pending' OR (debit = 0 AND credit = 0)\", " +
+                 "otherwise: \"A pending line carries no amounts.\"" %}
+      {% end %}
+      {% unless otherwise.is_a?(StringLiteral) %}
+        {% raise "check #{name} needs otherwise:, the sentence a row that breaks it is " +
+                 "refused with, as in check #{name}, #{sql}, otherwise: \"A pending line " +
+                 "carries no amounts.\"" %}
+      {% end %}
+      __sweettalk_constraint("check", [{{ name.id.stringify }}], nil,
+        {{ name.id.stringify }}, {{ otherwise }}, {{ sql }})
+    end
+
+    # Records one database constraint of this aggregate or entity as
+    # `SWEETTALK_CONSTRAINT_<KIND>_<SUFFIX>`: {kind, declaration order, schema line, the
+    # expression that names the constraint at run time, sentence}. *names* are the
+    # attributes it covers and *columns* their columns, resolved from the names when nil: a
+    # reference's `<name>_id`, a composite's part columns, and `state` once `moves` is
+    # declared. A unique index is named by SugarORM, which shortens it past 63 bytes and
+    # appends the tenant column in a tenanted context; a check is
+    # `check_<table>_<suffix>_<hash of the SQL>`, so a changed SQL is a new constraint, and
+    # one over 63 bytes is refused here. A refusal is raised bare: a symbol has no
+    # location, and the compiler reports the macro call's.
+    macro __sweettalk_constraint(kind, names, columns, suffix, sentence, sql)
+      {% owner = @type.name.split("::").last %}
+      {% listed = names.map { |name| ":#{name.id}" }.join(", ") %}
+      {% shown = kind == "check" ? "check :#{suffix.id}" : "#{kind.id} #{listed.id}" %}
+      {% if @type < ::SweetTalk::Projection || @type < ::SweetTalk::Process %}
+        {% raise "#{kind.id} belongs in an aggregate or an entity, not in " +
+                 "#{@type.constant("SWEETTALK_KIND").id} #{owner.id}: its key is its identity" %}
+      {% end %}
+      {% table = @type.constant("SWEETTALK_TABLE") %}
+      {% constant = "SWEETTALK_CONSTRAINT_#{kind.upcase.id}_#{suffix.upcase.id}" %}
+      {% if @type.has_constant?(constant) %}
+        {% raise "#{owner.id} declares #{shown.id} twice" %}
+      {% end %}
+      {% order = @type.constants.size %}
+      {% resolved = columns %}
+      {% unless resolved || kind == "check" %}
+        {% resolved = [] of Nil %}
+        {% attributes = @type.constants.select(&.starts_with?("SWEETTALK_HAS_"))
+             .map { |found| @type.constant(found) }.sort_by { |attribute| attribute[1] } %}
+        {% for name in names %}
+          {% attribute = attributes.find { |candidate| candidate[0] == name } %}
+          {% if name == "state" && @type.has_constant?("SWEETTALK_MOVES") %}
+            {% resolved << "state" %}
+          {% elsif attribute && attribute[2] == "entities" %}
+            {% raise "#{shown.id} names #{name.id}, a list of entities: what makes " +
+                     "#{attribute[3][6..-2].id} unique is declared inside entity " +
+                     "#{attribute[3][6..-2].id}" %}
+          {% elsif attribute && attribute[2] == "composite" %}
+            {% for part in attribute[7] %}
+              {% resolved << part[1] %}
+            {% end %}
+          {% elsif attribute %}
+            {% resolved << attribute[4] %}
+          {% else %}
+            {% have = attributes.reject { |candidate| candidate[2] == "entities" }.map(&.[0]) %}
+            {% have << "state" if @type.has_constant?("SWEETTALK_MOVES") %}
+            {% wanted = name == "state" ? "moves, whose state it names," : name %}
+            {% raise "#{shown.id} names #{name.id}, which #{owner.id} does not have above " +
+                     "it; it has #{have.join(", ").id}: declare #{wanted.id} before the " +
+                     "#{kind.id}" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      {% if kind == "check" %}
+        {% constraint = "check_#{table.id}_#{suffix.id}_@digest" %}
+        {% too_long = "#{shown.id} would be named @name, longer than PostgreSQL's 63 bytes: " +
+                      "shorten its name or the #{owner.id} name" %}
+        {% line = "check :#{suffix.id}_@digest, #{sql.stringify.id}" %}
+        ::SweetTalk.__sweettalk_hashed({{ constant.id }},
+          {"check", {{ order }}, {{ line }}, {{ "\"#{constraint.id}\"" }}, {{ sentence }}},
+          {{ sql }}, {{ constraint }}, {{ too_long }})
+      {% else %}
+        {% if kind == "unique" && @type < ::SweetTalk::Entity %}
+          {% resolved = ["#{@type.constant("SWEETTALK_PARENT")[0].id}_id"] + resolved %}
+        {% end %}
+        {% listed = resolved.map { |column| ":#{column.id}" }.join(", ") %}
+        {% line = "index #{listed.id}" + (kind == "unique" ? ", unique: true" : "") %}
+        {% quoted = resolved.map { |column| "\"#{column.id}\"" }.join(", ") %}
+        {% named = "::SugarORM::Catalog.index_name(#{table.stringify.id}, [#{quoted.id}])" %}
+        {% if kind == "unique" && sentence.is_a?(NilLiteral) %}
+          {% sentence = "#{owner.id} #{names.join(" and ").id} must be unique" %}
+        {% end %}
+        {{ constant.id }} = { {{ kind }}, {{ order }}, {{ line }}, {{ named }}, {{ sentence }} }
+      {% end %}
+    end
+
+    # `the total : Cents = expression` is a derived value, never stored.
+    #
+    # @word attribute | Declares a value the aggregate computes from its other attributes and
+    #   never stores.
+    # @usage the NAME : TYPE = EXPRESSION
+    # @guide c-sweettalk-aggregates
+    # @example
+    #   context Smelter, means: "metal poured into ingots" do
+    #     aggregate Ingot, means: "one poured bar" do
+    #       has weight : Int32
+    #       has bars : Int32 = 1
+    #       the total_weight : Int32 = weight * bars
+    #     end
+    #   end
+    macro the(decl)
+      {% if decl.is_a?(TypeDeclaration) && !decl.value.is_a?(Nop) %}
+        {% derived = {decl.var.stringify, decl.line_number, decl.type.stringify} %}
+        SWEETTALK_THE_{{ decl.var.id.upcase }} = {{ derived }}
+
+        def {{ decl.var }} : {{ decl.type }}
+          ::SweetTalk.coerce({{ decl.type }}, ({{ decl.value }}))
+        end
+      {% else %}
+        {% name = decl.is_a?(TypeDeclaration) ? decl.var : decl %}
+        {% name = decl.target if decl.is_a?(Assign) %}
+        {% decl.raise "the #{name} needs a type, as in the #{name} : Cents = …" %}
+      {% end %}
+    end
+
+    # Refuses `@owner = other`, `@owner ||= other` or `@owner, @x = …` in the body of
+    # *verb*, a command, factory, step, compensation or deadline, when `owner` is a
+    # reference: the reference is stored in `@owner_id`, so that line would declare a stray
+    # instance variable and change nothing. `self.owner = other` is the way. *text* is the
+    # body's source; its string literals are dropped before the scan.
+    macro __sweettalk_no_stray_writes(verb, text)
+      {% scanned = text.gsub(/"(?:[^"\\]|\\.)*"/, "")
+           .gsub(/(?<![@\w])(@\w+)\s*(?:\|\||&&|<<|>>|[-+*\/%&|^])?=(?![=~>])/, "\\1 = ")
+           .gsub(/(?<![@\w])(@\w+)\s*,(?=[^\n=<>!]*=(?![=~>]))/, "\\1 = ,") %}
+      {% for constant in @type.constants.select(&.starts_with?("SWEETTALK_HAS_")) %}
+        {% attribute = @type.constant(constant) %}
+        {% if %w[reference record].includes?(attribute[2]) &&
+                scanned.includes?("@#{attribute[0].id} = ") %}
+          {% raise "#{verb.id} assigns @#{attribute[0].id}, but #{attribute[0].id} is a " +
+                   "reference stored as #{attribute[4].id}: use self.#{attribute[0].id} = ..., " +
+                   "which takes the aggregate, the record or its id" %}
+        {% end %}
+      {% end %}
+    end
+
+    macro whenever(event, border = nil, each = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% event.raise "whenever belongs in a context, a border or a projection, or in a process, " +
+                     "not in #{owner.id}" %}
+    end
+
+    macro key(decl)
+      {% decl.raise "key belongs in a projection or a process: " +
+                    "it names the attribute that picks a row" %}
+    end
+
+    macro service(call, returns = nil, means = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% call.raise "service belongs in a context, not in #{owner.id}" %}
+    end
+
+    macro unit(call, changes = nil, locks = nil, returns = nil, once_by = nil, otherwise = nil,
+               assures = nil, means = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% call.raise "unit belongs in a context, not in #{owner.id}" %}
+    end
+
+    macro specification(name, on = nil, where = nil, means = nil, assures = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% name.raise "specification belongs in a context, after its aggregate, not in #{owner.id}" %}
+    end
+
+    macro compensate(event, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% event.raise "compensate belongs beside a whenever in a context, a border or a process, " +
+                     "not in #{owner.id}" %}
+    end
+
+    macro deadline(name, after = nil, &block)
+      {% owner = "#{@type.constant("SWEETTALK_KIND").id} #{@type.name.split("::").last.id}" %}
+      {% name.raise "deadline belongs in a process, not in #{owner.id}" %}
+    end
+
+    # Ends the command with a refusal; `on: :quantity` names the field it is about.
+    #
+    # @word behaviour | Stops a command, a factory or a step with a sentence the caller sees.
+    # @usage refuse MESSAGE[, on: FIELD]
+    # @in in a command, a factory, a policy or a process step
+    # @guide c-sweettalk-commands
+    # @option on | a symbol naming an attribute | - | The field the refusal is about, so a form
+    #   shows the sentence beside its input.
+    # @example
+    #   context Orders, means: "what people ask for" do
+    #     aggregate Request, means: "one thing asked for" do
+    #       has quantity : Int32
+    #       event Made, means: "a request was made"
+    #
+    #       to ask(count : Int32) do
+    #         refuse "Ask for at least one.", on: :quantity if count < 1
+    #         @quantity = count
+    #         emit Made
+    #       end
+    #     end
+    #   end
+    def refuse(message : String, on : Symbol? = nil) : NoReturn
+      raise ::SweetTalk::Refusal.new(message, on: on)
+    end
+  end
+end

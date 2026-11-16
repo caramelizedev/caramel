@@ -303,9 +303,9 @@ assert.equal(converted('<p><code>check :dates, "starts_at < ends_at"</code> when
 assert.equal(converted('<ul><li><p>One.</p><p>Two.</p></li></ul>'), '- One.\n\n  Two.\n', 'An item\'s paragraphs run together in Markdown');
 assert.equal(llmsEntry('Read [this]', 'https://caramelize.dev/a b/', 'Why.'), '- [Read \\[this\\]](https://caramelize.dev/a%20b/): Why.', 'An llms.txt name ends its link early');
 assert(!/&(lt|gt|quot|#39|amp);/.test(llms), 'llms.txt holds an undecoded entity');
-// The SweetTalk skill that frappe make domain writes ends each rule with a section of
+// The SweetTalk skill that frappe sweettalk:make domain writes ends each rule with a section of
 // the Markdown edition, and every section it cites exists.
-const skill = fs.readFileSync(new URL('../templates/skills/sweettalk/SKILL.md', import.meta.url), 'utf8');
+const skill = fs.readFileSync(new URL('../sweettalk/templates/SKILL.md', import.meta.url), 'utf8');
 assert(skill.startsWith('---\nname: sweettalk\ndescription: '), 'The SweetTalk skill lacks its name and description');
 const cited = / https:\/\/caramelize\.dev\/docs\/VERSION\/([a-z-]+)\/index\.md#([a-z0-9-]+)$/;
 for (const rule of skill.split('\n').filter(line => line.startsWith('- '))) {
@@ -405,10 +405,11 @@ const compileRows = {
   'A central context’s unit whose changes: names a tenanted aggregate': ['central_unit_tenanted'],
   'A warn line with assures:': ['warn_assures'],
   'A command, a factory or a unit body that names an outside border’s module': ['unit_names_outside', 'command_names_outside', 'within_outside_later'],
-  'A money word without require "caramel/sweet_talk/money", a currencies that is not a list of three-capital codes, a code without its minor units, an exponent: for a code ISO 4217 lists or out of 0 to 9, or a quote without currencies before it or with another rounding:': ['money_without_require', 'money_currency_shape', 'money_currency_unknown', 'money_currency_not_iso', 'money_exponent_listed', 'money_excess_decimals', 'money_quote_without_currencies', 'money_quote_rounding', 'money_allocation_without_require'],
+  'A money word without require "sweettalk/money", a currencies that is not a list of three-capital codes, a code without its minor units, an exponent: for a code ISO 4217 lists or out of 0 to 9, or a quote without currencies before it or with another rounding:': ['money_without_require', 'money_currency_shape', 'money_currency_unknown', 'money_currency_not_iso', 'money_exponent_listed', 'money_excess_decimals', 'money_quote_without_currencies', 'money_quote_rounding', 'money_allocation_without_require'],
   'An allocation named other than by a verb, without of: or by:, with a remainder: other than :largest_fraction, :first, :last or :to, a ties: other than :key, or a Float64, to_f or float literal in its types or block': ['allocation_not_verb', 'allocation_without_by', 'allocation_remainder', 'allocation_ties', 'allocation_float_weight', 'allocation_rule_float', 'allocation_rule_to_f', 'allocation_rule_float_literal'],
   'An amount added to another currency’s, or two amounts whose currency is data added': ['money_mix', 'money_amounts_added'],
-  'A Decimal(P, S) value without require "caramel/sweet_talk/decimal"': ['decimal_without_require'],
+  'A Decimal(P, S) value without require "sweettalk/decimal"': ['decimal_without_require'],
+  'require "sweettalk" without require "caramel" before it, or require "sweettalk/corretto" without require "caramel/corretto" before it': ['without_caramel', 'corretto_without_corretto'],
   'A decimal bound that is not decimal text, such as at_least: 0, or one written past S decimals': ['decimal_bound_not_text', 'decimal_bound_scale'],
   'A Json value with at_least: or any other option': ['json_option'],
   'order: on a Json value': ['json_order'],
@@ -427,6 +428,14 @@ const compileRows = {
 };
 const sweetTalkPage = read(`docs/${version}/sweettalk`);
 const compileTable = textOf(sweetTalkPage.slice(sweetTalkPage.indexOf('<h2 id="c-sweettalk-refusals">'), sweetTalkPage.indexOf('<h2 id="c-sweettalk-limits">')));
+// The SweetTalk guide names each command that the shard's frappe.yml declares, as Frappé
+// writes it: after frappe and the shard's name.
+const manifest = fs.readFileSync(new URL('../sweettalk/frappe.yml', import.meta.url), 'utf8');
+const declared = [...manifest.matchAll(/^  - syntax: (.+)$/gm)].map(match => match[1]);
+assert(declared.length > 0, 'sweettalk/frappe.yml declares no command');
+for (const syntax of declared) {
+  assert(textOf(sweetTalkPage).includes(`frappe sweettalk:${syntax}`), `The SweetTalk guide omits frappe sweettalk:${syntax}, which sweettalk/frappe.yml declares`);
+}
 const covered = new Set();
 for (const [phrase, names] of Object.entries(compileRows)) {
   assert(compileTable.includes(phrase), `The SweetTalk guide's "What does not compile" lacks the row "${phrase}", which covers ${names.join(', ')}`);

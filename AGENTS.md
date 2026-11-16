@@ -1,10 +1,10 @@
 # Caramel
 
 A Crystal framework and its tools: Caramel core, SugarORM, Cold Brew, Corretto, the
-Frappé CLI and Latte.
+Frappé CLI and Latte. `sweettalk/` is the SweetTalk shard.
 
-These instructions are for changing the framework. In an application this file sits
-under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
+These instructions are for changing the framework. Only an application made from a
+checkout sees them, through `lib/caramel`: there, follow the application's AGENTS.md.
 
 - Read `CONTRIBUTING.md` before changing code: checks, style, writing, commits and releases.
 - Before writing, changing or reviewing documentation (a guide, reference page, recipe,
@@ -30,7 +30,7 @@ under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
   - `bin/frappe-lint` from the repository root lints with `.ameba.yml`;
   - `crystal tool format --check FILES…` checks layout;
   - `crystal spec PATHS…` runs specs.
-- Say which checks you could not run, such as the macOS-only ones.
+- Say which checks you could not run.
 
 ## Other agents on this machine
 

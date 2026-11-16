@@ -1,9 +1,12 @@
+require "yaml"
 require "./unix_http"
 
 module Caramel::Checks
   # A private Latte daemon on free DNS/HTTP/HTTPS ports with Frappé projects
   # under one disposable temp root. `finish` removes the root only after a
-  # passing run whose services stopped cleanly.
+  # passing run whose services stopped cleanly. Its applications install the
+  # shards a release would publish from this working tree (Checks.published),
+  # not the checkout.
   class LatteFixture
     getter root : String
     getter repo : String
@@ -12,6 +15,7 @@ module Caramel::Checks
     getter env : Hash(String, String?)
     getter daemon : Process?
     getter app : Process?
+    getter published : Hash(String, Frappe::Published::Shard)
 
     def initialize(prefix : String)
       @repo = REPO
@@ -29,6 +33,9 @@ module Caramel::Checks
       end
       @env["CARAMEL_HOME"] = @state
       @env["CARAMEL_FRAMEWORK_ROOT"] = @repo
+      @published = Checks.published(File.join(@root, "published"))
+      # `frappe new` takes the caramel shard from here, pinned to its published commit.
+      @env["CARAMEL_REPOSITORY"] = Checks.source(@published["caramel"])
       @frappe = File.join(@repo, "bin/frappe")
       @daemon = nil
       @app = nil.as(Process?)
@@ -106,6 +113,73 @@ module Caramel::Checks
         values[key] = JSON.parse(value).as_s
       end
       values
+    end
+
+    # `frappe new NAME` under `projects`, with *environment*: an application whose
+    # lib/caramel is the published tree and whose lock pins the published commit.
+    def new_application(name : String,
+                        environment : Hash(String, String?) = @env) : Latte::ProcessResult
+      made = command([@frappe, "new", name], chdir: @projects, environment: environment)
+      Checks.installed!(File.join(@projects, name), @published["caramel"])
+      made
+    end
+
+    # Adds the shard at *path*, a directory, to the dependencies and the lock of the
+    # application at *project*, under the name and version its shard.yml states;
+    # `frappe setup` then installs it.
+    def depend_on_shard(project : String, path : String) : Nil
+      shard = YAML.parse(File.read(File.join(path, "shard.yml")))
+      source = "path: #{path}"
+      depend(project, shard["name"].as_s, source, source, shard["version"].as_s)
+    end
+
+    # Writes the dependency *name* into the application at *project*: *manifest*, its
+    # lines in shard.yml, and *source* and *version*, its lines in shard.lock.
+    private def depend(project : String,
+                       name : String,
+                       manifest : String,
+                       source : String,
+                       version : String) : Nil
+      file = File.join(project, "shard.yml")
+      dependency = "\ndependencies:\n  #{name}:\n    #{manifest}\n"
+      File.write(file, File.read(file).sub("\ndependencies:\n", dependency))
+      lock = File.join(project, "shard.lock")
+      File.write(lock, File.read(lock) + "\n  #{name}:\n    #{source}\n    version: #{version}\n")
+    end
+
+    # Adds the published sweettalk shard to the application at *project* and installs
+    # it with `frappe setup`, which migrates unless *migrate* is false: shard.yml takes
+    # it from its assembled repository at this release, and shard.lock pins its
+    # published commit. The shard's own shard.yml names the framework by the repository
+    # a release publishes it to, and Shards refuses one shard from two sources, so the
+    # application's shard.override.yml gives every shard the assembled framework that
+    # the application depends on.
+    def add_sweettalk(project : String, migrate : Bool = true) : Nil
+      shard = @published["sweettalk"]
+      source = "git: #{Checks.source(shard).to_json}"
+      depend(project, shard.name, %(#{source}\n    version: "~> #{shard.version}"), source,
+        shard.pin)
+      framework = Checks.source(@published["caramel"])
+      override = "dependencies:\n  caramel:\n    git: #{framework.to_json}\n"
+      File.write(File.join(project, "shard.override.yml"), override)
+      forget_tool_programs(shard)
+      setup = migrate ? [@frappe, "setup"] : [@frappe, "setup", "--no-migrate"]
+      command(setup, chdir: project)
+      Checks.installed!(project, shard)
+      Checks.installed!(project, @published["caramel"])
+    end
+
+    # The toolchain keeps a shard's tool program for each commit a lock pins, and every
+    # assembly of a changed tree is another commit: removes the programs it keeps for
+    # earlier assemblies of *shard*.
+    private def forget_tool_programs(shard : Frappe::Published::Shard) : Nil
+      kept = "#{shard.name}-#{shard.pin}"
+      programs = File.join(Checks.toolchain_root, "shard-tools")
+      return unless Dir.exists?(programs)
+      Dir.each_child(programs) do |name|
+        earlier = name.starts_with?("#{shard.name}-") && name.includes?("+git.commit.")
+        FileUtils.rm_rf(File.join(programs, name)) if earlier && name != kept
+      end
     end
 
     def site(name : String) : JSON::Any

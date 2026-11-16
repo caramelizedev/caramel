@@ -57,6 +57,45 @@ private def tools(project : Caramel::Frappe::Project,
   Caramel::Frappe::Tools.new(project.root, output, error)
 end
 
+# Stands in for scripts/shards: it records its arguments.
+private LAUNCHER = <<-SH
+  #!/bin/sh
+  echo "$*" > installed
+
+  SH
+
+private MANIFEST = <<-YAML
+  name: bookshelf
+  version: 0.1.0
+  dependencies:
+    caramel:
+      path: ../caramel
+    sweettalk:
+      github: example/sweettalk
+  development_dependencies:
+    lexbor:
+      github: example/lexbor
+
+  YAML
+
+# A lock of each of *names*.
+private def lock(names : Array(String)) : String
+  entries = names.map { |name| "  #{name}:\n    path: ../#{name}\n    version: 0.1.0\n" }
+  "version: 2.0\nshards:\n#{entries.join('\n')}"
+end
+
+# Yields a project that names caramel, sweettalk and lexbor and locks *locked*, in a
+# checkout whose scripts/shards is LAUNCHER.
+private def dependent(locked : Array(String), &)
+  application do |project, _|
+    Dir.mkdir(File.join(project.root, "scripts"))
+    File.write(File.join(project.root, "scripts/shards"), LAUNCHER, perm: 0o700)
+    File.write(File.join(project.root, "shard.yml"), MANIFEST)
+    File.write(File.join(project.root, "shard.lock"), lock(locked))
+    yield project
+  end
+end
+
 describe Caramel::Frappe::Tools do
   it "runs a contributed command with its output as written and its standard input" do
     application do |project, binary|
@@ -77,6 +116,24 @@ describe Caramel::Frappe::Tools do
       reader.gets.should eq("Hello, Ada, from #{DATABASE} in development")
       finished.receive.should eq(3)
       File.read(File.join(project.root, "ran")).should eq("demo:greet --loud\n")
+    end
+  end
+
+  it "installs what shard.lock holds when it locks every dependency shard.yml names" do
+    dependent(%w[caramel sweettalk lexbor pg]) do |project|
+      tools(project).dependencies(project)
+      installed = File.read(File.join(project.root, "installed"))
+      installed.should eq("install --frozen --skip-postinstall\n")
+    end
+  end
+
+  it "refuses a dependency shard.yml names and shard.lock lacks, naming frappe shards " \
+     "install, before Shards runs" do
+    dependent(%w[caramel]) do |project|
+      remedy = "shard.lock does not lock sweettalk, lexbor, which shard.yml names; run " \
+               "frappe shards install to lock and install what was added, then frappe setup"
+      expect_raises(Caramel::Frappe::Error, remedy) { tools(project).dependencies(project) }
+      File.exists?(File.join(project.root, "installed")).should be_false
     end
   end
 

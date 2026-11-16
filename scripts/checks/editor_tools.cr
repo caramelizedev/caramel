@@ -156,6 +156,11 @@ module EditorCheck
       build_env = Hash(String, String?).new
       ENV.each { |key, value| build_env[key] = value }
       build_env["CARAMEL_TOOLCHAIN_ROOT"] = ROOT
+      # The application takes the caramel shard a release would publish, as a released
+      # application does, so its lib/caramel is a copy and not this checkout.
+      assembly = File.join(Caramel::Checks.check_root("caramel-editor-tools"), "published")
+      caramel = Caramel::Checks.published(assembly)["caramel"]
+      build_env["CARAMEL_REPOSITORY"] = Caramel::Checks.source(caramel)
       generator = "spec/fixtures/generate_project.cr"
       generate = Caramel::Checks.crystal(["run", generator, "--", project],
         env: build_env, timeout: 600.seconds)
@@ -163,6 +168,7 @@ module EditorCheck
       install = Caramel::Checks.shards(["install", "--frozen"],
         chdir: project, env: build_env, timeout: 900.seconds)
       raise "Project dependency installation failed: #{install.stderr}" unless install.success?
+      Caramel::Checks.installed!(project, caramel)
       env = {
         "HOME"                   => HOME,
         "PATH"                   => "/usr/bin:/bin",
@@ -179,11 +185,9 @@ module EditorCheck
         at_parent = LSPClient.position(text, "ApplicationAction", 2)
         client.definition_until(show, at_parent, 300.seconds) { |item| item == action }
         puts "PASS: frappe lsp crystalline definition into application source"
-        # An unreleased checkout is a path dependency: lib/caramel resolves to it.
-        framework = File.join(REPO, "src/caramel/action.cr")
         at_page = LSPClient.position(text, "page \"Welcome\"", 1)
         client.definition_until(show, at_page, 180.seconds) do |item|
-          item.ends_with?("/bookshelf/lib/caramel/src/caramel/action.cr") || item == framework
+          item.ends_with?("/bookshelf/lib/caramel/src/caramel/action.cr")
         end
         puts "PASS: frappe lsp crystalline definition into the project's Caramel dependency"
       ensure

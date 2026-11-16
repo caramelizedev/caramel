@@ -276,6 +276,14 @@ module Caramel::Frappe
         "--no-migrate leaves the database unchanged.",
         brief: "Install dependencies and prepare the database",
         examples: ["setup", "setup --no-migrate"]),
+      Command.new("shards [ARGS...]",
+        "Run this release's pinned Shards in the project with ARGS as given, options " \
+        "included, and exit with its status. frappe shards install locks and installs a " \
+        "dependency added to shard.yml; frappe setup installs only what shard.lock holds. " \
+        "An install fails when a shard that shard.lock pins to a commit lands at another.",
+        brief: "Run the pinned Shards, to add or update a dependency",
+        examples: ["shards install", "shards update lexbor", "shards outdated"],
+        passthrough: true),
       Command.new("dev [--no-open] [--branch NAME]",
         "Build, serve and reload the app at its HTTPS origin; " \
         "--branch runs it against database branch NAME.",
@@ -299,30 +307,6 @@ module Caramel::Frappe
         "path or action contains it (any case).",
         brief: "List routes with their contracts",
         examples: ["routes", "routes books"]),
-      Command.new("requirements [ID]",
-        "List the requirement ids the SweetTalk domain declares, each with the never, " \
-        "always, specification and unit lines that assure it; ID shows one.",
-        brief: "List the requirements the domain assures",
-        examples: ["requirements"]),
-      Command.new("glossary [--json]",
-        "Print the SweetTalk domain's detailed glossary as Markdown: each term's meaning, " \
-        "a value's bounds and words, an aggregate's states and moves, an event's handlers " \
-        "in the order they run, a unit's changes: and locks:; --json prints the document.",
-        brief: "Print the domain's glossary",
-        examples: ["glossary", "glossary --json"]),
-      Command.new("contexts [--mermaid]",
-        "Print the SweetTalk context map: each context and kernel with what it depends on, " \
-        "reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart.",
-        brief: "Print the domain's context map",
-        examples: ["contexts", "contexts --mermaid"]),
-      Command.new("words [WORD] [--json]",
-        "Print SweetTalk's vocabulary as its macros state it, with no application needed: " \
-        "every word with its kind and summary, or WORD's usage, options, one example " \
-        "that compiles and its guide section; an unknown WORD names the nearest; " \
-        "--json prints the same as JSON.",
-        brief: "Look up SweetTalk's vocabulary, no app needed",
-        examples: ["words", "words context"],
-        project: false),
       Command.new("expand FILE:LINE:COL",
         "Print the plain Crystal that the macro call at FILE:LINE:COL expands to; " \
         "where none expands, the call whose block encloses it, such as " \
@@ -359,17 +343,6 @@ module Caramel::Frappe
         "--int64 keys it by an Int64 the database assigns instead of a UUID.",
         brief: "Make the application multi-tenant",
         examples: ["make tenancy Account"]),
-      Command.new("make domain NAME CONTEXT --means=TEXT [--central]",
-        "Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, " \
-        "which means TEXT, and spec/domain/NAME_spec.cr. The first domain also edits " \
-        "three files: it adds require \"caramel/sweet_talk\", require \"../app/domain/*\" " \
-        "and SweetTalk.boot to config/application.cr, the app/domain/** exclusion of " \
-        "Lint/UnusedArgument to .ameba.yml, and the Domain: and Domain rules: lines to " \
-        "AGENTS.md. When the application has no SweetTalk skill for agents, it also " \
-        "writes .claude/skills/sweettalk/SKILL.md. In a multi-tenant application the " \
-        "domain names the tenant, and --central makes the context one every tenant shares.",
-        brief: "Start a SweetTalk domain with its first context",
-        examples: ["make domain Library Lending --means=\"Members borrow and return books\""]),
       Command.new("translations",
         "List the keys each locale still takes from the default locale; " \
         "exits 1 while any is missing.",
@@ -468,8 +441,9 @@ module Caramel::Frappe
         examples: ["installations remove 0.21.0"],
         project: false),
       Command.new("doctor",
-        "Check the toolchain, this Caramel installation, dependencies, local configuration, " \
-        "Latte services, trusted HTTPS and the port relay.",
+        "Check the toolchain, this Caramel installation, where the caramel shard comes " \
+        "from, dependencies, local configuration, Latte services, trusted HTTPS and the " \
+        "port relay.",
         brief: "Check your toolchain, Latte and local setup"),
       Command.new("open",
         "Open the application's HTTPS origin in the browser; while frappe dev runs, a " \
@@ -492,7 +466,7 @@ module Caramel::Frappe
     # The line for each run of words that begins longer commands, and for no other run,
     # shown in help, family help and completion.
     FAMILIES = {
-      "make"          => "Generate code: resource, locale, tenancy, domain",
+      "make"          => "Generate code: resource, locale, tenancy",
       "db"            => "Dump, restore, diff, branch or diagnose the database",
       "db branch"     => "Create, list or delete database branches",
       "sites"         => "List or unregister the sites Latte serves",
@@ -501,12 +475,11 @@ module Caramel::Frappe
     }
 
     GROUPS = [
-      Group.new("GET STARTED", %w[new setup dev open doctor]),
+      Group.new("GET STARTED", %w[new setup shards dev open doctor]),
       Group.new("WRITE YOUR APP", %w[make routes expand translations]),
       Group.new("CHECK AND TEST", %w[check lint format corretto]),
       Group.new("DATABASE", %w[migrate seed db]),
       Group.new("DEBUG A RUNNING APP", %w[logs traces trace errors]),
-      Group.new("SWEETTALK DOMAIN", %w[words requirements glossary contexts]),
       Group.new("SHIP", %w[build]),
       Group.new("LATTE AND THIS MAC", %w[services sites installations lsp]),
       Group.new("ABOUT FRAPPÉ", %w[help version completion agent-manifest]),

@@ -1,7 +1,9 @@
 # Lots of units and the amount they carry, for SweetTalk's calculations (ADR 0035): a split
 # whose rule holds, the same split with its shares rounded on their own, whose rule breaks,
 # and a value of a lot with a never line on its result.
-require "../../../src/caramel/sweet_talk/decimal"
+require "../../../src/caramel"
+require "../../../src/sugar_orm/decimal"
+require "../../../sweettalk/src/sweettalk/decimal"
 
 module Lots
   include SweetTalk

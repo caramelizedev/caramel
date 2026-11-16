@@ -147,7 +147,7 @@ module Caramel::Checks::Lint
 
   # The Crystal files .ameba.yml lints: fixture data is excluded there too.
   private def linted_sources : Array(String)
-    Dir.glob(File.join(Checks::REPO, "{src,spec,scripts}/**/*.cr")).reject do |path|
+    Dir.glob(File.join(Checks::REPO, "{src,sweettalk/src,spec,scripts}/**/*.cr")).reject do |path|
       path.lchop("#{Checks::REPO}/").matches?(%r{\Aspec/fixtures/[^/]+/})
     end
   end

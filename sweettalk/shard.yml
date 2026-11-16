@@ -1,0 +1,8 @@
+name: sweettalk
+version: 0.23.0
+crystal: ">= 1.22.3"
+license: MIT
+dependencies:
+  caramel:
+    github: caramelizedev/caramel-shard
+    version: 0.23.0

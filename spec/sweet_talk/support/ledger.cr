@@ -5,7 +5,8 @@
 # defaulted attribute before a required one and an invariant of its own, an aggregate
 # that refers to its own type, and a batch of slips a factory opens and commands retitle
 # and strike, for what a save writes and what an event says of its entities.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Ledger
   include SweetTalk

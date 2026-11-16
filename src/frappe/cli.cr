@@ -3,6 +3,7 @@ require "./mrdp"
 require "./check"
 require "./lint"
 require "./new_project"
+require "./development_source"
 require "./latte_client"
 require "./installations"
 require "./release"
@@ -12,7 +13,6 @@ require "./tools"
 require "./resource_generator"
 require "./locale_generator"
 require "./tenancy_generator"
-require "./domain_generator"
 require "./dev_session"
 require "./dev_sign_in"
 require "./site_log"
@@ -20,8 +20,6 @@ require "./schema_diff"
 require "./editor_tools"
 require "./traces"
 require "./expand_fallback"
-require "./glossary"
-require "./words"
 require "./terminal"
 require "./help"
 require "./completion"
@@ -123,6 +121,9 @@ module Caramel::Frappe
           @output.puts("#{project.name} is configured.")
           Toolkit.next_steps(@output, [{"frappe dev", serve}])
         end
+      when "shards"
+        tools = Tools.new(@framework_root, @output, @error)
+        return tools.shards(Project.load, invocation.list("ARGS"))
       when "dev"
         dev(invocation)
       when "check"
@@ -163,20 +164,8 @@ module Caramel::Frappe
         make_locale(invocation["CODE"])
       when "make tenancy"
         make_tenancy(invocation["MODEL"], invocation.flag?("--int64"))
-      when "make domain"
-        make_domain(invocation)
       when "translations"
         return translations
-      when "requirements"
-        return requirements(invocation["ID"]?)
-      when "words"
-        return words(invocation["WORD"]?, invocation.flag?("--json"))
-      when "glossary"
-        glossary = Glossary.load(Project.load, Tools.new(@framework_root, @output, @error))
-        @output.puts(invocation.flag?("--json") ? glossary.document.to_json : glossary.to_markdown)
-      when "contexts"
-        glossary = Glossary.load(Project.load, Tools.new(@framework_root, @output, @error))
-        @output.print(invocation.flag?("--mermaid") ? glossary.to_mermaid : glossary.to_text)
       when "migrate"
         return migrate(invocation)
       when "seed"
@@ -499,18 +488,6 @@ module Caramel::Frappe
       Toolkit.next_steps(@output, steps, notes)
     end
 
-    private def make_domain(invocation : Commands::Invocation) : Nil
-      name = invocation["NAME"]
-      files = DomainGenerator.new.generate(Project.load, name, invocation["CONTEXT"],
-        invocation["--means"], central: invocation.flag?("--central"))
-      Toolkit.generated(@output, files)
-      singular = name.underscore
-      steps = [{"Write the domain in app/domain/#{singular}.cr.", ""},
-               {"frappe db diff --name create_#{singular}", "derive its tables"},
-               {"frappe migrate", "apply them"}]
-      Toolkit.next_steps(@output, steps)
-    end
-
     # Prints the application's report of keys each locale still lacks.
     private def translations : Int32
       project = Project.load
@@ -520,49 +497,6 @@ module Caramel::Frappe
       status, report = tools.capture(binary, ["translations"], project.root, development)
       @output.print(report)
       status.success? ? 0 : 1
-    end
-
-    # Prints SweetTalk's words, or one word, from the macros of this Frappé's own release.
-    private def words(word : String?, json : Bool) : Int32
-      vocabulary = Words.load(@framework_root)
-      if word && !vocabulary.word?(word)
-        nearest = vocabulary.nearest(word)
-        message = "unknown word #{word}"
-        message += "; nearest: #{nearest.join(", ")}" unless nearest.empty?
-        raise Commands::Usage.new(message, "frappe words", @table.matching(["words"]),
-          nearest.first?)
-      end
-      @output.puts(json ? words_json(vocabulary, word) : words_text(vocabulary, word))
-      0
-    end
-
-    private def words_text(vocabulary : Words, word : String?) : String
-      (word ? vocabulary.to_text(word) : vocabulary.to_text).chomp
-    end
-
-    private def words_json(vocabulary : Words, word : String?) : String
-      return vocabulary.to_json unless word
-      JSON.build { |builder| vocabulary.word_json(builder, word) }
-    end
-
-    # Prints the application's requirement ids and what assures each, or one id's, and
-    # returns the application's exit status. An application that does not require
-    # caramel/sweet_talk has no such command, and answers with its usage and status 2.
-    private def requirements(id : String?) : Int32
-      project = Project.load
-      tools = Tools.new(@framework_root, @output, @error)
-      binary = tools.compile(project)
-      errors = IO::Memory.new
-      arguments = id ? ["requirements", id] : ["requirements"]
-      development = {"CARAMEL_ENV" => "development"}
-      status, listing = tools.capture(binary, arguments, project.root, development, errors)
-      if status.exit_code == 2 && errors.to_s.starts_with?("Usage:")
-        raise Error.new("This application declares no requirements: " \
-                        "it does not require caramel/sweet_talk")
-      end
-      @output.print(listing)
-      @error.print(errors.to_s)
-      status.success? ? 0 : status.exit_code
     end
 
     # `crystal tool expand` sees macro calls in method bodies and in the files
@@ -749,6 +683,7 @@ module Caramel::Frappe
         "Project configuration"       => -> { Project.load; nil },
         "Managed Crystal compiler"    => -> { Tools.new(@framework_root).check_compiler },
         "Caramel installation"        => -> { verify_installation },
+        "Caramel shard source"        => -> { verify_source },
         "Locked dependencies"         => -> { verify_dependencies },
         "Managed PostgreSQL tool"     => -> { verify_postgres; nil },
         "Private local configuration" => -> { Project.load.local_environment; nil },
@@ -768,6 +703,10 @@ module Caramel::Frappe
 
     private def verify_dependencies
       Tools.new(@framework_root).check_dependencies(Project.load)
+    end
+
+    private def verify_source : Nil
+      DevelopmentSource.check(Project.load.root, @framework_root)
     end
 
     private def verify_postgres

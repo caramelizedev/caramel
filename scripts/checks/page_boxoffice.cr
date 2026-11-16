@@ -15,9 +15,10 @@ module Caramel::Checks
     end
 
     def follow : Nil
-      # 01 · Create the application and its domain
+      # 01 · Create the application, add the sweettalk shard and start the domain
       create
-      domain = frappe("make", "domain", "BoxOffice", "Seating",
+      add_sweettalk(@project)
+      domain = frappe("sweettalk:make", "domain", "BoxOffice", "Seating",
         "--means=selling the seats of each show")
       %w[app/domain/box_office.cr spec/domain/box_office_spec.cr config/application.cr
         .claude/skills/sweettalk/SKILL.md].each do |path|

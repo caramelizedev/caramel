@@ -2,7 +2,8 @@
 # are unique, with a plain index and a check on one attribute; an adjustment unique by two
 # attributes together, indexed by two, with a check over its lifecycle; and a shipment
 # whose parcels are unique by tag within it.
-require "../../../src/caramel/sweet_talk"
+require "../../../src/caramel"
+require "../../../sweettalk/src/sweettalk"
 
 module Constrained
   include SweetTalk

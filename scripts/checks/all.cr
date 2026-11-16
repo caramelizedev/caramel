@@ -32,7 +32,7 @@ module Caramel::Checks::All
   EXEMPT = %w[all compiler-profile]
   SPECS  = %w[
     spec/caramel spec/frappe spec/latte spec/sugar_orm
-    spec/cold_brew spec/corretto spec/release
+    spec/cold_brew spec/corretto spec/release spec/sweet_talk_tool
   ]
   USAGE = "usage: scripts/check all [--lanes N] [--except NAME ...]"
   # The most lanes --lanes takes, and the default's ceiling (ADR 0017).
@@ -83,6 +83,7 @@ module Caramel::Checks::All
     unknown = skipped - targets.map(&.first)
     Checks.fail("unknown check: #{unknown.join(", ")}") unless unknown.empty?
     prune_program_caches
+    assemble
 
     environment = File.join(Checks::REPO, "spec/fixtures/frappe_environment.cr")
     # The linter, the longest build, compiles alongside the rest: two Crystal
@@ -110,6 +111,17 @@ module Caramel::Checks::All
       puts "Failed: #{failed.join(", ")}"
       1
     end
+  end
+
+  # Assembles the shards a release would publish from this working tree once, in a
+  # fixed directory of this checkout, where every lane's checks find them
+  # (Checks.published): the applications they generate install those shards.
+  private def assemble : Nil
+    directory = Checks.check_root("published")
+    shards = Checks.assemble(directory)
+    ENV[Checks::PUBLISHED] = directory
+    listed = shards.values.map { |shard| "#{shard.name} #{shard.version} #{shard.commit[0, 12]}" }
+    puts "Published: #{listed.join(", ")} in #{directory}"
   end
 
   # Runs each run in turn and returns the names of the failed ones.

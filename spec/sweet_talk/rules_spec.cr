@@ -513,6 +513,6 @@ describe "SweetTalk's requirements" do
     errors.to_s.should eq("SHELF-9 is not a requirement; requirements: #{listed}\n")
     errors.clear
     SweetTalk.__sweettalk_print_requirements(["--all"], output, errors).should eq(2)
-    errors.to_s.should eq("Usage: requirements [ID|--ids]\n")
+    errors.to_s.should eq("Usage: sweettalk:requirements [ID|--ids]\n")
   end
 end

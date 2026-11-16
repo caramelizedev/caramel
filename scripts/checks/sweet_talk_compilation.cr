@@ -1,20 +1,23 @@
 require "./support/harness"
-require "../../src/frappe/word_drift"
+require "../../src/frappe/toolkit"
+require "../../src/caramel/version"
+require "../../sweettalk/src/sweettalk/tool/word_drift"
 
-# caramel/sweet_talk (ADRs 0030, 0031, 0033, 0035, 0036, 0039 to 0041, 0046
+# The sweettalk shard (ADRs 0030, 0031, 0033, 0035, 0036, 0039 to 0041, 0046
 # and 0063). Each declaration mistake fails to compile with a fixed problem text, naming
 # its file where the mistake has a line; a valid domain compiles, with and without
-# caramel/tenancy; the example of each word `frappe words` prints compiles; and an
-# application that does not require caramel/sweet_talk, or one of its modules,
+# caramel/tenancy; the example of each word `frappe sweettalk:words` prints compiles; a
+# program that requires the shard without the framework is refused in one line; and an
+# application that does not require sweettalk, or one of its modules,
 # holds none of its code. spec/sweet_talk and spec/sweet_talk_tenancy need PostgreSQL, so
 # scripts/check integration runs them.
 
 FIXTURES = "spec/fixtures/sweet_talk"
 ABSENT   = "SweetTalk code must be absent from an application that does not require " \
-           "caramel/sweet_talk"
+           "sweettalk"
 # A string only SweetTalk's boundary holds.
 MARKER = "a command changes one aggregate"
-# Each module of caramel/sweet_talk (ADR 0030) with a string only its own code holds, and
+# Each module of sweettalk (ADR 0030) with a string only its own code holds, and
 # the modules it requires; the application spec/fixtures/sweet_talk/<module>.cr requires it.
 MODULES = {
   "decimal" => {"must be a decimal written with digits and a point", [] of String},
@@ -525,7 +528,7 @@ PROBLEMS = [
    "what it keeps, is declared inside entity Line"},
   {"unique_twice", "Crate declares unique :label twice"},
   {"money_without_require",
-   "currencies needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "currencies needs require \"sweettalk/money\" before this domain: a program that " \
    "declares no currency holds none of its code"},
   {"money_currency_shape",
    "currencies takes a list of ISO 4217 codes, as in currencies %w[USD EUR], not"},
@@ -546,7 +549,7 @@ PROBLEMS = [
    "quote Rate takes rounding: :half_up, :half_even, :down or :up, how a converted amount " \
    "becomes whole minor units, not :nearest"},
   {"money_allocation_without_require",
-   "allocation needs require \"caramel/sweet_talk/money\" before this domain: a program that " \
+   "allocation needs require \"sweettalk/money\" before this domain: a program that " \
    "declares no currency holds none of its code"},
   {"allocation_not_verb",
    "allocation takes a verb, as in allocation split, of: Money::Amount, by: Weight, " \
@@ -582,7 +585,7 @@ PROBLEMS = [
    "groups taken_by_label adds up :taken, an amount whose currency is data: add it up with " \
    "sums, which answers a total per currency"},
   {"decimal_without_require",
-   "value Rate wraps Decimal, which needs require \"caramel/sweet_talk/decimal\" before this " \
+   "value Rate wraps Decimal, which needs require \"sweettalk/decimal\" before this " \
    "domain: a program that declares no decimal value never links GMP"},
   {"decimal_bound_scale",
    "value Rate takes at_least: \"0.123456789\", which has more than 8 decimals: Decimal(20, 8) " \
@@ -774,8 +777,15 @@ PROBLEMS = [
   {"property_undrawable",
    "Corretto.property cannot draw note : Shop::Billing::Note for Billing.annotate: it draws " \
    "Int32, Int64, Bool, String, nil, arrays, hashes and unions of them"},
+  {"without_caramel",
+   "sweettalk needs the framework first: write require \"caramel\" before require " \
+   "\"sweettalk\""},
+  {"corretto_without_corretto",
+   "sweettalk/corretto needs Corretto first: write require \"caramel/corretto\" before " \
+   "require \"sweettalk/corretto\""},
 ]
-# These problems come from whole-program checks, so they name no fixture line.
+# These problems come from whole-program checks, or from the shard's own files, so they
+# name no fixture line.
 UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_boot
   compile_unknown_border compile_each_not_list compile_event_union_field
   compile_rows_named compile_tenant_unnamed compile_central_event_tenanted_handler
@@ -785,7 +795,8 @@ UNLOCATED = %w[compile_foreign_name compile_context_cycle compile_cycle_without_
   compile_kernel_sharer_silent compile_kernel_not_shared compile_kernel_names_context
   compile_follows_kernel compile_border_kernel compile_kernel_word_alone
   compile_kernel_word_unused compile_unit_changes_foreign compile_json_range
-  compile_older_type compile_within_foreign_name]
+  compile_older_type compile_within_foreign_name compile_without_caramel
+  compile_corretto_without_corretto]
 
 cases = {"compile_valid" => nil, "compile_with_tenancy" => nil} of String => String?
 PROBLEMS.each { |(name, problem)| cases["compile_#{name}"] = problem }
@@ -808,11 +819,12 @@ cases.each_with_index do |(name, problem), index|
   puts "PASS: #{name}"
 end
 
-# The example of each word `frappe words` prints (the @example of its doc comment in
-# src/caramel/sweet_talk) compiles as written: the examples that need the same requires are
+# The example of each word `frappe sweettalk:words` prints (the @example of its doc comment
+# in sweettalk/src/sweettalk) compiles as written: the examples that need the same requires are
 # one program, a module each, with SweetTalk.boot. WordDrift holds each block to its macro.
-words = Caramel::Frappe::Words.load(Caramel::Checks::REPO)
-drift = Caramel::Frappe::WordDrift.new(words)
+words = SweetTalk::Tool::Words.load(File.join(Caramel::Checks::REPO, "sweettalk"),
+  Caramel::Checks::REPO)
+drift = SweetTalk::Tool::WordDrift.new(words)
 scratch = Caramel::Checks.private_temp("caramel-words-")
 at_exit { FileUtils.rm_rf(scratch) }
 up = "../../../#{Caramel::Checks::REPO.lstrip('/')}"
@@ -829,14 +841,20 @@ Caramel::Checks.type_check(written).each_with_index do |result, index|
 end
 puts "PASS: the examples of #{words.words.size} SweetTalk words compile as written"
 
-# The same application without and with caramel/sweet_talk, and with each of its modules
+# The same application without and with sweettalk, and with each of its modules
 # (ADR 0030): only an application that requires a module holds its code, and all run alike.
-root = Caramel::Checks.private_temp("caramel-sweet-talk-")
+# Each builds against the framework and the shard a release would publish, in a stand-in
+# for this checkout at a fixed path, where its compiler cache lasts from run to run.
+root = Caramel::Checks.check_root("caramel-sweet-talk")
 at_exit { FileUtils.rm_rf(root) }
-(["plain", "sweet"] + MODULES.keys).each do |name|
+applications = ["plain", "sweet"] + MODULES.keys
+checkout = Caramel::Checks.published_checkout(File.join(root, "checkout"),
+  Caramel::Checks.published(File.join(root, "published")),
+  applications.map { |name| "#{FIXTURES}/#{name}.cr" })
+applications.each do |name|
   binary = File.join(root, name)
   build = Caramel::Checks.crystal(["build", "#{FIXTURES}/#{name}.cr", "-o", binary],
-    timeout: 1.hour)
+    chdir: checkout, timeout: 1.hour)
   Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
   held = File.read(binary)
   if {"plain", "sweet"}.includes?(name) && held.includes?(MARKER) != (name == "sweet")
@@ -845,7 +863,7 @@ at_exit { FileUtils.rm_rf(root) }
   MODULES.each do |required, (marker, _)|
     holds = name == required || MODULES[name]?.try(&.[1].includes?(required)) || false
     next if held.includes?(marker) == holds
-    Caramel::Checks.fail("#{name}: caramel/sweet_talk/#{required} code must be present " \
+    Caramel::Checks.fail("#{name}: sweettalk/#{required} code must be present " \
                          "exactly when the application requires it")
   end
   ran = Caramel::Checks.run([binary], timeout: 1.minute)
@@ -853,5 +871,5 @@ at_exit { FileUtils.rm_rf(root) }
     Caramel::Checks.fail("#{name} printed:\n#{ran.stdout}#{ran.stderr}")
   end
 end
-puts "PASS: an application without caramel/sweet_talk, or without one of its modules, " \
+puts "PASS: an application without sweettalk, or without one of its modules, " \
      "holds none of its code, and all run alike"

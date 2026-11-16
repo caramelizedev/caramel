@@ -13,12 +13,13 @@ module Caramel::Checks
     end
 
     def follow : Nil
-      # 01 · Create the application, its tenant and its domain
+      # 01 · Create the application with the sweettalk shard, its tenant and its domain
       create
+      add_sweettalk(@project)
       tenancy = frappe("make", "tenancy", "Account")
       assert!(tenancy.stdout.includes?("Generated app/models/account.cr\n"), tenancy.stdout)
       migrate(1)
-      domain = frappe("make", "domain", "Ledger", "Books",
+      domain = frappe("sweettalk:make", "domain", "Ledger", "Books",
         "--means=what each heading was posted in each period")
       %w[app/domain/ledger.cr spec/domain/ledger_spec.cr].each do |path|
         assert!(domain.stdout.includes?("Generated #{path}\n"), domain.stdout)

@@ -523,8 +523,8 @@ module SugarORM
                  "(declared primary: #{column.primary}, identity: #{column.identity}; " \
                  "database primary: #{actual.primary}, identity: #{actual.identity}).",
         remediation: "SugarORM does not rewrite primary keys; declare the key type the " \
-                     "table has (`field id : Int64, primary: true`, or `ids Int64` in a " \
-                     "SweetTalk domain), or create a new table and copy the rows deliberately.",
+                     "table has (`field id : Int64, primary: true`), or create a new table " \
+                     "and copy the rows deliberately.",
         overridable: false,
       )
     end

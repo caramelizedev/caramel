@@ -104,7 +104,7 @@ module SugarORM
       __sugar_where([::SugarORM::Condition.new("(#{fragment})", values)])
     end
 
-    # A predicate built as a `Condition`, such as a SweetTalk specification's. Its `?`
+    # A predicate built as a `Condition`, such as one a library builds from a rule. Its `?`
     # binds take its values in order, and it is parenthesized, as a fragment is, so an
     # `OR` inside it cannot reach the conditions beside it. It is not an overload of
     # `where`, which would turn "no parameter named" into "no overload matches".

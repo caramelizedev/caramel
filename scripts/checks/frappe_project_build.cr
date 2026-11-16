@@ -17,7 +17,7 @@ module Caramel::Checks
       failed = true
       begin
         start
-        command([@frappe, "new", "bookshelf"], chdir: @projects)
+        new_application("bookshelf")
         values = local_values(@project)
         make = [@frappe, "make", "resource", "Book", "title:string", "author:string"]
         command(make, chdir: @project)
@@ -32,6 +32,27 @@ module Caramel::Checks
       end
     end
 
+    # The build's container installs the dependencies itself, and of this machine it
+    # reaches only a path dependency, which `frappe build` mounts: no `file://` URL.
+    # For the build the application takes the published caramel tree by path, where
+    # its native build took the same tree by git.
+    private def depend_by_path : Nil
+      caramel = @published["caramel"]
+      git = "git: #{Checks.source(caramel).to_json}"
+      path = "path: #{caramel.directory.to_json}"
+      replace("shard.yml", %(#{git}\n    version: "~> #{caramel.version}"), path)
+      pinned = "#{git}\n    version: #{caramel.pin}"
+      replace("shard.lock", pinned, "#{path}\n    version: #{caramel.version}")
+    end
+
+    # Replaces *written* in the application's file *name*, which holds it.
+    private def replace(name : String, written : String, replacement : String) : Nil
+      file = File.join(@project, name)
+      text = File.read(file)
+      assert!(text.includes?(written), text)
+      File.write(file, text.sub(written, replacement))
+    end
+
     private def release_build : Nil
       docker = Process.find_executable("docker") || "/usr/local/bin/docker"
       engine = File.executable?(docker) && attempt([docker, "info"], timeout: 60.seconds).success?
@@ -39,6 +60,7 @@ module Caramel::Checks
         puts "SKIP: frappe build needs a running container engine"
         return
       end
+      depend_by_path
       git = ["/usr/bin/git", "-C", @project, "-c", "user.name=Caramel",
              "-c", "user.email=checks@caramel.invalid", "-c", "commit.gpgsign=false"]
       command(git + ["init", "-q"], echo: false)

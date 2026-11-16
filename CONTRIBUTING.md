@@ -92,9 +92,9 @@ Every piece of writing has one home, chosen by what it is ([ADR 0014](docs/decis
   repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
   pull request description or the CHANGELOG.
 
-State a fact once and link to it. `scripts/check prose` checks where markdown lives,
-the ADR sections, relative links and each file's size; `scripts/check website` the pages
-and the cited anchors.
+State a fact once and link to it. `scripts/check prose` checks markdown's homes, links
+and sizes, an ADR's sections, status, number and citations, and the `sweettalk/`
+boundary; `scripts/check website` the pages and anchors.
 
 ## Principles
 
@@ -115,13 +115,15 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `ty
 
 ## Releases
 
-A release is a tag `vX.Y.Z` of this repository and its source archive ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). During 0.x a minor release may break compatibility and a patch release never does.
+A release is a tag `vX.Y.Z` and the shards `published.yml` lists, each assembled from the tag ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)).
 
-1. Write the upgrade notes a user needs under `## Unreleased` in `CHANGELOG.md` as bullets, with no heading of their own (`scripts/release` adds `### Upgrade notes`), and commit them.
-2. Run `scripts/release --dry-run` to see the next version and its changelog section.
-3. Update the release labels in `website/source/site.html` to that version and commit them; `scripts/release` refuses a version the site does not name.
-4. Run `scripts/release`. It refuses a dirty working tree and an edited released framework migration. It sets the version in `shard.yml`, which `Caramel::VERSION` and `Latte.app` read, and writes the changelog. It runs `scripts/check all`, then commits `chore(release): vX.Y.Z` and creates the annotated tag. When a check fails it restores both files and tags nothing.
-5. Push and publish by hand, as it prints: `git push origin HEAD vX.Y.Z`, then `gh release create vX.Y.Z --verify-tag --title "Caramel X.Y.Z" --notes-from-tag`, then publish the guides with `node website/publish.mjs`, which keeps earlier editions and waits until a new edition answers.
+1. Write the upgrade notes as bullets under `## Unreleased` in `CHANGELOG.md` (`scripts/release` adds their heading), and commit.
+2. `scripts/release --dry-run` prints the next version and its changelog section.
+3. Set the release labels in `website/source/site.html` to that version and commit; `scripts/release` refuses a version the site does not name.
+4. Run `scripts/release`. It refuses a dirty tree and an edited released migration, stamps both `shard.yml` files, writes the changelog and runs `scripts/check all`; a failure restores the files and tags nothing. It commits `chore(release): vX.Y.Z`, tags, assembles the tag's shards and prints each one's commit and push command.
+5. Push by hand, as it prints: both shards first, since applications install from them, then the tag and the GitHub release. Then run `node website/publish.mjs`.
+
+`published.yml` says when to add a path to it. `src/frappe/published.cr` fixes a published commit's author and message; changing them changes later releases' ids only.
 
 ## Compatibility contracts
 

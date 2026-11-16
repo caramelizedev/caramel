@@ -1,0 +1,57 @@
+format: 1
+commands:
+  - syntax: words [WORD] [--json]
+    brief: Look up SweetTalk's vocabulary
+    description: >-
+      Print SweetTalk's vocabulary as its macros state it, whether or not the application
+      builds: every word with its kind and summary, or WORD's usage, options, one example
+      that compiles and its guide section; an unknown WORD names the nearest; --json prints
+      the same as JSON.
+    examples:
+      - words
+      - words context
+    run: tool
+  - syntax: requirements [ID]
+    brief: List the requirements the domain assures
+    description: >-
+      List the requirement ids the SweetTalk domain declares, each with the never, always,
+      specification and unit lines that assure it; ID shows one.
+    examples:
+      - requirements
+    run: application
+  - syntax: glossary [--json]
+    brief: Print the domain's glossary
+    description: >-
+      Print the SweetTalk domain's detailed glossary as Markdown: each term's meaning, a
+      value's bounds and words, an aggregate's states and moves, an event's handlers in the
+      order they run, a unit's changes: and locks:; --json prints the document.
+    examples:
+      - glossary
+      - glossary --json
+    run: application
+  - syntax: contexts [--mermaid]
+    brief: Print the domain's context map
+    description: >-
+      Print the SweetTalk context map: each context and kernel with what it depends on,
+      reacts to, shares and calls; --mermaid prints it as a Mermaid flowchart.
+    examples:
+      - contexts
+      - contexts --mermaid
+    run: application
+  - syntax: make domain NAME CONTEXT --means=TEXT [--central]
+    brief: Start a SweetTalk domain with its first context
+    description: >-
+      Start a SweetTalk domain: app/domain/NAME.cr with its first context CONTEXT, which
+      means TEXT, and spec/domain/NAME_spec.cr. The first domain also edits three files: it
+      adds require "sweettalk", require "../app/domain/*" and SweetTalk.boot to
+      config/application.cr, the app/domain/** exclusion of Lint/UnusedArgument to
+      .ameba.yml, and the Domain: and Domain rules: lines to AGENTS.md. When the
+      application has no SweetTalk skill for agents, it also writes
+      .claude/skills/sweettalk/SKILL.md. In a multi-tenant application the domain names the
+      tenant, and --central makes the context one every tenant shares.
+    examples:
+      - make domain Library Lending --means="Members borrow and return books"
+    run: tool
+families:
+  make: "Generate code: domain"
+tool: src/sweettalk/tool.cr

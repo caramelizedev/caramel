@@ -4,7 +4,8 @@
 # rounds; an event, a projection, a finder and a specification over amounts; and
 # allocations whose rules hold on drawn cases and catch a seeded off-by-one.
 require "./support/app"
-require "../../src/caramel/sweet_talk/corretto"
+require "../../src/caramel/corretto/property"
+require "../../sweettalk/src/sweettalk/corretto"
 
 module MoneySpec
   alias Money = Books::Cash

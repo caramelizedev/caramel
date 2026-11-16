@@ -1,8 +1,12 @@
+require "yaml"
 require "./support/harness"
 
-# Every kind of writing has one home (ADR 0014): markdown lives only in the files
-# that state a contract, each decision record keeps its three sections, every
-# relative link resolves, and every capped file stays within its byte cap.
+# The repository keeps to its layout (ADR 0014). Every kind of writing has one home:
+# markdown lives only in the files that state a contract, each decision record keeps its
+# three sections, its accepted status and a number no other record has, every relative
+# link resolves, every capped file stays within its byte cap, and no file cites a record
+# by the number of one of its entries. And the sweettalk shard is apart from the
+# framework: no file of the framework names it, and the two state one version (ADR 0030).
 module Caramel::Checks::Prose
   extend self
 
@@ -14,7 +18,7 @@ module Caramel::Checks::Prose
     ADR_PATH,
     /\Awebsite\/README\.md\z/,
     /\Atemplates\/application\/(README|AGENTS|CLAUDE)\.md\z/,
-    /\Atemplates\/skills\/sweettalk\/SKILL\.md\z/,
+    /\Asweettalk\/(README|templates\/SKILL)\.md\z/,
     /\A\.claude\/skills\/(caramel-docs|caramel-triage)\/SKILL\.md\z/,
     /\A(website\/)?vendor\//,
   ]
@@ -29,44 +33,133 @@ module Caramel::Checks::Prose
     "templates/application/README.md" => 3_000,
     "templates/application/AGENTS.md" => 2_000,
     "templates/application/CLAUDE.md" => 200,
+    "sweettalk/README.md"             => 1_000,
     # A decision record has no cap: it is as long as its subject. A skill has none
     # either: it is read when its task matches, and the link check keeps it from
     # becoming a second source (ADR 0014).
   }
 
-  ADR_TITLE  = /\A# ADR (\d{4}): \S/
-  ADR_DATE   = /\ADate: \d{4}-\d{2}-\d{2}\z/
-  ADR_STATUS = "Status: "
+  ADR_TITLE = /\A# ADR (\d{4}): \S/
+  ADR_DATE  = /\ADate: \d{4}-\d{2}-\d{2}\z/
+  # The whole status line of every record: a record is edited in place, so none is
+  # superseded or amended by another.
+  ADR_STATUS = "Status: accepted."
   ADR_SHAPES = [%w[Decision Reasons], %w[Context Decision Reasons]]
+
+  # A record cited by the number of one of its entries, linked or not, with or without a
+  # comma: the record's number, then `decision`, `entry`, `item` or `§`, then a number.
+  NUMBERED = /ADR \d{4}(\]\([^)\s]*\))?,? (decisions?|entr(y|ies)|items?|§) ?\d/i
+  # The trees whose files are read for such a citation, beside the markdown in its homes.
+  CITING = %w[src spec scripts sweettalk templates website/source]
 
   LINK   = /\]\(([^)\s]+)\)/
   SCHEME = /\A[a-z][a-z0-9+.-]*:/i
   VENDOR = /\A(website\/)?vendor\//
 
+  # The framework's sources and templates, which an application builds from: the products
+  # under src/ and what Frappé generates from. None of it names the sweettalk shard, in
+  # any spelling: the framework neither holds the shard nor knows it.
+  FRAMEWORK = %w[src templates]
+  SWEETTALK = /sweet[ _-]?talk/i
+  # The framework's shard.yml and the shard's, which state one version.
+  MANIFEST       = "shard.yml"
+  SHARD_MANIFEST = "sweettalk/shard.yml"
+
   def main : Int32
-    paths = markdown_paths
+    listed = listed_paths
+    paths = markdown_paths(listed)
     problems = [] of String
     paths.each { |path| problems.concat(homeless(path)) }
     homed = paths.select { |path| HOMES.any?(&.matches?(path)) }
     adrs = homed.select(&.matches?(ADR_PATH))
     adrs.each { |path| problems.concat(adr_problems(path)) }
+    problems.concat(number_problems(adrs))
+    citing = citing_paths(listed, homed)
+    citing.each { |path| problems.concat(citation_problems(path)) }
     homed.each { |path| problems.concat(link_problems(path)) }
     homed.each { |path| problems.concat(cap_problems(path)) }
+    framework = listed.select { |path| FRAMEWORK.any? { |tree| path.starts_with?("#{tree}/") } }
+    framework.each { |path| problems.concat(boundary_problems(path)) }
+    problems.concat(version_problems)
     Checks.fail(problems.join("\n")) unless problems.empty?
     puts "PASS: #{homed.size} markdown files sit in their homes, #{adrs.size} ADRs keep " \
          "Context, Decision and Reasons, every relative link resolves, and every capped " \
          "file is within its cap"
+    puts "PASS: every ADR states `#{ADR_STATUS}`, no two share a number, and none of " \
+         "#{citing.size} files cites a record by the number of one of its entries"
+    puts "PASS: none of the framework's #{framework.size} files names SweetTalk, and " \
+         "#{SHARD_MANIFEST} states the version of #{MANIFEST} and depends on it"
     0
   end
 
-  # The tracked and unignored files that are markdown or live under docs/.
-  private def markdown_paths : Array(String)
+  # The tracked and unignored files of the repository.
+  private def listed_paths : Array(String)
     listing = %w[ls-files -z --cached --others --exclude-standard]
     listed = Checks.run(["/usr/bin/git", "-C", Checks::REPO] + listing).stdout
-    paths = listed.split('\0', remove_empty: true)
-    paths.select! { |path| path.ends_with?(".md") || path.starts_with?("docs/") }
-    paths.select! { |path| File.file?(absolute(path)) }
-    paths
+    listed.split('\0', remove_empty: true).select { |path| File.file?(absolute(path)) }
+  end
+
+  # Those of *paths* that are markdown or live under docs/.
+  private def markdown_paths(paths : Array(String)) : Array(String)
+    paths.select { |path| path.ends_with?(".md") || path.starts_with?("docs/") }
+  end
+
+  # The files read for a citation by an entry's number: the markdown in its homes and
+  # the files under CITING, apart from what is vendored.
+  private def citing_paths(listed : Array(String), homed : Array(String)) : Array(String)
+    sources = listed.select { |path| CITING.any? { |tree| path.starts_with?("#{tree}/") } }
+    (homed + sources).uniq!.reject(&.matches?(VENDOR))
+  end
+
+  # Where *path* cites a record by the number of one of its entries.
+  private def citation_problems(path : String) : Array(String)
+    problems = [] of String
+    File.read(absolute(path)).scrub.each_line.with_index(1) do |line, number|
+      next unless line.matches?(NUMBERED)
+      problems << "#{path}:#{number}: cites a record by an entry's number, which changes " \
+                  "when the record is edited; cite the choice in words (ADR 0014)"
+    end
+    problems
+  end
+
+  # Where two of *adrs* have one number.
+  private def number_problems(adrs : Array(String)) : Array(String)
+    numbered = adrs.group_by { |path| File.basename(path)[0, 4] }
+    numbered.select { |_, paths| paths.size > 1 }.map do |number, paths|
+      "#{paths.sort.join(" and ")}: both are ADR #{number}; a number is used once across " \
+      "docs/decisions and docs/decisions/sweettalk, so give one the next unused number"
+    end
+  end
+
+  # Where *path*, a file of the framework, names the sweettalk shard: in its own name,
+  # or on a line.
+  private def boundary_problems(path : String) : Array(String)
+    rule = "the framework names SweetTalk nowhere (ADR 0014); say it in the sweettalk " \
+           "shard, or in words that fit any library"
+    problems = [] of String
+    problems << "#{path}: its path names SweetTalk; #{rule}" if path.matches?(SWEETTALK)
+    File.read(absolute(path)).scrub.each_line.with_index(1) do |line, number|
+      problems << "#{path}:#{number}: names SweetTalk; #{rule}" if line.matches?(SWEETTALK)
+    end
+    problems
+  end
+
+  # Where the shard's shard.yml and the framework's disagree on the version.
+  private def version_problems : Array(String)
+    version = YAML.parse(File.read(absolute(MANIFEST)))["version"].as_s
+    shard = YAML.parse(File.read(absolute(SHARD_MANIFEST)))
+    own = shard["version"]?.try(&.as_s?)
+    needed = shard.dig?("dependencies", "caramel", "version").try(&.as_s?)
+    problems = [] of String
+    unless own == version
+      problems << "#{SHARD_MANIFEST}: version is #{own.inspect}, and #{MANIFEST} states " \
+                  "#{version}; the shard shares the framework's version (ADR 0030)"
+    end
+    unless needed == version
+      problems << "#{SHARD_MANIFEST}: depends on caramel #{needed.inspect}, and #{MANIFEST} " \
+                  "states #{version}; the shard depends on exactly that version (ADR 0030)"
+    end
+    problems
   end
 
   private def absolute(path : String) : String
@@ -99,10 +192,16 @@ module Caramel::Checks::Prose
     first = lines.index(&.starts_with?("## ")) || lines.size
     header = lines[0...first]
     dated = header.any?(&.matches?(ADR_DATE))
-    stated = header.any?(&.starts_with?(ADR_STATUS))
+    status = header.index(&.starts_with?("Status:"))
     problems = [] of String
     problems << "#{path}: no `Date: YYYY-MM-DD` line before the first section" unless dated
-    problems << "#{path}: no `Status: ` line before the first section" unless stated
+    if status.nil?
+      problems << "#{path}: no `#{ADR_STATUS}` line before the first section; add it"
+    elsif header[status] != ADR_STATUS
+      problems << "#{path}:#{status + 1}: the status line must be exactly " \
+                  "`#{ADR_STATUS}`; edit the record in place, since none amends or " \
+                  "supersedes another (ADR 0014)"
+    end
     problems
   end
 

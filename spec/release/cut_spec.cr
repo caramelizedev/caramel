@@ -14,9 +14,15 @@ private def commit(repository : String, message : String) : Nil
   git(repository, "commit", "--quiet", "--message", message)
 end
 
+# Where a spec's releases assemble their shards: beside the repository, removed with it.
+private def published(repository : String) : String
+  "#{repository}-published"
+end
+
 private def release_repository(&)
   repository = File.tempname("caramel-release-spec-", dir: "/private/tmp")
   Dir.mkdir(repository, 0o700)
+  Dir.mkdir(published(repository), 0o700)
   git(repository, "init", "--quiet")
   git(repository, "config", "user.name", "Caramel specs")
   git(repository, "config", "user.email", "specs@caramel.invalid")
@@ -29,9 +35,19 @@ private def release_repository(&)
         version: 0.31.0
 
     YAML
+  File.write(File.join(repository, "published.yml"), <<-YAML)
+    caramel:
+      repository: example/caramel
+      paths:
+        - shard.yml
+
+    YAML
   yield repository
 ensure
-  FileUtils.rm_rf(repository) if repository
+  if repository
+    FileUtils.rm_rf(repository)
+    FileUtils.rm_rf(published(repository))
+  end
 end
 
 describe Caramel::Cut do
@@ -112,7 +128,8 @@ describe Caramel::Cut do
       end
       File.write(source, migrations.call("aa"))
       commit(repository, "feat: jobs")
-      Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: output)
+      shards = published(repository)
+      Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: output, published: shards)
       File.write(source, migrations.call("zz"))
       commit(repository, "fix: jobs")
       edited = "migration 1 create_jobs shipped in v0.1.0 and was edited"
@@ -172,7 +189,8 @@ describe Caramel::Cut do
       passing = ["/usr/bin/true"]
       commit(repository, "feat: first light")
       commit(repository, "fix!: an early rename")
-      Caramel::Cut.run(repository, check: passing, output: output, today: day)
+      shards = published(repository)
+      Caramel::Cut.run(repository, check: passing, output: output, today: day, published: shards)
       git(repository, "tag", "--list").should eq("v0.1.0\n")
       message = git(repository, "show", "--no-patch", "--format=%B", "v0.1.0")
       message.should contain("Caramel 0.1.0\n\n## 0.1.0 - 2026-09-28")
@@ -200,7 +218,7 @@ describe Caramel::Cut do
       output.to_s.should contain("Caramel 0.1.1 (after v0.1.0)")
       git(repository, "tag", "--list").should eq("v0.1.0\n")
       commit(repository, "feat(frappe)!: rename the dispatch")
-      Caramel::Cut.run(repository, check: passing, output: output, today: day)
+      Caramel::Cut.run(repository, check: passing, output: output, today: day, published: shards)
       manifest = File.read(File.join(repository, "shard.yml"))
       manifest.should start_with("name: caramel\nversion: 0.2.0\n")
       text = File.read(changelog)
@@ -258,6 +276,128 @@ describe Caramel::Cut do
       end
       File.read(File.join(repository, "shard.yml")).should contain("version: 0.1.0\n")
       git(repository, "tag", "--list").should eq("v0.1.0\n")
+    end
+  end
+
+  it "gives the sweettalk shard the release's version, as its own and as the one it " \
+     "asks of caramel, and restores it when the checks fail" do
+    release_repository do |repository|
+      shard = File.join(repository, "sweettalk/shard.yml")
+      Dir.mkdir_p(File.dirname(shard))
+      File.write(shard, <<-YAML)
+        name: sweettalk
+        version: 0.1.0
+        dependencies:
+          other:
+            version: 9.9.9
+          caramel:
+            github: example/caramel
+            version: 0.1.0
+
+        YAML
+      commit(repository, "feat: first light")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "feat: second light")
+      expect_raises(Caramel::Cut::Refused, "the check suite failed") do
+        Caramel::Cut.run(repository, check: ["/usr/bin/false"], output: IO::Memory.new)
+      end
+      git(repository, "status", "--porcelain").should be_empty
+      Caramel::Cut.run(repository,
+        check: ["/usr/bin/true"], output: IO::Memory.new, published: published(repository))
+      File.read(shard).should eq(<<-YAML)
+        name: sweettalk
+        version: 0.2.0
+        dependencies:
+          other:
+            version: 9.9.9
+          caramel:
+            github: example/caramel
+            version: 0.2.0
+
+        YAML
+      git(repository, "status", "--porcelain").should be_empty
+      git(repository, "show", "--stat", "--format=", "HEAD").should contain("sweettalk/shard.yml")
+    end
+  end
+
+  it "commits the shards its tag publishes in local repositories, prints each commit " \
+     "with the command that pushes it, and pushes nothing" do
+    release_repository do |repository|
+      Dir.mkdir(File.join(repository, "sweettalk"))
+      File.write(File.join(repository, "sweettalk/shard.yml"), <<-YAML)
+        name: sweettalk
+        version: 0.1.0
+        dependencies:
+          caramel:
+            github: example/caramel
+            version: 0.1.0
+
+        YAML
+      File.write(File.join(repository, "published.yml"), <<-YAML)
+        caramel:
+          repository: example/caramel
+          paths:
+            - shard.yml
+        sweettalk:
+          repository: example/sweettalk
+          root: sweettalk
+
+        YAML
+      commit(repository, "feat: first light")
+      git(repository, "tag", "v0.1.0")
+      commit(repository, "feat: second light")
+      output = IO::Memory.new
+      shards = published(repository)
+      Caramel::Cut.run(repository, check: ["/usr/bin/true"], output: output, published: shards)
+      Dir.children(shards).size.should eq(1)
+      directory = File.join(shards, Dir.children(shards).first)
+      commits = Caramel::Frappe::Published.assembled(repository, "v0.2.0") do |assembled|
+        assembled.transform_values(&.commit)
+      end
+      output.to_s.should eq(<<-TEXT)
+        Tagged v0.2.0. Its shards are committed under #{directory}.
+        Push each first, since applications install the release from them:
+          caramel #{commits["caramel"]}
+            git -C #{directory}/caramel push https://github.com/example/caramel.git +main v0.2.0
+          sweettalk #{commits["sweettalk"]}
+            git -C #{directory}/sweettalk push \
+              https://github.com/example/sweettalk.git +main v0.2.0
+        Then publish the release:
+          git push origin HEAD v0.2.0
+          gh release create v0.2.0 --verify-tag \
+            --title "Caramel 0.2.0" --notes-from-tag
+
+        TEXT
+      commits.each do |name, id|
+        shard = File.join(directory, name)
+        git(shard, "rev-parse", "v0.2.0", "main").should eq("#{id}\n#{id}\n")
+        File.read(File.join(shard, "shard.yml")).should contain("version: 0.2.0\n")
+        git(shard, "remote").should eq("")
+      end
+      git(repository, "remote").should eq("")
+      git(repository, "status", "--porcelain").should be_empty
+    end
+  end
+
+  it "says that it tagged when the tag's shards cannot be assembled" do
+    release_repository do |repository|
+      File.write(File.join(repository, "published.yml"), <<-YAML)
+        caramel:
+          repository: example/caramel
+          paths:
+            - shard.yml
+            - LICENSE
+
+        YAML
+      commit(repository, "feat: first light")
+      unassembled = "tagged v0.1.0, which is not pushed, but could not assemble the shards " \
+                    "it publishes: published.yml: caramel selects LICENSE, which commit "
+      expect_raises(Caramel::Cut::Refused, unassembled) do
+        Caramel::Cut.run(repository,
+          check: ["/usr/bin/true"], output: IO::Memory.new, published: published(repository))
+      end
+      git(repository, "tag", "--list").should eq("v0.1.0\n")
+      Dir.children(published(repository)).should be_empty
     end
   end
 end

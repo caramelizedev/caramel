@@ -1,5 +1,6 @@
 require "spec"
 require "file_utils"
+require "./support/release_checkout"
 require "../../src/frappe/new_project"
 require "../../src/frappe/dev_files"
 
@@ -110,73 +111,65 @@ describe Caramel::Frappe::NewProject do
     end
   end
 
-  it "depends on the GitHub release only from a checkout of its tag without tracked changes" do
-    repository = File.tempname("caramel-new-release-", dir: "/private/tmp")
-    Dir.mkdir(repository)
-    identity = ["-c", "user.name=Caramel specs", "-c", "user.email=specs@caramel.invalid"]
-    git = ->(arguments : Array(String)) do
-      command = ["/usr/bin/git", "-C", repository] + identity + arguments
-      result = Caramel::Latte::ProcessRunner.run(command, timeout: 30.seconds)
-      result.success?.should be_true
-    end
-    begin
+  it "depends on the shard its release publishes, at the published commit, only from a " \
+     "checkout of the release tag without tracked changes" do
+    ReleaseCheckout.create(Caramel::VERSION) do |repository|
       generator = Caramel::Frappe::NewProject.new(repository)
-      manifest = File.join(repository, "shard.yml")
-      release = <<-YAML + "\n"
-        name: caramel
-        version: #{Caramel::VERSION}
-        YAML
-      File.write(manifest, release)
-      generator.dependency.shard.should eq("path: #{File.realpath(repository).to_json}")
-      [
-        ["init", "--quiet"],
-        ["add", "--all"],
-        ["commit", "--quiet", "--message", "release"],
-      ].each { |arguments| git.call(arguments) }
-      generator.dependency.shard.should start_with("path: ")
-      git.call(["tag", "v#{Caramel::VERSION}"])
-      head = ["/usr/bin/git", "-C", repository, "rev-parse", "HEAD"]
-      commit = Caramel::Latte::ProcessRunner.run(head, timeout: 30.seconds).stdout.strip
-      commit.should match(/\A[0-9a-f]{40}\z/)
-      github = Caramel::Frappe::NewProject::Dependency.new(
-        shard: %(github: caramelizedev/caramel\n    version: "~> #{Caramel::VERSION}"),
-        lock: %(git: "https://github.com/caramelizedev/caramel.git"),
+      checkout = "path: #{repository.to_json}"
+      generator.dependency.shard.should eq(checkout)
+      ReleaseCheckout.git(repository, "tag", "v#{Caramel::VERSION}")
+      commit = Caramel::Frappe::Published.assembled(repository, "HEAD", &.["caramel"].commit)
+      commit.should_not eq(ReleaseCheckout.git(repository, "rev-parse", "HEAD").strip)
+      published = Caramel::Frappe::NewProject::Dependency.new(
+        shard: %(github: example/caramel-published\n    version: "~> #{Caramel::VERSION}"),
+        lock: %(git: "https://github.com/example/caramel-published.git"),
         version: "#{Caramel::VERSION}+git.commit.#{commit}",
       )
-      generator.dependency.should eq(github)
+      generator.dependency.should eq(published)
       File.write(File.join(repository, "demo.txt"), "an application generated inside the clone")
-      generator.dependency.shard.should start_with("github: ")
-      File.write(manifest, release + "# edited\n")
-      generator.dependency.shard.should start_with("path: ")
-    ensure
-      FileUtils.rm_rf(repository)
+      generator.dependency.should eq(published)
+      manifest = File.join(repository, "shard.yml")
+      File.write(manifest, File.read(manifest) + "# edited\n")
+      generator.dependency.shard.should eq(checkout)
+      # A source archive carries no tag to be at.
+      ReleaseCheckout.git(repository, "checkout", "--", "shard.yml")
+      FileUtils.rm_rf(File.join(repository, ".git"))
+      generator.dependency.shard.should eq(checkout)
     end
   end
 
-  it "depends on CARAMEL_REPOSITORY by git at this release when it is set" do
-    parent = File.tempname("caramel-new-git-")
-    Dir.mkdir(parent)
-    ENV["CARAMEL_REPOSITORY"] = "/private/tmp/caramel-release.git"
-    begin
-      generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
-      generator.create("shelf", File.join(parent, "shelf"))
-      required = <<-YAML + "\n"
-          caramel:
-            git: "/private/tmp/caramel-release.git"
-            version: "~> #{Caramel::VERSION}"
-        YAML
-      File.read(File.join(parent, "shelf/shard.yml")).should contain(required)
-      locked = <<-YAML + "\n"
-        version: 2.0
-        shards:
-          caramel:
-            git: "/private/tmp/caramel-release.git"
-            version: #{Caramel::VERSION}
-        YAML
-      File.read(File.join(parent, "shelf/shard.lock")).should start_with(locked)
-    ensure
-      ENV.delete("CARAMEL_REPOSITORY")
-      FileUtils.rm_rf(parent)
+  it "depends on CARAMEL_REPOSITORY by git, locked to the commit this release's tag " \
+     "names there" do
+    ReleaseCheckout.create(Caramel::VERSION) do |repository|
+      parent = File.tempname("caramel-new-git-")
+      Dir.mkdir(parent)
+      ENV["CARAMEL_REPOSITORY"] = repository
+      begin
+        generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
+        untagged = "CARAMEL_REPOSITORY #{repository} has no tag v#{Caramel::VERSION}"
+        expect_raises(Caramel::Frappe::Error, untagged) { generator.dependency }
+        tag = "v#{Caramel::VERSION}"
+        ReleaseCheckout.git(repository, "tag", "--annotate", "--message", "release", tag)
+        commit = ReleaseCheckout.git(repository, "rev-parse", "HEAD").strip
+        generator.create("shelf", File.join(parent, "shelf"))
+        required = <<-YAML + "\n"
+            caramel:
+              git: #{repository.to_json}
+              version: "~> #{Caramel::VERSION}"
+          YAML
+        File.read(File.join(parent, "shelf/shard.yml")).should contain(required)
+        locked = <<-YAML + "\n"
+          version: 2.0
+          shards:
+            caramel:
+              git: #{repository.to_json}
+              version: #{Caramel::VERSION}+git.commit.#{commit}
+          YAML
+        File.read(File.join(parent, "shelf/shard.lock")).should start_with(locked)
+      ensure
+        ENV.delete("CARAMEL_REPOSITORY")
+        FileUtils.rm_rf(parent)
+      end
     end
   end
 
