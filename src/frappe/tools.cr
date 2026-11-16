@@ -34,12 +34,37 @@ module Caramel::Frappe
     # Installs the locked dependencies, then runs their postinstall scripts
     # through the toolchain's cache of what each wrote (Postinstall).
     def dependencies(project : Project) : Nil
+      refuse_unlocked(project.root)
       shards = File.join(@framework_root, "scripts/shards")
       run(shards, ["install", "--frozen", "--skip-postinstall"], project.root)
       postinstall = Postinstall.new(@framework_root, @toolchain.root, @output) do |script, dir, env|
         run("/bin/sh", ["-c", script], dir, env)
       end
       postinstall.run(project.root)
+    end
+
+    # The frozen install stops at a dependency that shard.yml names and shard.lock
+    # lacks, and Shards then names its own `shards update`. Refuses first, with the
+    # command that locks and installs it.
+    private def refuse_unlocked(root : String) : Nil
+      return unless File.file?(File.join(root, "shard.lock"))
+      unlocked = named(root) - Project.locked(root).keys
+      return if unlocked.empty?
+      raise Error.new("shard.lock does not lock #{unlocked.join(", ")}, which shard.yml " \
+                      "names; run frappe shards install to lock and install what was " \
+                      "added, then frappe setup")
+    end
+
+    # Each dependency the shard.yml of the project at *root* names; none where it
+    # cannot be read, which Shards then reports.
+    private def named(root : String) : Array(String)
+      manifest = YAML.parse(File.read(File.join(root, "shard.yml")))
+      %w[dependencies development_dependencies].flat_map do |section|
+        entries = manifest.as_h? ? manifest[section]?.try(&.as_h?) : nil
+        entries ? entries.keys.compact_map(&.as_s?) : [] of String
+      end
+    rescue YAML::ParseException | File::Error
+      [] of String
     end
 
     # Runs the pinned Shards in *project* with *arguments* as given and returns its exit

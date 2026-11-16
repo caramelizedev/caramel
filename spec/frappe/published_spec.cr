@@ -288,14 +288,21 @@ describe Caramel::Frappe::Published do
     end
   end
 
-  it "publishes of this repository only what an application compiles against" do
+  it "publishes of this repository only what an application compiles against, and the " \
+     "licences its notices cite" do
     framework = File.expand_path("../..", __DIR__)
     destination do |directory|
       shards = Published.assemble(framework, directory)
       shards.keys.first.should eq("caramel")
       caramel = shards["caramel"].directory
       children = ->(path : String) { Dir.children(File.join(caramel, path)).sort! }
-      children.call("").should eq(%w[.git LICENSE README.md THIRD_PARTY_NOTICES.md shard.yml src])
+      top = %w[.git LICENSE README.md THIRD_PARTY_NOTICES.md shard.yml src vendor]
+      children.call("").should eq(top)
+      children.call("vendor").should eq(%w[licenses])
+      notices = File.read(File.join(caramel, "THIRD_PARTY_NOTICES.md"))
+      cited = notices.scan(%r{`(vendor/licenses/[^`]+)`}).map(&.[1])
+      cited.should_not be_empty
+      cited.each { |licence| File.file?(File.join(caramel, licence)).should be_true }
       framework_sources = %w[caramel caramel.cr frappe latte sugar_orm sugar_orm.cr]
       children.call("src").should eq(framework_sources)
       children.call("src/frappe").should eq(%w[error.cr mrdp.cr terminal.cr toolkit.cr])

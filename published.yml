@@ -1,7 +1,14 @@
-# What each release publishes for applications to install. Shards copies a repository's
-# whole tagged tree into an application's lib/, so a release assembles each shard below
-# from its tagged commit into a repository of its own (src/frappe/published.cr), and
-# applications depend on those. scripts/assemble-shards writes them into a directory.
+# What each release publishes for applications to install: the one declaration of it.
+# Shards copies a repository's whole tagged tree into an application's lib/, so a
+# release assembles each shard below from its tagged commit into a repository of its
+# own (src/frappe/published.cr), and applications depend on those.
+# scripts/assemble-shards writes them into a directory, and the checks install every
+# application they generate from such an assembly, so a file a tree lacks fails them.
+#
+# Add a path to caramel when what an application compiles, or what a shard's tool
+# program requires, comes to read a file outside the paths below, or when a file the
+# tree holds cites one. Whatever only Frappé, Latte, the checks or the website use
+# stays out: every byte here is copied into every application.
 #
 # repository: the GitHub repository the shard is published to. A shard that depends on
 #   another one here names that repository in its shard.yml; the assembly refuses the
@@ -15,6 +22,8 @@ caramel:
   paths:
     - LICENSE
     - THIRD_PARTY_NOTICES.md
+    # The licences THIRD_PARTY_NOTICES.md cites.
+    - vendor/licenses/
     - shard.yml
     # The framework and SugarORM, with the files src/caramel/ reads as it compiles.
     - src/caramel.cr

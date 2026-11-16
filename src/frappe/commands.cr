@@ -441,8 +441,9 @@ module Caramel::Frappe
         examples: ["installations remove 0.21.0"],
         project: false),
       Command.new("doctor",
-        "Check the toolchain, this Caramel installation, dependencies, local configuration, " \
-        "Latte services, trusted HTTPS and the port relay.",
+        "Check the toolchain, this Caramel installation, where the caramel shard comes " \
+        "from, dependencies, local configuration, Latte services, trusted HTTPS and the " \
+        "port relay.",
         brief: "Check your toolchain, Latte and local setup"),
       Command.new("open",
         "Open the application's HTTPS origin in the browser; while frappe dev runs, a " \
