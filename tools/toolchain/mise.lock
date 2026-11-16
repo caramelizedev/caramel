@@ -179,12 +179,23 @@ conda_deps = [
     "ncurses-6.6-he64c551_1",
 ]
 
+[[tools."github:caramelizedev/caramel-crystal"]]
+version = "1.22.3-caramel.1"
+backend = "github:caramelizedev/caramel-crystal"
+specifiers = ["1.22.3-caramel.1"]
+
+[tools."github:caramelizedev/caramel-crystal"."platforms.macos-arm64"]
+checksum = "sha256:63984be4e90ebd47b655fd518539173979f84301bd6c212283d496b4a78f062d"
+url = "https://github.com/caramelizedev/caramel-crystal/releases/download/1.22.3-caramel.1/crystal-1.22.3-caramel.1-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/caramelizedev/caramel-crystal/releases/assets/752436294"
+
 [[tools."github:crystal-lang/crystal"]]
-version = "1.22.1"
+version = "1.22.3"
 backend = "github:crystal-lang/crystal"
-specifiers = ["1.22.1"]
+specifiers = ["1.22.3"]
 
 [tools."github:crystal-lang/crystal"."platforms.macos-arm64"]
-checksum = "sha256:8f2dc1ba8219bb2606a2390b11f903f70be346cfeae869557b7c927f37ed9023"
-url = "https://github.com/crystal-lang/crystal/releases/download/1.22.1/crystal-1.22.1-1-darwin-universal.tar.gz"
-url_api = "https://api.github.com/repos/crystal-lang/crystal/releases/assets/667205745"
+checksum = "sha256:a37341e3caca06790bd89447e0c264d9f0d9824e0eae050e35bdebb027796433"
+url = "https://github.com/crystal-lang/crystal/releases/download/1.22.3/crystal-1.22.3-1-darwin-universal.tar.gz"
+url_api = "https://api.github.com/repos/crystal-lang/crystal/releases/assets/745318667"
+provenance = "github-attestations"

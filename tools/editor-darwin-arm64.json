@@ -13,7 +13,7 @@
     "git": "https://github.com/elbywan/crystalline.git",
     "commit": "a5f6f1bb9d55decf507138da7b2c47628ee15328",
     "reported_version": "0.20.0+a5f6f1b",
-    "crystal": "1.22.1",
+    "crystal": "1.22.3",
     "shards": {
       "lsp": "d75dc7ed6d500d1140000c678bd10e04fa751106"
     },

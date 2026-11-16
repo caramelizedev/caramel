@@ -3,7 +3,10 @@ lockfile = true
 lockfile_platforms = ["macos-arm64"]
 
 [tools]
-"github:crystal-lang/crystal" = "1.22.1"
+# The compiler is caramel-crystal's build of the Crystal release beside it
+# (ADR 0001). A Crystal pin moves there first; then both lines move together.
+"github:crystal-lang/crystal" = "1.22.3"
+"github:caramelizedev/caramel-crystal" = "1.22.3-caramel.1"
 "aqua:caddyserver/caddy" = "2.11.4"
 "conda:postgresql" = { version = "18.6", channel = "conda-forge" }
 "conda:openssl" = { version = "3.6.5", channel = "conda-forge" }

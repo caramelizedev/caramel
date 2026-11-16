@@ -13,8 +13,8 @@ module Caramel::Frappe
   # writes a tarball of a static linux/amd64 binary and `public/`, with a
   # checksum and a CycloneDX SBOM beside it (ADR 0032).
   class ReleaseBuild
-    IMAGE = "crystallang/crystal:1.22.1-alpine@sha256:" \
-            "9beda8a9d4a3659c29d185cc18f3fb9b382421bb6a4a59b8f266a6fb4ccc9f16"
+    IMAGE = "crystallang/crystal:1.22.3-alpine@sha256:" \
+            "450f111328d83be86117c96a795e3ebb1694f6249c45041f94e1a571ccf935ec"
     # Replaces IMAGE; only a digest-pinned reference keeps the build reproducible.
     IMAGE_VARIABLE = "CARAMEL_BUILD_IMAGE"
     IMAGE_PINNED   = /\A[\w.\/-]+(?::[\w.-]+)?@sha256:[0-9a-f]{64}\z/
@@ -48,7 +48,7 @@ module Caramel::Frappe
     PUBLISHED = "Publishing app/assets changed tracked files; commit them, " \
                 "then run frappe build:"
     UNPINNED = "#{IMAGE_VARIABLE} must name an image by digest, such as " \
-               "crystallang/crystal:1.22.1-alpine@sha256:<64 hex digits>; got "
+               "crystallang/crystal:1.22.3-alpine@sha256:<64 hex digits>; got "
 
     def initialize(@project : Project, @log : IO, @now : Time = Time.utc)
     end
