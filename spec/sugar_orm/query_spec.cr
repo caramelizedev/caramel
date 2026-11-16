@@ -27,6 +27,26 @@ describe SugarORM::Query do
     named.to_sql.should end_with(%(WHERE "owner_id" IS NULL AND "name" = $1))
   end
 
+  it "renders rest as the complement of a query's conditions" do
+    teams = SugarUnit::Team.query
+    teams.where(name: "Acme").rest.to_sql.should end_with(%(WHERE ("name" = $1) IS NOT TRUE))
+    teams.where(seats: ..3).rest.to_sql.should end_with(%(WHERE ("seats" <= $1) IS NOT TRUE))
+    teams.where(billing_email: nil).rest.to_sql
+      .should end_with(%(WHERE ("billing_email" IS NULL) IS NOT TRUE))
+    both = teams.where(archived: true, seats: 0).rest
+    both.to_sql.should end_with(%(WHERE ("seats" = $1 AND "archived" = $2) IS NOT TRUE))
+    both.binds.should eq([0, true] of SugarORM::Value)
+    teams.where(name: "Acme").rest.where(seats: 1..).to_sql
+      .should end_with(%(WHERE ("name" = $1) IS NOT TRUE AND "seats" >= $2))
+    teams.rest.to_sql.should end_with("WHERE FALSE")
+    expect_raises(ArgumentError, "rest takes a query without joins") do
+      SugarUnit::Member.query.joins(:team).rest
+    end
+    expect_raises(ArgumentError, "rest takes a query without limit or offset") do
+      teams.limit(5).rest
+    end
+  end
+
   it "takes a value narrowed from a nilable one" do
     email = ["billing@acme.test", nil].first
     query = SugarUnit::Team.query

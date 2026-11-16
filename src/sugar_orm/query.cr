@@ -203,6 +203,27 @@ module SugarORM
       self.class.new(clauses, @preloads)
     end
 
+    # The rows this query leaves out: its conditions, as one, are replaced by their
+    # complement, so the rows it matches and the rows its `rest` matches are every row.
+    # `IS NOT TRUE` keeps the rows where a condition is NULL, which `NOT` would leave out of
+    # both halves. Orders, preloads and a lock stay. A tenant's condition is added when the
+    # query runs, so it stays outside the complement.
+    def rest : self
+      raise ArgumentError.new("rest takes a query without joins") unless @clauses.joins.empty?
+      unless @clauses.limit.nil? && @clauses.offset.nil?
+        raise ArgumentError.new("rest takes a query without limit or offset")
+      end
+      conditions = @clauses.conditions
+      complement = if conditions.empty?
+                     ::SugarORM::Condition.new("FALSE", [] of ::SugarORM::Value)
+                   else
+                     ::SugarORM::Condition.new(
+                       "(#{conditions.map(&.sql).join(" AND ")}) IS NOT TRUE",
+                       conditions.flat_map(&.values))
+                   end
+      self.class.new(@clauses.copy_with(conditions: [complement]), @preloads)
+    end
+
     # The SELECT this query runs (before preloads), for inspection.
     def to_sql : String
       String.build do |io|
