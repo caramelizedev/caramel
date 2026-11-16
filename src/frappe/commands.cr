@@ -276,6 +276,14 @@ module Caramel::Frappe
         "--no-migrate leaves the database unchanged.",
         brief: "Install dependencies and prepare the database",
         examples: ["setup", "setup --no-migrate"]),
+      Command.new("shards [ARGS...]",
+        "Run this release's pinned Shards in the project with ARGS as given, options " \
+        "included, and exit with its status. frappe shards install locks and installs a " \
+        "dependency added to shard.yml; frappe setup installs only what shard.lock holds. " \
+        "An install fails when a shard that shard.lock pins to a commit lands at another.",
+        brief: "Run the pinned Shards, to add or update a dependency",
+        examples: ["shards install", "shards update lexbor", "shards outdated"],
+        passthrough: true),
       Command.new("dev [--no-open] [--branch NAME]",
         "Build, serve and reload the app at its HTTPS origin; " \
         "--branch runs it against database branch NAME.",
@@ -466,7 +474,7 @@ module Caramel::Frappe
     }
 
     GROUPS = [
-      Group.new("GET STARTED", %w[new setup dev open doctor]),
+      Group.new("GET STARTED", %w[new setup shards dev open doctor]),
       Group.new("WRITE YOUR APP", %w[make routes expand translations]),
       Group.new("CHECK AND TEST", %w[check lint format corretto]),
       Group.new("DATABASE", %w[migrate seed db]),

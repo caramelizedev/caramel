@@ -42,6 +42,24 @@ module Caramel::Frappe
       postinstall.run(project.root)
     end
 
+    # Runs the pinned Shards in *project* with *arguments* as given and returns its exit
+    # status. It runs through scripts/shards, the one place that selects the pinned Shards
+    # and, after an install, refuses a shard that shard.lock pins to a commit and that was
+    # installed at another. It keeps the caller's environment and standard input, as the
+    # launcher run by hand does: a private dependency needs the caller's git credentials.
+    # Shards runs the postinstall script of each shard it installs; the toolchain's cache
+    # of what they wrote (Postinstall) is `dependencies`' alone.
+    def shards(project : Project, arguments : Array(String)) : Int32
+      launcher = File.join(@framework_root, "scripts/shards")
+      status = Process.run(launcher, arguments,
+        chdir: project.root,
+        env: {"CARAMEL_TOOLCHAIN_ROOT" => @toolchain.root},
+        output: @output,
+        error: @error,
+        input: Process::Redirect::Inherit)
+      status.exit_code? || 1
+    end
+
     def check_compiler : Nil
       compiler = File.join(@toolchain.root, COMPILER)
       result = Latte::ProcessRunner.run([compiler, "--version"],

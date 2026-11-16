@@ -120,6 +120,9 @@ module Caramel::Frappe
           @output.puts("#{project.name} is configured.")
           Toolkit.next_steps(@output, [{"frappe dev", serve}])
         end
+      when "shards"
+        tools = Tools.new(@framework_root, @output, @error)
+        return tools.shards(Project.load, invocation.list("ARGS"))
       when "dev"
         dev(invocation)
       when "check"
