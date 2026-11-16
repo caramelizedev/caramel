@@ -1,8 +1,9 @@
 module Caramel::Checks
-  # The sweettalk shard on the generated application, which depends by path on this
-  # checkout's sweettalk/ directory beside the framework: the commands its frappe.yml
-  # declares are absent until then, its tool commands run before the application requires
-  # it, and its application commands print what the application's domain declares.
+  # The sweettalk shard on the generated application, which installs the published
+  # shard beside the published framework (LatteFixture#add_sweettalk): the commands its
+  # frappe.yml declares are absent until then, its tool commands run before the
+  # application requires it, and its application commands print what the application's
+  # domain declares.
   class FrappeProject < ProjectFixture
     # What only Frappé's own code for SweetTalk's commands would hold.
     SWEETTALK_MARKERS = ["SweetTalk", "sweettalk:"]
@@ -78,7 +79,7 @@ module Caramel::Checks
       end
       outside = command([@frappe, "help"], chdir: @projects, echo: false).stdout
       assert!(!outside.downcase.includes?("sweettalk"), outside)
-      puts "PASS: with the shard as a path dependency beside the framework, frappe help " \
+      puts "PASS: with the published shard installed beside the framework, frappe help " \
            "and frappe agent-manifest list the five frappe sweettalk: commands in the " \
            "application, and none outside it"
     end

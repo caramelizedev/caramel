@@ -138,30 +138,38 @@ describe Caramel::Frappe::NewProject do
     end
   end
 
-  it "depends on CARAMEL_REPOSITORY by git at this release when it is set" do
-    parent = File.tempname("caramel-new-git-")
-    Dir.mkdir(parent)
-    ENV["CARAMEL_REPOSITORY"] = "/private/tmp/caramel-release.git"
-    begin
-      generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
-      generator.create("shelf", File.join(parent, "shelf"))
-      required = <<-YAML + "\n"
-          caramel:
-            git: "/private/tmp/caramel-release.git"
-            version: "~> #{Caramel::VERSION}"
-        YAML
-      File.read(File.join(parent, "shelf/shard.yml")).should contain(required)
-      locked = <<-YAML + "\n"
-        version: 2.0
-        shards:
-          caramel:
-            git: "/private/tmp/caramel-release.git"
-            version: #{Caramel::VERSION}
-        YAML
-      File.read(File.join(parent, "shelf/shard.lock")).should start_with(locked)
-    ensure
-      ENV.delete("CARAMEL_REPOSITORY")
-      FileUtils.rm_rf(parent)
+  it "depends on CARAMEL_REPOSITORY by git, locked to the commit this release's tag " \
+     "names there" do
+    ReleaseCheckout.create(Caramel::VERSION) do |repository|
+      parent = File.tempname("caramel-new-git-")
+      Dir.mkdir(parent)
+      ENV["CARAMEL_REPOSITORY"] = repository
+      begin
+        generator = Caramel::Frappe::NewProject.new(File.expand_path("../..", __DIR__))
+        untagged = "CARAMEL_REPOSITORY #{repository} has no tag v#{Caramel::VERSION}"
+        expect_raises(Caramel::Frappe::Error, untagged) { generator.dependency }
+        tag = "v#{Caramel::VERSION}"
+        ReleaseCheckout.git(repository, "tag", "--annotate", "--message", "release", tag)
+        commit = ReleaseCheckout.git(repository, "rev-parse", "HEAD").strip
+        generator.create("shelf", File.join(parent, "shelf"))
+        required = <<-YAML + "\n"
+            caramel:
+              git: #{repository.to_json}
+              version: "~> #{Caramel::VERSION}"
+          YAML
+        File.read(File.join(parent, "shelf/shard.yml")).should contain(required)
+        locked = <<-YAML + "\n"
+          version: 2.0
+          shards:
+            caramel:
+              git: #{repository.to_json}
+              version: #{Caramel::VERSION}+git.commit.#{commit}
+          YAML
+        File.read(File.join(parent, "shelf/shard.lock")).should start_with(locked)
+      ensure
+        ENV.delete("CARAMEL_REPOSITORY")
+        FileUtils.rm_rf(parent)
+      end
     end
   end
 

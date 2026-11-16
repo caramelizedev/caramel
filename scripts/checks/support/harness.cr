@@ -6,6 +6,7 @@ require "digest/sha256"
 require "../../../src/latte/process"
 require "../../../src/latte/paths"
 require "../../../src/latte/toolchain"
+require "../../../src/frappe/published"
 
 module Caramel::Checks
   REPO = File.expand_path("../../..", __DIR__)
@@ -24,6 +25,22 @@ module Caramel::Checks
   # The LatteFixture environment daemon (spec/fixtures/frappe_environment.cr)
   # that the build step builds.
   PREBUILT_ENVIRONMENT = File.join(REPO, "bin/checks/frappe-environment")
+
+  # scripts/check all sets this to the directory that holds its one assembly of the
+  # published shards, which every lane's checks share; a check run on its own
+  # assembles them itself.
+  PUBLISHED = "CARAMEL_CHECK_ALL_PUBLISHED"
+
+  # Where an assembly records its shards, for the checks that share it.
+  ASSEMBLED = "shards.json"
+
+  # An assembled shard as ASSEMBLED records it.
+  alias Assembled = NamedTuple(
+    name: String,
+    repository: String,
+    version: String,
+    commit: String,
+    directory: String)
 
   # A command's stdout and stderr are each captured up to 16 MiB.
   OUTPUT_LIMIT = 16 * 1024 * 1024
@@ -142,7 +159,8 @@ module Caramel::Checks
 
   # A git repository of this working tree, committed and tagged
   # v<version>, standing in for github.com/caramelizedev/caramel. Its
-  # shard.yml declares *version*.
+  # manifests state *version* as scripts/release stamps it: the framework's,
+  # and the sweettalk shard's with the framework it asks for.
   def self.tagged_repository(destination : String, version : String) : String
     listing = %w[ls-files -z --cached --others --exclude-standard]
     listed = run(["/usr/bin/git", "-C", REPO] + listing).stdout
@@ -152,11 +170,14 @@ module Caramel::Checks
       Dir.mkdir_p(File.dirname(File.join(destination, relative)))
       File.copy(source, File.join(destination, relative))
     end
-    manifest = File.join(destination, "shard.yml")
-    lines = File.read_lines(manifest).map do |line|
-      line.starts_with?("version:") ? "version: #{version}" : line
+    stated = {"shard.yml" => /\Aversion:/, "sweettalk/shard.yml" => /\A *version:/}
+    stated.each do |name, line_of_version|
+      manifest = File.join(destination, name)
+      lines = File.read_lines(manifest).map do |line|
+        line.matches?(line_of_version) ? line.sub(/version:.*/, "version: #{version}") : line
+      end
+      File.write(manifest, lines.join('\n') + '\n')
     end
-    File.write(manifest, lines.join('\n') + '\n')
     git = ["/usr/bin/git", "-C", destination,
            "-c", "user.name=Caramel checks",
            "-c", "user.email=checks@caramel.invalid"]
@@ -171,6 +192,82 @@ module Caramel::Checks
       fail(result.stdout + result.stderr) unless result.success?
     end
     destination
+  end
+
+  # Assembles the shards this working tree publishes (published.yml) into *directory*,
+  # each a git repository that holds what a release would publish, records them there
+  # for `published` and returns them by name.
+  def self.assemble(directory : String) : Hash(String, Frappe::Published::Shard)
+    shards = Frappe::Published.assemble(REPO, directory)
+    recorded = shards.values.map do |shard|
+      {name: shard.name, repository: shard.repository, version: shard.version,
+       commit: shard.commit, directory: shard.directory}
+    end
+    File.write(File.join(directory, ASSEMBLED), recorded.to_json)
+    shards
+  rescue ex : Frappe::Error
+    fail("The published shards do not assemble: #{ex.message}")
+  end
+
+  # The published shards by name: the ones scripts/check all assembled for this run,
+  # else an assembly of this check's own in *directory*.
+  def self.published(directory : String) : Hash(String, Frappe::Published::Shard)
+    shared = ENV[PUBLISHED]? || return assemble(directory)
+    recorded = Array(Assembled).from_json(File.read(File.join(shared, ASSEMBLED)))
+    recorded.to_h { |shard| {shard[:name], Frappe::Published::Shard.new(**shard)} }
+  end
+
+  # Where Shards fetches an assembled shard from: its repository on this machine.
+  def self.source(shard : Frappe::Published::Shard) : String
+    "file://#{shard.directory}"
+  end
+
+  # Every regular file under *directory* but git's own, by path, with the digest of
+  # its bytes.
+  def self.tree(directory : String) : Hash(String, String)
+    git = File.join(directory, ".git", "")
+    paths = Dir.glob(File.join(directory, "**/*"), match: :dot_files).select do |path|
+      !path.starts_with?(git) && File.info(path, follow_symlinks: false).file?
+    end
+    paths.sort!.to_h do |path|
+      {path.lchop("#{directory}/"), Digest::SHA256.hexdigest(File.read(path))}
+    end
+  end
+
+  # Raises unless the application at *project* holds *shard* as a release publishes it:
+  # lib/<name> is a copy of its tree, file for file, and shard.lock pins its commit.
+  def self.installed!(project : String, shard : Frappe::Published::Shard) : Nil
+    library = File.join(project, "lib", shard.name)
+    copied = File.info?(library, follow_symlinks: false).try(&.directory?)
+    unless copied && tree(library) == tree(shard.directory)
+      raise "#{library} is not the published tree of #{shard.name}"
+    end
+    lock = YAML.parse(File.read(File.join(project, "shard.lock")))
+    locked = lock["shards"][shard.name]["version"].as_s
+    return if locked == shard.pin
+    raise "#{project}/shard.lock locks #{shard.name} #{locked}, not #{shard.pin}"
+  end
+
+  # A stand-in for this checkout at *directory*, whose framework and sweettalk shard
+  # are the published ones: *shards*' caramel tree at its root and their sweettalk
+  # tree in sweettalk/, as the repository lays them out, beside this checkout's
+  # installed dependencies and its *files* at their own paths. A program among them
+  # that requires `../../src/caramel` compiles against what a release publishes, and
+  # reaches nothing else of the checkout.
+  def self.published_checkout(directory : String,
+                              shards : Hash(String, Frappe::Published::Shard),
+                              files : Array(String)) : String
+    targets = {"caramel" => directory, "sweettalk" => File.join(directory, "sweettalk")}
+    targets.each do |name, target|
+      clone = run(["/usr/bin/git", "clone", "--quiet", shards[name].directory, target])
+      fail(clone.stdout + clone.stderr) unless clone.success?
+    end
+    File.symlink(File.join(REPO, "lib"), File.join(directory, "lib"))
+    files.each do |file|
+      Dir.mkdir_p(File.dirname(File.join(directory, file)))
+      File.copy(File.join(REPO, file), File.join(directory, file))
+    end
+    directory
   end
 
   def self.runtime_root(state_root : String) : String

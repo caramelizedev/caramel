@@ -24,7 +24,7 @@ module Caramel::Checks
       failed = true
       begin
         start
-        command([@frappe, "new", "bookshelf"], chdir: @projects)
+        new_application("bookshelf")
         values = local_values(@project)
         assert!(File.info(File.join(@project, ".env")).permissions.value == 0o600)
         keys = %w[
@@ -134,6 +134,7 @@ module Caramel::Checks
         skipped = command([@frappe, "setup", "--no-migrate"], chdir: resumed)
         assert!(skipped.stdout.includes?("Skipped migrations (--no-migrate)") &&
                 !skipped.stdout.includes?("Applied"), skipped.stdout)
+        Checks.installed!(resumed, @published["caramel"])
         resumed_values = local_values(resumed)
         resumed_url_m = resumed_values["MIGRATION_DATABASE_URL"]
         tables = sql(resumed_url_m,
@@ -214,13 +215,14 @@ module Caramel::Checks
       end
     end
 
-    # ADR 0016: a generated application depends on a tagged Caramel release by
-    # git. A repository of this working tree, tagged as this release, stands in
-    # for github.com/caramelizedev/caramel.
+    # ADR 0016: a generated application depends on the caramel shard a release
+    # publishes, by git, and its lock pins the published commit. The repository this
+    # working tree assembles stands in for the one on GitHub, as it does for every
+    # application here (LatteFixture); `tagged` shows what `frappe new` writes of it.
     def git_source : Nil
-      url = "file://#{Checks.tagged_repository(File.join(@root, "caramel.git"), Caramel::VERSION)}"
-      repository = environment({"CARAMEL_REPOSITORY" => url})
-      command([@frappe, "new", "tagged"], chdir: @projects, environment: repository)
+      caramel = @published["caramel"]
+      url = Checks.source(caramel)
+      new_application("tagged")
       tagged = File.join(@projects, "tagged")
       dependency = <<-YAML
           caramel:
@@ -231,23 +233,63 @@ module Caramel::Checks
       locked = <<-YAML
           caramel:
             git: #{url.to_json}
-            version: #{Caramel::VERSION}\n
+            version: #{caramel.pin}\n
         YAML
       lock = File.read(File.join(tagged, "shard.lock"))
-      assert!(lock.includes?(locked))
+      assert!(lock.includes?(locked), lock)
       # The dependencies come from the framework's lock, each pinned to the
-      # commit its tag pointed at; CARAMEL_REPOSITORY itself is not pinned.
+      # commit its tag pointed at.
       pinned = /^  pg:\n    git: .+\n    version: 0\.31\.0\+git\.commit\.[0-9a-f]{40}$/m
       assert!(lock.matches?(pinned), lock)
-      library = File.join(tagged, "lib/caramel")
-      checkout = File.info(library, follow_symlinks: false).directory? &&
-                 File.file?(File.join(library, "src/caramel/command_line.cr"))
-      assert!(checkout, "lib/caramel is not the tagged release")
       production_dependencies(tagged)
       checked = command([@frappe, "check"], chdir: tagged, echo: false)
       assert!(checked.stdout.starts_with?("OK check "), checked.stdout)
-      puts "PASS: frappe new against a repository tagged v#{Caramel::VERSION} " \
-           "resolves the framework by git, migrates and type-checks"
+      puts "PASS: frappe new against the repository this tree publishes, tagged " \
+           "v#{Caramel::VERSION}, pins the published commit, installs the published " \
+           "tree and no more, migrates and type-checks"
+      released_form(tagged)
+    end
+
+    # The manifest and the lock of *generated* as a released application holds them:
+    # caramel and sweettalk from the repositories on GitHub a release publishes them
+    # to, each pinned to its published commit. Shards installs both trees from those
+    # names alone, the shard's own dependency on the framework among them, and leaves
+    # the lock as it is. Git fetches each name from its assembled repository.
+    private def released_form(generated : String) : Nil
+      caramel, sweettalk = @published["caramel"], @published["sweettalk"]
+      released = File.join(@projects, "released")
+      Dir.mkdir(released)
+      local = "git: #{Checks.source(caramel).to_json}"
+      manifest = File.read(File.join(generated, "shard.yml"))
+      named = manifest.sub(local, "github: #{caramel.repository}")
+      File.write(File.join(released, "shard.yml"), named)
+      lock = File.join(released, "shard.lock")
+      generated_lock = File.read(File.join(generated, "shard.lock"))
+      File.write(lock, generated_lock.sub(local, "git: #{caramel.url}"))
+      requirement = %(github: #{sweettalk.repository}\n    version: "~> #{sweettalk.version}")
+      depend(released, sweettalk.name, requirement, "git: #{sweettalk.url}", sweettalk.pin)
+      locked = File.read(lock)
+      assert!(!locked.includes?("file://"), locked)
+      rewrites = {"GIT_CONFIG_COUNT" => @published.size.to_s}
+      @published.values.each_with_index do |shard, index|
+        rewrites["GIT_CONFIG_KEY_#{index}"] = "url.#{Checks.source(shard)}.insteadOf"
+        rewrites["GIT_CONFIG_VALUE_#{index}"] = shard.url
+      end
+      install = [File.join(@repo, "scripts/shards"), "install", "--frozen", "--skip-postinstall"]
+      begin
+        command(install, chdir: released, environment: environment(rewrites))
+      ensure
+        # Shards keeps a mirror of each under its GitHub name; no later install may
+        # find the assembled commits there.
+        cache = File.join(Checks.toolchain_root, "shards-cache/github.com")
+        mirrors = @published.values.map { |shard| File.join(cache, "#{shard.repository}.git") }
+        FileUtils.rm_rf(mirrors)
+      end
+      assert!(File.read(lock) == locked, "Shards rewrote the lock of a released application")
+      @published.each_value { |shard| Checks.installed!(released, shard) }
+      puts "PASS: a manifest and a lock that name the published repositories on GitHub, " \
+           "as a released application's do, install both published trees and leave the " \
+           "lock as it is"
     end
 
     private def production_dependencies(project) : Nil

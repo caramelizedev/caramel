@@ -16,7 +16,7 @@ module Caramel::Checks
       failed = true
       begin
         start
-        command([@frappe, "new", "bookshelf"], chdir: @projects)
+        new_application("bookshelf")
         clone = clone_project("bookshelf-clone")
         command([@frappe, "setup"], chdir: clone)
         Dev.new(self, clone).check

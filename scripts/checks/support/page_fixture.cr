@@ -47,7 +47,7 @@ module Caramel::Checks
 
     # `frappe new`, asserting the two lines the Learn page expects.
     def create : Nil
-      made = command([@frappe, "new", @name], chdir: @projects)
+      made = new_application(@name)
       assert!(made.stdout.includes?("Created #{@name}."), made.stdout)
       configured = "#{@name} is configured at https://#{@name}.caramel"
       assert!(made.stdout.includes?(configured), made.stdout)

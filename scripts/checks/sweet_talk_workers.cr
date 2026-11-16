@@ -4,12 +4,15 @@ require "uri"
 # SweetTalk's jobs worked by `work` in two OS processes (ADRs 0009 and 0041):
 # the rules domain's tally steps each run once, both processes claim them,
 # every Tally total is the sum of its steps, and SIGTERM lets an in-flight step
-# finish. It builds spec/fixtures/sweet_talk_workers.cr and owns a PostgreSQL
-# cluster, as integration does.
+# finish. It builds spec/fixtures/sweet_talk_workers.cr against the framework and
+# the sweettalk shard a release would publish, and owns a PostgreSQL cluster, as
+# integration does.
 module Caramel::Checks::SweetTalkWorkers
   extend self
 
-  FIXTURE      = "spec/fixtures/sweet_talk_workers.cr"
+  FIXTURE = "spec/fixtures/sweet_talk_workers.cr"
+  # The domain the fixture requires.
+  DOMAIN       = "spec/sweet_talk/support/rules.cr"
   STEPS        =     50
   PAUSE_MS     =     50
   IN_FLIGHT_MS =   3000
@@ -96,11 +99,20 @@ module Caramel::Checks::SweetTalkWorkers
     failed ? 1 : 0
   end
 
+  # A stand-in for this checkout that holds the published framework and sweettalk
+  # shard, with the fixture and its domain (Checks.published_checkout): at a fixed
+  # path, so the build keeps its compiler cache from one run to the next.
+  private def checkout : String
+    root = Checks.check_root("caramel-sweet-talk-workers")
+    shards = Checks.published(File.join(root, "published"))
+    Checks.published_checkout(File.join(root, "checkout"), shards, [FIXTURE, DOMAIN])
+  end
+
   # The steps against the running cluster. A failed step raises, so `main`
   # still stops the cluster; the worker processes stop first.
   private def scenario(owned : String, env : Hash(String, String?)) : Nil
     binary = File.join(owned, "rules-workers")
-    build = Checks.crystal(["build", FIXTURE, "-o", binary], timeout: 1.hour)
+    build = Checks.crystal(["build", FIXTURE, "-o", binary], chdir: checkout, timeout: 1.hour)
     raise build.stdout + build.stderr unless build.success?
     migrated = Checks.run([binary, "migrate"], env: env)
     raise "migrate failed: #{migrated.stdout}#{migrated.stderr}" unless migrated.success?

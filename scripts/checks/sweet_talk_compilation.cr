@@ -843,12 +843,18 @@ puts "PASS: the examples of #{words.words.size} SweetTalk words compile as writt
 
 # The same application without and with sweettalk, and with each of its modules
 # (ADR 0030): only an application that requires a module holds its code, and all run alike.
-root = Caramel::Checks.private_temp("caramel-sweet-talk-")
+# Each builds against the framework and the shard a release would publish, in a stand-in
+# for this checkout at a fixed path, where its compiler cache lasts from run to run.
+root = Caramel::Checks.check_root("caramel-sweet-talk")
 at_exit { FileUtils.rm_rf(root) }
-(["plain", "sweet"] + MODULES.keys).each do |name|
+applications = ["plain", "sweet"] + MODULES.keys
+checkout = Caramel::Checks.published_checkout(File.join(root, "checkout"),
+  Caramel::Checks.published(File.join(root, "published")),
+  applications.map { |name| "#{FIXTURES}/#{name}.cr" })
+applications.each do |name|
   binary = File.join(root, name)
   build = Caramel::Checks.crystal(["build", "#{FIXTURES}/#{name}.cr", "-o", binary],
-    timeout: 1.hour)
+    chdir: checkout, timeout: 1.hour)
   Caramel::Checks.fail(build.stdout + build.stderr) unless build.success?
   held = File.read(binary)
   if {"plain", "sweet"}.includes?(name) && held.includes?(MARKER) != (name == "sweet")

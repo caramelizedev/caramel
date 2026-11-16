@@ -129,7 +129,7 @@ module Caramel::Checks
     private def create_project : Hash(String, String)
       fixture = @fixture
       frappe = File.join(fixture.repo, "bin/frappe")
-      fixture.command([frappe, "new", NAME], chdir: fixture.projects)
+      fixture.new_application(NAME)
       fixture.command([frappe, "sites", "remove", NAME], echo: false)
       manifest = File.join(@project, "config/environment.yml")
       original = File.read(manifest)

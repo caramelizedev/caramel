@@ -6,8 +6,9 @@ require "../../src/caramel/version"
 # with its own scripts/build-release and registers it, and a project pinned to
 # that release runs its Frappé. Installing it again builds a linter it lacks.
 # A repository of this working tree tagged v9.9.9 stands in for
-# github.com/caramelizedev/caramel; HOME and CARAMEL_HOME are private, so this
-# Mac's launchers and registry stay as they are.
+# github.com/caramelizedev/caramel, and each project's lock names the caramel shard
+# that tag publishes, as a released application's does; HOME and CARAMEL_HOME are
+# private, so this Mac's launchers and registry stay as they are.
 module Caramel::Checks::Installations
   extend self
 
@@ -18,6 +19,8 @@ module Caramel::Checks::Installations
     root = Checks.private_temp("caramel-installations-")
     begin
       repository = Checks.tagged_repository(File.join(root, "caramel.git"), RELEASE)
+      # What the tag publishes follows from the tag alone, as a release's does.
+      caramel = Frappe::Published.assembled(repository, "v#{RELEASE}", &.["caramel"])
       home = File.join(root, "home")
       Dir.mkdir(home, 0o700)
       state = File.join(root, "state")
@@ -74,7 +77,7 @@ module Caramel::Checks::Installations
            "reuses this toolchain, builds it and its linter, " \
            "registers and points the launchers at it"
 
-      pinned = project(root, "pinned", RELEASE)
+      pinned = project(root, "pinned", RELEASE, caramel)
       doctor = frappe.call(["doctor"], pinned)
       unless doctor.stdout.starts_with?("OK    Project configuration\n")
         Checks.fail("the pinned project did not run Frappé #{RELEASE}:\n" \
@@ -84,7 +87,11 @@ module Caramel::Checks::Installations
         Checks.fail("frappe doctor did not accept the installed release:\n" \
                     "#{doctor.stdout}")
       end
-      missing = frappe.call(["doctor"], project(root, "missing", "9.9.8"))
+      unless doctor.stdout.includes?("OK    Caramel shard source\n")
+        Checks.fail("frappe doctor did not accept a lock that names the published " \
+                    "shard:\n#{doctor.stdout}")
+      end
+      missing = frappe.call(["doctor"], project(root, "missing", "9.9.8", caramel))
       hint = "Install it: frappe installations install 9.9.8"
       unless missing.status.exit_code == 1 && missing.stderr.includes?(hint)
         Checks.fail("an uninstalled pin did not name its install command:\n#{missing.stderr}")
@@ -119,7 +126,12 @@ module Caramel::Checks::Installations
     end
   end
 
-  private def project(root : String, name : String, release : String) : String
+  # A project whose lock pins *release* as a released application's does: the caramel
+  # shard from the repository it is published to, at a published commit.
+  private def project(root : String,
+                      name : String,
+                      release : String,
+                      caramel : Frappe::Published::Shard) : String
     directory = File.join(root, name)
     Dir.mkdir_p(File.join(directory, "config"))
     # Each file ends with a newline: the blank line before its terminator.
@@ -135,8 +147,8 @@ module Caramel::Checks::Installations
       version: 2.0
       shards:
         caramel:
-          git: https://github.com/caramelizedev/caramel.git
-          version: #{release}
+          git: #{caramel.url}
+          version: #{release}+git.commit.#{caramel.commit}
 
       YAML
     directory

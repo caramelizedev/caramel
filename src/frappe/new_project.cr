@@ -91,13 +91,15 @@ module Caramel::Frappe
     end
 
     # The caramel shard this release publishes on GitHub, locked to its published
-    # commit; CARAMEL_REPOSITORY, a git URL, for tests and forks; or, from a checkout
-    # that is not exactly its clean release tag, the checkout itself.
+    # commit; from CARAMEL_REPOSITORY, a git URL, for tests and forks, locked to the
+    # commit this release's tag names there; or, from a checkout that is not exactly its
+    # clean release tag, the checkout itself.
     def dependency : Dependency
       pin = "\n    version: \"~> #{Caramel::VERSION}\""
       if repository = ENV["CARAMEL_REPOSITORY"]?
         source = "git: #{repository.to_json}"
-        Dependency.new(shard: source + pin, lock: source, version: Caramel::VERSION)
+        version = "#{Caramel::VERSION}+git.commit.#{tagged(repository)}"
+        Dependency.new(shard: source + pin, lock: source, version: version)
       elsif commit = release_commit
         release = published(commit)
         Dependency.new(shard: "github: #{release.repository}" + pin,
@@ -106,6 +108,19 @@ module Caramel::Frappe
         source = "path: #{@framework_root.to_json}"
         Dependency.new(shard: source, lock: source, version: Caramel::VERSION)
       end
+    end
+
+    # The commit that this release's tag names in the git repository at *url*.
+    private def tagged(url : String) : String
+      tag = "refs/tags/v#{Caramel::VERSION}"
+      listing = ["/usr/bin/git", "ls-remote", url, tag, "#{tag}^{}"]
+      listed = Latte::ProcessRunner.run(listing,
+        env: {"GIT_TERMINAL_PROMPT" => "0"} of String => String?,
+        timeout: 60.seconds)
+      # An annotated tag lists itself, then the commit it names.
+      commit = listed.stdout.lines.last?.try(&.split('\t').first)
+      return commit if listed.success? && commit && commit.matches?(/\A[0-9a-f]{40}\z/)
+      raise Error.new("CARAMEL_REPOSITORY #{url} has no tag v#{Caramel::VERSION}")
     end
 
     # The caramel shard the release at *commit* publishes. Its commit id follows from
