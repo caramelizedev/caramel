@@ -1,0 +1,9 @@
+#!/bin/sh
+# Assembles the shards a release publishes (published.yml), each into a git
+# repository under DIRECTORY: from the working tree, or from --commit REV. With a
+# commit it also prints the command that pushes each; it pushes nothing.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$ROOT/bin"
+"$ROOT/scripts/crystal" build "$ROOT/scripts/cut/assemble.cr" -o "$ROOT/bin/assemble-shards"
+exec "$ROOT/bin/assemble-shards" "$@"

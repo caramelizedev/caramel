@@ -1,0 +1,44 @@
+# What each release publishes for applications to install. Shards copies a repository's
+# whole tagged tree into an application's lib/, so a release assembles each shard below
+# from its tagged commit into a repository of its own (src/frappe/published.cr), and
+# applications depend on those. scripts/assemble-shards writes them into a directory.
+#
+# repository: the GitHub repository the shard is published to. A shard that depends on
+#   another one here names that repository in its shard.yml; the assembly refuses the
+#   two when they differ.
+# paths: the files and directories its tree holds, each where it is in this repository.
+# root: instead of paths, the directory whose files are its tree.
+# readme: its README.md, for a tree that selects none.
+
+caramel:
+  repository: caramelizedev/caramel-shard
+  paths:
+    - LICENSE
+    - THIRD_PARTY_NOTICES.md
+    - shard.yml
+    # The framework and SugarORM, with the files src/caramel/ reads as it compiles.
+    - src/caramel.cr
+    - src/caramel/
+    - src/sugar_orm.cr
+    - src/sugar_orm/
+    # What a shard's tool program requires.
+    - src/frappe/toolkit.cr
+    - src/frappe/error.cr
+    - src/frappe/mrdp.cr
+    - src/frappe/terminal.cr
+    - src/latte/paths.cr
+  readme: |
+    # Caramel
+
+    This repository holds the part of [Caramel](https://github.com/caramelizedev/caramel)
+    that an application compiles against. Each tag is assembled from the tag of the same
+    name there, and nothing is edited here.
+
+    - Read the guide at https://caramelize.dev/docs/.
+    - Report a problem or contribute at https://github.com/caramelizedev/caramel.
+
+    Caramel is released under the [MIT License](LICENSE).
+
+sweettalk:
+  repository: caramelizedev/sweettalk
+  root: sweettalk
