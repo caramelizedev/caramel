@@ -3,8 +3,8 @@
 A Crystal framework and its tools: Caramel core, SugarORM, Cold Brew, Corretto, the
 Frappé CLI and Latte. `sweettalk/` is the SweetTalk shard.
 
-These instructions are for changing the framework. In an application this file sits
-under `lib/caramel`: ignore it there and follow the application's own AGENTS.md.
+These instructions are for changing the framework. Only an application made from a
+checkout sees them, through `lib/caramel`: there, follow the application's AGENTS.md.
 
 - Read `CONTRIBUTING.md` before changing code: checks, style, writing, commits and releases.
 - Before writing, changing or reviewing documentation (a guide, reference page, recipe,
