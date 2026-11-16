@@ -2,13 +2,15 @@ require "json"
 require "semantic_version"
 require "file_utils"
 require "../../src/latte/process"
+require "../../src/frappe/published"
 
 # Cuts a Caramel release (ADR 0016): the next version from the Conventional
 # Commits since the last tag, CHANGELOG.md from those commits and the
 # hand-written notes under Unreleased, the version in shard.yml and in the
 # sweettalk shard's, a guard that released framework migrations are unchanged,
-# and an annotated tag once the full check suite passes. Pushing and publishing
-# stay manual.
+# an annotated tag once the full check suite passes, and the shards the tag
+# publishes, each committed in a local repository. Pushing and publishing stay
+# manual.
 module Caramel::Cut
   REPO = File.expand_path("../..", __DIR__)
   # The framework migrations, relative to a tree's root.
@@ -149,11 +151,13 @@ module Caramel::Cut
     false
   end
 
+  # *published* is the directory the release's shards are assembled under.
   def self.run(repository : String = REPO,
                check : Array(String) = [File.join(REPO, "scripts/check"), "all"],
                dry_run : Bool = false,
                output : IO = STDOUT,
-               today : Time = Time.local) : Nil
+               today : Time = Time.local,
+               published : String = "/private/tmp") : Nil
     raise Refused.new(UNCOMMITTED) unless git(repository, "status", "--porcelain").empty?
     tag = last_tag(repository)
     # Before a first release nothing shipped, so nothing it changes can break.
@@ -203,11 +207,33 @@ module Caramel::Cut
     git(repository, "tag", "--annotate", "--cleanup=verbatim",
       "v#{version}", "--message", "Caramel #{version}\n\n#{section}")
     output.puts <<-TEXT
-      Tagged v#{version}. Publish it:
+      Tagged v#{version}. #{publication(repository, "v#{version}", published)}
+      Then publish the release:
         git push origin HEAD v#{version}
         gh release create v#{version} --verify-tag \
           --title "Caramel #{version}" --notes-from-tag
       TEXT
+  end
+
+  # Assembles the shards *tag* publishes (published.yml), each in a repository of one
+  # commit in a new directory under *published*, and returns the commands that push
+  # them. A published commit's id follows from the tagged commit alone, so a later
+  # `scripts/assemble-shards --commit` of the tag prepares the same commits.
+  private def self.publication(repository : String, tag : String, published : String) : String
+    directory = File.tempname("caramel-#{tag}-", dir: published)
+    Dir.mkdir(directory, 0o700)
+    shards = Frappe::Published.assemble(repository, directory, tag)
+    String.build do |io|
+      io << "Its shards are committed under " << directory << ".\n"
+      io << "Push each first, since applications install the release from them:"
+      shards.each_value do |shard|
+        io << "\n  " << shard.name << ' ' << shard.commit << "\n    " << shard.push
+      end
+    end
+  rescue ex : Frappe::Error
+    FileUtils.rm_rf(directory) if directory
+    raise Refused.new("tagged #{tag}, which is not pushed, but could not assemble the " \
+                      "shards it publishes: #{ex.message}")
   end
 
   private def self.last_tag(repository : String) : String?
