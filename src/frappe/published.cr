@@ -15,6 +15,11 @@ module Caramel::Frappe
   # environment and no configuration of this machine, and files are stored as their
   # bytes. So the commit's id follows from the source commit alone: whoever has that
   # commit computes the id offline, and nothing records it.
+  #
+  # The author, the message and the rest of what an id follows from are fixed here. A
+  # release computes its ids with the code of its own tag, in `frappe new` and in
+  # scripts/release, so a change here changes the ids of later releases only; assemble
+  # an earlier tag with that tag's own scripts/assemble-shards.
   module Published
     # Where the repository declares its published shards, relative to its root.
     DECLARATION = "published.yml"
@@ -24,7 +29,8 @@ module Caramel::Frappe
     # The branch of a published repository that holds its newest release.
     BRANCH = "main"
     # Who a published commit is by. Changing either changes the id of every commit
-    # assembled afterwards.
+    # assembled afterwards. The address is provisional: settle it before the first
+    # release is published, since it is part of every id from then on.
     AUTHOR = "Caramel"
     EMAIL  = "releases@caramelize.dev"
 

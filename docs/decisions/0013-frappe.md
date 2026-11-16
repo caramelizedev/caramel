@@ -25,6 +25,7 @@ The CLI serves humans and agents. Both need a fast loop that verifies a change, 
 13. **A shard's program is built once for each version of the shard and kept in the toolchain.** Every project that locks that version reuses the build. A shard that a project depends on by path is built again when its source changes.
 14. **Generators share one public toolkit.** Frappé's own generators and a shard's program find the project, write its files, edit its configuration and report through the same module.
 15. **Completion asks Frappé each time.** The script a shell loads lists no command. It asks Frappé what may follow the words typed, and Frappé answers from the commands of the directory the shell is in.
+16. **`frappe shards` is the one way an application reaches Shards.** It runs the release's pinned Shards in the project, with the arguments as given. `frappe setup` installs only what the lock holds, so `frappe shards install` is what locks a dependency added to `shard.yml`.
 
 ## Reasons
 
@@ -46,3 +47,4 @@ The CLI serves humans and agents. Both need a fast loop that verifies a change, 
 - A program costs a compiler run. Kept in the toolchain by shard and version, the run is paid once on a machine, not once in every project.
 - With one toolkit a shard's generator refuses, writes all or nothing and reports as Frappé's generators do, and Frappé's own use keeps the toolkit honest.
 - Rejected: a static completion script. It lists the commands of the Frappé that printed it, so a project's shard commands would never complete, and every release would ask each developer to print the script again.
+- An application holds no script of the framework's to call, since its `lib/caramel` is only what it compiles against, and a Shards on `PATH` is another version that nothing checks against the commits the lock pins. Passing the arguments through keeps Shards' own interface, so none of its options waits for a release of Frappé.

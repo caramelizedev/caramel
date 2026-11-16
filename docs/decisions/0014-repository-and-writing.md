@@ -6,7 +6,7 @@ Status: accepted.
 
 ## Context
 
-Shards copies the whole tagged tree into every application's `lib/caramel`, where agents read and grep it. Status, measurements and restated facts were half of the repository's markdown. Decisions were recorded one per feature, so a choice ended up spread over records that amended one another, and the records filled with rules that the code, the website and the doc comments already state.
+Shards copies a repository's whole tagged tree into an application's `lib/`, where agents read and grep it. Status, measurements and restated facts were half of the repository's markdown. Decisions were recorded one per feature, so a choice ended up spread over records that amended one another, and the records filled with rules that the code, the website and the doc comments already state.
 
 ## Decision
 
@@ -19,14 +19,16 @@ Shards copies the whole tagged tree into every application's `lib/caramel`, wher
 7. **A record covers one subject and is edited in place.** There is one record per subject, not per feature, and the commit that changes a choice edits its record. No record amends, extends or supersedes another. A record that merges others keeps the lowest of their numbers, and the other numbers are never reused.
 8. **SweetTalk's records sit in a directory of their own, and a framework record states no SweetTalk choice.** Where core has a mechanism SweetTalk uses, the framework record states the neutral choice and may link the SweetTalk record in one clause.
 9. **`sweettalk/` holds what an application installs, and nothing else.** That is its `shard.yml`, the commands it declares to Frappé, its sources with the program that runs its tool commands, the skill its generator writes, a README and the licence. Its specs, fixtures and checks, its decision records and its guide stay with the framework's. No file of the framework's sources or templates names SweetTalk.
-10. **A citation names the choice in words.** Code and other records cite a record by its number and a few words, never by an entry's number. A record may cite a website section as a code span holding `site#` and the section's anchor, as in `site#c-coldbrew-run`, and the website check fails on an anchor no built page has.
-11. **Checks hold the homes.** A check refuses markdown outside its homes, a record without its sections, a dead relative link, a file past its byte cap and a file of the framework that names SweetTalk. A record has no byte cap.
+10. **`published.yml` is the one declaration of what a release publishes.** The framework's shard is the paths it lists, each where it is in this repository, and the SweetTalk shard is `sweettalk/` whole. An application's `lib/caramel` holds only what it compiles against, with the licences its notices cite. The tools, the templates, the website, the specs and these records stay here ([ADR 0016](0016-versioning-and-releases.md) for how a release publishes the trees).
+11. **A citation names the choice in words.** Code and other records cite a record by its number and a few words, never by an entry's number. A record may cite a website section as a code span holding `site#` and the section's anchor, as in `site#c-coldbrew-run`, and the website check fails on an anchor no built page has.
+12. **Checks hold the homes.** A check refuses markdown outside its homes, a record without its sections, a dead relative link, a file past its byte cap and a file of the framework that names SweetTalk. A record has no byte cap.
 
 ## Reasons
 
 - Product-named directories match what applications and agents type.
 - Cold Brew under the `caramel` require puts the queue, PubSub and cache in every application binary, because one machine is enough.
-- Every byte in the tagged tree reaches every application and every repository search.
+- Every byte a release publishes reaches every application that installs it, and every byte here reaches every search of this repository. Listing what an application compiles against keeps the rest out of its `lib/`.
+- One declaration serves the release tool, `frappe new` and the checks, so what is tested, what a lock pins and what is published cannot differ.
 - A fact stated once cannot drift. A Markdown edition generated from the pages, and a skill that links instead of restating, add no second source.
 - Rejected: moving all documentation to another repository. Contracts must change in the same commit as the code, and the website's checks read the source at that commit.
 - Rejected: hiding prose from search with ignore files. It would still ship in applications and still drift.
