@@ -19,11 +19,11 @@ describe SugarORM::Query do
     query.binds.should eq([[1_i64, 2_i64], "Acme", 3, 7] of SugarORM::Value)
   end
 
-  it "renders where_null as IS NULL and combines it with other conditions" do
-    unbilled = SugarUnit::Team.query.where_null(:billing_email)
+  it "renders nil on any nullable column as IS NULL and combines it with other conditions" do
+    unbilled = SugarUnit::Team.query.where(billing_email: nil)
     unbilled.to_sql.should eq(%(#{SELECT} WHERE "billing_email" IS NULL))
     unbilled.binds.should be_empty
-    named = SugarUnit::Team::Query.where_null(:owner_id).where(name: "Acme")
+    named = SugarUnit::Team::Query.where(owner_id: nil).where(name: "Acme")
     named.to_sql.should end_with(%(WHERE "owner_id" IS NULL AND "name" = $1))
   end
 
@@ -129,12 +129,63 @@ describe SugarORM::Query do
     expect_raises(ArgumentError, "delete_all does not lock rows") { locked.delete_all }
   end
 
-  it "renders where_in as a subquery whose binds follow the outer query's" do
+  it "narrows by a parent query whose binds follow the outer query's" do
     teams = SugarUnit::Team.query.where(archived: false).where(name: "Acme")
-    members = SugarUnit::Member.query.where(email: "a@b.c").where_in(:team_id, teams)
+    members = SugarUnit::Member.query.where(email: "a@b.c").where(team: teams)
     parent = %(SELECT "id" FROM "unit_teams" WHERE "archived" = $2 AND "name" = $3)
-    members.to_sql.should end_with(%(WHERE "email" = $1 AND ("team_id" IN (#{parent}))))
+    members.to_sql.should end_with(%(WHERE "email" = $1 AND "team_id" IN (#{parent})))
     members.binds.should eq(["a@b.c", false, "Acme"] of SugarORM::Value)
+
+    left_out = SugarUnit::Member.query.where(team: not(teams))
+    parent = %(SELECT "id" FROM "unit_teams" WHERE "archived" = $1 AND "name" = $2)
+    left_out.to_sql.should end_with(%(WHERE NOT ("team_id" IN (#{parent}))))
+
+    owners = SugarUnit::Member.query.where(email: "x")
+    parent = %(SELECT "id" FROM "unit_members" WHERE "email" = $1)
+    SugarUnit::Team.query.where(owner: not(owners)).to_sql
+      .should end_with(%(WHERE ("owner_id" IN (#{parent})) IS NOT TRUE))
+    SugarUnit::Team.query.where(owner: not(owners, unknown: :drop)).to_sql
+      .should end_with(%(WHERE NOT ("owner_id" IN (#{parent}))))
+  end
+
+  it "renders each word of a keyword where" do
+    teams = SugarUnit::Team.query
+    teams.where(name: not("Acme")).to_sql.should end_with(%(WHERE "name" <> $1))
+    teams.where(billing_email: not("a@b.c")).to_sql
+      .should end_with(%(WHERE "billing_email" IS DISTINCT FROM $1))
+    teams.where(billing_email: not("a@b.c", unknown: :drop)).to_sql
+      .should end_with(%(WHERE "billing_email" <> $1))
+    teams.where(billing_email: not(["a", "b"])).to_sql
+      .should end_with(%(WHERE ("billing_email" = ANY($1)) IS NOT TRUE))
+    teams.where(billing_email: not(nil)).to_sql
+      .should end_with(%(WHERE "billing_email" IS NOT NULL))
+    teams.where(seats: over(3)).to_sql.should end_with(%(WHERE "seats" > $1))
+    teams.where(seats: under(3)).to_sql.should end_with(%(WHERE "seats" < $1))
+    teams.where(seats: not(1..3)).to_sql.should end_with(%(WHERE NOT ("seats" BETWEEN $1 AND $2)))
+
+    starts = teams.where(name: starting_with("Ac"))
+    starts.to_sql.should end_with(%(WHERE "name" LIKE $1))
+    starts.binds.should eq(["Ac%"] of SugarORM::Value)
+    within = teams.where(name: containing("50%", any_case: true))
+    within.to_sql.should end_with(%(WHERE "name" ILIKE $1))
+    within.binds.should eq(["%50\\%%"] of SugarORM::Value)
+    ends = teams.where(name: not(ending_with("me")))
+    ends.to_sql.should end_with(%(WHERE NOT ("name" LIKE $1)))
+    ends.binds.should eq(["%me"] of SugarORM::Value)
+    teams.where(billing_email: not(containing("x"))).to_sql
+      .should end_with(%(WHERE ("billing_email" LIKE $1) IS NOT TRUE))
+  end
+
+  it "widens an Int32 literal in a word to the column's Int64 or Float64" do
+    teams = SugarUnit::Team.query
+    teams.where(id: not(3)).binds.first.should be_a(Int64)
+    teams.where(id: over(3)).binds.first.should be_a(Int64)
+    teams.where(ratio: under(2)).binds.first.should be_a(Float64)
+  end
+
+  it "renders one SQL text for a list of any length" do
+    teams = SugarUnit::Team.query
+    teams.where(name: not(["a"])).to_sql.should eq(teams.where(name: not(["a", "b", "c"])).to_sql)
   end
 
   it "refuses to sum through a lock, and to group an ordered or cut query" do

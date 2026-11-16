@@ -50,12 +50,30 @@ cases = {
     "compile_where_may_be_nil.cr:4:43",
     "undefined method 'to_a' for Team::BillingEmailMayBeNil",
     "got a value that may be nil, and nil matches the rows whose billing_email IS NULL",
-    "Remediation: pass a value that is never nil, or write where_null(:billing_email)",
+    "Remediation: pass a value that is never nil, or write where(billing_email: nil)",
   ],
-  "compile_where_null_not_nullable" => [
-    "compile_where_null_not_nullable.cr:3:24",
-    "to match a member of enum Team::NullableField",
-    "Options are: :billing_email and :owner_id",
+  "compile_where_not_may_be_nil" => [
+    "compile_where_not_may_be_nil.cr:4:",
+    "undefined method 'to_a' for Team::BillingEmailMayBeNil",
+    "and nil would match the rows whose billing_email IS NOT NULL",
+    "Remediation: pass a value that is never nil, or write where(billing_email: not(nil))",
+  ],
+  "compile_where_word_type" => [
+    "compile_where_word_type.cr:3:",
+    "no overload matches 'Team::QueryOf(NamedTuple()).where'",
+    "archived: SugarORM::Over(Bool)",
+  ],
+  "compile_where_text_on_int" => [
+    "compile_where_text_on_int.cr:3:",
+    "seats: SugarORM::Text",
+  ],
+  "compile_where_not_nil_not_nullable" => [
+    "compile_where_not_nil_not_nullable.cr:3:",
+    "name: SugarORM::Not(Nil)",
+  ],
+  "compile_where_parent_wrong_schema" => [
+    "compile_where_parent_wrong_schema.cr:3:",
+    "owner: Team::QueryOf(NamedTuple())",
   ],
   "compile_unknown_order" => [
     "compile_unknown_order.cr:3:44",

@@ -857,14 +857,6 @@ module SugarORM
       end
 
       {% nullable = columns.select { |column| column[:nullable] } %}
-      {% unless nullable.empty? %}
-        # The columns that may hold NULL, for `where_null`.
-        enum NullableField
-          {% for column in nullable %}
-            {{ column[:name].camelcase.id }}
-          {% end %}
-        end
-      {% end %}
 
       {% for column in nullable %}
         # Returned by `where({{ column[:name].id }}: value)` when *value* may be
@@ -1175,10 +1167,40 @@ module SugarORM
                  "Range(::Nil, #{sugar.id})",
                ] : [] of Nil
                accepted = [sugar] + ranges + nilable
+             else
+               negated = ([scalar, "Array(#{scalar.id})"] + ranges).map do |type|
+                 "::SugarORM::Not(#{type.id})"
+               end
+               if column[:nullable]
+                 negated << "::SugarORM::Not(::Nil)"
+                 negated << "::SugarORM::Not(#{scalar.id} | ::Nil)"
+               end
+               if ranged
+                 negated << "::SugarORM::Over(#{scalar.id})" << "::SugarORM::Under(#{scalar.id})"
+               end
+               if column[:scalar] == "Int64" || column[:scalar] == "Float64"
+                 negated << "::SugarORM::Not(::Int32)" << "::SugarORM::Over(::Int32)"
+                 negated << "::SugarORM::Under(::Int32)"
+               end
+               if column[:scalar] == "String"
+                 negated << "::SugarORM::Text" << "::SugarORM::Not(::SugarORM::Text)"
+               end
+               accepted = accepted + negated
              end
              unset = "::SugarORM::Unset = ::SugarORM::UNSET"
              "#{column[:name].id} : #{accepted.join(" | ").id} | #{unset.id}"
-           end.join(", ") %}
+           end %}
+        {% parents = associations.select { |association| association[:kind] == "belongs_to" } %}
+        {% parent_params = parents.map do |association|
+             subquery = "::SugarORM::Subquery(#{association[:target]})"
+             unset = "::SugarORM::Unset = ::SugarORM::UNSET"
+             "#{association[:name].id} : #{subquery.id} | ::SugarORM::Not(#{subquery.id}) | " +
+               "#{unset.id}"
+           end %}
+        {% signature = (signature + parent_params).join(", ") %}
+        {% where_forwarded = (columns.map(&.[:name]) + parents.map(&.[:name])).map do |name|
+             "#{name.id}: #{name.id}"
+           end %}
 
         # Keyword conditions, checked against the columns at compile time: a
         # value, an Array (= ANY), a Range, or the literal `nil` (IS NULL). A
@@ -1187,11 +1209,23 @@ module SugarORM
         def where(*, {{ signature.id }})
           __sugar_conditions = [] of ::SugarORM::Condition
           {% for column in columns %}
+            {% value = "::#{@type}.__sugar_encode_#{column[:name].id}(#{column[:name].id})" %}
+            {% if !column[:codec] && !column[:references] && column[:scalar] == "Int64" %}
+              {% value = "::SugarORM::WhereWords.widen(#{value.id}, ::Int64)" %}
+            {% elsif !column[:codec] && !column[:references] && column[:scalar] == "Float64" %}
+              {% value = "::SugarORM::WhereWords.widen(#{value.id}, ::Float64)" %}
+            {% end %}
             unless {{ column[:name].id }}.is_a?(::SugarORM::Unset)
-              __sugar_conditions << ::SugarORM::Condition.column(
-                {{ column[:name] }}, ::{{ @type }}.__sugar_encode_{{ column[:name].id }}(
-                  {{ column[:name].id }}
-                )
+              __sugar_conditions << ::SugarORM::WhereWords.column(
+                {{ column[:name] }}, {{ value.id }}, {{ column[:nullable] ? true : false }}
+              )
+            end
+          {% end %}
+          {% for association in parents %}
+            unless {{ association[:name].id }}.is_a?(::SugarORM::Unset)
+              __sugar_conditions << ::SugarORM::WhereWords.parent(
+                {{ association[:key] }}, {{ association[:name].id }},
+                {{ association[:optional] ? true : false }}
               )
             end
           {% end %}
@@ -1205,7 +1239,7 @@ module SugarORM
         end
 
         def self.where(*, {{ signature.id }})
-          new.where({{ forwarded.join(", ").id }})
+          new.where({{ where_forwarded.join(", ").id }})
         end
 
         {% unless nullable.empty? %}
@@ -1224,30 +1258,25 @@ module SugarORM
               {% name = column[:name].id %}
               {% message = "where(#{name}: value) got a value that may be nil, and nil " +
                            "matches the rows whose #{name} IS NULL. Remediation: pass a " +
-                           "value that is never nil, or write where_null(:#{name}) " +
+                           "value that is never nil, or write where(#{name}: nil) " +
                            "to match those rows" %}
+              {% words_message = "where(#{name}: not(value)) got a value that may be nil, and " +
+                                 "nil would match the rows whose #{name} IS NOT NULL. " +
+                                 "Remediation: pass a value that is never nil, or write " +
+                                 "where(#{name}: not(nil)) to match those rows" %}
               \{% elsif V{{ index }}.union? && V{{ index }}.nilable? %}
                 ::{{ @type }}::{{ column[:name].camelcase.id }}MayBeNil(
                   NamedTuple({{ message }}: ::Nil)
+                ).new
+              \{% elsif V{{ index }}.name(generic_args: false) == "SugarORM::Not" &&
+                        V{{ index }}.type_vars[0].union? && V{{ index }}.type_vars[0].nilable? %}
+                ::{{ @type }}::{{ column[:name].camelcase.id }}MayBeNil(
+                  NamedTuple({{ words_message }}: ::Nil)
                 ).new
             {% end %}
             \{% else %}
               query
             \{% end %}
-          end
-
-          # The rows whose *field* IS NULL; only a nullable column is a field.
-          def where_null(field : ::{{ @type }}::NullableField) : self
-            column = case field
-                     {% for column in nullable %}
-                       in .{{ column[:name].id }}? then {{ column[:name] }}
-                     {% end %}
-                     end
-            __sugar_where([::SugarORM::Condition.column(column, nil)])
-          end
-
-          def self.where_null(field : ::{{ @type }}::NullableField)
-            new.where_null(field)
           end
         {% end %}
 

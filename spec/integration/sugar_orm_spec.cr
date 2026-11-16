@@ -531,7 +531,7 @@ describe "SugarORM with PostgreSQL" do
       teams.where(name: "none").sum_text(:seats).should eq("0")
       teams.order_by(:seats).limit(2).sum_text(:seats).should eq("7")
       teams.group_sum_text(:archived, :seats).should eq([{"false", "7"}, {"true", "5"}])
-      active = SugarSpec::User.query.where_in(:team_id, teams.where(archived: false))
+      active = SugarSpec::User.query.where(team: teams.where(archived: false))
       active.sum_text(:score).should eq("1.5")
     end
   end
@@ -670,8 +670,8 @@ describe "SugarORM with PostgreSQL" do
       expect_raises(ArgumentError, "delete_all deletes from one table") do
         users.joins(:team).delete_all
       end
-      expect_raises(ArgumentError, "where_in takes a parent query without joins") do
-        SugarSpec::Team.query.where_in(:owner_id, users.joins(:team))
+      expect_raises(ArgumentError, "where takes a parent query without joins") do
+        SugarSpec::Team.query.where(owner: users.joins(:team))
       end
       SugarORM::Repo.transaction do
         expect_raises(ArgumentError, "a query with joins does not lock rows") do

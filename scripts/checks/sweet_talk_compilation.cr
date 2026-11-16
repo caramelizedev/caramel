@@ -260,10 +260,10 @@ PROBLEMS = [
    "check_warehousing_refrigerated_shipping_containers_state_eb99943a, longer than " \
    "PostgreSQL's 63 bytes"},
   {"finds_block_count",
-   "finds how_many narrows jars with where, where_null, order_by, limit and offset only, so " \
+   "finds how_many narrows jars with where, order_by, limit and offset only, so " \
    "it reads Jar rows and writes nothing, not count"},
   {"finds_block_delete",
-   "finds purge narrows jars with where, where_null, order_by, limit and offset only, so it " \
+   "finds purge narrows jars with where, order_by, limit and offset only, so it " \
    "reads Jar rows and writes nothing, not delete_all"},
   {"finds_block_rows", "Rules::Shelf names Rows, SweetTalk's storage"},
   {"finds_block_sql",
@@ -351,7 +351,7 @@ PROBLEMS = [
    "finds newest orders by created, which Sales cannot sort by: order by id, or by an " \
    "attribute stored in one column"},
   {"projection_finds_block_count",
-   "finds how_many narrows rows with where, where_null, order_by, limit and offset only, so " \
+   "finds how_many narrows rows with where, order_by, limit and offset only, so " \
    "it reads Sales rows and writes nothing, not count"},
   {"subdomain_unknown",
    "context Catalogue takes subdomain: :core, :supporting or :generic, not subdomain: :main"},
