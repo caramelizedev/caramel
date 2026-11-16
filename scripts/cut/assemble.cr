@@ -7,7 +7,7 @@ if ARGV.first? == "--commit"
   ARGV.shift
   commit = ARGV.shift?
 end
-unless ARGV.size == 1 && !ARGV.first.starts_with?('-')
+if ARGV.size != 1 || ARGV.first.starts_with?('-')
   STDERR.puts("usage: scripts/assemble-shards [--commit REV] DIRECTORY")
   exit 2
 end

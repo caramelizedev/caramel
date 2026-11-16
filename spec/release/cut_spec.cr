@@ -37,7 +37,7 @@ private def release_repository(&)
     YAML
   File.write(File.join(repository, "published.yml"), <<-YAML)
     caramel:
-      repository: caramelizedev/caramel-shard
+      repository: example/caramel
       paths:
         - shard.yml
 
@@ -291,7 +291,7 @@ describe Caramel::Cut do
           other:
             version: 9.9.9
           caramel:
-            github: caramelizedev/caramel-shard
+            github: example/caramel
             version: 0.1.0
 
         YAML
@@ -311,7 +311,7 @@ describe Caramel::Cut do
           other:
             version: 9.9.9
           caramel:
-            github: caramelizedev/caramel-shard
+            github: example/caramel
             version: 0.2.0
 
         YAML
