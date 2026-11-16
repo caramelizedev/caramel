@@ -92,9 +92,9 @@ Every piece of writing has one home, chosen by what it is ([ADR 0014](docs/decis
   repository. Use [caramel-notes](https://github.com/caramelizedev/caramel-notes), the
   pull request description or the CHANGELOG.
 
-State a fact once and link to it. `scripts/check prose` checks markdown's homes, ADR
-sections, links, sizes and the `sweettalk/` shard's boundary; `scripts/check website`
-the pages and anchors.
+State a fact once and link to it. `scripts/check prose` checks markdown's homes, links
+and sizes, an ADR's sections, status, number and citations, and the `sweettalk/`
+boundary; `scripts/check website` the pages and anchors.
 
 ## Principles
 
@@ -115,7 +115,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `ty
 
 ## Releases
 
-A release is a tag `vX.Y.Z` and the shards `published.yml` lists, each assembled from the tag ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)). In 0.x a minor may break compatibility; a patch never does.
+A release is a tag `vX.Y.Z` and the shards `published.yml` lists, each assembled from the tag ([ADR 0016](docs/decisions/0016-versioning-and-releases.md)).
 
 1. Write the upgrade notes as bullets under `## Unreleased` in `CHANGELOG.md` (`scripts/release` adds their heading), and commit.
 2. `scripts/release --dry-run` prints the next version and its changelog section.
