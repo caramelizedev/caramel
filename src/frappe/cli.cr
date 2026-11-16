@@ -3,6 +3,7 @@ require "./mrdp"
 require "./check"
 require "./lint"
 require "./new_project"
+require "./development_source"
 require "./latte_client"
 require "./installations"
 require "./release"
@@ -682,6 +683,7 @@ module Caramel::Frappe
         "Project configuration"       => -> { Project.load; nil },
         "Managed Crystal compiler"    => -> { Tools.new(@framework_root).check_compiler },
         "Caramel installation"        => -> { verify_installation },
+        "Caramel shard source"        => -> { verify_source },
         "Locked dependencies"         => -> { verify_dependencies },
         "Managed PostgreSQL tool"     => -> { verify_postgres; nil },
         "Private local configuration" => -> { Project.load.local_environment; nil },
@@ -701,6 +703,10 @@ module Caramel::Frappe
 
     private def verify_dependencies
       Tools.new(@framework_root).check_dependencies(Project.load)
+    end
+
+    private def verify_source : Nil
+      DevelopmentSource.check(Project.load.root, @framework_root)
     end
 
     private def verify_postgres
