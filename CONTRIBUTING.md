@@ -123,7 +123,7 @@ A release is a tag `vX.Y.Z` and the shards `published.yml` lists, each assembled
 4. Run `scripts/release`. It refuses a dirty tree and an edited released migration, stamps both `shard.yml` files, writes the changelog and runs `scripts/check all`; a failure restores the files and tags nothing. It commits `chore(release): vX.Y.Z`, tags, assembles the tag's shards and prints each one's commit and push command.
 5. Push by hand, as it prints: both shards first, since applications install from them, then the tag and the GitHub release. Then run `node website/publish.mjs`.
 
-`published.yml` says when to add a path to it. `src/frappe/published.cr` fixes a published commit's author and message; changing them changes later releases' ids only. The address, `releases@caramelize.dev`, is provisional.
+`published.yml` says when to add a path to it. `src/frappe/published.cr` fixes a published commit's author and message; changing them changes later releases' ids only.
 
 ## Compatibility contracts
 

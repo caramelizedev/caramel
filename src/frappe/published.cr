@@ -29,8 +29,7 @@ module Caramel::Frappe
     # The branch of a published repository that holds its newest release.
     BRANCH = "main"
     # Who a published commit is by. Changing either changes the id of every commit
-    # assembled afterwards. The address is provisional: settle it before the first
-    # release is published, since it is part of every id from then on.
+    # assembled afterwards.
     AUTHOR = "Caramel"
     EMAIL  = "releases@caramelize.dev"
 
