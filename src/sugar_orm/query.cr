@@ -1,6 +1,6 @@
 module SugarORM
   # One WHERE predicate; `?` marks each bind and becomes `$n` when rendered.
-  record Condition, sql : String, values : Array(Value) do
+  record Condition, sql : String, values : Array(Value), nullable : Bool = false do
     def self.column(column : String, value : Nil) : self
       new(%("#{column}" IS NULL), [] of Value)
     end
@@ -29,11 +29,71 @@ module SugarORM
     def self.column(column : String, value) : self
       new(%("#{column}" = ?), [value] of Value)
     end
+
+    # The negation of `column(column, value)`. *nullable* says the column may hold NULL, so
+    # the rows with no value stay in the result.
+    def self.column_not(column : String, value : Nil, nullable : Bool) : self
+      new(%("#{column}" IS NOT NULL), [] of Value)
+    end
+
+    def self.column_not(column : String, value : Array, nullable : Bool) : self
+      column(column, value).copy_with(nullable: nullable).negate
+    end
+
+    def self.column_not(column : String, value : Range, nullable : Bool) : self
+      column(column, value).copy_with(nullable: nullable).negate
+    end
+
+    def self.column_not(column : String, value, nullable : Bool) : self
+      if nullable
+        new(%("#{column}" IS DISTINCT FROM ?), [value] of Value, nullable: true)
+      else
+        new(%("#{column}" <> ?), [value] of Value)
+      end
+    end
+
+    # A strict comparison: *operator* is ">" or "<".
+    def self.compare(column : String, operator : String, value) : self
+      unless operator == ">" || operator == "<"
+        raise ArgumentError.new("compare takes > or <, not #{operator}")
+      end
+      new(%("#{column}" #{operator} ?), [value] of Value)
+    end
+
+    # LIKE over *text*, whose `\`, `%` and `_` match themselves. *at* is `:start`, `:end` or
+    # `:within`.
+    def self.text(column : String, text : String, at : Symbol, any_case : Bool,
+                  nullable : Bool) : self
+      escaped = text.gsub(/[\\%_]/) { |char| "\\#{char}" }
+      pattern = case at
+                when :start  then "#{escaped}%"
+                when :end    then "%#{escaped}"
+                when :within then "%#{escaped}%"
+                else
+                  raise ArgumentError.new("text takes :start, :end or :within, not #{at.inspect}")
+                end
+      new(%("#{column}" #{any_case ? "ILIKE" : "LIKE"} ?), [pattern] of Value, nullable: nullable)
+    end
+
+    # The rows this condition leaves out. A nullable condition may be NULL, and NOT NULL is
+    # NULL, so it is compared with IS NOT TRUE to keep those rows.
+    def negate : self
+      if nullable
+        self.class.new("(#{sql}) IS NOT TRUE", values, nullable)
+      else
+        self.class.new("NOT (#{sql})", values, nullable)
+      end
+    end
   end
 
   # What a keyword `where` returns for a value that may be nil. Each schema
   # generates `T::<Column>MayBeNil(Remediation)`, which has no query methods.
   abstract struct MayBeNil
+  end
+
+  # A query some other query can restrict its rows by: `T` is the schema whose keys it yields.
+  abstract struct Subquery(T)
+    abstract def __sugar_in_condition(column : String) : ::SugarORM::Condition
   end
 
   # ` AND "<tenant column>" = $n`, with the tenant appended to *args*, when
@@ -84,7 +144,7 @@ module SugarORM
   # An immutable query over schema `T`; `P` is the NamedTuple of preload
   # loaders. Every clause returns a new query. Each schema generates
   # `T::QueryOf(P)` with its typed `where` and `preload` overloads.
-  abstract struct Query(T, P)
+  abstract struct Query(T, P) < Subquery(T)
     # Fully qualified: the generated `T::QueryOf` expands these defaults in its
     # own scope.
     def initialize(@clauses : ::SugarORM::Clauses = ::SugarORM::Clauses.new,
@@ -141,6 +201,27 @@ module SugarORM
     protected def __sugar_where(conditions : Array(::SugarORM::Condition)) : self
       clauses = @clauses.copy_with(conditions: @clauses.conditions + conditions)
       self.class.new(clauses, @preloads)
+    end
+
+    # The rows this query leaves out: its conditions, as one, are replaced by their
+    # complement, so the rows it matches and the rows its `rest` matches are every row.
+    # `IS NOT TRUE` keeps the rows where a condition is NULL, which `NOT` would leave out of
+    # both halves. Orders, preloads and a lock stay. A tenant's condition is added when the
+    # query runs, so it stays outside the complement.
+    def rest : self
+      raise ArgumentError.new("rest takes a query without joins") unless @clauses.joins.empty?
+      unless @clauses.limit.nil? && @clauses.offset.nil?
+        raise ArgumentError.new("rest takes a query without limit or offset")
+      end
+      conditions = @clauses.conditions
+      complement = if conditions.empty?
+                     ::SugarORM::Condition.new("FALSE", [] of ::SugarORM::Value)
+                   else
+                     ::SugarORM::Condition.new(
+                       "(#{conditions.map(&.sql).join(" AND ")}) IS NOT TRUE",
+                       conditions.flat_map(&.values))
+                   end
+      self.class.new(@clauses.copy_with(conditions: [complement]), @preloads)
     end
 
     # The SELECT this query runs (before preloads), for inspection.
@@ -325,18 +406,11 @@ module SugarORM
       ::SugarORM::Page(typeof(records.first), T::PrimaryKey).new(records, cursor)
     end
 
-    # Narrows to the rows whose *field* holds the key of a row *parent* matches:
-    # "field" IN (SELECT "<pk>" FROM <parent table> WHERE …), with the parent's conditions,
-    # tenant included, read when this is called.
-    def where_in(field : T::Field, parent : ::SugarORM::Query(U, Q)) : self forall U, Q
-      where_condition(parent.__sugar_in_condition(T.__sugar_column(field)))
-    end
-
-    # The condition `where_in` adds to a query over another schema; public for that call only.
+    # The condition keyword `where` adds for a belongs_to parent query; public for that call only.
     def __sugar_in_condition(column : String) : ::SugarORM::Condition
-      refuse_lock("where_in")
+      refuse_lock("a parent query in where")
       unless @clauses.joins.empty?
-        raise ArgumentError.new("where_in takes a parent query without joins")
+        raise ArgumentError.new("where takes a parent query without joins")
       end
       predicates = conditions
       sql = String.build do |io|
@@ -394,7 +468,8 @@ module SugarORM
       refuse_lock("delete_all")
       unless @clauses.joins.empty?
         raise ArgumentError.new(
-          "delete_all deletes from one table; narrow with where_in instead of joins"
+          "delete_all deletes from one table; narrow by a parent query, " \
+          "where(<belongs_to>: parent), instead of joins"
         )
       end
       table = T.__sugar_quoted_table
@@ -501,10 +576,6 @@ module SugarORM
       new.page(db, size, after, direction)
     end
 
-    def self.where_in(field : T::Field, parent : ::SugarORM::Query(U, Q)) forall U, Q
-      new.where_in(field, parent)
-    end
-
     def self.limit(count : Int32)
       new.limit(count)
     end
@@ -575,7 +646,8 @@ module SugarORM
     private def refuse_lock_with_joins : Nil
       return if @clauses.joins.empty? || !@clauses.lock
       raise ArgumentError.new(
-        "a query with joins does not lock rows; narrow with where_in to lock them"
+        "a query with joins does not lock rows; narrow by a parent query, " \
+        "where(<belongs_to>: parent), to lock them"
       )
     end
 

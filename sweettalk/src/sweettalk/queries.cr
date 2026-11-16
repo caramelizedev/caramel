@@ -14,7 +14,7 @@ module SweetTalk
     # column, id breaking ties; `first: count` returns at most that many. Each part is
     # optional, but one is given. With a block instead, `finds newest(count : Int32) do
     # |orders| orders.order_by(:created_at, :desc).limit(count) end` narrows the live rows
-    # with SugarORM's `where`, `where_null`, `order_by`, `limit` and `offset`, and the
+    # with SugarORM's `where`, `order_by`, `limit` and `offset`, and the
     # results are built from what it returns. Every query is checked once the program's top
     # level is complete (`__sweettalk_check_queries`), so a wrong one does not compile even
     # if nothing calls it.
@@ -108,8 +108,8 @@ module SweetTalk
         {% for step in 0..63 %}
           {% node = node.expressions[0] if node.is_a?(Expressions) && node.expressions.size == 1 %}
           {% if node.is_a?(Call) && !node.receiver.is_a?(Nop) %}
-            {% unless %w[where where_null order_by limit offset].includes?(node.name.stringify) %}
-              {% node.raise "finds #{verb} narrows #{rows.id} with where, where_null, order_by, " +
+            {% unless %w[where order_by limit offset].includes?(node.name.stringify) %}
+              {% node.raise "finds #{verb} narrows #{rows.id} with where, order_by, " +
                             "limit and offset only, so it reads #{short.id} rows and writes " +
                             "nothing, not #{node.name}" %}
             {% end %}
@@ -876,7 +876,7 @@ module SweetTalk
       def self.__sweettalk_held_{{ verb }}({{ call.args.splat }})
         filtered = __sweettalk_filtered_{{ verb }}({{ call.args.map(&.var).splat }})
         query = {{ type.constant("SWEETTALK_ROW").id }}.query
-          .where_in(:{{ type.constant("SWEETTALK_PARENT")[0].id }}_id, filtered)
+          .where({{ type.constant("SWEETTALK_PARENT")[0].id }}: filtered)
         {% for key, value in conditions %}
           {% attribute = attributes.find { |attribute| attribute[0] == key.id.stringify } %}
           {% unless attribute && attribute[2] != "entities" %}

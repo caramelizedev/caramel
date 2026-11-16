@@ -168,6 +168,7 @@ module Rules
         order: {id: :desc}, first: count
       counts on_sale_count, satisfying: OnSale
       counts gifts, where: {note: "gift"}
+      counts crowded_count, where: {count: over(Count.new(5))}
       counts live_jars
 
       # One transaction stamps every row it creates alike, so id breaks the tie.
@@ -214,6 +215,19 @@ module Rules
     specification Stocked, on: Jar, where: Gift | Full, means: "a jar that is full or a gift"
     specification Featured, on: Jar, where: OnSale & Stocked,
       means: "a jar on sale that is full or a gift"
+    specification Noted, on: Jar, where: {note: not(nil)}, means: "a jar with a note"
+    specification Ungifted, on: Jar, where: {note: not("gift")},
+      means: "a jar not noted as a gift, or with no note"
+    specification Remarked, on: Jar, where: {note: not("gift", unknown: :drop)},
+      means: "a jar with a note other than gift"
+    specification Crowded, on: Jar, where: {count: over(Count.new(5))},
+      means: "a jar of more than five"
+    specification Scant, on: Jar, where: {count: under(Count.new(3))},
+      means: "a jar of fewer than three"
+    specification Fragile, on: Jar, where: {note: containing("FRAG", any_case: true)},
+      means: "a jar noted as fragile"
+    specification Sturdy, on: Jar, where: {note: not(starting_with("frag"))},
+      means: "a jar not noted as fragile"
 
     process Tally, means: "how much a box was counted, until it goes quiet" do
       key box : Box

@@ -12,6 +12,7 @@ struct Team < SugarORM::Schema
     belongs_to owner : User?
     has_one profile : Profile
     index :name, unique: true
+    band seats, few: 1..3, many: 4..
     json :id, :name
   end
 

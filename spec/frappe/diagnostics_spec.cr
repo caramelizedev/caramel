@@ -123,7 +123,7 @@ describe Caramel::Frappe::Diagnostics do
       ERR NULLABLE_WHERE at spec/fixtures/sugar_orm/compile_where_may_be_nil.cr:4:43
       MSG: where(billing_email: value) got a value that may be nil, and nil matches \
         the rows whose billing_email IS NULL.
-      FIX: pass a value that is never nil, or write where_null(:billing_email) \
+      FIX: pass a value that is never nil, or write where(billing_email: nil) \
         to match those rows\n
       MRDP
     # Only the sentinel loses the compiler's suggestion; a real typo keeps it.

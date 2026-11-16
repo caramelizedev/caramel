@@ -22,13 +22,16 @@ An application needs pure schemas, association safety at compile time, explicit 
 10. **A changeset is a class, and the only mutable boundary.** Its params are checked against the schema at compile time, and it carries the errors and the outcome of a write. An upsert is declared on it.
 11. **The facade builds a changeset and returns it.** Every facade method and query terminal also takes an explicit database handle.
 12. **An association that was not preloaded has no methods.** Its accessor returns a generated sentinel type whose name carries the remedy, and a preload changes the query's return type.
-13. **Queries are immutable and check names and types at compile time.** A value that may be nil does not compile in `where`; the literal `nil` is IS NULL. `where_condition` is a method of its own.
+13. **Queries are immutable and check names and types at compile time.** A value that may be nil does not compile in `where`; the literal `nil` is IS NULL. The top-level words `not`, `over`, `under`, `starting_with`, `ending_with` and `containing` are values keyword `where` takes; `not` keeps the rows with no value unless it says `unknown: :drop`. `where_condition` is a method of its own.
 14. **The Repo holds one pool and binds connections to fibers.** A nested transaction is a savepoint.
 15. **Hand-written SQL is read as named tuples of a declared shape.**
 16. **PostgreSQL's conflicts raise typed errors, and retrying a transaction is opt-in and outermost.** The outermost commit's error is typed too. A retry runs with no pause. A generated Destroy answers 409 when other rows still reference its record.
 17. **Aggregates return PostgreSQL's exact text.**
-18. **Joins go through `belongs_to` only.** `where_in` narrows by a parent query without a join. Either way the parent query brings its own conditions and tenant.
+18. **Joins go through `belongs_to` only.** `where(<belongs_to>: parent_query)` narrows by a parent query without a join, and `not(parent_query)` leaves its rows out. Either way the parent query brings its own conditions and tenant.
 19. **Batches and pages read by primary key.** The cursor is the last row's key, typed, with no encoding.
+20. **`rest` is a query's complement.** Its conditions become one `IS NOT TRUE`, so the rows a query matches and the rows its `rest` matches are every row; it refuses joins, a limit and an offset.
+21. **A band names a range of a numeric field once.** `band copies, scarce: 1..3, plenty: 4..` makes an enum keyword `where` takes; bands of one field may not overlap.
+22. **`Repo.insert_all` writes many insert changesets of one class in one statement per set of columns.** Each is validated as an insert is, none is written when one is invalid, and each column travels as one array through `unnest`.
 
 ## Reasons
 
@@ -54,3 +57,11 @@ An application needs pure schemas, association safety at compile time, explicit 
 - Rejected: sleeping between retries. A fixed pause is a guess.
 - Rejected: typed sums. The type of a PostgreSQL sum depends on the column's, and only the caller knows which value to build.
 - Rejected: an opaque page cursor. Encoding adds a format to version and tamper-proof.
+- The words are top-level methods, as `puts` is, so a query reads the same in an action, a spec or a script; a class's own method of the same name wins inside that class.
+- `not` keeps the rows with no value by default, as `IS DISTINCT FROM` does; SQL's `<>` drops them without saying so.
+- Rejected: operator hashes (`{not: …}`), which accept their keys in any order, and block predicates (`where { copies > 3 }`), where Crystal cannot refuse `&&` or `||` between two conditions, so half of one is dropped silently.
+- Rejected: keeping `where_null` and `where_in`; `where(field: nil)` and `where(<belongs_to>: parent)` say the same in the one `where`.
+- `IS NOT TRUE` keeps the rows where a condition is NULL; `NOT` would leave them out of both halves.
+- A range named once cannot drift between the queries that use it; an overlap would put one value in two bands.
+- `unnest` keeps one SQL text for any number of rows, so one prepared statement serves every batch, and no batch reaches PostgreSQL's limit of 65,535 binds.
+- A constraint a statement breaks cannot name its row, so `insert_all` raises it instead of marking a changeset.

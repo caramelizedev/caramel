@@ -189,7 +189,9 @@ module SweetTalk
       def self.__sweettalk_drop(query) : Nil
         {% for collection in collections %}
           {% child = collection[3][6..-2].id %}
-          {{ child }}.__sweettalk_drop({{ row }}::{{ child }}.query.where_in(:{{ own }}, query))
+          {{ child }}.__sweettalk_drop(
+            {{ row }}::{{ child }}.query.where({{ @type.constant("SWEETTALK_STORED").id }}: query)
+          )
         {% end %}
         query.delete_all
       end

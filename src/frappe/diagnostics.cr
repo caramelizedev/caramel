@@ -296,7 +296,7 @@ module Caramel::Frappe
 
     # SugarORM's MayBeNil type name reads "where(x: value) got a value that
     # may be nil, … Remediation: pass a value that is never nil, or write
-    # where_null(:x) …". The compiler's own "Did you mean" is about the
+    # where(x: nil) …". The compiler's own "Did you mean" is about the
     # sentinel, not the query, so it is left out.
     private def self.nullable_where(text : String,
                                     root : String,

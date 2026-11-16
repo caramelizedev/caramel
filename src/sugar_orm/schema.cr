@@ -30,7 +30,7 @@ module SugarORM
     end
 
     {% for name in %w(field timestamps belongs_to has_many has_one index drop_column
-                     check tenant json) %}
+                     check tenant json band) %}
       # :nodoc:
       macro {{ name.id }}(*arguments, **options)
         \{% raise "`{{ name.id }}` belongs inside the schema block.\n" +
@@ -102,7 +102,7 @@ module SugarORM
          ) %}
       {% holds_only = "Remediation: a schema block holds only " +
                       "field, timestamps, belongs_to, has_many, has_one, " +
-                      "index, drop_column, check, tenant and json declarations." %}
+                      "index, drop_column, check, band, tenant and json declarations." %}
       {% owner = @type.name(generic_args: false).stringify.split("::").last %}
       {% owner_key = owner.underscore + "_id" %}
       {% columns = [] of Nil %}
@@ -111,6 +111,7 @@ module SugarORM
       {% explicit_indexes = [] of Nil %}
       {% json_line = nil %}
       {% check_declarations = [] of Nil %}
+      {% band_declarations = [] of Nil %}
       {% foreign_keys = [] of Nil %}
       {% drops = [] of Nil %}
       {% primary = [] of Nil %}
@@ -556,6 +557,26 @@ module SugarORM
                          "or `check :dates, \"starts_at < ends_at\"`." %}
             {% statement.raise problem + statement_at %}
           {% end %}
+        {% elsif kind == "band" %}
+          {% field = statement.args.empty? ? nil : statement.args[0] %}
+          {% field_ok = statement.args.size == 1 && (
+               field.is_a?(SymbolLiteral) || field.is_a?(StringLiteral) ||
+               (field.is_a?(Call) && field.receiver.is_a?(Nop) && field.args.empty?)
+             ) %}
+          {% unless field_ok && !named.empty? %}
+            {% problem = "band expects a field and named ranges, " +
+                         "like `band copies, scarce: 1..3, plenty: 4..`." %}
+            {% statement.raise problem + statement_at %}
+          {% end %}
+          {% for argument in named %}
+            {% band_declarations << {
+                 node:   statement,
+                 column: field.id.stringify,
+                 name:   argument.name.stringify,
+                 range:  argument.value,
+               } %}
+          {% end %}
+
         {% else %}
           {% problem = "Unknown schema declaration '#{kind.id}'.\n" + holds_only %}
           {% statement.raise problem + statement_at %}
@@ -757,6 +778,88 @@ module SugarORM
         {% end %}
         {% checks << entry %}
       {% end %}
+      {% bands = [] of Nil %}
+      {% for band in band_declarations %}
+        {% node = band[:node] %}
+        {% node_at = "\n  --> #{node.filename.id}:" +
+                     "#{node.line_number}:#{node.column_number}" %}
+        {% column = band[:column] %}
+        {% found = columns.find { |candidate| candidate[:name] == column } %}
+        {% unless found %}
+          {% problem = "band references '#{column.id}', " +
+                       "which is not a column of #{@type}.\n" +
+                       "Columns: #{columns.map(&.[:name]).join(", ").id}" %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% floating = found[:scalar] == "Float64" %}
+        {% numeric = floating || found[:scalar] == "Int32" || found[:scalar] == "Int64" %}
+        {% unless numeric && !found[:codec] %}
+          {% problem = "band #{column.id}: needs an Int32, Int64 or Float64 field, " +
+                       "but '#{column.id}' is #{found[:declared].id}.\n" +
+                       "Remediation: name bands only on a numeric column." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% range = band[:range] %}
+        {% unless range.is_a?(RangeLiteral) %}
+          {% problem = "band #{column.id}: #{band[:name].id} takes a range literal, " +
+                       "like `#{band[:name].id}: 1..3`." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% literals = [range.begin, range.end].reject(&.is_a?(Nop)) %}
+        {% pattern = floating ? /\A:f/ : /\A:[iu]/ %}
+        {% typed = !literals.empty? && literals.all? { |bound| bound.is_a?(NumberLiteral) } %}
+        {% typed = typed && literals.all? { |bound| bound.kind.stringify =~ pattern } %}
+        {% unless typed %}
+          {% problem = "band #{column.id}: #{band[:name].id} takes a range of " +
+                       "#{floating ? "Float64".id : found[:scalar].id} literals, " +
+                       "but '#{column.id}' is #{found[:declared].id}." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% low = range.begin.is_a?(Nop) ? nil : range.begin %}
+        {% high = range.end.is_a?(Nop) ? nil : range.end %}
+        {% if low && high && (low > high || (low == high && range.excludes_end?)) %}
+          {% problem = "band #{column.id}: #{band[:name].id} is an empty range.\n" +
+                       "Remediation: put the lower bound first." %}
+          {% node.raise problem + node_at %}
+        {% end %}
+        {% suffix = floating ? "f64" : (found[:scalar] == "Int64" ? "i64" : "i32") %}
+        {% strip = /_|[iuf](8|16|32|64|128)\z/ %}
+        {% low_text = low ? "#{low.stringify.gsub(strip, "").id}_#{suffix.id}" : "" %}
+        {% high_text = high ? "#{high.stringify.gsub(strip, "").id}_#{suffix.id}" : "" %}
+        {% entry = {
+             column:    column,
+             name:      band[:name],
+             low:       low,
+             high:      high,
+             low_text:  low_text,
+             high_text: high_text,
+             exclusive: range.excludes_end?,
+             suffix:    suffix,
+             nullable:  found[:nullable],
+           } %}
+        {% for earlier in bands %}
+          {% if earlier[:column] == column %}
+            {% if earlier[:name] == band[:name] %}
+              {% problem = "band #{column.id}: the name #{band[:name].id} is used twice.\n" +
+                           "Remediation: give each band its own name." %}
+              {% node.raise problem + node_at %}
+            {% end %}
+            {% other_low = earlier[:low] %}
+            {% other_high = earlier[:high] %}
+            {% before = high.is_a?(NilLiteral) || other_low.is_a?(NilLiteral) ||
+                        (entry[:exclusive] ? other_low < high : other_low <= high) %}
+            {% after = other_high.is_a?(NilLiteral) || low.is_a?(NilLiteral) ||
+                       (earlier[:exclusive] ? low < other_high : low <= other_high) %}
+            {% if before && after %}
+              {% problem = "band #{column.id}: #{earlier[:name].id} and #{band[:name].id} " +
+                           "overlap.\n" +
+                           "Remediation: make each value belong to one band at most." %}
+              {% node.raise problem + node_at %}
+            {% end %}
+          {% end %}
+        {% end %}
+        {% bands << entry %}
+      {% end %}
       {% for drop in drops %}
         {% if columns.any? { |column| column[:name] == drop[:name] } %}
           {% problem = "drop_column :#{drop[:name].id} " +
@@ -857,20 +960,58 @@ module SugarORM
       end
 
       {% nullable = columns.select { |column| column[:nullable] } %}
-      {% unless nullable.empty? %}
-        # The columns that may hold NULL, for `where_null`.
-        enum NullableField
-          {% for column in nullable %}
-            {{ column[:name].camelcase.id }}
-          {% end %}
-        end
-      {% end %}
 
       {% for column in nullable %}
         # Returned by `where({{ column[:name].id }}: value)` when *value* may be
         # nil. It defines no query methods, so using it fails to compile at the
         # caller's line, with the remediation in the type's name.
         struct {{ column[:name].camelcase.id }}MayBeNil(Remediation) < ::SugarORM::MayBeNil
+        end
+      {% end %}
+
+      {% for column_name in bands.map(&.[:column]).uniq %}
+        {% mine = bands.select { |band| band[:column] == column_name } %}
+        {% camel = column_name.camelcase %}
+        {% suffix = mine[0][:suffix] %}
+        {% scalar_name = suffix == "f64" ? "Float64" : (suffix == "i64" ? "Int64" : "Int32") %}
+        {% nilable_band = mine[0][:nullable] %}
+        # The named ranges of `{{ column_name.id }}`.
+        enum {{ camel.id }}Band
+          {% for band in mine %}
+            {{ band[:name].camelcase.id }}
+          {% end %}
+        end
+
+        # The first band that holds *value*, or nil.
+        def self.{{ column_name.id }}_band(
+          value : ::{{ scalar_name.id }}{% if nilable_band %} | ::Nil{% end %}
+        ) : {{ camel.id }}Band?
+          {% if nilable_band %}
+            return nil if value.nil?
+          {% end %}
+          {% for band in mine %}
+            {% tests = [] of Nil %}
+            {% unless band[:low_text] == "" %}
+              {% tests << "value >= #{band[:low_text].id}" %}
+            {% end %}
+            {% unless band[:high_text] == "" %}
+              {% tests << "value #{band[:exclusive] ? "<".id : "<=".id} #{band[:high_text].id}" %}
+            {% end %}
+            return {{ camel.id }}Band::{{ band[:name].camelcase.id }} if {{ tests.join(" && ").id }}
+          {% end %}
+          nil
+        end
+
+        # :nodoc:
+        # The range a band names, for keyword `where`.
+        def self.__sugar_band_{{ column_name.id }}(band : {{ camel.id }}Band)
+          case band
+          {% for band in mine %}
+            {% dots = band[:exclusive] ? "..." : ".." %}
+            {% span = "#{band[:low_text].id}#{dots.id}#{band[:high_text].id}" %}
+            in .{{ band[:name].id }}? then ({{ span.id }})
+          {% end %}
+          end
         end
       {% end %}
 
@@ -1067,6 +1208,26 @@ module SugarORM
         @{{ primary_key.id }}
       end
 
+      # The SQL type of *column*, as `__sugar_table` declares it.
+      def self.__sugar_sql_type(column : String) : String
+        case column
+        {% for column in columns %}
+          {% if column[:codec] %}
+            when {{ column[:name] }}
+              ::SugarORM::Codec.checked_sql_type({{ column[:codec] }}.sql_type)
+          {% elsif column[:references] %}
+            when {{ column[:name] }}
+              {{ column[:references] }}.__sugar_primary_sql_type
+          {% else %}
+            when {{ column[:name] }}
+              {{ column[:sql_type] }}
+          {% end %}
+        {% end %}
+        else
+          raise ArgumentError.new("#{self} has no column '#{column}'")
+        end
+      end
+
       def self.__sugar_table : ::SugarORM::Catalog::Table
         ::SugarORM::Catalog::Table.new(
           name: {{ table }},
@@ -1175,10 +1336,43 @@ module SugarORM
                  "Range(::Nil, #{sugar.id})",
                ] : [] of Nil
                accepted = [sugar] + ranges + nilable
+             else
+               negated = ([scalar, "Array(#{scalar.id})"] + ranges).map do |type|
+                 "::SugarORM::Not(#{type.id})"
+               end
+               if column[:nullable]
+                 negated << "::SugarORM::Not(::Nil)"
+                 negated << "::SugarORM::Not(#{scalar.id} | ::Nil)"
+               end
+               if ranged
+                 negated << "::SugarORM::Over(#{scalar.id})" << "::SugarORM::Under(#{scalar.id})"
+               end
+               if column[:scalar] == "Int64" || column[:scalar] == "Float64"
+                 negated << "::SugarORM::Not(::Int32)" << "::SugarORM::Over(::Int32)"
+                 negated << "::SugarORM::Under(::Int32)"
+               end
+               if column[:scalar] == "String"
+                 negated << "::SugarORM::Text" << "::SugarORM::Not(::SugarORM::Text)"
+               end
+               accepted = accepted + negated
+             end
+             if bands.any? { |band| band[:column] == column[:name] }
+               accepted = accepted + ["::#{@type}::#{column[:name].camelcase.id}Band"]
              end
              unset = "::SugarORM::Unset = ::SugarORM::UNSET"
              "#{column[:name].id} : #{accepted.join(" | ").id} | #{unset.id}"
-           end.join(", ") %}
+           end %}
+        {% parents = associations.select { |association| association[:kind] == "belongs_to" } %}
+        {% parent_params = parents.map do |association|
+             subquery = "::SugarORM::Subquery(#{association[:target]})"
+             unset = "::SugarORM::Unset = ::SugarORM::UNSET"
+             "#{association[:name].id} : #{subquery.id} | ::SugarORM::Not(#{subquery.id}) | " +
+               "#{unset.id}"
+           end %}
+        {% signature = (signature + parent_params).join(", ") %}
+        {% where_forwarded = (columns.map(&.[:name]) + parents.map(&.[:name])).map do |name|
+             "#{name.id}: #{name.id}"
+           end %}
 
         # Keyword conditions, checked against the columns at compile time: a
         # value, an Array (= ANY), a Range, or the literal `nil` (IS NULL). A
@@ -1187,11 +1381,37 @@ module SugarORM
         def where(*, {{ signature.id }})
           __sugar_conditions = [] of ::SugarORM::Condition
           {% for column in columns %}
+            {% value = "::#{@type}.__sugar_encode_#{column[:name].id}(#{column[:name].id})" %}
+            {% if !column[:codec] && !column[:references] && column[:scalar] == "Int64" %}
+              {% value = "::SugarORM::WhereWords.widen(#{value.id}, ::Int64)" %}
+            {% elsif !column[:codec] && !column[:references] && column[:scalar] == "Float64" %}
+              {% value = "::SugarORM::WhereWords.widen(#{value.id}, ::Float64)" %}
+            {% end %}
             unless {{ column[:name].id }}.is_a?(::SugarORM::Unset)
-              __sugar_conditions << ::SugarORM::Condition.column(
-                {{ column[:name] }}, ::{{ @type }}.__sugar_encode_{{ column[:name].id }}(
-                  {{ column[:name].id }}
+              {% if bands.any? { |band| band[:column] == column[:name] } %}
+                if {{ column[:name].id }}.is_a?(::{{ @type }}::{{ column[:name].camelcase.id }}Band)
+                  __sugar_conditions << ::SugarORM::Condition.column(
+                    {{ column[:name] }}, ::{{ @type }}.__sugar_band_{{ column[:name].id }}(
+                      {{ column[:name].id }}
+                    )
+                  )
+                else
+                  __sugar_conditions << ::SugarORM::WhereWords.column(
+                    {{ column[:name] }}, {{ value.id }}, {{ column[:nullable] ? true : false }}
+                  )
+                end
+              {% else %}
+                __sugar_conditions << ::SugarORM::WhereWords.column(
+                  {{ column[:name] }}, {{ value.id }}, {{ column[:nullable] ? true : false }}
                 )
+              {% end %}
+            end
+          {% end %}
+          {% for association in parents %}
+            unless {{ association[:name].id }}.is_a?(::SugarORM::Unset)
+              __sugar_conditions << ::SugarORM::WhereWords.parent(
+                {{ association[:key] }}, {{ association[:name].id }},
+                {{ association[:optional] ? true : false }}
               )
             end
           {% end %}
@@ -1205,7 +1425,7 @@ module SugarORM
         end
 
         def self.where(*, {{ signature.id }})
-          new.where({{ forwarded.join(", ").id }})
+          new.where({{ where_forwarded.join(", ").id }})
         end
 
         {% unless nullable.empty? %}
@@ -1224,30 +1444,25 @@ module SugarORM
               {% name = column[:name].id %}
               {% message = "where(#{name}: value) got a value that may be nil, and nil " +
                            "matches the rows whose #{name} IS NULL. Remediation: pass a " +
-                           "value that is never nil, or write where_null(:#{name}) " +
+                           "value that is never nil, or write where(#{name}: nil) " +
                            "to match those rows" %}
+              {% words_message = "where(#{name}: not(value)) got a value that may be nil, and " +
+                                 "nil would match the rows whose #{name} IS NOT NULL. " +
+                                 "Remediation: pass a value that is never nil, or write " +
+                                 "where(#{name}: not(nil)) to match those rows" %}
               \{% elsif V{{ index }}.union? && V{{ index }}.nilable? %}
                 ::{{ @type }}::{{ column[:name].camelcase.id }}MayBeNil(
                   NamedTuple({{ message }}: ::Nil)
+                ).new
+              \{% elsif V{{ index }}.name(generic_args: false) == "SugarORM::Not" &&
+                        V{{ index }}.type_vars[0].union? && V{{ index }}.type_vars[0].nilable? %}
+                ::{{ @type }}::{{ column[:name].camelcase.id }}MayBeNil(
+                  NamedTuple({{ words_message }}: ::Nil)
                 ).new
             {% end %}
             \{% else %}
               query
             \{% end %}
-          end
-
-          # The rows whose *field* IS NULL; only a nullable column is a field.
-          def where_null(field : ::{{ @type }}::NullableField) : self
-            column = case field
-                     {% for column in nullable %}
-                       in .{{ column[:name].id }}? then {{ column[:name] }}
-                     {% end %}
-                     end
-            __sugar_where([::SugarORM::Condition.column(column, nil)])
-          end
-
-          def self.where_null(field : ::{{ @type }}::NullableField)
-            new.where_null(field)
           end
         {% end %}
 

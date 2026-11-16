@@ -56,6 +56,23 @@ module SweetTalk
     Range.new(column(value.begin), column(value.end), value.excludes_end?)
   end
 
+  # A word of a `where:` keeps its meaning: its value is read as the plain value would be.
+  def self.column(value : ::SugarORM::Not(V)) forall V
+    ::SugarORM::Not.new(column(value.value), value.unknown)
+  end
+
+  def self.column(value : ::SugarORM::Over(V)) forall V
+    ::SugarORM::Over.new(column(value.value))
+  end
+
+  def self.column(value : ::SugarORM::Under(V)) forall V
+    ::SugarORM::Under.new(column(value.value))
+  end
+
+  def self.column(value : ::SugarORM::Text)
+    value
+  end
+
   def self.column(value : (String | Int32 | Int64 | UUID | Bool | Float64 | Time)?)
     value
   end

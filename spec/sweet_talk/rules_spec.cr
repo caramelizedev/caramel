@@ -361,11 +361,21 @@ describe "SweetTalk's rules" do
                                 Gift: [2, 4, 9], Plain: [1, 3, 5, 6, 7, 8, 10],
                                 Wide: [2, 4, 6, 8, 10], Unnoted: [1, 3, 6, 7],
                                 Gone: [4, 5, 6], Stocked: [2, 3, 4, 6, 8, 9],
-                                Featured: [2, 3, 9]} %}
+                                Featured: [2, 3, 9], Noted: [2, 4, 5, 8, 9, 10],
+                                Ungifted: [1, 3, 5, 6, 7, 8, 10], Remarked: [5, 8, 10],
+                                Crowded: [3, 6, 8, 9], Scant: [1, 4, 10], Fragile: [8, 10],
+                                Sturdy: [1, 2, 3, 4, 5, 6, 7, 9]} %}
         readings = RulesSpec.readings(jars, all, Rules::Shelf::{{ rule.id }})
         wanted = {{ expected }}
         { {{ rule.stringify }}, readings }.should eq({ {{ rule.stringify }}, {wanted, wanted} })
       {% end %}
+    end
+  end
+
+  it "counts the jars a word of where: matches" do
+    SweetTalkSpec.rolled_back do
+      RulesSpec.jars
+      Rules::Shelf::Jar.crowded_count.should eq(4)
     end
   end
 
@@ -390,7 +400,7 @@ describe "SweetTalk's rules" do
 
   it "lists specifications in the glossary" do
     terms = SweetTalk.glossary.select { |term| term.kind == "specification" }
-    terms.count(&.context.==("Shelf")).should eq(9)
+    terms.count(&.context.==("Shelf")).should eq(16)
     on_sale = terms.find! { |term| term.name == "OnSale" }
     {on_sale.kind, on_sale.name, on_sale.context, on_sale.means}
       .should eq({"specification", "OnSale", "Shelf", "a sealed jar still on the shelf"})
