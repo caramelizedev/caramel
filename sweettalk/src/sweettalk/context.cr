@@ -1620,7 +1620,9 @@ module SweetTalk
                     {% encoded = "#{row}.__sugar_encode_#{part[1].id}(#{want.id})" %}
                     {% wheres << "::SweetTalk.__sweettalk_coded(#{part[1]}, #{encoded.id})" %}
                   {% else %}
-                    {% wheres << "::SugarORM::Condition.column(#{part[1]}, #{want.id})" %}
+                    {% nullable = attribute[9] ? true : false %}
+                    {% wheres << "::SugarORM::WhereWords.column(#{part[1]}, #{want.id}, " +
+                                 "#{nullable})" %}
                   {% end %}
                   {% typings << "typeof(#{row}.query.where(#{part[1].id}: #{want.id}))" %}
                 {% end %}
@@ -1636,7 +1638,9 @@ module SweetTalk
                   {% encoded = "#{row}.__sugar_encode_#{attribute[4].id}(#{want.id})" %}
                   {% wheres << "::SweetTalk.__sweettalk_coded(#{attribute[4]}, #{encoded.id})" %}
                 {% else %}
-                  {% wheres << "::SugarORM::Condition.column(#{attribute[4]}, #{want.id})" %}
+                  {% nullable = attribute[9] ? true : false %}
+                  {% wheres << "::SugarORM::WhereWords.column(#{attribute[4]}, #{want.id}, " +
+                               "#{nullable})" %}
                 {% end %}
                 {% typings << "typeof(#{row}.query.where(#{attribute[4].id}: #{want.id}))" %}
               {% end %}

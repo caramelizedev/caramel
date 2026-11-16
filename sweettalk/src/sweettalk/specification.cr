@@ -23,6 +23,41 @@ module SweetTalk
     have.nil?
   end
 
+  # `not(…)` holds when the wanted value does not; with no value it holds unless the word
+  # says `unknown: :drop`, as IS DISTINCT FROM and IS NOT TRUE read it in PostgreSQL.
+  # `not(nil)` holds when there is a value. A macro tells the two apart: when two overloads
+  # restrict `Not` alike, Crystal does not rank `Not(Nil)` above `Not(V)`.
+  def self.__sweettalk_holds?(have, wanted : ::SugarORM::Not(V)) : Bool forall V
+    {% if V == Nil %}
+      !have.nil?
+    {% else %}
+      return wanted.unknown.keep? if have.nil?
+      !__sweettalk_holds?(have, wanted.value)
+    {% end %}
+  end
+
+  def self.__sweettalk_holds?(have, wanted : ::SugarORM::Over(V)) : Bool forall V
+    return false if have.nil?
+    have > wanted.value
+  end
+
+  def self.__sweettalk_holds?(have, wanted : ::SugarORM::Under(V)) : Bool forall V
+    return false if have.nil?
+    have < wanted.value
+  end
+
+  # A text word matches the text literally; LIKE's escaping applies only in SQL.
+  def self.__sweettalk_holds?(have, wanted : ::SugarORM::Text) : Bool
+    return false if have.nil?
+    text = wanted.any_case ? wanted.text.downcase : wanted.text
+    value = wanted.any_case ? have.downcase : have
+    case wanted.at
+    when :start then value.starts_with?(text)
+    when :end   then value.ends_with?(text)
+    else             value.includes?(text)
+    end
+  end
+
   def self.__sweettalk_holds?(have, wanted) : Bool
     have == wanted
   end
