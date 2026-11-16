@@ -10,7 +10,7 @@ private ENVIRONMENT = <<-YAML
   domain_suffix: test
   YAML
 
-private SHARDS = "data/installs/github-crystal-lang-crystal/1.22.1/embedded/bin/shards"
+private SHARDS = "data/installs/github-crystal-lang-crystal/1.22.3/embedded/bin/shards"
 
 # Stands in for the pinned Shards: it records its arguments, one to a line, where it ran
 # and the cache it was given, lands the shards the file `landed` holds, and exits with
